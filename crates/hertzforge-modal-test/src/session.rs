@@ -4,7 +4,8 @@
 //!
 //! # States
 //!
-//! `idle` (a point is selected, nothing taken), `armed` (impact: waiting for a hit),
+//! `idle` (a point is selected, nothing taken), `arming` (impact: the pre-trigger is
+//! filling; the trigger is not live yet), `armed` (impact: waiting for a hit),
 //! `captured` (impact, manual accept: a hit waits for accept or reject), `measuring`
 //! (shaker: the drive is on and frames are averaged), `point_done` (the point's
 //! averages are in), and `ended`.
@@ -18,6 +19,11 @@
 //! that completed it), and accepting a rejected one puts it in. Undo takes the last
 //! accepted average of the selected point back out. A force off its target is a signal
 //! only and never rejects.
+//!
+//! In shaker mode reject and undo each take the latest frame only out, the drive on
+//! or off; clearing the whole point's measurement is its own call,
+//! [`Session::clear_point`]. A drive stopped part way keeps its frames: the next drive
+//! start at the point goes on with the same average, a pause.
 
 use crate::average::{frame_spectra, Averager, Estimates, FrameSpectra};
 use crate::hits::{self, HitReport};
@@ -31,6 +37,7 @@ use std::collections::VecDeque;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Idle,
+    Arming,
     Armed,
     Captured,
     Measuring,
@@ -42,6 +49,7 @@ impl State {
     pub fn name(self) -> &'static str {
         match self {
             State::Idle => "idle",
+            State::Arming => "arming",
             State::Armed => "armed",
             State::Captured => "captured",
             State::Measuring => "measuring",
@@ -171,12 +179,18 @@ pub struct Session {
     seq: u64,
     /// The latest hit: its point, its place and its spectra, until the next lands.
     latest: Option<(usize, usize, FrameSpectra)>,
+    /// The latest hit's own block (impact): every measured channel from the block's
+    /// first sample, unwindowed.
+    latest_block: Option<Vec<Vec<f64>>>,
     // The capture.
     frame: u64,
     hist: Vec<VecDeque<f64>>,
     prev_force: f64,
     trigger_at: Option<u64>,
     holdoff_until: u64,
+    /// The input frame the trigger goes live at: a full pre-trigger after the arm and
+    /// the hold-off.
+    live_from: u64,
     // Shaker mode.
     next_seg: Option<u64>,
     seg_step: u64,
@@ -235,11 +249,13 @@ impl Session {
             measurements: 0,
             seq: 0,
             latest: None,
+            latest_block: None,
             frame: 0,
             hist: vec![VecDeque::new(); width],
             prev_force: 0.0,
             trigger_at: None,
             holdoff_until: 0,
+            live_from: 0,
             next_seg: None,
             seg_step: n as u64,
             seg_skip: 0,
@@ -267,6 +283,24 @@ impl Session {
 
     fn pretrigger(&self) -> usize {
         self.setup.pretrigger_frames()
+    }
+
+    /// Arm (again): `arming` until the pre-trigger holds a full pre-trigger of frames
+    /// taken after the arm and the hold-off, then `armed`, the trigger live.
+    fn rearm(&mut self, ev: &mut Vec<Event>) {
+        self.trigger_at = None;
+        self.live_from = self.frame.max(self.holdoff_until) + self.pretrigger() as u64;
+        let s = if self.frame >= self.live_from {
+            State::Armed
+        } else {
+            State::Arming
+        };
+        self.set_state(s, ev);
+    }
+
+    /// Whether the trigger is armed: filling its pre-trigger or live.
+    pub fn armed(&self) -> bool {
+        matches!(self.state, State::Arming | State::Armed)
     }
 
     fn set_state(&mut self, s: State, ev: &mut Vec<Event>) {
@@ -341,16 +375,15 @@ impl Session {
             ));
         }
         let mut ev = Vec::new();
-        self.trigger_at = None;
-        self.holdoff_until = self.frame;
-        self.set_state(State::Armed, &mut ev);
+        self.holdoff_until = self.holdoff_until.max(self.frame);
+        self.rearm(&mut ev);
         Ok(ev)
     }
 
     /// Disarm (impact) without taking anything.
     pub fn disarm(&mut self) -> Vec<Event> {
         let mut ev = Vec::new();
-        if self.state == State::Armed {
+        if self.armed() {
             self.trigger_at = None;
             self.set_state(State::Idle, &mut ev);
         }
@@ -455,18 +488,24 @@ impl Session {
         self.frame += 1;
         match self.setup.mode {
             Mode::Impact => {
+                // The trigger watches the force in the hammer's polarity, and only once
+                // the pre-trigger is full.
+                let sign = self.setup.impact.polarity.sign();
+                if self.state == State::Arming && i >= self.live_from {
+                    self.set_state(State::Armed, &mut ev);
+                }
                 if self.state == State::Armed
                     && self.trigger_at.is_none()
                     && i >= self.holdoff_until
                 {
                     let level = self.setup.impact.trigger_pct / 100.0 * self.plan.refs[0].range;
-                    let f = *self.hist[0].back().unwrap_or(&0.0);
+                    let f = sign * *self.hist[0].back().unwrap_or(&0.0);
                     if self.prev_force < level && f >= level {
                         self.trigger_at = Some(i);
                     }
                     self.prev_force = f;
                 } else if let Some(&f) = self.hist[0].back() {
-                    self.prev_force = f;
+                    self.prev_force = sign * f;
                 }
                 if let Some(t) = self.trigger_at {
                     let pre = self.pretrigger() as u64;
@@ -533,6 +572,7 @@ impl Session {
             .collect();
         let report = hits::check(&hits::HitInput {
             force: &b[0],
+            sign: self.setup.impact.polarity.sign(),
             force_range: self.plan.refs[0].range,
             responses: &resp,
             pretrigger: pre,
@@ -546,6 +586,7 @@ impl Session {
         let spectra = self.spectra(&b);
         let p = self.point;
         self.seq += 1;
+        self.latest_block = Some(b);
         let overload = !report.overloaded.is_empty();
         let auto = self.setup.impact.accept == AcceptMode::Auto;
         let reason = report.rejected();
@@ -575,8 +616,12 @@ impl Session {
         self.latest = Some((p, at, spectra));
         if !auto {
             self.set_state(State::Captured, &mut ev);
-        } else if accepted {
-            ev.extend(self.maybe_done(p));
+        } else {
+            // The hold-off and a fresh pre-trigger before the next hit.
+            self.rearm(&mut ev);
+            if accepted {
+                ev.extend(self.maybe_done(p));
+            }
         }
         ev
     }
@@ -626,7 +671,7 @@ impl Session {
         if self.points[p].measured || self.points[p].averager.count() < self.setup.averages as usize
         {
             if self.state == State::Captured {
-                self.set_state(State::Armed, &mut ev);
+                self.rearm(&mut ev);
             }
             return ev;
         }
@@ -651,9 +696,8 @@ impl Session {
                 .find(|k| !self.points[*k].measured)
             {
                 self.point = next;
-                self.trigger_at = None;
                 ev.push(Event::Selected { point: next });
-                self.set_state(State::Armed, &mut ev);
+                self.rearm(&mut ev);
             }
         }
         ev
@@ -688,8 +732,7 @@ impl Session {
         self.points[p].averager.push(s);
         ev.push(Event::Status { point: p, at });
         if self.state == State::Captured {
-            self.state = State::Armed;
-            ev.push(Event::State(State::Armed));
+            self.rearm(&mut ev);
         }
         ev.extend(self.maybe_done(p));
         Ok(ev)
@@ -711,7 +754,7 @@ impl Session {
                 "The latest hit was undone; take another.",
             ));
         }
-        if matches!(self.state, State::Measuring) {
+        if self.state == State::Measuring && self.setup.mode != Mode::Shaker {
             return Err(refused(
                 "busy",
                 "Frames are being averaged: stop the drive first.",
@@ -727,7 +770,7 @@ impl Session {
             self.points[p].averager.undo();
             ev.extend(self.reopen(p));
         } else if self.state == State::Captured {
-            self.set_state(State::Armed, &mut ev);
+            self.rearm(&mut ev);
         }
         Ok(ev)
     }
@@ -745,21 +788,37 @@ impl Session {
             ev.push(Event::Selected { point: p });
         }
         if self.state != State::Measuring {
-            let s = if self.setup.mode == Mode::Impact && self.state != State::Idle {
-                State::Armed
+            if self.setup.mode == Mode::Impact && self.state != State::Idle {
+                if !self.armed() {
+                    self.rearm(&mut ev);
+                }
             } else {
-                State::Idle
-            };
-            self.set_state(s, &mut ev);
+                self.set_state(State::Idle, &mut ev);
+            }
         }
         ev
     }
 
-    /// Undo the selected point's last accepted average. A shaker point's averages are
-    /// all taken out: its frames belong together.
+    /// Undo the selected point's last accepted average: a hit, or (shaker) a frame, the
+    /// drive on or off.
     pub fn undo(&mut self) -> Result<Vec<Event>, Refused> {
+        self.take_out(false)
+    }
+
+    /// Clear the selected point's whole measurement: every accepted average out, the
+    /// point open again. Its list keeps every tile, the averaged ones marked `undone`.
+    pub fn clear_point(&mut self) -> Result<Vec<Event>, Refused> {
+        self.take_out(true)
+    }
+
+    fn take_out(&mut self, all: bool) -> Result<Vec<Event>, Refused> {
         self.live()?;
-        if matches!(self.state, State::Measuring | State::Captured) {
+        let busy = match self.state {
+            State::Captured => true,
+            State::Measuring => all || self.setup.mode != Mode::Shaker,
+            _ => false,
+        };
+        if busy {
             return Err(refused(
                 "busy",
                 format!(
@@ -777,7 +836,6 @@ impl Session {
             ));
         }
         let mut ev = Vec::new();
-        let all = self.setup.mode == Mode::Shaker;
         loop {
             self.points[p].averager.undo();
             if let Some(at) = self.points[p]
@@ -851,6 +909,13 @@ impl Session {
         self.latest
             .as_ref()
             .map(|(p, at, _)| (*p, &self.points[*p].taken[*at]))
+    }
+
+    /// The latest hit's block and spectra, while it is the latest (impact).
+    pub fn latest_hit(&self) -> Option<(usize, &Taken, &[Vec<f64>], &FrameSpectra)> {
+        let (p, at, sp) = self.latest.as_ref()?;
+        let b = self.latest_block.as_ref()?;
+        Some((*p, &self.points[*p].taken[*at], b.as_slice(), sp))
     }
 
     /// The current estimate of point `p`.
@@ -1040,7 +1105,8 @@ mod tests {
         hit(&mut s, HitKind::Clean);
         assert_eq!(s.points[0].taken.len(), 1);
         s.accept().unwrap();
-        assert_eq!(s.state, State::Armed);
+        // Armed again: the hold-off and a fresh pre-trigger before the trigger is live.
+        assert_eq!(s.state, State::Arming);
         hit(&mut s, HitKind::Clean);
         s.accept().unwrap();
         assert!(s.points[0].measured);
@@ -1051,6 +1117,71 @@ mod tests {
         assert_eq!(s.points[0].accepted(), 1);
         assert_eq!(s.points[0].taken[1].status, "undone");
         assert_eq!(s.counts_json()["points"][0]["measured"], false);
+    }
+
+    #[test]
+    fn modal_test_the_trigger_is_live_only_once_the_pretrigger_is_full() {
+        let mut s = session(AcceptMode::Auto, 2);
+        let pre = s.setup.pretrigger_frames();
+        assert!(pre > 20);
+        let ev = s.arm().unwrap();
+        assert!(ev.iter().any(|e| matches!(e, Event::State(State::Arming))));
+        assert_eq!(s.state, State::Arming);
+        // A hit 10 frames after the arm, before the pre-trigger is full: not taken.
+        let fs = s.setup.fs_hz;
+        let f = structure::hammer(
+            HitKind::Clean,
+            fs,
+            3 * 1024,
+            10,
+            structure::PULSE_PEAK_LBF,
+            100.0,
+        );
+        let mut states = Vec::new();
+        for (i, v) in f.iter().enumerate() {
+            for e in s.feed(&[*v as f32, 0.0, 0.0]) {
+                if let Event::State(st) = e {
+                    states.push((i, st));
+                }
+            }
+        }
+        assert!(
+            s.points[0].taken.is_empty(),
+            "no hit taken before the trigger was live"
+        );
+        // Waiting for a hit from the frame the pre-trigger is full, not before.
+        assert_eq!(states, vec![(pre, State::Armed)]);
+        // The next hit, with the pre-trigger full, is taken.
+        hit(&mut s, HitKind::Clean);
+        assert_eq!(s.points[0].taken.len(), 1);
+        let r = s.points[0].taken[0].report.as_ref().unwrap();
+        assert!(r.peak_frame >= pre, "{}", r.peak_frame);
+    }
+
+    #[test]
+    fn modal_test_a_negative_hammer_triggers_and_peaks_in_its_polarity() {
+        let mut s = session(AcceptMode::Auto, 2);
+        s.setup.impact.polarity = crate::setup::Polarity::Negative;
+        s.arm().unwrap();
+        let fs = s.setup.fs_hz;
+        let n = 3 * 1024;
+        let f = structure::hammer(HitKind::Clean, fs, n, 200, structure::PULSE_PEAK_LBF, 100.0);
+        for v in &f {
+            s.feed(&[-*v as f32, 0.0, 0.0]);
+        }
+        assert_eq!(s.points[0].taken.len(), 1, "the negative hit triggered");
+        let r = s.points[0].taken[0].report.as_ref().unwrap();
+        assert!(
+            (r.peak - structure::PULSE_PEAK_LBF).abs() < 2.0,
+            "{}",
+            r.peak
+        );
+        assert_eq!(s.points[0].taken[0].status, "accepted");
+        // A positive pulse does not trigger a negative hammer.
+        for v in &f {
+            s.feed(&[*v as f32, 0.0, 0.0]);
+        }
+        assert_eq!(s.points[0].taken.len(), 1);
     }
 
     #[test]

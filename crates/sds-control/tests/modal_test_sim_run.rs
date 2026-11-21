@@ -368,3 +368,211 @@ async fn modal_test_hits_carry_their_status_and_the_counts_follow() {
     assert_eq!(out["totals"]["taken"], 3, "{out}");
     let _ = std::fs::remove_dir_all(folder.parent().unwrap());
 }
+
+fn point_accepted(s: &Value) -> u64 {
+    s["counts"]["point"]["accepted"].as_u64().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn modal_test_shaker_pause_keeps_the_frames_and_reject_undo_take_the_latest_only() {
+    let mut c = rig(true, 8.0).await;
+    c.ok(
+        "modal_test.configure",
+        json!({"config": shaker_config("burst_random")}),
+    )
+    .await;
+    c.ok("modal_test.start", json!({})).await;
+    c.ok("modal_test.drive_start", json!({})).await;
+    until(&mut c, Duration::from_secs(60), "three frames", |s| {
+        point_accepted(s) >= 3
+    })
+    .await;
+    // A drive stop part way: the frames taken stay.
+    c.ok("modal_test.drive_stop", json!({})).await;
+    let s = until(&mut c, Duration::from_secs(30), "the drive idle", |s| {
+        s["drive_phase"] == "idle"
+    })
+    .await;
+    let a = point_accepted(&s);
+    assert!((3..12).contains(&a), "{s}");
+    assert_eq!(s["counts"]["point"]["asked"], 12);
+    assert_eq!(s["counts"]["totals"]["points_measured"], 0);
+    // Reject and undo each take the latest frame only.
+    let r = c.ok("modal_test.reject", json!({})).await;
+    assert_eq!(point_accepted(&r["state"]), a - 1, "{r}");
+    let r = c.ok("modal_test.undo", json!({})).await;
+    assert_eq!(point_accepted(&r["state"]), a - 2, "{r}");
+    // A later drive start goes on with the same average: a pause, not a new start.
+    c.ok("modal_test.drive_start", json!({})).await;
+    let s = until(&mut c, Duration::from_secs(30), "measuring again", |s| {
+        s["state"] == "measuring" && point_accepted(s) > a - 2
+    })
+    .await;
+    // While the drive is on, a reject takes the latest frame out and averaging goes on.
+    let b = point_accepted(&s);
+    let r = c.ok("modal_test.reject", json!({})).await;
+    assert!(point_accepted(&r["state"]) <= b, "{r}");
+    let s = until(&mut c, Duration::from_secs(60), "the point", |s| {
+        s["counts"]["totals"]["points_measured"] == 1
+    })
+    .await;
+    assert_eq!(point_accepted(&s), 12, "{s}");
+    let taken = s["hits"].as_array().unwrap();
+    assert_eq!(
+        taken.iter().filter(|t| t["status"] == "accepted").count(),
+        12
+    );
+    assert_eq!(taken.iter().filter(|t| t["status"] == "undone").count(), 1);
+    // Clearing the point's whole measurement is its own call.
+    until(&mut c, Duration::from_secs(30), "the drive idle", |s| {
+        s["drive_phase"] == "idle"
+    })
+    .await;
+    let r = c.ok("modal_test.clear_point", json!({})).await;
+    assert_eq!(point_accepted(&r["state"]), 0, "{r}");
+    assert_eq!(r["state"]["counts"]["totals"]["points_measured"], 0);
+    c.ok("modal_test.abort", json!({})).await;
+    let fin = until(&mut c, Duration::from_secs(20), "the end", |s| {
+        s["state"] == "finished"
+    })
+    .await;
+    let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
+    record_done(&mut c, &folder).await;
+    let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+}
+
+/// The last `modal_test.live` frame, its message and decoded arrays.
+fn last_live(c: &Client) -> (Value, &support::Event) {
+    let e = *c.of_topic("modal_test.live").last().expect("a live frame");
+    (e.data().clone(), e)
+}
+
+fn named(chans: &Value) -> Vec<(u64, String)> {
+    chans
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["index"].as_u64().unwrap(),
+                c["role"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn modal_test_live_frame_names_its_channels_and_shows_the_latest_hit() {
+    let mut c = rig(false, 8.0).await;
+    c.ok("modal_test.configure", json!({"config": impact_config()}))
+        .await;
+    c.ok("modal_test.start", json!({})).await;
+    c.ok("modal_test.arm", json!({})).await;
+    let s = until(&mut c, Duration::from_secs(60), "a hit", |s| {
+        s["counts"]["totals"]["taken"].as_u64().unwrap_or(0) >= 1
+    })
+    .await;
+    // A live frame after the hit.
+    c.pump(Duration::from_millis(1500)).await;
+    let (live, ev) = last_live(&c);
+    let want = [(1, "reference"), (2, "response"), (3, "response")];
+    let want: Vec<(u64, String)> = want.iter().map(|(i, r)| (*i, r.to_string())).collect();
+    assert_eq!(named(&live["time"]["channels"]), want, "{live}");
+    assert_eq!(live["time"]["channels"][0]["unit"], "lbf");
+    // The pairs follow point_dofs: responses by references.
+    let dofs = &s["point_dofs"];
+    let (nr, nf) = (
+        dofs["responses"].as_array().unwrap().len(),
+        dofs["references"].as_array().unwrap().len(),
+    );
+    assert_eq!(live["frf"]["pairs"].as_array().unwrap().len(), nr * nf);
+    let hit = &live["hit"];
+    assert!(hit.is_object(), "{live}");
+    assert_eq!(named(&hit["channels"]), want);
+    // A block of 1024: every sample sent, at the sample rate.
+    assert_eq!(hit["samples"], 1024, "{hit}");
+    assert_eq!(hit["decimation"], 1, "{hit}");
+    assert_eq!(hit["step_s"], 1.0 / 1024.0, "{hit}");
+    let d = ev.decoded.as_ref().unwrap();
+    for ch in hit["channels"].as_array().unwrap() {
+        assert_eq!(d.array(&ch["values"]).unwrap().to_f64().len(), 1024);
+    }
+    assert_eq!(hit["windows"]["force"]["pre_frames"], 51, "{hit}");
+    assert_eq!(hit["force_spectrum"]["unit"], "lbf^2/Hz");
+    assert!(hit["force_spectrum"]["tip_drop_db"].is_number(), "{hit}");
+    let f = d
+        .array(&hit["force_spectrum"]["frequency_hz"])
+        .unwrap()
+        .to_f64();
+    let v = d.array(&hit["force_spectrum"]["values"]).unwrap().to_f64();
+    assert_eq!(f.len(), v.len());
+    assert!(f.len() <= 1024 && !f.is_empty());
+    assert_eq!(live["references"], Value::Null, "{live}");
+    c.ok("modal_test.abort", json!({})).await;
+    let fin = until(&mut c, Duration::from_secs(20), "the end", |s| {
+        s["state"] == "finished"
+    })
+    .await;
+    let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
+    record_done(&mut c, &folder).await;
+    let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn modal_test_shaker_live_frame_names_the_drives_and_shows_the_reference_spectra() {
+    let mut c = rig(true, 8.0).await;
+    c.ok(
+        "modal_test.configure",
+        json!({"config": shaker_config("burst_random")}),
+    )
+    .await;
+    c.ok("modal_test.start", json!({})).await;
+    c.ok("modal_test.drive_start", json!({})).await;
+    let s = until(&mut c, Duration::from_secs(60), "two frames", |s| {
+        point_accepted(s) >= 2
+    })
+    .await;
+    c.pump(Duration::from_millis(1500)).await;
+    let (live, ev) = last_live(&c);
+    let want = [
+        (1, "reference"),
+        (2, "response"),
+        (3, "response"),
+        (4, "reference"),
+        (5, "drive"),
+        (6, "drive"),
+    ];
+    let want: Vec<(u64, String)> = want.iter().map(|(i, r)| (*i, r.to_string())).collect();
+    assert_eq!(named(&live["time"]["channels"]), want, "{live}");
+    assert_eq!(live["time"]["channels"][4]["unit"], "V");
+    let dofs = &s["point_dofs"];
+    let (nr, nf) = (
+        dofs["responses"].as_array().unwrap().len(),
+        dofs["references"].as_array().unwrap().len(),
+    );
+    assert_eq!((nr, nf), (2, 2));
+    let pairs = live["frf"]["pairs"].as_array().unwrap();
+    assert_eq!(pairs.len(), nr * nf);
+    assert_eq!(pairs[1]["response"], 0);
+    assert_eq!(pairs[1]["reference"], 1);
+    assert_eq!(live["hit"], Value::Null, "{live}");
+    let r = &live["references"];
+    let auto = r["autospectra"].as_array().unwrap();
+    let idx: Vec<u64> = auto.iter().map(|a| a["index"].as_u64().unwrap()).collect();
+    assert_eq!(idx, vec![1, 4], "{r}");
+    assert_eq!(auto[0]["unit"], "lbf^2/Hz");
+    let d = ev.decoded.as_ref().unwrap();
+    let f = d.array(&r["frequency_hz"]).unwrap().to_f64();
+    assert!(!f.is_empty() && f.len() <= 1024);
+    for a in auto {
+        assert_eq!(d.array(&a["values"]).unwrap().to_f64().len(), f.len());
+    }
+    c.ok("modal_test.abort", json!({})).await;
+    let fin = until(&mut c, Duration::from_secs(20), "the end", |s| {
+        s["state"] == "finished"
+    })
+    .await;
+    let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
+    record_done(&mut c, &folder).await;
+    let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+}

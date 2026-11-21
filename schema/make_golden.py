@@ -6602,6 +6602,10 @@ MODAL_LIVE_FREQS = [0.0, 2.0, 4.0, 6.0]
 MODAL_LIVE_MAG = [[0.03125, 0.0625, 0.125, 0.25], [0.015625, 0.03125, 0.0625, 0.125]]
 MODAL_LIVE_PHASE = [[0.0, -90.0, -180.0, 90.0], [180.0, 90.0, 0.0, -90.0]]
 MODAL_LIVE_COHERENCE = [[0.5, 0.75, 0.875, 1.0], [0.25, 0.5, 0.75, 1.0]]
+#: Each time channel's table index, part and unit.
+MODAL_LIVE_NAMES = [(1, 'reference', 'lbf'), (2, 'response', 'g'), (3, 'response', 'g')]
+#: The latest hit's force autospectrum on the same lines.
+MODAL_LIVE_FORCE_AUTO = [4.0, 2.0, 1.0, 0.5]
 
 
 def _modal_live_build() -> tuple[dict, dict]:
@@ -6611,16 +6615,31 @@ def _modal_live_build() -> tuple[dict, dict]:
         arrays[ident] = ('f32', [len(values)], values)
         return {'$array': ident}
 
-    channels = [{'values': put(f't{k}', v)} for k, v in enumerate(MODAL_LIVE_TIME)]
+    def named(prefix: str, k: int, values: list) -> dict:
+        index, role, unit = MODAL_LIVE_NAMES[k]
+        return {'index': index, 'role': role, 'unit': unit, 'values': put(f'{prefix}{k}', values)}
+
+    channels = [named('t', k, v) for k, v in enumerate(MODAL_LIVE_TIME)]
     freqs = put('f', MODAL_LIVE_FREQS)
     pairs = [{'response': i, 'reference': 0, 'magnitude': put(f'm{i}_0', MODAL_LIVE_MAG[i]),
               'phase_deg': put(f'p{i}_0', MODAL_LIVE_PHASE[i])} for i in range(2)]
     coherence = [{'response': i, 'values': put(f'c{i}', c)}
                  for i, c in enumerate(MODAL_LIVE_COHERENCE)]
+    hit_channels = [named('h', k, v) for k, v in enumerate(MODAL_LIVE_TIME)]
+    hit = {'point': 1, 'n': 2, 'seq': 4, 'start_frame': 1536, 'start_s': 1.5,
+           'samples': 4, 'decimation': 1, 'step_s': 1 / 1024,
+           'channels': hit_channels,
+           'windows': {'force': {'pre_frames': 1, 'width_frames': 2, 'fall_frames': 1},
+                       'exponential': {'tau_s': 0.125, 'end': 0.0625}},
+           'force_spectrum': {'frequency_hz': put('hf', MODAL_LIVE_FREQS),
+                              'unit': 'lbf^2/Hz',
+                              'values': put('hs', MODAL_LIVE_FORCE_AUTO),
+                              'tip_drop_db': 9.5}}
     data = {'run_id': 'modal-test-0001', 'state': 'armed', 'point': 1,
             'time': {'rate_hz': 1024, 'channels': channels},
             'frf': {'frequency_hz': freqs, 'averages': 2, 'pairs': pairs,
-                    'coherence': coherence}}
+                    'coherence': coherence},
+            'hit': hit}
     return {'type': 'event', 'topic': 'modal_test.live', 'seq': 412, 'data': data}, arrays
 
 

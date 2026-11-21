@@ -50,6 +50,8 @@ pub struct Measurement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub inputs: usize,
+    /// Every input of the station's frame, by slot: its table index and unit.
+    pub input_rows: Vec<(u32, String)>,
     pub outputs: usize,
     pub refs: Vec<Row>,
     pub resps: Vec<Row>,
@@ -286,6 +288,7 @@ impl Plan {
         };
         Ok(Plan {
             inputs: inputs.len(),
+            input_rows: inputs.iter().map(|c| (c.index, c.units.name())).collect(),
             outputs: drive_rows.len(),
             refs,
             resps,

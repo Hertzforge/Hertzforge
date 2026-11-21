@@ -5,7 +5,7 @@
 
 use sds_control::codec;
 use sds_control::modal_test::config;
-use sds_control::modal_test::run::{self, Display, ModalView};
+use sds_control::modal_test::run::{self, Display, HitShow, ModalView, Named};
 use sds_control::playback::config::config_invalid;
 use sds_control::protocol;
 use sds_control::table::{parse_rows, Report};
@@ -138,13 +138,25 @@ fn live_view() -> ModalView {
 fn modal_test_the_live_frame_is_the_golden_frame_byte_for_byte() {
     let want = std::fs::read(golden("event_modal_test_live.bin")).unwrap();
     let expected = read_json("event_modal_test_live.expected.json");
+    let named = |index, role, unit: &str| Named {
+        index,
+        role,
+        unit: unit.into(),
+    };
+    let names = vec![
+        named(1, "reference", "lbf"),
+        named(2, "response", "g"),
+        named(3, "response", "g"),
+    ];
+    let block = vec![
+        vec![0.0, 18.5, 2.25, 0.0],
+        vec![0.0, 0.5, -1.25, 0.75],
+        vec![0.0, -0.25, 0.625, -0.375],
+    ];
     let d = Display {
         rate_hz: 1024.0,
-        channels: vec![
-            vec![0.0, 18.5, 2.25, 0.0],
-            vec![0.0, 0.5, -1.25, 0.75],
-            vec![0.0, -0.25, 0.625, -0.375],
-        ],
+        names: names.clone(),
+        channels: block.clone(),
         freqs: vec![0.0, 2.0, 4.0, 6.0],
         mag: vec![
             vec![vec![0.03125, 0.0625, 0.125, 0.25]],
@@ -156,6 +168,25 @@ fn modal_test_the_live_frame_is_the_golden_frame_byte_for_byte() {
         ],
         coherence: vec![vec![0.5, 0.75, 0.875, 1.0], vec![0.25, 0.5, 0.75, 1.0]],
         averages: 2,
+        hit: Some(HitShow {
+            point: 1,
+            n: 2,
+            seq: 4,
+            start_frame: 1536,
+            start_s: 1.5,
+            samples: 4,
+            decimation: 1,
+            step_s: 1.0 / 1024.0,
+            names,
+            channels: block,
+            force_window: Some((1, 2, 1)),
+            exponential: Some((0.125, 0.0625)),
+            force_unit: "lbf".into(),
+            force_auto: vec![4.0, 2.0, 1.0, 0.5],
+            tip_drop_db: 9.5,
+        }),
+        ref_names: Vec::new(),
+        ref_auto: Vec::new(),
     };
     let mut arrays = codec::Arrays::new();
     let data = run::live_json(&live_view(), &d, &mut arrays);

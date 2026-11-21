@@ -214,6 +214,8 @@
       "trigger": {
         "level": 10,
         "unit": "lbf",
+        "polarity": "positive",
+        "watches": "the force rising through 10 lbf (positive hammer); live once 26 pre-trigger frames are in",
         "pretrigger_frames": 26
       },
       "holdoff_blocks": 0,
@@ -221,7 +223,7 @@
       "auto_advance": true,
       "checks": {
         "overload": "0.98 of each row's range rejects",
-        "double_hit": "a later force over 5 percent of the peak rejects",
+        "double_hit": "a second impact of the hammer's polarity over 5 percent of the peak, or six times the pre-trigger RMS if larger, after the pulse falls below 5 percent of it, rejects",
         "tip_warn_db": 20,
         "target": null
       },

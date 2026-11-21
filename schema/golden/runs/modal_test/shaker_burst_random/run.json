@@ -6,6 +6,10 @@
   "operator": "A. Operator",
   "article": "Beam, SN 0007",
   "notes": "",
+  "specification": {
+    "document": "Test procedure",
+    "clause": "5.2"
+  },
   "metadata": [],
   "source": "SIM",
   "sim": {

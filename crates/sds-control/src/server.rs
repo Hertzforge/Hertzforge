@@ -204,7 +204,7 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     playback.state, playback.log, modal_test.configure, modal_test.config, \
     modal_test.start, modal_test.select, modal_test.next, modal_test.previous, \
     modal_test.arm, modal_test.disarm, modal_test.accept, modal_test.reject, \
-    modal_test.undo, modal_test.target_from_hit, modal_test.drive_start, \
+    modal_test.undo, modal_test.clear_point, modal_test.target_from_hit, modal_test.drive_start, \
     modal_test.drive_stop, modal_test.sim_hit, modal_test.end, modal_test.abort, \
     modal_test.reset, modal_test.clear, modal_test.state, modal_test.log, laws.list, laws.import, laws.check, sim.profiles, \
     sim.start, sim.stop and sim.state";
@@ -2287,6 +2287,7 @@ impl Service {
             "modal_test.accept" => self.modal_test_call(conn, "accept", params).await,
             "modal_test.reject" => self.modal_test_call(conn, "reject", params).await,
             "modal_test.undo" => self.modal_test_call(conn, "undo", params).await,
+            "modal_test.clear_point" => self.modal_test_call(conn, "clear_point", params).await,
             "modal_test.target_from_hit" => {
                 self.modal_test_call(conn, "target_from_hit", params).await
             }

@@ -313,6 +313,7 @@ impl Service {
             "accept" => Cmd::Accept,
             "reject" => Cmd::Reject,
             "undo" => Cmd::Undo,
+            "clear_point" => Cmd::ClearPoint,
             "target_from_hit" => Cmd::TargetFromHit,
             "drive_start" => Cmd::DriveStart,
             "drive_stop" => Cmd::DriveStop,

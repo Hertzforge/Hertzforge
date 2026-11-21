@@ -11,7 +11,7 @@ use hertzforge_channel_table::ChannelTable;
 use hertzforge_modal_test::plan::Plan;
 use hertzforge_modal_test::setup::{
     AcceptMode, DriveSet, Estimator, ExpWindowSet, ForceTarget, ForceWindowSet, ImpactSet,
-    ModalSetup, Mode, Point, Refusal, Roving, ShakerSet, SourceKind, LEVEL_DEFAULT_VRMS,
+    ModalSetup, Mode, Point, Polarity, Refusal, Roving, ShakerSet, SourceKind, LEVEL_DEFAULT_VRMS,
     STOP_RAMP_DEPTH_DB, STOP_RAMP_S, TARGET_TOLERANCE_PCT,
 };
 use hertzforge_modal_test::window::{ExpWindow, ForceWindow};
@@ -123,6 +123,7 @@ fn impact(o: &Obj<'_>) -> Result<ImpactSet, MethodError> {
         o,
         &[
             "trigger_level_pct",
+            "polarity",
             "pretrigger_pct",
             "holdoff_blocks",
             "double_hit_pct",
@@ -142,6 +143,16 @@ fn impact(o: &Obj<'_>) -> Result<ImpactSet, MethodError> {
             return Err(bad(
                 &o.at("accept"),
                 format!("\"{x}\" is not an accept mode; it is auto or manual"),
+            ))
+        }
+    };
+    let polarity = match o.opt_str("polarity")? {
+        None | Some("positive") => Polarity::Positive,
+        Some("negative") => Polarity::Negative,
+        Some(x) => {
+            return Err(bad(
+                &o.at("polarity"),
+                format!("\"{x}\" is not a polarity; it is positive or negative"),
             ))
         }
     };
@@ -181,6 +192,7 @@ fn impact(o: &Obj<'_>) -> Result<ImpactSet, MethodError> {
     };
     Ok(ImpactSet {
         trigger_pct: o.f64_or("trigger_level_pct", d.trigger_pct)?,
+        polarity,
         pretrigger_pct: o.f64_or("pretrigger_pct", d.pretrigger_pct)?,
         holdoff_blocks: o.f64_or("holdoff_blocks", d.holdoff_blocks)?,
         double_hit_pct: o.f64_or("double_hit_pct", d.double_hit_pct)?,
@@ -511,14 +523,18 @@ pub fn report(w: &WireModal, plan: &Plan, source: &str) -> Value {
                 "impact".into(),
                 json!({
                     "drives": "none: nothing is driven in impact mode",
-                    "trigger": {"level": num(i.trigger_pct / 100.0 * hammer.range), "unit": hammer.unit,
+                    "trigger": {"level": num(i.polarity.sign() * i.trigger_pct / 100.0 * hammer.range), "unit": hammer.unit,
+                                "polarity": i.polarity.name(),
+                                "watches": format!("the force rising through {} {} ({} hammer); live once {} pre-trigger frames are in",
+                                                   num(i.polarity.sign() * i.trigger_pct / 100.0 * hammer.range), hammer.unit,
+                                                   i.polarity.name(), s.pretrigger_frames()),
                                 "pretrigger_frames": s.pretrigger_frames()},
                     "holdoff_blocks": num(i.holdoff_blocks),
                     "accept": i.accept.name(),
                     "auto_advance": i.auto_advance,
                     "checks": {
                         "overload": format!("{} of each row's range rejects", num(hertzforge_hal::INPUT_OVERLOAD_FRACTION)),
-                        "double_hit": format!("a later force over {} percent of the peak rejects", num(i.double_hit_pct)),
+                        "double_hit": format!("a second impact of the hammer's polarity over {} percent of the peak, or six times the pre-trigger RMS if larger, after the pulse falls below 5 percent of it, rejects", num(i.double_hit_pct)),
                         "tip_warn_db": num(i.tip_warn_db),
                         "target": i.target.map(|t| json!({"peak": num(t.peak), "tolerance_pct": num(t.tolerance_pct),
                                                           "unit": hammer.unit, "rejects": false})),

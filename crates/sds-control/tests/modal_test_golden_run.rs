@@ -59,6 +59,7 @@ fn shaker_config() -> Value {
     json!({
         "title": "Golden Two Shakers", "operator": "A. Operator",
         "article": "Beam, SN 0007",
+        "specification": {"document": "Test procedure", "clause": "5.2"},
         "mode": "shaker", "fs_hz": 1024, "block": 512, "band": {"hi_hz": 200},
         "averages": 4,
         "shaker": {"drives": [{"row": 5, "level_vrms": 0.05}, {"row": 6, "level_vrms": 0.05}],

@@ -151,12 +151,16 @@ pub const TARGET_TOLERANCE_PCT: f64 = 20.0;
 pub struct ImpactSet {
     /// The trigger level, percent of the hammer row's range.
     pub trigger_pct: f64,
+    /// The hammer's polarity: the sign its force takes on a hit. The trigger, the peak,
+    /// the force target and the double-hit check all watch this sign.
+    pub polarity: Polarity,
     /// The pre-trigger, percent of the block.
     pub pretrigger_pct: f64,
     /// Blocks after a captured block before the trigger re-arms.
     pub holdoff_blocks: f64,
-    /// A later force sample above this percent of the main peak, after the pulse has
-    /// fallen below [`crate::hits::PULSE_END_FRACTION`] of it, is a double hit.
+    /// A second impact above this percent of the main peak (or six times the
+    /// pre-trigger RMS, the larger), after the pulse has fallen below
+    /// [`crate::hits::PULSE_END_FRACTION`] of it, is a double hit ([`crate::hits`]).
     pub double_hit_pct: f64,
     /// The force spectrum's drop from its maximum to the band's top above which the
     /// tip is reported (a warning, never a rejection), dB.
@@ -173,6 +177,7 @@ impl Default for ImpactSet {
     fn default() -> Self {
         ImpactSet {
             trigger_pct: 10.0,
+            polarity: Polarity::Positive,
             pretrigger_pct: 5.0,
             holdoff_blocks: 1.0,
             double_hit_pct: 5.0,
@@ -182,6 +187,30 @@ impl Default for ImpactSet {
             exp_window: ExpWindowSet::default(),
             auto_advance: true,
             target: None,
+        }
+    }
+}
+
+/// The sign a hammer's force takes on a hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    Positive,
+    Negative,
+}
+
+impl Polarity {
+    pub fn name(self) -> &'static str {
+        match self {
+            Polarity::Positive => "positive",
+            Polarity::Negative => "negative",
+        }
+    }
+
+    /// `1` or `-1`: a force times it is positive on a hit.
+    pub fn sign(self) -> f64 {
+        match self {
+            Polarity::Positive => 1.0,
+            Polarity::Negative => -1.0,
         }
     }
 }
@@ -534,7 +563,7 @@ impl ModalSetup {
         let i = &self.impact;
         pct_in(
             r,
-            "impact.trigger_pct",
+            "impact.trigger_level_pct",
             i.trigger_pct,
             0.1,
             100.0,

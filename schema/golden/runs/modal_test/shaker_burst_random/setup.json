@@ -3,6 +3,10 @@
     "title": "Golden Two Shakers",
     "operator": "A. Operator",
     "article": "Beam, SN 0007",
+    "specification": {
+      "document": "Test procedure",
+      "clause": "5.2"
+    },
     "mode": "shaker",
     "fs_hz": 1024,
     "block": 512,

@@ -165,11 +165,59 @@ pub fn state_key(v: Option<&ModalView>) -> String {
     state_json(v).to_string()
 }
 
-/// The display: the latest frames of every measured channel, and the selected point's
-/// current estimate.
+/// The most points any one array of `modal_test.live` carries.
+pub const LIVE_POINTS: usize = 1024;
+
+/// A channel the display names: its table index, its part (`reference`, `response`,
+/// `monitor` or `drive`) and its unit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Named {
+    pub index: u32,
+    pub role: &'static str,
+    pub unit: String,
+}
+
+impl Named {
+    fn json(&self, values: Value) -> Value {
+        json!({"index": self.index, "role": self.role, "unit": self.unit, "values": values})
+    }
+}
+
+/// The latest hit's own block (impact), for the display to draw and compute nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HitShow {
+    pub point: usize,
+    pub n: u32,
+    pub seq: u64,
+    /// The input frame the block starts at, and that frame's time, s.
+    pub start_frame: u64,
+    pub start_s: f64,
+    /// The block's samples.
+    pub samples: usize,
+    /// Samples per interval of the min/max decimation (`1`: every sample sent).
+    pub decimation: usize,
+    /// The time between the values sent, s.
+    pub step_s: f64,
+    /// The block's references then its responses, as the plan orders them.
+    pub names: Vec<Named>,
+    pub channels: Vec<Vec<f64>>,
+    /// The force window in the block's samples: pre-trigger, flat width and fall.
+    pub force_window: Option<(usize, usize, usize)>,
+    /// The exponential window: its time constant, s, and its value at the block's end.
+    pub exponential: Option<(f64, f64)>,
+    /// The force autospectrum of the hit on the band's lines.
+    pub force_unit: String,
+    pub force_auto: Vec<f64>,
+    pub tip_drop_db: f64,
+}
+
+/// The display: the latest frames of every channel, the selected point's current
+/// estimate, and the latest hit (impact) or the references' autospectra (shaker).
 #[derive(Debug, Clone, Default)]
 pub struct Display {
     pub rate_hz: f64,
+    /// Every input of the station's frame in table order, then (shaker) every drive.
+    pub names: Vec<Named>,
     pub channels: Vec<Vec<f64>>,
     pub freqs: Vec<f64>,
     /// `[response][reference]` magnitude and phase (degrees) per line.
@@ -178,6 +226,95 @@ pub struct Display {
     /// `[response]` per line: the ordinary coherence (one reference) or the multiple.
     pub coherence: Vec<Vec<f64>>,
     pub averages: usize,
+    pub hit: Option<HitShow>,
+    /// Shaker: the references (as the plan orders them) and their autospectra so far.
+    pub ref_names: Vec<Named>,
+    pub ref_auto: Vec<Vec<f64>>,
+}
+
+/// Every `k`-th value, `k` the least that keeps [`LIVE_POINTS`] or fewer.
+fn stride(n: usize) -> usize {
+    n.div_ceil(LIVE_POINTS).max(1)
+}
+
+fn every(x: &[f64], k: usize) -> Vec<f64> {
+    x.iter().step_by(k.max(1)).copied().collect()
+}
+
+/// The min/max decimation: each interval of `k` samples gives its two extremes in time
+/// order (`k` of 1: every sample).
+pub fn min_max(x: &[f64], k: usize) -> Vec<f64> {
+    if k <= 1 {
+        return x.to_vec();
+    }
+    let mut out = Vec::with_capacity(2 * x.len().div_ceil(k));
+    for c in x.chunks(k) {
+        let (mut lo, mut hi) = (0, 0);
+        for (i, v) in c.iter().enumerate() {
+            if *v < c[lo] {
+                lo = i;
+            }
+            if *v > c[hi] {
+                hi = i;
+            }
+        }
+        let (a, b) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+        out.push(c[a]);
+        out.push(c[b]);
+    }
+    out
+}
+
+/// The block's decimation: samples per interval, so that two values per interval keep
+/// [`LIVE_POINTS`] or fewer.
+pub fn block_decimation(samples: usize) -> usize {
+    if samples <= LIVE_POINTS {
+        1
+    } else {
+        samples.div_ceil(LIVE_POINTS / 2)
+    }
+}
+
+/// The names of the station frame's channels: inputs by slot, then drives.
+pub fn frame_names(plan: &Plan, with_drives: bool) -> Vec<Named> {
+    let mut v: Vec<Named> = plan
+        .input_rows
+        .iter()
+        .enumerate()
+        .map(|(slot, (index, unit))| Named {
+            index: *index,
+            role: if plan.refs.iter().any(|r| r.slot == slot) {
+                "reference"
+            } else if plan.resps.iter().any(|r| r.slot == slot) {
+                "response"
+            } else {
+                "monitor"
+            },
+            unit: unit.clone(),
+        })
+        .collect();
+    if with_drives {
+        v.extend(plan.drives.iter().map(|d| Named {
+            index: d.index,
+            role: "drive",
+            unit: "V".into(),
+        }));
+    }
+    v
+}
+
+/// The plan's references then its responses, named.
+pub fn measured_names(plan: &Plan) -> Vec<Named> {
+    let named = |r: &hertzforge_modal_test::plan::Row, role| Named {
+        index: r.index,
+        role,
+        unit: r.unit.clone(),
+    };
+    plan.refs
+        .iter()
+        .map(|r| named(r, "reference"))
+        .chain(plan.resps.iter().map(|r| named(r, "response")))
+        .collect()
 }
 
 /// `modal_test.live`.
@@ -193,30 +330,89 @@ pub fn live_json(v: &ModalView, d: &Display, arrays: &mut crate::codec::Arrays) 
         .channels
         .iter()
         .enumerate()
-        .map(|(k, x)| json!({"values": put(format!("t{k}"), x)}))
+        .map(|(k, x)| {
+            let values = put(format!("t{k}"), x);
+            match d.names.get(k) {
+                Some(n) => n.json(values),
+                None => json!({"values": values}),
+            }
+        })
         .collect();
-    let freqs = put("f".into(), &d.freqs);
+    let k = stride(d.freqs.len());
+    let freqs = put("f".into(), &every(&d.freqs, k));
     let mut frf = Vec::new();
     for (i, row) in d.mag.iter().enumerate() {
         for (j, m) in row.iter().enumerate() {
             frf.push(json!({"response": i, "reference": j,
-                "magnitude": put(format!("m{i}_{j}"), m),
-                "phase_deg": put(format!("p{i}_{j}"), &d.phase_deg[i][j])}));
+                "magnitude": put(format!("m{i}_{j}"), &every(m, k)),
+                "phase_deg": put(format!("p{i}_{j}"), &every(&d.phase_deg[i][j], k))}));
         }
     }
     let coh: Vec<Value> = d
         .coherence
         .iter()
         .enumerate()
-        .map(|(i, c)| json!({"response": i, "values": put(format!("c{i}"), c)}))
+        .map(|(i, c)| json!({"response": i, "values": put(format!("c{i}"), &every(c, k))}))
         .collect();
-    json!({
+    let mut out = json!({
         "run_id": v.run_id,
         "state": v.state,
         "point": v.point,
         "time": {"rate_hz": num(d.rate_hz), "channels": channels},
         "frf": {"frequency_hz": freqs, "averages": d.averages, "pairs": frf, "coherence": coh},
-    })
+    });
+    let o = out.as_object_mut().expect("an object");
+    if v.mode == "impact" {
+        let hit = d.hit.as_ref().map(|h| {
+            let chans: Vec<Value> = h
+                .channels
+                .iter()
+                .enumerate()
+                .map(|(c, x)| {
+                    let values = put(format!("h{c}"), x);
+                    match h.names.get(c) {
+                        Some(n) => n.json(values),
+                        None => json!({"values": values}),
+                    }
+                })
+                .collect();
+            json!({
+                "point": h.point, "n": h.n, "seq": h.seq,
+                "start_frame": h.start_frame, "start_s": num(h.start_s),
+                "samples": h.samples, "decimation": h.decimation, "step_s": num(h.step_s),
+                "channels": chans,
+                "windows": {
+                    "force": h.force_window.map(|(pre, width, fall)| json!({"pre_frames": pre, "width_frames": width, "fall_frames": fall})),
+                    "exponential": h.exponential.map(|(tau, end)| json!({"tau_s": num(tau), "end": num(end)})),
+                },
+                "force_spectrum": {
+                    "frequency_hz": put("hf".into(), &every(&d.freqs, k)),
+                    "unit": format!("{}^2/Hz", h.force_unit),
+                    "values": put("hs".into(), &every(&h.force_auto, k)),
+                    "tip_drop_db": num(h.tip_drop_db),
+                },
+            })
+        });
+        o.insert("hit".into(), hit.unwrap_or(Value::Null));
+    } else {
+        let spectra: Vec<Value> = d
+            .ref_auto
+            .iter()
+            .enumerate()
+            .map(|(j, a)| {
+                let values = put(format!("r{j}"), &every(a, k));
+                match d.ref_names.get(j) {
+                    Some(n) => json!({"index": n.index, "unit": format!("{}^2/Hz", n.unit), "values": values}),
+                    None => json!({"values": values}),
+                }
+            })
+            .collect();
+        o.insert(
+            "references".into(),
+            json!({"frequency_hz": put("rf".into(), &every(&d.freqs, k)), "averages": d.averages, "autospectra": spectra}),
+        );
+    }
+    out
 }
 
 /// What a start needs from the service.
@@ -243,6 +439,7 @@ pub enum Cmd {
     Accept,
     Reject,
     Undo,
+    ClearPoint,
     TargetFromHit,
     DriveStart,
     DriveStop,
@@ -750,7 +947,16 @@ impl ModalRun {
             let mut d = lock(&self.display);
             d.rate_hz = fs;
             d.freqs = session.freqs().to_vec();
+            d.names = frame_names(&session.plan, shaker);
+            d.ref_names = measured_names(&session.plan)
+                .into_iter()
+                .take(session.plan.refs.len())
+                .collect();
         }
+        // The display's time history: the latest frames of every channel of the frame.
+        let keep = TIME_POINTS.min(session.setup.block);
+        let mut time: Vec<std::collections::VecDeque<f64>> =
+            vec![std::collections::VecDeque::with_capacity(keep + 1); width];
         self.publish(session, host, None);
         loop {
             // The operator's calls.
@@ -763,6 +969,12 @@ impl ModalRun {
             if let Some(c) = capture.as_mut() {
                 while c.pop(&mut frame) {
                     events.extend(session.feed(&frame[..host.inputs]));
+                    for (h, v) in time.iter_mut().zip(&frame) {
+                        if h.len() == keep {
+                            h.pop_front();
+                        }
+                        h.push_back(f64::from(*v));
+                    }
                 }
             }
             // Shaker mode: averaging begins once the ramp has begun on a frame's start.
@@ -828,6 +1040,8 @@ impl ModalRun {
             }
             if changed || last_display.elapsed() > Duration::from_millis(100) {
                 last_display = Instant::now();
+                lock(&self.display).channels =
+                    time.iter().map(|h| h.iter().copied().collect()).collect();
                 self.update_display(session);
                 self.publish(session, host, None);
             }
@@ -874,6 +1088,15 @@ impl ModalRun {
             Cmd::Accept => s.accept().map_err(as_err)?,
             Cmd::Reject => s.reject().map_err(as_err)?,
             Cmd::Undo => s.undo().map_err(as_err)?,
+            Cmd::ClearPoint => {
+                let ev = s.clear_point().map_err(as_err)?;
+                self.shared.add_log_data(
+                    "operator",
+                    format!("point {} cleared: every average taken out", s.point),
+                    Some(json!({"action": "clear_point", "point": s.point})),
+                );
+                ev
+            }
             Cmd::TargetFromHit => {
                 let peak = s.target_from_latest().map_err(as_err)?;
                 self.shared.add_log_data(
@@ -1061,7 +1284,32 @@ impl ModalRun {
 
     fn update_display(&self, s: &Session) {
         let mut d = lock(&self.display);
-        d.channels = s.recent(TIME_POINTS.min(s.setup.block));
+        d.hit = s.latest_hit().map(|(p, t, b, sp)| {
+            let fs = s.setup.fs_hz;
+            let k = block_decimation(b.first().map_or(0, Vec::len));
+            let report = t.report.as_ref();
+            HitShow {
+                point: p,
+                n: t.n,
+                seq: t.seq,
+                start_frame: t.start_frame,
+                start_s: t.start_frame as f64 / fs,
+                samples: t.frames,
+                decimation: k,
+                step_s: if k == 1 {
+                    1.0 / fs
+                } else {
+                    k as f64 / (2.0 * fs)
+                },
+                names: measured_names(&s.plan),
+                channels: b.iter().map(|x| min_max(x, k)).collect(),
+                force_window: s.windows.force.as_ref().map(|f| (f.pre, f.width, f.fall)),
+                exponential: s.windows.exp.as_ref().map(|e| (e.tau_s, e.end)),
+                force_unit: s.plan.refs[0].unit.clone(),
+                force_auto: sp.x[0].iter().map(|c| c.norm_sqr()).collect(),
+                tip_drop_db: report.map_or(0.0, |r| r.tip_drop_db),
+            }
+        });
         match s.estimate(s.point) {
             Some(e) => {
                 d.mag = e
@@ -1088,11 +1336,17 @@ impl ModalRun {
                     .or(e.multiple_coherence.clone())
                     .unwrap_or_default();
                 d.averages = e.averages;
+                d.ref_auto = if s.setup.mode == Mode::Shaker {
+                    e.ref_auto.clone()
+                } else {
+                    Vec::new()
+                };
             }
             None => {
                 d.mag.clear();
                 d.phase_deg.clear();
                 d.coherence.clear();
+                d.ref_auto.clear();
                 d.averages = 0;
             }
         }

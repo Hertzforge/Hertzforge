@@ -10,6 +10,9 @@
    "rate_hz": 1024,
    "channels": [
     {
+     "index": 1,
+     "role": "reference",
+     "unit": "lbf",
      "values": {
       "dtype": "f32",
       "shape": [
@@ -24,6 +27,9 @@
      }
     },
     {
+     "index": 2,
+     "role": "response",
+     "unit": "g",
      "values": {
       "dtype": "f32",
       "shape": [
@@ -38,6 +44,9 @@
      }
     },
     {
+     "index": 3,
+     "role": "response",
+     "unit": "g",
      "values": {
       "dtype": "f32",
       "shape": [
@@ -157,6 +166,108 @@
      }
     }
    ]
+  },
+  "hit": {
+   "point": 1,
+   "n": 2,
+   "seq": 4,
+   "start_frame": 1536,
+   "start_s": 1.5,
+   "samples": 4,
+   "decimation": 1,
+   "step_s": 0.0009765625,
+   "channels": [
+    {
+     "index": 1,
+     "role": "reference",
+     "unit": "lbf",
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       18.5,
+       2.25,
+       0.0
+      ]
+     }
+    },
+    {
+     "index": 2,
+     "role": "response",
+     "unit": "g",
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       0.5,
+       -1.25,
+       0.75
+      ]
+     }
+    },
+    {
+     "index": 3,
+     "role": "response",
+     "unit": "g",
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       -0.25,
+       0.625,
+       -0.375
+      ]
+     }
+    }
+   ],
+   "windows": {
+    "force": {
+     "pre_frames": 1,
+     "width_frames": 2,
+     "fall_frames": 1
+    },
+    "exponential": {
+     "tau_s": 0.125,
+     "end": 0.0625
+    }
+   },
+   "force_spectrum": {
+    "frequency_hz": {
+     "dtype": "f32",
+     "shape": [
+      4
+     ],
+     "values": [
+      0.0,
+      2.0,
+      4.0,
+      6.0
+     ]
+    },
+    "unit": "lbf^2/Hz",
+    "values": {
+     "dtype": "f32",
+     "shape": [
+      4
+     ],
+     "values": [
+      4.0,
+      2.0,
+      1.0,
+      0.5
+     ]
+    },
+    "tip_drop_db": 9.5
+   }
   }
  }
 }

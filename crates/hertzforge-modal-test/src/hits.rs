@@ -3,9 +3,13 @@
 //!
 //! * **Overload.** A sample of the reference or a response at or above
 //!   [`hertzforge_hal::INPUT_OVERLOAD_FRACTION`] of its row's range. Rejects.
-//! * **Double hit.** After the main pulse has fallen below [`PULSE_END_FRACTION`] of its
-//!   peak, a later force sample whose magnitude exceeds the double-hit fraction of the
-//!   peak. Rejects. A force cell's ringing below the fraction is not one.
+//! * **Double hit.** A second impact: after the main pulse has fallen below
+//!   [`PULSE_END_FRACTION`] of its peak, a later excursion of the hammer's own polarity
+//!   that rises above the larger of the double-hit fraction of the main peak and
+//!   [`DOUBLE_HIT_NOISE_RMS`] times the pre-trigger force's RMS. Anywhere in the block,
+//!   after the force window too. Rejects. An undershoot of the opposite polarity never
+//!   counts, and nor does ringing: a lobe of the hammer's polarity no larger than the
+//!   opposite lobe just before it is the force cell ringing down, not an impact.
 //! * **Tip roll-off.** The force autospectrum's drop, dB, from its largest value in the
 //!   band to its value at the band's top line. Above the setup's figure the tip is
 //!   reported as too soft for the band. A warning only.
@@ -20,13 +24,17 @@ use serde_json::{json, Value};
 
 /// The fraction of the peak below which the main pulse has ended.
 pub const PULSE_END_FRACTION: f64 = 0.05;
+/// A second impact must also rise above this many times the pre-trigger force's RMS.
+pub const DOUBLE_HIT_NOISE_RMS: f64 = 6.0;
 /// A response's post-trigger peak must exceed this many times its pre-trigger RMS.
 pub const NO_RESPONSE_RATIO: f64 = 4.0;
 
 /// What a check is handed: one block per channel, in engineering units.
 pub struct HitInput<'a> {
-    /// The reference (force) samples.
+    /// The reference (force) samples, the block from its first sample.
     pub force: &'a [f64],
+    /// The hammer's polarity: `1` or `-1`.
+    pub sign: f64,
     /// The reference row's range.
     pub force_range: f64,
     /// The responses, with their ranges.
@@ -53,12 +61,15 @@ pub struct WindowCut {
     pub window_end_frame: usize,
 }
 
-/// A double hit's numbers.
+/// A double hit's numbers: the second impact's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoubleHit {
-    /// The frame of the later peak, from the block's start.
+    /// The sample of the second impact's peak, from the block's first sample.
     pub frame: usize,
-    /// The later peak over the main one.
+    /// The second impact's peak, in the hammer row's unit, as a magnitude in the
+    /// hammer's polarity.
+    pub peak: f64,
+    /// The second impact's peak over the main one.
     pub ratio: f64,
 }
 
@@ -76,8 +87,10 @@ pub struct TargetCheck {
 /// A hit's report.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HitReport {
-    /// The force's largest magnitude, in the hammer row's unit.
+    /// The force's largest value in the hammer's polarity, as a magnitude, in the hammer
+    /// row's unit.
     pub peak: f64,
+    /// Its sample, from the block's first sample.
     pub peak_frame: usize,
     /// The overloaded channels: `0` the reference, `1 + k` response `k`.
     pub overloaded: Vec<usize>,
@@ -127,7 +140,7 @@ impl HitReport {
             "peak": self.peak,
             "peak_frame": self.peak_frame,
             "overloaded": self.overloaded,
-            "double_hit": self.double_hit.as_ref().map(|d| json!({"frame": d.frame, "ratio": d.ratio})),
+            "double_hit": self.double_hit.as_ref().map(|d| json!({"frame": d.frame, "peak": d.peak, "ratio": d.ratio})),
             "tip_drop_db": self.tip_drop_db,
             "tip_warning": self.tip_warning,
             "no_response": self.no_response,
@@ -146,37 +159,67 @@ impl HitReport {
     }
 }
 
-/// The double-hit check alone: `None` for a clean hit.
-pub fn double_hit(force: &[f64], fraction: f64) -> Option<DoubleHit> {
-    let (p, peak) = peak_of(force);
+/// The double-hit check alone: `None` for a clean hit. `sign` is the hammer's
+/// polarity, `fraction` the double-hit fraction and `pre` the pre-trigger's samples.
+pub fn double_hit(force: &[f64], sign: f64, fraction: f64, pre: usize) -> Option<DoubleHit> {
+    let y: Vec<f64> = force.iter().map(|v| sign * v).collect();
+    let (p, peak) = peak_of(&y);
     if peak <= 0.0 {
         return None;
     }
-    let end = pulse_end(force, p, peak)?;
-    let (q, later) = force[end..]
-        .iter()
-        .enumerate()
-        .fold((0, 0.0f64), |(bi, bv), (i, v)| {
-            if v.abs() > bv {
-                (i, v.abs())
+    let end = pulse_end(&y, p, peak)?;
+    let pre = pre.min(force.len());
+    let rms = if pre == 0 {
+        0.0
+    } else {
+        (force[..pre].iter().map(|v| v * v).sum::<f64>() / pre as f64).sqrt()
+    };
+    let threshold = (fraction * peak).max(DOUBLE_HIT_NOISE_RMS * rms);
+    // Lobe by lobe from the pulse's end: a lobe of the hammer's polarity over the
+    // threshold, and larger than the opposite lobe just before it, is a second impact.
+    let mut n = end;
+    let mut opposite = 0.0f64;
+    while n < y.len() {
+        if y[n] > 0.0 {
+            let (mut at, mut top) = (n, y[n]);
+            while n < y.len() && y[n] > 0.0 {
+                if y[n] > top {
+                    (at, top) = (n, y[n]);
+                }
+                n += 1;
+            }
+            if top > threshold && top > opposite {
+                return Some(DoubleHit {
+                    frame: at,
+                    peak: top,
+                    ratio: top / peak,
+                });
+            }
+            opposite = 0.0;
+        } else {
+            let mut m = 0.0f64;
+            while n < y.len() && y[n] <= 0.0 {
+                m = m.max(-y[n]);
+                n += 1;
+            }
+            opposite = m;
+        }
+    }
+    None
+}
+
+/// The largest value and its sample.
+fn peak_of(y: &[f64]) -> (usize, f64) {
+    y.iter().enumerate().fold(
+        (0, 0.0f64),
+        |(bi, bv), (i, v)| {
+            if *v > bv {
+                (i, *v)
             } else {
                 (bi, bv)
             }
-        });
-    (later > fraction * peak).then(|| DoubleHit {
-        frame: end + q,
-        ratio: later / peak,
-    })
-}
-
-fn peak_of(x: &[f64]) -> (usize, f64) {
-    x.iter().enumerate().fold((0, 0.0f64), |(bi, bv), (i, v)| {
-        if v.abs() > bv {
-            (i, v.abs())
-        } else {
-            (bi, bv)
-        }
-    })
+        },
+    )
 }
 
 /// The force autospectrum's drop, dB, from its largest value over lines `0..=top` to
@@ -230,8 +273,9 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
             overloaded.push(1 + k);
         }
     }
-    let (peak_frame, peak) = peak_of(h.force);
-    let dh = double_hit(h.force, h.double_hit_pct / 100.0);
+    let y: Vec<f64> = h.force.iter().map(|v| h.sign * v).collect();
+    let (peak_frame, peak) = peak_of(&y);
+    let dh = double_hit(h.force, h.sign, h.double_hit_pct / 100.0, h.pretrigger);
     let tip = tip_drop_db(h.force, h.band_top_line);
     let no_response = h
         .responses
@@ -248,7 +292,7 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
         .collect();
     let target = h.target.as_ref().map(|t| target_check(peak, t));
     let window_cut = h.force_window_end.and_then(|end| {
-        let pulse_end = pulse_end(h.force, peak_frame, peak);
+        let pulse_end = pulse_end(&y, peak_frame, peak);
         (peak > 0.0 && pulse_end.is_none_or(|e| e >= end)).then_some(WindowCut {
             pulse_end_frame: pulse_end,
             window_end_frame: end,
@@ -275,10 +319,10 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
     }
 }
 
-/// The first sample after the peak at `p` where the force is below
-/// [`PULSE_END_FRACTION`] of `peak`.
-pub fn pulse_end(force: &[f64], p: usize, peak: f64) -> Option<usize> {
-    (p..force.len()).find(|&n| force[n].abs() < PULSE_END_FRACTION * peak)
+/// The first sample after the peak at `p` where the force in the hammer's polarity,
+/// `y`, is below [`PULSE_END_FRACTION`] of `peak`.
+pub fn pulse_end(y: &[f64], p: usize, peak: f64) -> Option<usize> {
+    (p..y.len()).find(|&n| y[n] < PULSE_END_FRACTION * peak)
 }
 
 #[cfg(test)]
@@ -301,6 +345,7 @@ mod tests {
     ) -> HitInput<'a> {
         HitInput {
             force,
+            sign: 1.0,
             force_range: 100.0,
             responses: resp,
             pretrigger: 20,
@@ -336,40 +381,127 @@ mod tests {
         assert_eq!(j["force_window_cut"]["pulse_end_frame"], end);
     }
 
-    #[test]
-    fn modal_test_a_true_double_hit_is_caught_and_a_clean_hit_is_not() {
-        let mut clean = vec![0.0; 1024];
-        pulse(&mut clean, 20, 5, 20.0);
-        assert_eq!(double_hit(&clean, 0.05), None);
-        let mut twice = clean.clone();
-        pulse(&mut twice, 80, 5, 4.0);
-        let d = double_hit(&twice, 0.05).expect("caught");
-        assert!((d.ratio - 0.2).abs() < 0.02, "{d:?}");
-        assert!((80..85).contains(&d.frame));
-        let r = check(&input(&twice, &[], None));
-        assert_eq!(r.rejected(), Some("double_hit"));
+    /// The built traces' rate: a 1 ms hammer pulse is 20 samples.
+    const DH_FS: f64 = 20480.0;
+    const DH_PRE: usize = 200;
+
+    /// A block with a 1 ms half-sine of `peak` at the end of the pre-trigger.
+    fn hit(peak: f64) -> Vec<f64> {
+        let mut f = vec![0.0; 4096];
+        pulse(&mut f, DH_PRE, 20, peak);
+        f
     }
 
-    /// A force cell's decaying ringing after the pulse, of amplitude `amp`.
-    fn ring(x: &mut [f64], amp: f64) {
-        for (n, v) in x.iter_mut().enumerate().take(400).skip(25) {
-            let t = (n - 25) as f64 / 1024.0;
-            *v += amp * (2.0 * std::f64::consts::PI * 300.0 * t).sin() * (-t * 20.0).exp();
+    fn dh(f: &[f64]) -> Option<DoubleHit> {
+        double_hit(f, 1.0, 0.05, DH_PRE)
+    }
+
+    #[test]
+    fn modal_test_a_clean_half_sine_is_not_a_double_hit() {
+        assert_eq!(dh(&hit(20.0)), None);
+    }
+
+    #[test]
+    fn modal_test_a_second_pulse_5_ms_on_is_a_double_hit_down_to_the_fraction() {
+        let gap = (0.005 * DH_FS) as usize;
+        for (pct, caught) in [(50.0, true), (10.0, true), (4.0, false)] {
+            let mut f = hit(20.0);
+            pulse(&mut f, DH_PRE + gap, 20, 20.0 * pct / 100.0);
+            let d = dh(&f);
+            assert_eq!(d.is_some(), caught, "{pct} %: {d:?}");
+            if let Some(d) = d {
+                // The second impact's own numbers: its sample, its peak, its fraction.
+                assert!(
+                    (DH_PRE + gap..DH_PRE + gap + 20).contains(&d.frame),
+                    "{d:?}"
+                );
+                assert!((d.peak - 20.0 * pct / 100.0).abs() < 0.01 * 20.0, "{d:?}");
+                assert!((d.ratio - pct / 100.0).abs() < 0.01, "{d:?}");
+                let r = check(&input(&f, &[], None));
+                assert_eq!(r.rejected(), Some("double_hit"));
+                let j = r.to_json();
+                assert_eq!(j["double_hit"]["frame"], d.frame);
+                assert_eq!(j["double_hit"]["peak"], d.peak);
+                assert_eq!(j["double_hit"]["ratio"], d.ratio);
+            }
         }
     }
 
     #[test]
-    fn modal_test_force_cell_ringing_below_the_fraction_is_not_a_double_hit() {
-        let mut f = vec![0.0; 1024];
-        pulse(&mut f, 20, 5, 20.0);
-        // Ringing after the pulse at 3 percent of the peak, decaying.
-        ring(&mut f, 0.6);
-        assert_eq!(double_hit(&f, 0.05), None);
-        // The same ringing at 8 percent is one.
-        let mut g = vec![0.0; 1024];
-        pulse(&mut g, 20, 5, 20.0);
-        ring(&mut g, 1.6);
-        assert!(double_hit(&g, 0.05).is_some());
+    fn modal_test_an_opposite_undershoot_and_its_ringing_are_not_a_double_hit() {
+        // After the pulse, a 20 % undershoot of the opposite sign ringing down at the
+        // force cell's 2 kHz: its lobes of the hammer's sign reach 15 %, then less.
+        let mut f = hit(20.0);
+        let from = DH_PRE + 20;
+        for (n, v) in f.iter_mut().enumerate().skip(from) {
+            let t = (n - from) as f64 / DH_FS;
+            *v -= 4.0 * (2.0 * std::f64::consts::PI * 2000.0 * t).sin() * (-t * 600.0).exp();
+        }
+        let lobe = f[from..].iter().fold(0.0f64, |m, v| m.max(*v));
+        assert!(
+            lobe > 0.05 * 20.0,
+            "the ringing rises above the fraction: {lobe}"
+        );
+        assert_eq!(dh(&f), None);
+    }
+
+    #[test]
+    fn modal_test_noise_at_1_25_pct_rms_of_the_peak_is_not_a_double_hit() {
+        // Gaussian noise at 1.25 % RMS of the peak over the whole block.
+        let mut f = hit(20.0);
+        let mut z = 0x9E37_79B9_7F4A_7C15u64;
+        let mut u = || {
+            z ^= z << 13;
+            z ^= z >> 7;
+            z ^= z << 17;
+            (z >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for v in f.iter_mut() {
+            let g = (-2.0 * u().max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u()).cos();
+            *v += 0.0125 * 20.0 * g;
+        }
+        assert_eq!(dh(&f), None);
+        // At the setup's lowest fraction, 1 %, under the noise itself: six times the
+        // pre-trigger's RMS keeps the noise from counting.
+        assert_eq!(double_hit(&f, 1.0, 0.01, DH_PRE), None);
+    }
+
+    #[test]
+    fn modal_test_a_second_pulse_after_the_force_window_is_a_double_hit() {
+        // The force window's flat part ends 2 ms after the trigger; a 20 % second
+        // impact 50 ms on is still one.
+        let mut f = hit(20.0);
+        let late = DH_PRE + (0.050 * DH_FS) as usize;
+        pulse(&mut f, late, 20, 4.0);
+        let mut h = input(&f, &[], None);
+        h.pretrigger = DH_PRE;
+        h.force_window_end = Some(DH_PRE + 40);
+        let r = check(&h);
+        let d = r.double_hit.clone().expect("caught after the window");
+        assert!(
+            d.frame > DH_PRE + 40 && (late..late + 20).contains(&d.frame),
+            "{d:?}"
+        );
+        assert_eq!(r.rejected(), Some("double_hit"));
+    }
+
+    #[test]
+    fn modal_test_a_negative_hammer_is_judged_in_its_own_polarity() {
+        let mut f: Vec<f64> = hit(20.0).iter().map(|v| -v).collect();
+        let gap = (0.005 * DH_FS) as usize;
+        let mut second = vec![0.0; f.len()];
+        pulse(&mut second, DH_PRE + gap, 20, 2.0);
+        for (a, b) in f.iter_mut().zip(&second) {
+            *a -= b;
+        }
+        let mut h = input(&f, &[], None);
+        h.sign = -1.0;
+        let r = check(&h);
+        assert!((r.peak - 20.0).abs() < 0.1, "{}", r.peak);
+        assert!((DH_PRE..DH_PRE + 20).contains(&r.peak_frame));
+        assert!(r.double_hit.is_some());
+        // Judged as a positive hammer, the same block has no pulse of its sign.
+        assert_eq!(double_hit(&f, 1.0, 0.05, DH_PRE), None);
     }
 
     #[test]
