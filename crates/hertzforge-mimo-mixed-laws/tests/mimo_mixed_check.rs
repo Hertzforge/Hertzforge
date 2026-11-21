@@ -277,3 +277,61 @@ fn mimo_mixed_a_floor_law_that_overdrives_fails_the_check() {
     eprintln!("double-drive floor law: {}", r.detail);
     assert!(!r.passed);
 }
+
+/// Run the floor-only case's configuration, its floor's abort band `abort_db`
+/// either side, with the overdriving floor law, to its end; the end, and the
+/// floor error at the last full-level reading per control.
+fn overdriven_floor_run(abort_db: f64) -> (hertzforge_mimo_mixed::service::RunEnd, Vec<f64>) {
+    use hertzforge_mimo_mixed::config::{MimoPartBody, PerControl};
+    use hertzforge_mimo_mixed::service::MimoMixedService;
+    let case = MimoMixedCheckCase::FloorOnly;
+    let mut cfg = mimo_mixed_check_config(case);
+    for p in &mut cfg.parts {
+        if let MimoPartBody::Floor(f) = &mut p.body {
+            f.abort_db = PerControl::All((abort_db, abort_db));
+        }
+    }
+    let mut laws = MimoMixedLaws::builtin(&cfg).expect("built-in laws");
+    laws.floor = Arc::new(DoubleFloor(laws.floor.clone()));
+    let st = mimo_mixed_check_station(case);
+    let mut svc = MimoMixedService::new(
+        cfg,
+        hertzforge_mimo_mixed_laws::mimo_mixed_check_table(&st),
+        station(case),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        laws,
+    )
+    .expect("the service");
+    svc.arm().expect("arm");
+    svc.identify().expect("identify");
+    assert!(svc.coherence_gate().expect("gate"));
+    svc.proceed().expect("proceed");
+    let mut last = Vec::new();
+    while svc.run_chunk().expect("run") {
+        let s = svc.status();
+        if s.phase == hertzforge_mimo_mixed::service::MimoMixedPhase::FullLevel {
+            last = s.floor_error_db.clone();
+        }
+    }
+    (svc.end().cloned().expect("an end"), last)
+}
+
+/// Requirement: the run's own floor envelope stands behind the check. The
+/// overdriving floor law holds the floor about 3 dB high: inside the floor's
+/// default abort band (6 dB either side) the run completes (the check fails
+/// it on its 1 dB requirement); with an abort band of 2.5 dB the same law
+/// ends the run `floor_envelope`.
+#[test]
+fn mimo_mixed_a_floor_held_high_trips_the_envelope_only_past_its_abort_band() {
+    let (e, err) = overdriven_floor_run(hertzforge_mimo_mixed::config::DEFAULT_FLOOR_ABORT_DB.0);
+    eprintln!(
+        "abort band 6 dB: ended {} ({}); floor error {err:?} dB",
+        e.name, e.words
+    );
+    assert_eq!(e.name, "completed", "{e:?}");
+    assert!(err.iter().all(|x| *x > 2.5 && *x < 6.0), "{err:?}");
+    let (e, _) = overdriven_floor_run(2.5);
+    eprintln!("abort band 2.5 dB: ended {} ({})", e.name, e.words);
+    assert_eq!(e.name, "floor_envelope", "{e:?}");
+    assert_eq!(e.part.as_deref(), Some("floor"), "{e:?}");
+}
