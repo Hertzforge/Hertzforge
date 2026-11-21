@@ -278,7 +278,9 @@ export interface Shape3DView {
 	 * Things the tree's rows or a table's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the
 	 * origin of the k-th frame, and fills the triangles `faces[k]` and draws the edges `edges[k]` (rows of `nodes`, flat).
 	 */
-	mark_sets?: { link: string; ids: number[]; rows?: number[][]; frames?: boolean; faces?: number[][]; edges?: number[][] }[];
+	mark_sets?: MarkSet[];
+	/** The elements in their own colors: triangles and lines (rows of `nodes`) and each one's color, u8 RGB. */
+	element_colors?: { triangles: Uint32Array; triangle_colors: Uint8Array; lines: Uint32Array; line_colors: Uint8Array };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -286,6 +288,20 @@ export interface Shape3DView {
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
+}
+
+/** Things marked together under a `link` (schema/PROTOCOL.md, `mark_sets`). */
+export interface MarkSet {
+	link: string;
+	ids: number[];
+	rows?: number[][];
+	frames?: boolean;
+	faces?: number[][];
+	edges?: number[][];
+	/** A click in the view marks the element under it (Select mode, beside a `pick`'s Add mode). */
+	clicks?: boolean;
+	/** Delete in the view runs `op` with `params` and the ids marked as `ids`. */
+	remove?: { op: string; params: Record<string, unknown> };
 }
 
 /** What a drag on a gizmo's arrow or ring runs. */
@@ -342,6 +358,14 @@ export interface Pick3D {
 	back?: string;
 	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI; absent where the service takes it in the view's unit. */
 	to_si?: [number, number];
+	/** What is asked beside the clicks, each a param and its options; an option may change how many clicks make one, and the hint. */
+	settings?: PickSetting[];
+}
+
+export interface PickSetting {
+	param: string;
+	label: string;
+	options: { value: string | number; label: string; count?: number; hint?: string }[];
 }
 
 /**
@@ -511,6 +535,8 @@ export interface TableEdit {
 	rows?: number[];
 	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
 	to_si?: Record<string, [number, number]>;
+	/** A swatch drawn in each cell of a column, by key: the cell's text to its color, '#rrggbb'. */
+	swatches?: Record<string, Record<string, string>>;
 	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' ids, the cells in `column`, as runs. */
 	remove?: { op: string; params: Record<string, unknown>; column: number };
 }

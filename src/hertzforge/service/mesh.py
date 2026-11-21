@@ -94,6 +94,32 @@ def element_highlights(geometry: Any, elements: Any) -> tuple[list[list[int]], l
     return split(triangles, tri_owner), split(edges, edge_owner)
 
 
+def element_colors(geometry: Any) -> dict[str, np.ndarray]:
+    """The elements in their own colors (`elem_color`, the palette `color_rgb` reads), as
+    `element_cells` draws them: `triangles` and `lines` by node row, and each one's color,
+    `triangle_colors` and `line_colors` (u8 RGB)."""
+    from hertzforge.drawing.viz.geometry import color_rgb, element_cells
+
+    faces, lines, _points = element_cells(geometry)
+    tri_rows, tri_colors, line_rows, line_colors = [], [], [], []
+    for color, group in faces.items():
+        triangles = triangulate(group)
+        tri_rows.append(triangles)
+        tri_colors.append(np.tile(np.round(np.multiply(color_rgb(color), 255)), (len(triangles), 1)))
+    for color, group in lines.items():
+        pairs = np.asarray(group, dtype=np.int64).reshape(-1, 2)
+        line_rows.append(pairs)
+        line_colors.append(np.tile(np.round(np.multiply(color_rgb(color), 255)), (len(pairs), 1)))
+
+    def joined(parts: list, width: int, kind: Any) -> np.ndarray:
+        return (np.concatenate(parts) if parts else np.zeros((0, width))).astype(kind)
+
+    return {'triangles': joined(tri_rows, 3, np.uint32),
+            'triangle_colors': joined(tri_colors, 3, np.uint8),
+            'lines': joined(line_rows, 2, np.uint32),
+            'line_colors': joined(line_colors, 3, np.uint8)}
+
+
 def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(node rows drawn, triangles, lines), the last two indexing the drawn
     nodes. Faces and lines are the drawing of the elements

@@ -777,3 +777,81 @@ def test_a_long_element_table_says_which_rows_the_view_highlights(project, valid
     drawn, quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
     assert len(drawn['mark_sets'][0]['ids']) == 10 < len(quads['rows'])
     assert drawn['note'] == 'Rows after the first 10 are not highlighted in the view.'
+
+
+def test_a_family_offers_no_add_element_row_its_edit_adds_them(project, validate):
+    from hertzforge.service.action_table import action_table
+
+    rows = action_table(project, ['Geometry'], {}, {'kind': 'family', 'id': 'quads'})['columns'][0]['rows']
+    assert 'project.add_element' not in {row['id'] for row in rows}
+    drawn, _quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    assert drawn['pick']['op'] == 'project.add_element'
+
+
+def test_add_mode_offers_the_familys_types_and_its_groups(project, validate):
+    geometry = project['Geometry']
+    run(project, 'project.add_element_group', name='Struts')
+    struts = int(geometry.group_id[-1])
+    run(project, 'project.add_element', family='beams', nodes='101 102', group=struts)
+    run(project, 'project.add_element_group', name='Empty')
+    drawn, _quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    pick = drawn['pick']
+    types, groups = pick['settings']
+    assert types['param'] == 'type' and pick['params']['type'] == 'quad4'
+    words = [o['value'] for o in types['options']]
+    assert {'quad4', 'quad8', 'quadshell4'} <= set(words) and 'tri3' not in words
+    counts = {o['value']: o['count'] for o in types['options']}
+    assert counts['quad4'] == 4 and counts['quad8'] == 8
+    # the quads' group and the empty one, not the beams' group
+    labels = [o['label'] for o in groups['options']]
+    assert labels == ['First or new', 'element group 1', 'Empty']
+    beams_view, _beams = _edited(project, {'kind': 'family', 'id': 'beams'}, validate)
+    (beam_types, _groups) = beams_view['pick']['settings']
+    assert {o['count'] for o in beam_types['options']} == {0}, 'a line runs through any count'
+    # a type picked in Add mode comes back as the one the next click makes
+    view, _table = run(project, 'project.add_element', family='quads', type='quad8',
+                       nodes='101 102 103 203 303 302 301 201')
+    assert view['pick']['params']['type'] == 'quad8' and view['pick']['count'] == 8
+
+
+def test_an_element_is_colored_in_its_table_and_its_view(project, validate):
+    geometry = project['Geometry']
+    drawn, quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    assert quads['columns'][-1] == 'Color' and quads['rows'][0][-1] == '1 blue'
+    assert quads['edit']['kinds'] == {'type': 'choice', 'color': 'choice'}
+    assert quads['edit']['choices']['color'][4] == '4 red'
+    assert quads['edit']['swatches']['color']['4 red'] == '#d62629'
+    assert 'tri3' not in quads['edit']['choices']['type'], 'the types of the families shown'
+    colors = drawn['element_colors']
+    assert len(colors['triangles']) == 2 * len(geometry.elem_id)
+    assert {tuple(c) for c in colors['triangle_colors']} == {(31, 120, 181)}
+    for typed in ('4', 'red', '4 red'):
+        geometry.elem_color[0] = 1
+        view, table = run(project, 'project.set_entity_cell', **quads['edit']['params'], row=1,
+                          column='color', value=typed)
+        assert int(geometry.elem_color[0]) == 4 and table['rows'][0][-1] == '4 red'
+    assert (214, 38, 41) in {tuple(c) for c in view['element_colors']['triangle_colors']}
+    with pytest.raises(ProtocolError, match='not a color'):
+        run(project, 'project.set_entity_cell', **quads['edit']['params'], row=1,
+            column='color', value='chartreuse')
+
+
+def test_select_mode_clicks_and_deletes_the_tables_elements(project, validate):
+    drawn, quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    (marks,) = drawn['mark_sets']
+    assert marks['clicks'] is True
+    assert marks['remove'] == {'op': 'project.delete_entities', 'params': quads['edit']['remove']['params']}
+
+
+def test_an_element_added_in_a_groups_edit_shows_the_groups_again(project, validate):
+    geometry = project['Geometry']
+    group = int(geometry.group_id[0])
+    drawn, groups, elements = _edited(project, {'kind': 'group', 'id': group}, validate)
+    pick = drawn['pick']
+    assert pick['params']['family'] == 'quads' and pick['params']['group'] == group
+    assert pick['params']['groups'] == str(group)
+    views = run(project, pick['op'], **pick['params'], nodes='101 102 202 201')
+    wire_views(views, validate)
+    assert [v['title'].split(':')[0] for v in views[1:]] == [
+        'Element groups of Geometry', 'Elements of Geometry']
+    assert len(views[2]['rows']) == len(geometry.elem_id)

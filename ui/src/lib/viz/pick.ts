@@ -206,3 +206,50 @@ export function markedShapes(sets: readonly ShapedSet[], marked: (link: string) 
 	}
 	return { faces, edges };
 }
+
+/** Every face of a set's elements as one index of node rows, with the element (its place in `ids`) each triangle is of: what a click on the model is matched against. */
+export function setTriangles(set: { faces?: number[][] }): { index: number[]; owner: number[] } {
+	const index: number[] = [];
+	const owner: number[] = [];
+	(set.faces ?? []).forEach((rows, k) => {
+		for (let t = 0; t + 2 < rows.length; t += 3) {
+			index.push(rows[t], rows[t + 1], rows[t + 2]);
+			owner.push(k);
+		}
+	});
+	return { index, owner };
+}
+
+/**
+ * The element of a set whose side passes nearest (x, y) on screen, within `reach`: its place in the set's `ids`, or null.
+ * `screen` holds each node row's x and y, `visible` whether it is in front of the camera. A line element is picked so, having no face.
+ */
+export function nearestEdge(set: { edges?: number[][] }, screen: ArrayLike<number>, visible: ArrayLike<boolean>, x: number, y: number, reach = PICK_REACH): number | null {
+	let best: number | null = null;
+	let bestDistance = reach * reach;
+	(set.edges ?? []).forEach((rows, k) => {
+		for (let e = 0; e + 1 < rows.length; e += 2) {
+			const [a, b] = [rows[e], rows[e + 1]];
+			if (!visible[a] || !visible[b]) continue;
+			const [ax, ay, bx, by] = [screen[2 * a], screen[2 * a + 1], screen[2 * b], screen[2 * b + 1]];
+			const length = (bx - ax) ** 2 + (by - ay) ** 2;
+			const t = length > 0 ? Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length)) : 0;
+			const d = (ax + t * (bx - ax) - x) ** 2 + (ay + t * (by - ay) - y) ** 2;
+			if (d < bestDistance) {
+				bestDistance = d;
+				best = k;
+			}
+		}
+	});
+	return best;
+}
+
+/** How many clicks make one and what the hint says, from the option chosen in a setting that says so (an element type), else the pick's own. */
+export function pickClicks(pick: { count?: number; hint: string; params: Record<string, unknown>; settings?: { param: string; options: { value: string | number; count?: number; hint?: string }[] }[] }, chosen: Record<string, unknown>): { count: number; hint: string } {
+	for (const setting of pick.settings ?? []) {
+		const value = setting.param in chosen ? chosen[setting.param] : pick.params[setting.param];
+		const option = setting.options.find((o) => String(o.value) === String(value));
+		if (option?.count !== undefined) return { count: option.count, hint: option.hint ?? pick.hint };
+	}
+	return { count: pick.count ?? 0, hint: pick.hint };
+}

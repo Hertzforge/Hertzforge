@@ -31,6 +31,30 @@ PALETTE = [
 ]
 
 
+#: what each palette color is called, as an element's Color cell names it
+PALETTE_NAMES = ('gray', 'blue', 'orange', 'green', 'red', 'purple', 'brown', 'pink',
+                 'olive', 'cyan')
+
+
+def color_text(index: int) -> str:
+    """A color index as a cell says it: the index and its color's name, '3 green'."""
+    return f'{int(index)} {PALETTE_NAMES[int(index) % len(PALETTE)]}'
+
+
+def color_index(text: str) -> int:
+    """The color index a typed color names: a whole number from 0 (a name after it is
+    ignored, so '3 green' reads as 3), or a palette color's name."""
+    words = str(text).strip().lower().split()
+    if not words:
+        raise ValueError('name a color: a number from 0, or ' + ', '.join(PALETTE_NAMES))
+    if words[0].isdigit():
+        return int(words[0])
+    if words[0] in PALETTE_NAMES:
+        return PALETTE_NAMES.index(words[0])
+    raise ValueError(f'"{text}" is not a color: a number from 0, or '
+                     + ', '.join(PALETTE_NAMES))
+
+
 def color_rgb(index: int) -> tuple[float, float, float]:
     """The RGB triple (0 to 1) of a color index, wrapping past 9."""
     return PALETTE[int(index) % len(PALETTE)]

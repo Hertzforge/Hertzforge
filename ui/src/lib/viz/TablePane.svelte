@@ -121,8 +121,18 @@
 	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
 	function reveal(row: number, always = false) {
 		if (always && !long) {
-			// a short table is drawn whole: the row itself is brought into view
-			void tick().then(() => grid?.querySelector(`td[data-r="${row}"]`)?.scrollIntoView({ block: 'nearest' }));
+			// a short table is drawn whole: the row is brought into view within the table's own
+			// scroll, not the page's, so a row marked by a click in the 3-D view beside it does not
+			// scroll that view away
+			void tick().then(() => {
+				const cell = grid?.querySelector(`td[data-r="${row}"]`);
+				if (!grid || !cell) return;
+				const box = grid.getBoundingClientRect();
+				const at = cell.getBoundingClientRect();
+				const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+				if (at.top < box.top + head) grid.scrollTop -= box.top + head - at.top;
+				else if (at.bottom > box.bottom) grid.scrollTop += at.bottom - box.bottom;
+			});
 			return;
 		}
 		if (!long || !grid) return;
@@ -460,7 +470,8 @@
 									{#if editable(i) && kindOf(i) === 'flag'}
 										<input type="checkbox" class="flag" checked={flagOn(cell)} aria-label="{view.columns[i]}, row {r + 1}" disabled={saving} onclick={(e) => { e.preventDefault(); void toggleFlag(r, i); }} data-testid="table-cell-flag" />
 									{:else}
-										{cell}
+										{@const swatch = view.edit?.swatches?.[keys[i] ?? '']?.[cell]}
+										{#if swatch}<span class="swatch" style:background={swatch} aria-hidden="true" data-testid="table-cell-swatch"></span>{/if}{cell}
 									{/if}
 									{#if onedit && view.edit && block && r === block.r1 && i === block.c1 && !saving}
 										<span class="handle" role="presentation" title="Drag to fill; double-click to fill down" onpointerdown={grabHandle} ondblclick={fillDown} data-testid="table-fill-handle"></span>
@@ -517,6 +528,8 @@
 	th {
 		position: sticky;
 		top: 0;
+		/* over the cells, which are positioned for the fill handle and would otherwise paint over it */
+		z-index: 1;
 		background: var(--bg-2);
 		color: var(--text-2);
 		font-weight: var(--weight-strong);
@@ -587,6 +600,15 @@
 		user-select: none;
 	}
 
+	.swatch {
+		display: inline-block;
+		width: 0.8em;
+		height: 0.8em;
+		margin-right: 0.4em;
+		vertical-align: -0.05em;
+		border-radius: 2px;
+		border: 1px solid var(--line-2);
+	}
 	tr.marked td {
 		background: color-mix(in srgb, var(--blue-weak) 55%, transparent);
 	}
