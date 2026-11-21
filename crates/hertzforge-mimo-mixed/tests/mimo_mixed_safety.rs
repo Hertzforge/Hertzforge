@@ -985,6 +985,133 @@ fn mimo_mixed_real_time_start_is_refused_short_of_the_lookahead() {
     assert_eq!(svc.end().map(|e| e.name), Some("start_refused"));
 }
 
+/// The simulator, stating a 512-frame output lookahead, that from its
+/// second start on takes only 100 frames of the engine's zero prefill (so
+/// the engaged start is counted short of the identification's and the run
+/// errs on its first batch, the station started); it counts its starts and
+/// its emergency stops.
+struct Shifty {
+    inner: Box<dyn hertzforge_hal::Backend>,
+    m: usize,
+    writes_since_start: usize,
+    started: Arc<AtomicU64>,
+    stopped: Arc<AtomicU64>,
+}
+
+impl hertzforge_hal::Backend for Shifty {
+    fn caps(&self) -> hertzforge_hal::Caps {
+        let mut c = self.inner.caps();
+        c.output_buffer = Some(hertzforge_hal::OutputBufferContract {
+            min_lookahead_frames: 512,
+            underrun_policy: hertzforge_hal::UnderrunPolicy::RampDownThenAbort,
+        });
+        c
+    }
+    fn open(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.open()
+    }
+    fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.close()
+    }
+    fn configure(
+        &mut self,
+        table: &hertzforge_channel_table::ChannelTable,
+        acq: &hertzforge_hal::AcquisitionConfig,
+    ) -> Result<hertzforge_hal::ConfiguredActual, hertzforge_hal::HalError> {
+        self.inner.configure(table, acq)
+    }
+    fn arm(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.arm()
+    }
+    fn start(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.started.fetch_add(1, Ordering::Relaxed);
+        self.writes_since_start = 0;
+        self.inner.start()
+    }
+    fn stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.stop()
+    }
+    fn read_input(
+        &mut self,
+        out: &mut [f32],
+    ) -> Result<hertzforge_hal::InputRead, hertzforge_hal::HalError> {
+        self.inner.read_input(out)
+    }
+    fn write_drive(&mut self, drive: &[f32]) -> Result<usize, hertzforge_hal::HalError> {
+        self.writes_since_start += 1;
+        if self.started.load(Ordering::Relaxed) >= 2 {
+            match self.writes_since_start {
+                1 => {
+                    let frames = (drive.len() / self.m).min(100);
+                    return self.inner.write_drive(&drive[..frames * self.m]);
+                }
+                2 => return Ok(0),
+                _ => {}
+            }
+        }
+        self.inner.write_drive(drive)
+    }
+    fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
+        self.inner.poll_status()
+    }
+    fn emergency_stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.stopped.fetch_add(1, Ordering::Relaxed);
+        self.inner.emergency_stop()
+    }
+}
+
+/// Requirement: an error inside the run's loop once the station is
+/// started (here the engaged start counted short of the identification's
+/// frames ahead) stops the station at once and ends the run `run_error`,
+/// naming the error, with the drive at zero; the error is still returned.
+#[test]
+fn mimo_mixed_an_error_mid_run_stops_the_station_and_names_the_end() {
+    let s = SineStructure::Linear4x4;
+    let cfg = two_tone_config(30.0);
+    let laws = MimoMixedLaws::builtin(&cfg).expect("laws");
+    let started = Arc::new(AtomicU64::new(0));
+    let stopped = Arc::new(AtomicU64::new(0));
+    let b = Shifty {
+        inner: backend(s, 7),
+        m: cfg.drives.len(),
+        writes_since_start: 0,
+        started: started.clone(),
+        stopped: stopped.clone(),
+    };
+    let mut svc = MimoMixedService::new(
+        cfg,
+        table(s),
+        Box::new(b),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        laws,
+    )
+    .expect("service");
+    engage(&mut svc);
+    let r = svc.run_chunk();
+    println!(
+        "run_chunk: {r:?}; starts {}, emergency stops {}",
+        started.load(Ordering::Relaxed),
+        stopped.load(Ordering::Relaxed)
+    );
+    match r {
+        Err(MimoMixedError::Plant(w)) => assert!(w.contains("frames ahead"), "{w}"),
+        other => panic!("the run did not err: {other:?}"),
+    }
+    let e = svc
+        .end()
+        .cloned()
+        .expect("the run left running after its error");
+    println!("end: {}: {}", e.name, e.words);
+    assert_eq!(e.name, "run_error");
+    assert!(e.words.contains("frames ahead"), "{}", e.words);
+    assert_aborted_to_zero(&svc, &e);
+    assert!(
+        stopped.load(Ordering::Relaxed) >= 1,
+        "the station was not stopped"
+    );
+    assert!(!svc.run_chunk().expect("an ended run"), "the run went on");
+}
+
 // =============================================================================
 // Each drive to its own shaker.
 // =============================================================================

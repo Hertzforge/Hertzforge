@@ -145,6 +145,31 @@ impl MimoMixedService {
         }
     }
 
+    /// An error inside the run's loop or the identification's play: the
+    /// station stopped at once and the run ended `run_error`, as a step that
+    /// panicked ends it. A run already ended keeps its end. Returns `e`.
+    pub(crate) fn fail_run(&mut self, e: MimoMixedError) -> MimoMixedError {
+        if self.state == MimoMixedState::Ended {
+            return e;
+        }
+        let _ = self.backend.emergency_stop();
+        self.engine = None;
+        self.ident_rec = None;
+        self.ending = None;
+        if let Some(s) = self.step.as_mut() {
+            s.stop = Ramp::at(0.0);
+        }
+        self.finish(RunEnd {
+            name: "run_error",
+            aborted: true,
+            part: None,
+            control: None,
+            drive: None,
+            words: format!("the run failed ({e}); the station was stopped at once"),
+        });
+        e
+    }
+
     /// Ramp out and park the station (the identification's end).
     fn ident_park(&mut self) -> Result<(), MimoMixedError> {
         if let Some(s) = self.step.as_mut() {
@@ -254,7 +279,9 @@ impl MimoMixedService {
         let mut lag = 0usize;
         let mut level;
         loop {
-            let rec = self.ident_play(settle + seg(search_frames) + max_lag)?;
+            let rec = self
+                .ident_play(settle + seg(search_frames) + max_lag)
+                .map_err(|e| self.fail_run(e))?;
             if steps == 0 {
                 // `best_lag` pairs each control window with the drive that
                 // ends with it and starts `max_lag` frames earlier.
@@ -308,7 +335,9 @@ impl MimoMixedService {
             }
         }
         // The record.
-        let rec = self.ident_play(self.nfft + seg(idc.frames) + max_lag)?;
+        let rec = self
+            .ident_play(self.nfft + seg(idc.frames) + max_lag)
+            .map_err(|e| self.fail_run(e))?;
         let e = self.ident_estimate(&rec, self.nfft, lag);
         if let Some(end) = self.ident_limit_trip(&e) {
             self.wind_down(end);
@@ -316,7 +345,7 @@ impl MimoMixedService {
         }
         level = self.level_vs_reference(&e.g_cc);
         drop(rec);
-        self.ident_park()?;
+        self.ident_park().map_err(|e| self.fail_run(e))?;
         let band = self.band;
         fn la<T>(r: Result<T, hertzforge_sdm::linalg::LinalgError>) -> Result<T, MimoMixedError> {
             r.map_err(|e| MimoMixedError::Law(format!("the identification: {e}")))

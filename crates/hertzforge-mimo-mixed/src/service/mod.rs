@@ -1418,8 +1418,10 @@ impl MimoMixedService {
         let batch = TICKS_PER_BATCH as usize * block;
         let batches = ((CHUNK_S * self.fs / batch as f64).ceil() as u32).max(1);
         for _ in 0..batches {
-            if !self.run_one()? {
-                return Ok(false);
+            match self.run_one() {
+                Ok(true) => {}
+                Ok(false) => return Ok(false),
+                Err(e) => return Err(self.fail_run(e)),
             }
         }
         Ok(self.state != MimoMixedState::Ended)
