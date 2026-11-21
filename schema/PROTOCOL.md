@@ -7057,7 +7057,12 @@ tiles:
 `double_hit` or `operator`; `decay` (the decay check, null when not checked); `peak`,
 `tip_warning` and `force_window_cut` in impact mode, and
 `target_verdict` (`high`, `low`, `on_target`) with `target_diff_pct` when a target is set.
-`latest` is the latest tile with its point and its whole report; a report's `warnings` are
+`latest` is always present once the state is not `none`: null until a hit or frame has been
+taken (and again once an undo or a `clear_point` takes the latest one out of the average), then
+the latest tile. In impact mode every hit taken becomes `latest`, and the tile then also carries
+its `point` and its whole `report`. In shaker mode only a frame that is averaged becomes `latest`
+(an overloaded frame does not), and the tile has neither `point` nor `report`: a frame has no
+report. A report's `warnings` are
 `tip_roll_off`, `no_response`, `force_window_cuts_pulse` (with
 `force_window_cut: {"pulse_end_frame","window_end_frame"}`), `force_high`, `force_low` and
 `response_not_decayed` (the report's `decay` then names the row and its ratio).
