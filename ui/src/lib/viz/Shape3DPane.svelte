@@ -76,7 +76,7 @@
 	import { arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-	import { wideLines } from './wideLines';
+	import { fixedWideLines, wideLines } from './wideLines';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapBytes, colormapGradient } from './colormap';
@@ -456,7 +456,7 @@
 
 	/** The lowest and highest coordinate along each axis of the undeformed nodes and of any point layers. */
 	function span(): { lo: number[]; hi: number[] } {
-		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz)]);
+		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz), ...(view.segments ?? []).map((layer) => layer.xyz)]);
 	}
 
 	/** Model diagonal, from the undeformed nodes and any point layers. */
@@ -539,6 +539,8 @@
 	let bodies: Mesh | null = null;
 	/** The view's `points` layers: the nodes no line or face is drawn through, which stay put. */
 	let pointLayers: Points[] = [];
+	/** The view's `segments` layers: free line segments, each layer in its own color, which stay put. */
+	let segmentLayers: LineSegments2[] = [];
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
@@ -852,6 +854,9 @@
 			// points are framed with the model, or alone when nothing else is drawn
 			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
 		}
+		for (const layer of view.segments ?? []) {
+			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
+		}
 		for (const frame of view.frames ?? []) {
 			// a coordinate system's arrows, framed with the model
 			const box = new Box3().setFromCenterAndSize(new Vector3().fromArray(frame.origin), new Vector3(0, 0, 0));
@@ -978,6 +983,16 @@
 			cloud.frustumCulled = false;
 			pointLayers.push(cloud);
 			scene.add(cloud);
+		}
+
+		for (const layer of view.segments ?? []) {
+			// free segments, a projection's node pairs: drawn over the surface, so a pair inside a
+			// shell or under a face still shows
+			const [r, gr, b] = layer.color.map((c) => srgbToLinear(c / 255));
+			const drawn = fixedWideLines(layer.xyz, new Color(r, gr, b));
+			plain(drawn.material as Material);
+			segmentLayers.push(drawn);
+			scene.add(drawn);
 		}
 
 		if (view.lines && view.lines.length) {
@@ -1461,6 +1476,7 @@
 		orientation?.dispose();
 		bodies?.geometry.dispose();
 		for (const cloud of pointLayers) cloud.geometry.dispose();
+		for (const drawn of segmentLayers) drawn.geometry.dispose();
 		frameGroup?.traverse((o) => {
 			if (o instanceof Mesh || o instanceof LineSegments) {
 				o.geometry.dispose();

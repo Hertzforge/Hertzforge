@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BufferAttribute, Vector2, type WebGLRenderer } from 'three';
-import { wideLines } from './wideLines';
+import { BufferAttribute, Color, Vector2, type WebGLRenderer } from 'three';
+import { fixedWideLines, LINE_WIDTH, wideLines } from './wideLines';
 
 const nodes = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0]);
 const index = new Uint32Array([0, 1, 1, 2]);
@@ -81,5 +81,20 @@ describe('tracelines colored by deflection', () => {
 		expect(shader.vertexShader).not.toContain('vTravel');
 		expect(shader.fragmentShader).not.toContain('uMap');
 		expect(key).toBe('sds-wide-displaced');
+	});
+});
+
+describe('fixed wide lines', () => {
+	it('draws one wide segment per pair of rows, over the surface, in its color', () => {
+		const xyz = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 2]);
+		const lines = fixedWideLines(xyz, new Color(1, 0.5, 0));
+		const start = lines.geometry.getAttribute('instanceStart');
+		const end = lines.geometry.getAttribute('instanceEnd');
+		expect(start.count).toBe(2);
+		expect([start.getX(1), start.getY(1), start.getZ(1)]).toEqual([0, 1, 0]);
+		expect([end.getX(1), end.getY(1), end.getZ(1)]).toEqual([0, 1, 2]);
+		expect(lines.material.linewidth).toBe(LINE_WIDTH);
+		expect(lines.material.depthTest).toBe(false);
+		expect(lines.material.color.getHex()).toBe(new Color(1, 0.5, 0).getHex());
 	});
 });

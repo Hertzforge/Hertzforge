@@ -251,6 +251,12 @@ export interface Shape3DView {
 	 * in pixels. They stay put and are framed with the model.
 	 */
 	points?: { xyz: Float32Array; colors: Uint8Array; size: number }[];
+	/**
+	 * Free line segments over the model in its own coordinates, in layers: `xyz` f32 [2K, 3], segment k
+	 * from row 2k to row 2k + 1, and one sRGB `color` per layer. They stay put, are drawn over the
+	 * surface and are framed with the model (a projection's matched node pairs).
+	 */
+	segments?: { xyz: Float32Array; color: number[] }[];
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */

@@ -189,12 +189,32 @@ def _typed_on(project: Any, op: Any, values: dict[str, Any]) -> Any:
 
 def _preview_copy(project: Any, *names: str) -> Any:
     """A project holding only copies of the objects `names`, for an operation to act on while
-    its form is typed: nothing it does reaches the project or its journal."""
+    its form is typed: nothing it does reaches the project or its journal. Each is linked to
+    copies of the geometries linked to it, and the active geometry is copied for an object
+    with none, so a preview draws on, and matches against, the geometry Apply would."""
     from hertzforge import Project
+    from hertzforge.core.geometry import Geometry
 
     scratch = Project('preview')
-    for name in dict.fromkeys(names):
+    named = list(dict.fromkeys(names))
+    for name in named:
         scratch.add(name, copy.deepcopy(project[name]))
+    lonely = False
+    for name in named:
+        if isinstance(project[name], Geometry):
+            continue
+        homes = [m for m in project.object_group_of(name) or ()
+                 if m != name and isinstance(project.get(m), Geometry)]
+        lonely = lonely or not homes
+        for home in homes:
+            if home not in scratch:
+                scratch.add(home, copy.deepcopy(project[home]))
+            scratch.link(home, name)
+    active = project.active_geometry
+    if lonely and active is not None and active in project:
+        if active not in scratch:
+            scratch.add(active, copy.deepcopy(project[active]))
+        scratch.active_geometry = active
     return scratch
 
 

@@ -278,6 +278,13 @@
             "size": {"type": "number", "exclusiveMinimum": 0}
           }
         }},
+        "segments": {"type": "array", "items": {
+          "type": "object", "required": ["xyz", "color"], "additionalProperties": false,
+          "properties": {
+            "xyz": {"$ref": "#/$defs/arrayRef"},
+            "color": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3}
+          }
+        }},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
