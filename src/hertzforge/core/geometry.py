@@ -818,6 +818,10 @@ class Geometry:
         #: tuple is a mesh whose solids have gone; a group absent is one from no solid, or
         #: from a file written before this was kept, and is found by its name
         self.group_solids: dict[int, tuple[int, ...]] = {}
+        #: {element group id: the family it was made for ('quads', 'beams')}: what an
+        #: element group holds before it holds anything, as an Exodus element block has an
+        #: element type when it is empty. A group with elements is what they are
+        self.group_family: dict[int, str] = {}
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -1725,7 +1729,8 @@ class Geometry:
         return sorted({int(n) for k in np.flatnonzero(
             np.isin(self.elem_group, groups)) for n in self.elem_conn[k]})
 
-    def add_group(self, name: str = '', group_id: int | None = None) -> int:
+    def add_group(self, name: str = '', group_id: int | None = None,
+                  family: str = '') -> int:
         """Declare an element group and return its id.
 
         An empty element group is allowed: exodus files contain empty
@@ -1738,18 +1743,26 @@ class Geometry:
             What to call the element group.
         group_id : int, optional
             Its identifier. One more than the highest id when omitted.
+        family : str, optional
+            The element family it is for, such as 'quads' (`FAMILIES`), kept in
+            `group_family`: where an empty element group is listed.
 
         Returns
         -------
         int
             The element group's identifier.
         """
+        if family and family not in (*FAMILIES, *RARE_FAMILIES):
+            raise ValueError(f'{family!r} is not an element family; the families are '
+                             + ', '.join((*FAMILIES, *RARE_FAMILIES)))
         group_id = (self._next_id(self.group_id) if group_id is None
                     else int(group_id))
         if group_id in self.group_id:
             raise ValueError(f'element group {group_id} already exists')
         self.group_id = np.append(self.group_id, group_id)
         self.group_name.append(str(name))
+        if family:
+            self.group_family[group_id] = family
         return group_id
 
     def add_element(self, node_ids: Ids, elem_type: int | None = None,
@@ -1970,7 +1983,7 @@ class Geometry:
         self.group_id[row] = group_id
         self.elem_group[self.elem_group == old] = group_id
         if old != group_id:
-            for held in (self.group_properties, self.group_solids):
+            for held in (self.group_properties, self.group_solids, self.group_family):
                 if old in held:
                     held[group_id] = held.pop(old)
         self._mates_follow(groups={old: group_id})
@@ -2813,6 +2826,7 @@ class Geometry:
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
             self.group_solids.pop(group, None)
+            self.group_family.pop(group, None)
         self.group_id = self.group_id[staying]
         self._mates_follow(groups={group: None for group in wanted})
         return {'groups': removed, 'elements': len(doomed),
@@ -2890,6 +2904,7 @@ class Geometry:
         for group in others:
             self.group_properties.pop(group, None)
             self.group_solids.pop(group, None)
+            self.group_family.pop(group, None)
         if tied:
             self.group_solids[into] = tuple(sorted(solids))
         self.group_id = self.group_id[keep]

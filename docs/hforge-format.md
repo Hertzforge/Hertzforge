@@ -201,6 +201,10 @@ the project's `data_index`, as every imported file is.
             group_solids           JSON, {element group id: the solids it
                                    was meshed from} (only when there are
                                    any); a group absent is found by its name
+            group_family           JSON, {element group id: the element
+                                   family it was made for, 'quads'}, where
+                                   an empty group is listed (only when
+                                   there are any)
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,

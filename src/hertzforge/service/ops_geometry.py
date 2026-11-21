@@ -690,15 +690,18 @@ GROUP_NAME = Param('name', 'Name', 'string', default='')
 def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_element_group`: an empty element group
     (`Geometry.add_group`), added outright since
-    an element group is not placed in space."""
+    an element group is not placed in space. With `family` it is that family's, listed
+    under it in the tree while it is empty and offered in its Edit's Add mode."""
     name = params['geometry']
     geometry = project[name]
+    family = params['family'].strip()
     try:
-        group = geometry.add_group(params['name'], _optional_id(params['id']))
+        group = geometry.add_group(params['name'], _optional_id(params['id']), family=family)
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_call(name, 'add_group', params['name'], int(group))
-    return _shown(name, geometry, 'groups', f'added element group {group}')
+    project.record_call(name, 'add_group', params['name'], int(group), family=family)
+    return _shown(name, geometry, 'groups', f'added element group {group}'
+                  + (f' for the {family}' if family else ''))
 
 
 ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
@@ -1668,7 +1671,9 @@ OPERATIONS = (
             Param('groups', 'Element groups whose Edit shows after', 'string', default='')),
            DRAWN, add_element),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='geometry'),
+           (GEOMETRY, GROUP_NAME, NODE_ID,
+            Param('family', 'Element family (blank: none yet)', 'string', default='')),
+           DRAWN, add_element_group, workspace='geometry'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',
