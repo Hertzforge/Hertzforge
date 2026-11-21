@@ -687,3 +687,37 @@ describe('a projection, whose distance its row fills in', () => {
 		expect(own.a.formParams[0].unit).toBeUndefined();
 	});
 });
+
+describe("the MAC's node match, a distance", () => {
+	const offered = (defined: boolean) =>
+		({ title: 'MAC', views: [], note: '', offers: { projection: true, match_distance: { value: 0.0025, defined } } }) as unknown as AppState['analyze']['shown'];
+
+	it('shows the distance used in the display length and sends what is typed in meters', () => {
+		const { app, a } = make();
+		app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		a.shown = offered(true);
+		expect(a.matchShown).toEqual({ value: 2.5, unit: 'mm' });
+		expect(a.setMatchDistance(1.1)).toBe(true);
+		expect(a.prefs.match_distance).toBeCloseTo(0.0011, 12);
+		expect(a.setMatchDistance(0)).toBe(true);
+		expect(a.prefs.match_distance).toBe(0);
+	});
+
+	it("takes a model's own numbers as they are, and refuses one below zero", () => {
+		const { app, a } = make();
+		app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		a.shown = offered(false);
+		expect(a.matchShown).toEqual({ value: 0.0025, unit: '' });
+		a.setMatchDistance(0.004);
+		expect(a.prefs.match_distance).toBe(0.004);
+		expect(a.setMatchDistance(-1)).toBe(false);
+		expect(a.setMatchDistance(Number.NaN)).toBe(false);
+		expect(a.prefs.match_distance).toBe(0.004);
+	});
+
+	it('offers nothing to type for a selection with no such pair', () => {
+		const { a } = make();
+		a.shown = { title: 't', views: [], note: '', offers: { projection: false, match_distance: null } } as unknown as AppState['analyze']['shown'];
+		expect(a.matchShown).toBeNull();
+	});
+});

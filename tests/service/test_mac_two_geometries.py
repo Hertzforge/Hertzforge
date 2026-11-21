@@ -212,8 +212,8 @@ def apart():
     return held
 
 
-def test_the_match_tolerance_is_the_comparisons_own(apart, validate):
-    # at 2 % nothing matches: said beside the tolerance, with how far off the nearest is
+def test_the_match_distance_is_the_comparisons_own(apart, validate):
+    # by default nothing matches: said beside the distance, with how far off the nearest is
     out = shown(apart, 'FEM Shapes', 'Test Shapes', validate=validate)
     (reading,) = out['views']
     assert reading['view'] == 'reading' and 'No node' in reading['title']
@@ -221,19 +221,35 @@ def test_the_match_tolerance_is_the_comparisons_own(apart, validate):
     assert rows['Nodes matched']['value'].startswith('0 of ')
     assert rows['Worst distance']['value'] > rows['Match limit']['value'] > 0
     assert 'no test node has a FEM node within the match tolerance: the nearest is' in out['note']
-    assert out['offers']['projection'] is True, 'the tolerance is offered with it'
-    # loosened, the MAC is made, and the limit shown is the looser one
-    loose = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_tolerance': 100.0},
+    assert out['offers']['projection'] is True, 'the distance is offered with it'
+    # the distance offered is the one used: 2 % of the size of the geometry projected onto
+    default = apart.project.match_distance('FEM Shapes', 'Test Shapes')
+    assert out['offers']['match_distance'] == {'value': default, 'defined': False}
+    assert rows['Match limit']['value'] == pytest.approx(default)
+    # loosened past the 0.3 the test geometry was moved, the MAC is made within it
+    loose = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_distance': 0.5},
                   validate=validate)
     assert loose['views'][0]['view'] == 'matrix'
     limit = {row['label']: row for row in loose['views'][2]['rows']}['Match limit']['value']
-    assert limit > rows['Match limit']['value']
-    # and the animated projection takes the same tolerance
+    assert limit == pytest.approx(0.5)
+    assert loose['offers']['match_distance'] == {'value': 0.5, 'defined': False}
+    # and the animated projection takes the same distance
     moving = shown(apart, 'FEM Shapes', 'Test Shapes',
-                   prefs={'match_tolerance': 100.0, 'projection': True}, validate=validate)
+                   prefs={'match_distance': 0.5, 'projection': True}, validate=validate)
     assert any(view['view'] == 'shape3d' for view in moving['views'])
     still = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'projection': True})
     assert 'No node' in still['views'][0]['title']
-    for bad in (0, -1, 150, '2', True):
-        with pytest.raises(ProtocolError, match='"match_tolerance"'):
-            shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_tolerance': bad})
+    # a pair on one geometry has nothing to match: no distance is offered
+    alone = shown(apart, 'FEM Shapes', 'FEM Shapes', validate=validate)
+    assert alone['offers']['match_distance'] is None
+    for bad in (-1, float('nan'), float('inf'), '2', True):
+        with pytest.raises(ProtocolError, match='"match_distance"'):
+            shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_distance': bad})
+
+
+def test_the_match_distance_offered_says_when_it_is_in_meters(apart, validate):
+    apart.project['FEM Geometry'].define_units('m')
+    apart.project['Test Geometry'].define_units('m')
+    out = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_distance': 0.5},
+                validate=validate)
+    assert out['offers']['match_distance'] == {'value': 0.5, 'defined': True}
