@@ -432,10 +432,11 @@ The tree's rows for them mark with the same `link`: the view of a geometry's Coo
 part, and of element groups picked, whose listed elements are the ones sent. An element table of
 `project.view_entities` marks its rows with the same link, and its view's set holds the table's
 elements, the first 10,000, with their faces and edges; past that the view's `note` says so. A geometry's nodes have `marks`: the table and the view
-of `project.view_entities` for nodes, and the view the Nodes part shows. An element table's view
-also carries `element_colors` (`{"triangles","triangle_colors","lines","line_colors"}`, u32 rows
-of `nodes` and u8 RGB each), every element in its own palette color over the gray surface, shown
-while the surface is solid.
+of `project.view_entities` for nodes, and the view the Nodes part shows. A geometry drawn on its
+own (the geometry picked, one of its parts, its Edit views) also carries `element_colors`
+(`{"triangles","triangle_colors","lines","line_colors"}`, u32 rows of `nodes` and u8 RGB each),
+every element in its own palette color over the gray surface, shown while the surface is solid. A
+mode shape's view colors by deflection and carries none.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on

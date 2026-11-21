@@ -27,7 +27,7 @@ from hertzforge.drawing.viz.geometry import dof_arrow_solids
 from . import display_units, group_cells
 from . import views as v
 from .descriptors import TREE_PICKS, Operation, Option, Param, Workspace
-from .mesh import drawn_mesh
+from .mesh import drawn_mesh, element_colors
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
 from .parsing import each_picked, parse_id_runs
@@ -81,9 +81,11 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     # the nodes no line or face is drawn through, as points, so a geometry of measured
     # points shows while its coordinate system is moved or one of its groups is picked
     points, _note = scans.layers(geometry)
-    # the first rows are the geometry's own nodes, so their ids caption and number them
+    # the first rows are the geometry's own nodes, so their ids caption and number them;
+    # every element in its own color, as the plot of the geometry draws it
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
                      triangles=triangles, lines=lines, node_ids=np.asarray(geometry.node_id),
+                     element_colors=element_colors(geometry),
                      **({'points': points} if points else {}))
 
 
@@ -389,14 +391,11 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     if kind == 'nodes':
         drawn['marks'] = {'link': part_link('nodes', name)}
     if kind == 'elements':
-        from .mesh import element_colors
-
         # in Select mode a click in the view marks the element under it, as its row does
         # and Delete there removes the elements marked, as it does in the table
         drawn['mark_sets'] = [{**_table_element_marks(name, geometry, **part), 'clicks': True,
                                'remove': {'op': 'project.delete_entities',
                                           'params': {'geometry': name, 'kind': 'elements', **part}}}]
-        drawn['element_colors'] = element_colors(geometry)
         if len(drawn['mark_sets'][0]['ids']) == MARKED_ELEMENTS:
             drawn['note'] = (f'Rows after the first {MARKED_ELEMENTS} are not highlighted '
                              'in the view.')

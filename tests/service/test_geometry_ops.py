@@ -855,3 +855,25 @@ def test_an_element_added_in_a_groups_edit_shows_the_groups_again(project, valid
     assert [v['title'].split(':')[0] for v in views[1:]] == [
         'Element groups of Geometry', 'Elements of Geometry']
     assert len(views[2]['rows']) == len(geometry.elem_id)
+
+
+def test_the_geometrys_own_plot_draws_each_element_in_its_color(validate):
+    """Picking the geometry itself plots it with its elements' colors, by the rows of the
+    nodes it draws: a node no element uses is not drawn, so the rows after it move up."""
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.service import show
+
+    xyz = np.array([[9, 9, 9], [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0, 0]], float)
+    geometry = Geometry(node_id=[1, 2, 3, 4, 5, 6], node_xyz=xyz, elem_id=[10, 11],
+                        elem_type=[44, 21], elem_conn=[np.array([2, 3, 4, 5]), np.array([3, 6])],
+                        elem_color=[4, 3], elem_group=[1, 2], group_id=[1, 2],
+                        group_name=['plate', 'strut'])
+    project = hertzforge.Project('p')
+    project.add('G', geometry)
+    (view,) = show.show(project, ['G'], {}, None)['views']
+    wire_views([view], validate)
+    colors = view['element_colors']
+    assert list(view['node_ids']) == [2, 3, 4, 5, 6], 'node 1 is used by nothing'
+    assert colors['triangles'].tolist() == [[0, 1, 2], [0, 2, 3]]
+    assert colors['triangle_colors'].tolist() == [[214, 38, 41]] * 2
+    assert colors['lines'].tolist() == [[1, 4]] and colors['line_colors'].tolist() == [[43, 161, 43]]
