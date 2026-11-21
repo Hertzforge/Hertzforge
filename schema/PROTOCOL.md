@@ -192,10 +192,22 @@ the result's place:
         "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
         "off":2,                       nodes: marked places, shown through the model; this many of
                                        the last `ids` are left out and drawn dim
-        "others":[40,6]}               nodes: a second set of places in the rows after `ids`, drawn
+        "others":[40,6],               nodes: a second set of places in the rows after `ids`, drawn
                                        in their own color and not clicked: this many held, then
                                        this many not (a mate's other side)
+        "settings":[{"param":"type","label":"Type",
+                     "options":[{"value":"quad4","label":"quad4","count":4,"hint":"..."}, ...]}]}
+                                       what is asked beside the clicks: each value chosen goes
+                                       with the click as `param`, and an option with `count` (and
+                                       `hint`) changes how many clicks make one
 ```
+
+A view with a `pick` and a mark set with `"clicks":true` (an element table's view) has two modes,
+Select and Add, Select first. In Select a click marks the element under it (the face nearest the
+camera, else the side nearest on screen), Cmd (Ctrl) or Shift adding to the ones marked, and the
+set's `remove` (`{"op","params"}`) runs on Delete with the ids marked as `ids`. In Add the `pick`
+takes the clicks, with its `settings`: Add Element's Type (the family's types) and Element group.
+The mode carries over to the view an element added answers with.
 
 A point clicked is sent in the view's `unit` when the pick says `"in_display":true` (its `op` takes
 its `x`, `y` and `z` as lengths typed in the display system), and otherwise in meters, by the
@@ -420,7 +432,11 @@ The tree's rows for them mark with the same `link`: the view of a geometry's Coo
 part, and of element groups picked, whose listed elements are the ones sent. An element table of
 `project.view_entities` marks its rows with the same link, and its view's set holds the table's
 elements, the first 10,000, with their faces and edges; past that the view's `note` says so. A geometry's nodes have `marks`: the table and the view
-of `project.view_entities` for nodes, and the view the Nodes part shows.
+of `project.view_entities` for nodes, and the view the Nodes part shows. A geometry drawn on its
+own (the geometry picked, one of its parts, its Edit views) also carries `element_colors`
+(`{"triangles","triangle_colors","lines","line_colors"}`, u32 rows of `nodes` and u8 RGB each),
+every element in its own palette color over the gray surface, shown while the surface is solid. A
+mode shape's view colors by deflection and carries none.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
@@ -447,7 +463,9 @@ ids) as runs (`"1-3, 7"`). A table longer than a thousand rows sends its first t
 its count, and `more` (`{"method","params"}`); the shell asks `method` with `params` and `start`
 and `count` (at most 5000) for the rows it scrolls to, in the display units as the table is. An
 entity table of a part says the part in its edit's and `more`'s params (`family` or `groups`), and
-`project.set_entity_cell` takes a row as that part's.
+`project.set_entity_cell` takes a row as that part's. `swatches` (`{key: {text: "#rrggbb"}}`) draws a
+color's swatch in each cell of a column whose text it names: an element's Color, its palette index
+and name ("4 red"), chosen from the palette or typed as either.
 
 A table with `select` (`{"op","params","param","column"}`) says what picking one of its rows does:
 the shell runs `op` with `params` and that row's cell in `column` as `param`, and the views answered
@@ -853,8 +871,8 @@ would refuse what the selection holds, as far as that can be told with nothing t
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, offers the operations on that part alone, each carrying `"part": true`,
-and none of the geometry's own: the shapes to build from on the Solids row, Add Element and
-Add Group on an element family (the family filled in), and on element groups what sets their
+and none of the geometry's own: the shapes to build from on the Solids row, Edit and Add Group on
+an element family (the family filled in; its elements are added in Edit's Add mode), and on element groups what sets their
 properties, merges, aligns or mates them, with every group picked filled into `groups`, and on
 solids what edits, moves, patterns, takes apart, meshes or deletes them, with every solid picked filled into
 `solids`. Element groups or solids picked together come as `{"kind": "group", "id", "ids"}` (or

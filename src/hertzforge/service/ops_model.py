@@ -13,7 +13,7 @@ import numpy as np
 from . import group_cells
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .mesh import drawn_mesh, places_view
+from .mesh import drawn_mesh, element_colors, places_view
 from .ops_geometry import entity_table
 from .parsing import parse_id_runs
 from .protocol import refused
@@ -69,7 +69,8 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     view = v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
                      np.asarray(geometry.node_xyz, dtype=float)[rows], [],
                      triangles=triangles, lines=lines,
-                     node_ids=np.asarray(geometry.node_id)[rows])
+                     node_ids=np.asarray(geometry.node_id)[rows],
+                     element_colors=element_colors(geometry, rows))
     # the nodes no line or face is drawn through, as points: a geometry of
     # measured points, or of nodes alone, drew nothing
     points, note = scans.layers(geometry)

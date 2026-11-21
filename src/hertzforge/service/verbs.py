@@ -195,7 +195,10 @@ UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reord
                        # a filter is set and applied in its one action, Filter
                        # (`project.set_filter` with `keep`); the verb stays for scripts
                        # and for a filtered history's recipe (Brandon, 2026-11-17)
-                       'project.filter_data'})
+                       'project.filter_data',
+                       # an element is added in its family's Edit, by clicking its nodes
+                       # in Add mode
+                       'project.add_element'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',
