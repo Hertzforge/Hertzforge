@@ -1336,6 +1336,12 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     table = channel_table_from_rows(run.rows)
     objects: dict[str, Any] = {'Channel Table': table}
     modal = run.test == modal_run.WIRE['test']
+    if modal:
+        # a Modal Test's force gauges are input rows its setup names as references
+        rows = {int(i): k for k, i in enumerate(table['channel'])}
+        for index in modal_run.reference_rows(run):
+            if index in rows:
+                table.set_cell('role', rows[index], 'reference')
     measured = (modal_run.frames(run, table, lacked) if modal
                 else _histories(run, table, lacked, progress))
     for name, history in measured:

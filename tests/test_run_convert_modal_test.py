@@ -7,6 +7,7 @@ assumes."""
 
 from __future__ import annotations
 
+import json
 import os
 
 import numpy as np
@@ -45,8 +46,10 @@ def test_modal_test_fixed_hammer_frfs_are_at_each_dof_in_si(tmp_path):
     for k in range(6):
         np.testing.assert_allclose(frf.ordinate[k], rf.modal_accelerance(LINES, k, 0),
                                    rtol=1e-12, atol=1e-12)
-    assert frf.comment[0].startswith('H1 from 1 reference, 3 averages; measurement 1;')
-    assert 'force window 5 % of the block after the trigger' in frf.comment[0]
+    assert frf.comment[0].startswith('H1 from 1 reference, 3 averages; measurement 1, point 1;')
+    # the windows the FRF result names: 0.05 of the 4096-sample block, 204.8, so 205
+    assert ('force window on the references, 205 samples after the trigger at sample 64 '
+            'and a fall of 21') in frf.comment[0]
     assert isinstance(project['modal_coherence'], Coherence)
     assert project['modal_coherence'].reference_dof == ['1Z+'] * 6
     spectra = project['modal_reference_spectra']
@@ -58,11 +61,14 @@ def test_modal_test_fixed_hammer_frfs_are_at_each_dof_in_si(tmp_path):
 
 def test_modal_test_frames_are_each_measurements_accepted_hits(tmp_path):
     _done, project = _open(tmp_path, 'fixed_hammer', hits=3)
-    history = project['Measurement 1 frames']
+    history = project['Measurement 1 frames (point 1)']
     assert isinstance(history, TimeHistory)
-    # seven channels, three accepted hits each: the trial and the double hit are not copied
+    # seven channels, three accepted hits each: the undone and the double hit are not copied
     assert history.ordinate.shape == (21, rf.MODAL_BLOCK)
-    assert history.block[:3] == ['hit 1', 'hit 2', 'hit 3']
+    assert history.block[:3] == ['hit 3', 'hit 4', 'hit 5']
+    # each record says what the run checked of its hit
+    assert history.comment[0] == 'measurement 1, point 1, hit 3; peak 120 N, tip warning'
+    assert history.comment[1] == 'measurement 1, point 1, hit 4; peak 130 N'
     # timed from the trigger: the pre-trigger samples at negative times
     assert history.abscissa[64] == 0.0 and history.abscissa[0] < 0.0
     assert history.channel_roles()[('1Z+', 'force')] == 'reference'
@@ -72,7 +78,9 @@ def test_modal_test_frames_are_each_measurements_accepted_hits(tmp_path):
     assert history.ordinate[hammer[0], 64:69].max() > 0
     record = _record(project)
     lines = record.results['modal_frames']['records']
-    assert [line['reason'] for line in lines] == ['trial hit', '', 'double hit', '', '']
+    assert [(line['event'], line['status'], line['reason']) for line in lines] == [
+        ('taken', 'accepted', None), ('status', 'undone', None),
+        ('taken', 'rejected', 'double_hit'), *[('taken', 'accepted', None)] * 3]
 
 
 def test_modal_test_roving_hammer_is_turned_round_and_the_later_set_wins(tmp_path):
@@ -127,7 +135,7 @@ def test_modal_test_two_shakers_carry_multiple_coherence(tmp_path):
     assert sorted(set(frf.reference_dof)) == ['1Z+', '4Z+']
     np.testing.assert_allclose(frf.ordinate[frf.response_dof.index('5Z+') + 1],
                                rf.modal_accelerance(LINES, 4, 3), rtol=1e-12, atol=1e-12)
-    assert frf.comment[0].startswith('H1 from 2 references, 40 averages')
+    assert frf.comment[0].startswith('matrix H1 from 2 references, 40 averages')
     coherence = project['modal_coherence']
     assert isinstance(coherence, MultipleCoherence)
     assert coherence.response_dof == [f'{k}Z+' for k in range(1, 7)]
@@ -135,7 +143,7 @@ def test_modal_test_two_shakers_carry_multiple_coherence(tmp_path):
     spectra = project['modal_reference_spectra']
     assert spectra.response_dof == ['1Z+', '4Z+']
     record = _record(project)
-    assert record.arrays['modal_reference_spectra']['condition'].shape == (1, rf.MODAL_LINES)
+    assert record.arrays['modal_reference_spectra']['condition_number'].shape == (1, rf.MODAL_LINES)
     # a shaker averages: the window every channel shares is on the FRFs
     assert frf.averaging.window == 'hann' and frf.averaging.overlap == 0.5
     assert 'modal_frf fixed reference' not in project
@@ -164,8 +172,8 @@ def test_modal_test_values_not_finite_are_said_and_kept(tmp_path):
         f.seek(16 * 10)
         f.write(np.array([np.nan + 0j], dtype='<c16').tobytes())
     done = run_convert.convert(folder)
-    assert ('the modal_frf record of 1Z+ against 1Z+ in measurement 1 is not a finite '
-            'number at 1 of its 601 lines') in done.lacked
+    assert ('the modal_frf record of 1Z+ against 1Z+ in measurement 1, point 1 is not a '
+            'finite number at 1 of its 601 lines') in done.lacked
     frf = Project.open(done.path)['modal_frf']
     assert np.isnan(frf.ordinate[0, 10]) and np.isfinite(frf.ordinate[1]).all()
 
@@ -183,7 +191,7 @@ def test_modal_test_a_unit_unlike_the_tables_keeps_the_result_as_arrays(tmp_path
                for line in done.lacked)
     project = Project.open(done.path)
     assert 'modal_frf' not in project
-    assert _record(project).arrays['modal_frf']['values'].shape == (1, 6, 1, rf.MODAL_LINES)
+    assert _record(project).arrays['modal_frf']['frf'].shape == (1, 6, 1, rf.MODAL_LINES)
 
 
 def test_modal_test_the_setup_it_ran_opens_from_the_run(tmp_path):
@@ -303,24 +311,103 @@ def test_modal_test_a_direction_no_dof_spells_is_refused_by_name(tmp_path):
                    "direction" in line for line in done.lacked), done.lacked
     project = Project.open(done.path)
     assert 'modal_frf' not in project and 'modal_coherence' not in project
-    assert _record(project).arrays['modal_frf']['values'].shape == (1, 6, 1, rf.MODAL_LINES)
+    assert _record(project).arrays['modal_frf']['frf'].shape == (1, 6, 1, rf.MODAL_LINES)
     assert isinstance(project['modal_reference_spectra'], Psd)
 
 
-@pytest.mark.parametrize('layout, old, new, words', [
-    ('fixed_hammer', '"coherence": "ordinary"', '"coherence": "partial"',
-     "names its coherence 'partial' in its 'coherence' member, not ordinary or multiple"),
-    ('fixed_hammer', ', "coherence": "ordinary"', '',
-     "names its coherence None in its 'coherence' member"),
-    # values of one row per response, as multiple coherence holds, said to be ordinary
-    ('two_shakers', '"coherence": "multiple"', '"coherence": "ordinary"',
-     'record 0 names 6 responses and 2 references and holds values of shape (6, 601)'),
+def _rewrite_description(folder, result, change):
+    path = os.path.join(folder, 'results', f'{result}.json')
+    with open(path, encoding='utf-8') as f:
+        description = json.load(f)
+    change(description)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(description, f)
+
+
+def _rename_array(name):
+    def change(description):
+        description['arrays'][0]['name'] = name
+    return change
+
+
+def _relay(description):
+    description['layout'] = ['line', 'response']
+
+
+@pytest.mark.parametrize('layout, change, words', [
+    ('fixed_hammer', _rename_array('partial_coherence'),
+     'it holds no array named coherence or multiple_coherence'),
+    # an ordinary coherence is of one reference: two shakers' cannot be one
+    ('two_shakers', _rename_array('coherence'),
+     'record 0 names 2 references and holds an ordinary coherence, which is of one reference'),
+    ('fixed_hammer', _relay,
+     "its values are laid out ['line', 'response'], not ['response', 'line']"),
 ])
-def test_modal_test_coherence_is_the_kind_each_record_names(tmp_path, layout, old, new, words):
+def test_modal_test_coherence_is_the_kind_its_array_names(tmp_path, layout, change, words):
     folder = rf.modal_test_run(str(tmp_path / 'run'), layout)
-    _rewrite(folder, 'modal_coherence', old, new)
+    _rewrite_description(folder, 'modal_coherence', change)
     done = run_convert.convert(folder)
     assert any(line.startswith("the result 'modal_coherence' is kept as arrays")
                and words in line for line in done.lacked), done.lacked
     project = Project.open(done.path)
     assert 'modal_coherence' not in project and isinstance(project['modal_frf'], Frf)
+
+
+def test_modal_test_a_hits_target_and_checks_reach_its_frames_and_the_run_record(tmp_path):
+    _done, project = _open(tmp_path, 'fixed_hammer', target=True)
+    history = project['Measurement 1 frames (point 1)']
+    assert history.comment[:3] == [
+        ('measurement 1, point 1, hit 3; peak 120 N, +0 % from the force target (on target), '
+         'tip warning'),
+        ('measurement 1, point 1, hit 4; peak 130 N, +8.333 % from the force target '
+         '(on target)'),
+        'measurement 1, point 1, hit 5; peak 140 N, +16.67 % from the force target (high)']
+    lines = _record(project).results['modal_frames']['records']
+    # the undone hit (100 N, and its status line), the double hit (110 N), then the three
+    assert [line.get('target_verdict') for line in lines] == [
+        'low', 'low', 'on_target', 'on_target', 'on_target', 'high']
+    assert lines[-1]['target_diff_pct'] == pytest.approx(100 / 6)
+    outcome = _record(project).results['modal_outcome']
+    assert outcome['totals'] == {'accepted': 3, 'taken': 5, 'points_measured': 1,
+                                 'points_planned': 1}
+
+
+def test_modal_test_hits_are_cut_from_the_stream_by_their_spans(tmp_path):
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer', hits=2)
+    frames = _record(Project.open(run_convert.convert(folder).path))
+    spans = frames.arrays['modal_frames']['span']
+    # each line's span: the first station frame, from the stream's first at 1000, and the length
+    assert spans[0].tolist() == [1000.0, rf.MODAL_BLOCK]
+    assert spans[-1].tolist() == [1000.0 + 3 * rf.MODAL_BLOCK, rf.MODAL_BLOCK]
+    # a stream cut short leaves the hits past it out, and says so
+    stream = os.path.join(folder, 'streams', 'inputs')
+    with open(os.path.join(stream, 'stream.json'), encoding='utf-8') as f:
+        description = json.load(f)
+    description.update(frames=3 * rf.MODAL_BLOCK, cut_from_frames=4 * rf.MODAL_BLOCK)
+    with open(os.path.join(stream, 'stream.json'), 'w', encoding='utf-8') as f:
+        json.dump(description, f)
+    with open(os.path.join(stream, 'telemetry.f32'), 'r+b') as f:
+        f.truncate(3 * rf.MODAL_BLOCK * 7 * 4)
+    done = run_convert.convert(folder, str(tmp_path / 'cut.hforge'))
+    assert done.lacked == [(f"the stream 'inputs' holds its first {3 * rf.MODAL_BLOCK} of "
+                            f"{4 * rf.MODAL_BLOCK} frames, so 1 hit past them has no frames")]
+    history = Project.open(done.path)['Measurement 1 frames (point 1)']
+    # seven channels: hit 3 is inside the cut, hit 4 past it
+    assert history.ordinate.shape == (7, rf.MODAL_BLOCK) and set(history.block) == {'hit 3'}
+
+
+def test_modal_test_accepted_hits_of_no_finished_measurement_are_said(tmp_path):
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer', hits=2)
+    # the run counts what it took; its FRF record is gone, as a run cut off before it leaves it
+    os.remove(os.path.join(folder, 'results', 'modal_frf.jsonl'))
+    os.remove(os.path.join(folder, 'results', 'modal_frf.json'))
+    os.remove(os.path.join(folder, 'results', 'modal_frf.bin'))
+    with open(os.path.join(folder, 'run.json'), encoding='utf-8') as f:
+        manifest = json.load(f)
+    manifest['results'] = [r for r in manifest['results'] if r['name'] != 'modal_frf']
+    with open(os.path.join(folder, 'run.json'), 'w', encoding='utf-8') as f:
+        json.dump(manifest, f)
+    done = run_convert.convert(folder)
+    assert ('2 accepted hits of point 1 belong to no finished measurement; they stay in the '
+            'stream and the frame lines') in done.lacked
+    assert not any(name.startswith('Measurement') for name in done.objects)

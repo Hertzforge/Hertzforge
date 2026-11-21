@@ -20,7 +20,7 @@ from hertzforge.service.protocol import ProtocolError
 from .conftest import wire_views
 
 OPS = {op.id: op for op in OPERATIONS}
-FRAMES = 'Measurement 1 frames'
+FRAMES = 'Measurement 1 frames (point 1)'
 
 
 def run(project, op_id, **given):
