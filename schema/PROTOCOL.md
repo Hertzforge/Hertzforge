@@ -4867,10 +4867,10 @@ Event topics:
 "remaining_at_level_s","level_db","held","alarm","limiting","floor_error_db","floor_equalized",
 "scale","parts","drives","loop","views"}`:
 the state's members of those names, `class` the station's class, `loop` the floor loops run, and
-`views` **Control spectra** (per control `Control <index>` (`measured`, the composite with the
-tones in) with its `Reference`, `Alarm high`, `Alarm low`, `Abort high` and `Abort low` lines at
-the level, against `Frequency` Hz on the band's lines) and **Drive spectra** (`Drive <index>`,
-the floor's drive autospectrum). The views are empty until the floor has run a loop.
+`views` **Control spectra** (per control `control <channel>` (`measured`, the composite with the
+tones in) with its `control <channel> reference`, `... alarm high`, `... alarm low`, `... abort
+high` and `... abort low` lines at the level, against `Frequency` Hz on the band's lines) and
+**Drive spectra** (`drive <channel>`, the floor's drive autospectrum). The views are empty until the floor has run a loop.
 
 `mimo_mixed.subscribe` takes `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.2 to 10, default 2; 1
 to 16 plots) or `{"default":true}` (back to `mimo_mixed.live`). A plot is
