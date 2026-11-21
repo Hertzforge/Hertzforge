@@ -213,6 +213,7 @@ pub fn check_record(sha256: String, date: String, cases: Vec<CheckCase>) -> Chec
         date,
         passed: !cases.is_empty() && cases.iter().all(|c| c.passed),
         cases,
+        informational: Vec::new(),
     }
 }
 

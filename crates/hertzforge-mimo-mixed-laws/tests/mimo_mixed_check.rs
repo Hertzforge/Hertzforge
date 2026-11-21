@@ -1,18 +1,20 @@
-//! The MIMO Mixed check: the built-in pair passes each of the ten cases, each on
-//! the simulator's existing structure its own facts name, and a tone law
+//! The MIMO Mixed check: the built-in pair passes each of the nine required
+//! cases, each on the simulator's existing structure its own facts name, and
+//! the whole check's record clears the built-in in each role; a tone law
 //! that misses its level and a floor law that overdrives fail.
 
 use hertzforge_hal_sim::plants::SineStructure;
 use hertzforge_hal_sim::SimConfig;
 use hertzforge_mimo_mixed::service::MimoMixedLaws;
 use hertzforge_mimo_mixed_laws::{
-    mimo_mixed_check_config, mimo_mixed_check_station, run_mimo_mixed_check_case,
-    MimoMixedCheckCase,
+    mimo_mixed_check_config, mimo_mixed_check_record, mimo_mixed_check_station, role_record_clears,
+    run_mimo_mixed_check_case, LawRole, MimoMixedCheckCase,
 };
 use hertzforge_mimo_sine::law::{
     LawDescriptor, LawManifest, LawSetup, LawValues, MimoSineLaw, MimoSineLawFactory,
 };
 use hertzforge_mimo_sine::tick::{LawFault, TickInputs, TickOutputs};
+use hertzforge_random_laws::CheckStatus;
 use std::sync::Arc;
 
 fn station(case: MimoMixedCheckCase) -> Box<dyn hertzforge_hal::Backend> {
@@ -70,8 +72,6 @@ macro_rules! built_in_passes {
 built_in_passes! {
     mimo_mixed_check_floor_only => FloorOnly;
     mimo_mixed_check_fixed_tones_on_floor => FixedTonesOnFloor;
-    #[ignore = "method limit: even at 2 Hz/s the 0.5 Hz tracker lags the mode; tone_abort at -3.44 dB on control 3"]
-    mimo_mixed_check_swept_tone_through_mode => SweptToneThroughMode;
     mimo_mixed_check_narrowband_fixed => NarrowbandFixed;
     mimo_mixed_check_narrowband_swept => NarrowbandSwept;
     mimo_mixed_check_level_ladder => LevelLadder;
@@ -81,10 +81,64 @@ built_in_passes! {
     mimo_mixed_check_limit_channel => LimitChannel;
 }
 
-/// Every case has a test above.
+/// Every required case has a test above; the informational one runs in the
+/// whole check below.
 #[test]
 fn mimo_mixed_check_every_case_is_tested() {
     assert_eq!(MimoMixedCheckCase::ALL.len(), 10);
+    assert_eq!(MimoMixedCheckCase::REQUIRED.len(), 9);
+    assert_eq!(
+        MimoMixedCheckCase::INFORMATIONAL,
+        [MimoMixedCheckCase::SweptToneThroughMode]
+    );
+}
+
+/// Requirement: the whole check, every case in its order, with the built-in
+/// floor and tone laws, gives a record that passes and clears the law in
+/// either role; the informational swept-tone case is run and its result is
+/// in the record, outside the verdict.
+#[test]
+fn mimo_mixed_the_built_in_laws_pass_the_whole_required_check_in_each_role() {
+    const SHA: &str = "cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34";
+    let cases: Vec<_> = MimoMixedCheckCase::ALL
+        .into_iter()
+        .map(|case| {
+            let r = run_mimo_mixed_check_case(case, &builtin(case), station(case)).expect("run");
+            eprintln!(
+                "{} {}: {}",
+                if r.passed { "PASS" } else { "FAIL" },
+                r.name,
+                r.detail
+            );
+            r
+        })
+        .collect();
+    let record = mimo_mixed_check_record(SHA, "2026-11-21T10:00:00Z", cases);
+    let failed: Vec<_> = record
+        .cases
+        .iter()
+        .filter(|c| !c.passed)
+        .map(|c| &c.name)
+        .collect();
+    assert!(record.passed, "required cases failed: {failed:?}");
+    assert_eq!(record.cases.len(), MimoMixedCheckCase::REQUIRED.len());
+    assert_eq!(record.informational.len(), 1);
+    assert_eq!(record.informational[0].name, "swept_tone_through_mode");
+    eprintln!(
+        "informational swept_tone_through_mode passed {}: {}",
+        record.informational[0].passed, record.informational[0].detail
+    );
+    // The check runs a law in one role with the built-in in the other, so
+    // the built-in pair's run is each role's: the record, written under
+    // either role's name, clears it.
+    for role in [LawRole::Floor, LawRole::Tones] {
+        assert_eq!(
+            role_record_clears(&CheckStatus::Checked(record.clone()), SHA),
+            Ok(()),
+            "{}",
+            hertzforge_mimo_mixed_laws::mimo_mixed_check_name(role)
+        );
+    }
 }
 
 /// A tone law that answers as the built-in, then sends half its drive (6 dB

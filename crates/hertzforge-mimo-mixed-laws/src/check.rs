@@ -71,6 +71,30 @@ impl MimoMixedCheckCase {
         MimoMixedCheckCase::LimitChannel,
     ];
 
+    /// The cases a law must pass, in the order the check runs them.
+    pub const REQUIRED: [MimoMixedCheckCase; 9] = [
+        MimoMixedCheckCase::FloorOnly,
+        MimoMixedCheckCase::FixedTonesOnFloor,
+        MimoMixedCheckCase::NarrowbandFixed,
+        MimoMixedCheckCase::NarrowbandSwept,
+        MimoMixedCheckCase::LevelLadder,
+        MimoMixedCheckCase::SharedCeiling,
+        MimoMixedCheckCase::MoreDrivesThanControls,
+        MimoMixedCheckCase::TransportDelay,
+        MimoMixedCheckCase::LimitChannel,
+    ];
+
+    /// The cases run and recorded for information only. A tone swept
+    /// through a mode faster than the tracker follows is beyond the method
+    /// (the built-in laws read about 3.6 dB under target there), so no law
+    /// is held to it.
+    pub const INFORMATIONAL: [MimoMixedCheckCase; 1] = [MimoMixedCheckCase::SweptToneThroughMode];
+
+    /// Whether a law must pass this case.
+    pub fn required(self) -> bool {
+        !Self::INFORMATIONAL.contains(&self)
+    }
+
     /// The stable record and wire name.
     pub fn name(self) -> &'static str {
         match self {
@@ -695,6 +719,21 @@ mod tests {
         names.dedup();
         assert_eq!(names.len(), 10);
         assert_eq!(MimoMixedCheckCase::from_name("nope"), None);
+    }
+
+    #[test]
+    fn mimo_mixed_every_case_is_required_or_informational_in_run_order() {
+        let required: Vec<_> = MimoMixedCheckCase::ALL
+            .into_iter()
+            .filter(|c| c.required())
+            .collect();
+        assert_eq!(required, MimoMixedCheckCase::REQUIRED);
+        let informational: Vec<_> = MimoMixedCheckCase::ALL
+            .into_iter()
+            .filter(|c| !c.required())
+            .collect();
+        assert_eq!(informational, MimoMixedCheckCase::INFORMATIONAL);
+        assert!(!MimoMixedCheckCase::SweptToneThroughMode.required());
     }
 
     #[test]

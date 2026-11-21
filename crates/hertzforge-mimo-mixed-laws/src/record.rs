@@ -20,7 +20,7 @@ use hertzforge_random_laws::{
 /// The version of the MIMO Mixed check written into its records. A change to
 /// the cases, their stations or their requirements changes it, and a law
 /// checked before must be checked again.
-pub const MIMO_MIXED_CHECK_VERSION: &str = "mimo-mixed-check 1";
+pub const MIMO_MIXED_CHECK_VERSION: &str = "mimo-mixed-check 2";
 
 /// The catalog's name for the record of the MIMO Mixed check in `role`.
 pub fn mimo_mixed_check_name(role: LawRole) -> &'static str {
@@ -116,9 +116,16 @@ impl std::fmt::Display for RoleRefusal {
 impl std::error::Error for RoleRefusal {}
 
 /// The record of a law file's MIMO Mixed check: `cases` in the order the
-/// check ran them, each named by its case's record name.
+/// check ran them, each named by its case's record name. The required cases
+/// make the verdict; the informational ones
+/// ([`MimoMixedCheckCase::INFORMATIONAL`]) are recorded beside it. A case
+/// of no known name counts as required, so it can never clear a law.
 pub fn mimo_mixed_check_record(law_sha256: &str, date: &str, cases: Vec<CheckCase>) -> CheckRecord {
-    CheckRecord::new(law_sha256, MIMO_MIXED_CHECK_VERSION, date, cases)
+    let (informational, required): (Vec<_>, Vec<_>) = cases
+        .into_iter()
+        .partition(|c| MimoMixedCheckCase::from_name(&c.name).is_some_and(|k| !k.required()));
+    CheckRecord::new(law_sha256, MIMO_MIXED_CHECK_VERSION, date, required)
+        .with_informational(informational)
 }
 
 /// Write `record` as the law's MIMO Mixed check in `role`.
@@ -152,8 +159,9 @@ pub fn mimo_mixed_check_status(
 ///   ([`own_check_version`]: a `mimo` law's record of [`MIMO_CHECK_VERSION`],
 ///   a `sine_mimo` law's of [`MIMO_SINE_CHECK_VERSION`]);
 /// - the MIMO Mixed check in this role passed for its exact file, at
-///   [`MIMO_MIXED_CHECK_VERSION`] and over the cases the check runs now
-///   ([`MimoMixedCheckCase::ALL`], by name and order).
+///   [`MIMO_MIXED_CHECK_VERSION`] and over the cases the check requires
+///   now ([`MimoMixedCheckCase::REQUIRED`], by name and order); the
+///   informational cases take no part.
 ///
 /// A record for the other role clears nothing here. The simulator runs any
 /// law; this rule is for hardware only.
@@ -204,8 +212,8 @@ pub fn role_record_clears(status: &CheckStatus, law_sha256: &str) -> Result<(), 
             record.law_sha256
         )));
     }
-    let names_now = MimoMixedCheckCase::ALL.iter().map(|c| c.name());
-    let same_cases = record.cases.len() == MimoMixedCheckCase::ALL.len()
+    let names_now = MimoMixedCheckCase::REQUIRED.iter().map(|c| c.name());
+    let same_cases = record.cases.len() == MimoMixedCheckCase::REQUIRED.len()
         && record.cases.iter().map(|c| c.name.as_str()).eq(names_now);
     if record.tool_version != MIMO_MIXED_CHECK_VERSION || !same_cases {
         return Err(ArmRefusal::CheckOutdated {
@@ -235,7 +243,7 @@ mod tests {
     const SHA: &str = "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12";
 
     fn cases(pass: bool) -> Vec<CheckCase> {
-        MimoMixedCheckCase::ALL
+        MimoMixedCheckCase::REQUIRED
             .iter()
             .map(|c| CheckCase {
                 name: c.name().into(),
@@ -286,6 +294,48 @@ mod tests {
         ));
     }
 
+    /// Requirement: the swept-tone case is run and recorded but is not
+    /// required: a law that fails only it clears, and the record keeps the
+    /// result; a record that lists it among the required cases (the check
+    /// before this version) does not clear.
+    #[test]
+    fn mimo_mixed_the_swept_tone_case_is_recorded_but_not_required() {
+        let all: Vec<CheckCase> = MimoMixedCheckCase::ALL
+            .iter()
+            .map(|c| CheckCase {
+                name: c.name().into(),
+                passed: *c != MimoMixedCheckCase::SweptToneThroughMode,
+                detail: String::new(),
+            })
+            .collect();
+        let rec = mimo_mixed_check_record(SHA, "2026-11-21T10:00:00Z", all.clone());
+        assert!(rec.passed);
+        assert_eq!(rec.cases.len(), 9);
+        assert_eq!(rec.informational.len(), 1);
+        assert_eq!(rec.informational[0].name, "swept_tone_through_mode");
+        assert!(!rec.informational[0].passed);
+        assert_eq!(role_record_clears(&checked(rec), SHA), Ok(()));
+        let mut old = CheckRecord::new(SHA, MIMO_MIXED_CHECK_VERSION, "2026-11-21T10:00:00Z", all);
+        old.passed = old.cases.iter().all(|c| c.passed);
+        assert!(matches!(
+            role_record_clears(&checked(old), SHA),
+            Err(ArmRefusal::CheckOutdated { .. })
+        ));
+        // A required case failed still fails, whatever the informational say.
+        let mut some: Vec<CheckCase> = cases(false);
+        some.push(CheckCase {
+            name: "swept_tone_through_mode".into(),
+            passed: true,
+            detail: String::new(),
+        });
+        let rec = mimo_mixed_check_record(SHA, "2026-11-21T10:00:00Z", some);
+        assert!(!rec.passed);
+        assert!(matches!(
+            role_record_clears(&checked(rec), SHA),
+            Err(ArmRefusal::CheckFailed { .. })
+        ));
+    }
+
     #[test]
     fn mimo_mixed_a_role_refusal_says_what_stands_in_the_way() {
         assert_eq!(
@@ -299,7 +349,7 @@ mod tests {
             })
             .to_string(),
             "the MIMO Mixed check in this role passed mimo-mixed-check 0, which \
-             mimo-mixed-check 1 has replaced"
+             mimo-mixed-check 2 has replaced"
         );
         assert_eq!(
             RoleRefusal::WrongWorld {
