@@ -47,13 +47,16 @@ The first version runs up to 16 controls, 8 drives and 8 limit channels.
 2. **Identification.** MIMO Random's: independent random on every drive at a level under the
    reference, giving the model from every drive to every control, each control's multiple coherence
    and the model's condition across the band.
-3. **The gate.** The worst multiple coherence is checked against its floor and the model's condition
-   against its limit. A gate that does not pass holds the run.
-4. **The prediction.** From the model, the service forecasts what each drive needs at full level for
-   the floor and every tone together, against its ceilings. A forecast that cannot fit holds the run.
-5. **Review.** The run waits with the identification, the gate and the prediction on screen. With
-   the gate passed and the forecast in budget, **Proceed** goes on. Past a failed gate or a forecast
-   over a ceiling, only **Proceed With Your Words** goes on, and your words go in the log; or abort.
+3. **The gate.** Each control's coherence over the band is checked against the coherence gate and
+   the model's condition against its limit. A gate that does not pass holds the run.
+4. **The prediction.** From the model, the service predicts what each drive needs at full level for
+   the floor and every tone together, against its ceilings, and forecasts the budget along the
+   schedule. A prediction over a drive's ceiling holds the run.
+5. **Review.** The run always waits here, with the identification, the gate and the prediction on
+   screen. With nothing holding it, **Proceed** goes on. Past a failed gate or a prediction over a
+   ceiling, only **Override** with your words goes on (the override names the hold, and your words
+   go in the log); an override of the gate goes on to the prediction, which may hold again. A
+   forecast that finds no budget that fits refuses the run, and no override passes it. Or stop.
 6. **The floor alone.** The floor engages alone at the first level and plays until it has equalized.
 7. **The parts come in.** Parts time starts, and each tone and narrowband whose window is open and
    that is switched on ramps in over the part ramp.
@@ -74,8 +77,9 @@ warning the control service gives, by name. The setup is checked by the control 
 
 The station and channel table are shared with every test type. Every enabled control row is a
 control unless you switch it off here; every enabled drive row is a drive, in the table's order. Each
-drive takes its rms ceiling, its peak ceiling (at least the rms ceiling) and, if you want one, its rms
-abort.
+drive takes its rms ceiling, its peak ceiling (at least the rms ceiling), its peak abort, the most the
+identification may put on it and, if you want one, its rms abort. The peak abort left empty is the
+peak ceiling plus 1 dB, and the field shows that value; one you give must be above the peak ceiling.
 
 ### Floor Reference
 
@@ -101,8 +105,12 @@ at the bandwidth given (see "What Is Not Built").
 ### Schedule and Identification
 
 The level schedule is Mixed Mode's: levels in dB under full level, each held for its dwell, then
-full level for its time, in parts time. Identification takes its level, its averages, the
-coherence floor and the condition limit of the gate, and whether the run holds for review.
+full level for its time. The schedule is **Automatic** (each level held for its dwell) or
+**Manual** (the level moves only by hand, to a level of the schedule); the mode can be switched
+before the run and while it runs. Identification takes its level under the reference, its starting
+drive, how near the level it must come and in how many steps, its frames and its noise frames; the
+gate takes the coherence gate and the condition limit. The run always holds for review after
+identification.
 
 ### Laws
 
@@ -123,16 +131,18 @@ Five choices, each with what it means beside it.
 
 ### Limits and Protections
 
-Limit channels with their ceilings and abort margins, the floor's envelope and divergence aborts,
-the overload share, the loop's ramps and guards, and the run record's words.
+Limit channels with their ceilings and abort margins, the floor's envelope and divergence aborts
+(the loops and the dB a divergence is counted from), the loops to settle before the checks, the
+overload share, the loop's ramps, soft start and caps, and the run record's words.
 
 ### Prediction and Budget
 
 Before identification there is no model, so this section says the prediction comes after it. Once
-the run has identified, the prediction shows each drive's need against its ceilings as a bar, the
-peak need of the floor and the tones together against the peak ceiling, and each control's
-predicted levels. Refusals and warnings are listed here by name, each with the part, control or
-drive it concerns.
+the run has identified, the prediction shows each drive's random rms and peak, the tones' peak sum
+and the total against its ceilings, each control's predicted levels, and the forecast's nearest
+approach to a ceiling along the schedule as a bar; a forecast that cannot fit says which drive, when
+and by how much. Refusals and warnings are listed here by name, each with the part, control, drive
+or limit channel it concerns where the service names one.
 
 ## The Shared Drive Budget
 
@@ -183,8 +193,9 @@ names you may see:
 | Unknown band law, ceiling rule or fill rule; law not in the catalog | A choice the service does not know |
 | Reference not accepted | The floor's reference cannot be used |
 
-A forecast over budget is said before the run and again at review: you may still proceed with your
-words, and the ceiling rule then holds the tones down for the whole run.
+A prediction over a ceiling is said at review: you may still override with your words, and the
+ceiling rule then holds the tones down for the whole run. A forecast that cannot fit is refused at
+review, and no override passes it.
 
 A sweep faster than the tracker follows is a warning, not a refusal: the part's row says how fast it
 moves and how late the tracker reads it.
@@ -207,26 +218,39 @@ moves and how late the tracker reads it.
   parameters while they run; set them in the setup.
 - **Taking a control out at the gate.** The floor, every tone and every narrowband are stated at
   every control, so a control cannot be dropped once the run has identified. Change the controls
-  in the setup, or proceed past the gate with your words.
+  in the setup, or override the gate with your words.
 - **Keeping an identification for a later run.** Every run identifies. The record keeps the
   identification, but it cannot be loaded into another run.
 
 ## The Run Screen
 
-The run card carries the verbs that apply now: **Arm**, **Start**, **Proceed** at review, **Proceed
-With Your Words** past a failed gate or a forecast over a ceiling, **Hold** and **Resume**, the level
-steps in the manual schedule, **Stop** and **Abort**. Every part's switch is in the parts table; the
-floor has none.
+The run card carries the verbs that apply now: **Arm**, **Start**, **Proceed** at review,
+**Override** with your words past a failed gate or a prediction over a ceiling, **Hold** and
+**Resume**, the schedule's mode (**Automatic** or **Manual**), the level steps and the levels of
+the schedule in manual, **Stop** and **Abort**. At review it gives the identification and its gate
+in a line and the prediction. Every part's switch is in the parts table; the floor has none.
 
 - **The parts table:** for every part its id, kind, switch and frequency, whether it is held, whether
-  it is limiting, and at every control its target, its measured value, the error in dB and its
-  alarm.
-- **The drives card:** for every drive the random part's rms, the held peak, the tones' sum,
-  the headroom left under its peak ceiling, and the common scale.
-- **The pages:** the control spectra, the residual with the tones taken out and the cross terms,
-  each with its alarm and abort lines; the drives; each tone's amplitude and phase history at every
-  control; each narrowband's level; the identification and its coherence; and the laws' values.
+  it is limiting (a tone at its scale, a narrowband held back while its drive is out of room),
+  whether a narrowband is folded into the floor, and at every control its target, its measured value,
+  the error in dB and its alarm. A narrowband is stated in dB against the floor, so it shows its
+  error and no target.
+- **The drives card:** for every drive the random part's rms, the held peak, the tones' sum, the
+  peak played, the headroom left under its peak ceiling (in volts and dB), its peak abort, and the
+  common scale.
+- **The limits card:** for every limit channel how far its worst line is over its ceiling (negative:
+  under) and at what frequency.
+- **The level card:** the level, the schedule's mode, the run's time, the floor's state and loops,
+  and how the run ended.
+- **The pages:** the control spectra with their alarm and abort lines; the residual with the tones
+  taken out, with the cross terms; the cross terms alone; the drives; each tone's amplitude and phase
+  history at every control; each narrowband's level against its statement. The service draws these
+  seven and no others.
 - **The log:** every state, level, hold, part switch, limit, alarm and trip, with your words.
+
+The screen offers no control to change a law's parameters during the run, to take a control out at
+the gate, or to save or load an identification: the service does not build them (see "What Is Not
+Built").
 
 ## What a Run Saves
 
