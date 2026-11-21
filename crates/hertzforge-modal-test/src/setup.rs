@@ -257,6 +257,11 @@ impl SourceKind {
 /// level.
 pub const RANDOM_CREST: f64 = 4.0;
 
+/// How far inside the drive ceiling a level's bounded crest must stay: level times
+/// crest is at most the ceiling times one less this (0.1 %). The source is bounded in
+/// the f32 the station is handed, so no accepted level reaches the ceiling by rounding.
+pub const CEILING_MARGIN: f64 = 1e-3;
+
 /// One driven row and its level.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DriveSet {
@@ -662,20 +667,23 @@ impl ModalSetup {
                         d.row, d.level_vrms
                     ),
                 ));
-            } else if d.level_vrms * s.source.crest() > s.ceiling_v {
+            } else if d.level_vrms * s.source.crest() > s.ceiling_v * (1.0 - CEILING_MARGIN) {
                 r.push(Refusal::field(
                     "level_over_ceiling",
                     format!("shaker.drives[{k}].level_vrms"),
                     format!(
                         "Drive row {} at {} V RMS can reach {:.4} V with the {} source's crest of \
-                         {:.3}, over the drive ceiling of {} V. Lower the level, or raise the \
-                         ceiling if the shaker and amplifier allow it.",
+                         {:.3}, not inside the drive ceiling of {} V by its margin of {} % \
+                         (at most {:.6} V). Lower the level, or raise the ceiling if the shaker \
+                         and amplifier allow it.",
                         d.row,
                         d.level_vrms,
                         d.level_vrms * s.source.crest(),
                         s.source.name(),
                         s.source.crest(),
-                        s.ceiling_v
+                        s.ceiling_v,
+                        CEILING_MARGIN * 100.0,
+                        s.ceiling_v * (1.0 - CEILING_MARGIN)
                     ),
                 ));
             }
@@ -843,9 +851,15 @@ mod tests {
     #[test]
     fn modal_test_level_over_ceiling_is_refused_by_the_bounded_crest() {
         let mut s = shaker(SourceKind::Random, 1);
-        // 0.25 V RMS x crest 4 = 1.0 V: at the ceiling, passes.
+        // 0.25 V RMS x crest 4 = 1.0 V: at the ceiling, not inside it by the margin.
         s.shaker.drives[0].level_vrms = 0.25;
-        assert!(s.refusals().is_empty());
+        assert_eq!(reasons(&s), vec!["level_over_ceiling"]);
+        // Inside by the margin passes; a hair past the margin does not.
+        let edge = s.shaker.ceiling_v * (1.0 - CEILING_MARGIN) / RANDOM_CREST;
+        s.shaker.drives[0].level_vrms = edge;
+        assert!(s.refusals().is_empty(), "{:?}", s.refusals());
+        s.shaker.drives[0].level_vrms = edge * (1.0 + 1e-9);
+        assert_eq!(reasons(&s), vec!["level_over_ceiling"]);
         s.shaker.drives[0].level_vrms = 0.2501;
         assert_eq!(reasons(&s), vec!["level_over_ceiling"]);
         // A chirp's crest is a sine's.

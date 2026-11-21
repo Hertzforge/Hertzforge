@@ -53,8 +53,9 @@ pub fn refuse(reason: &'static str, message: impl Into<String>) -> MethodError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct End {
     /// `ended` (the operator ended it), `aborted`, `response_abort`, `drive_underrun`,
-    /// `drive_ceiling`, `input_overload`, `loop_faulted`, `loop_panicked` or
-    /// `arm_refused`.
+    /// `source_failed`, `drive_ceiling`, `input_overload`, `loop_faulted`,
+    /// `loop_panicked`, `run_panicked` (the run's own thread failed), `run_not_started`
+    /// (its thread could not start) or `arm_refused`.
     pub outcome: &'static str,
     pub message: String,
     pub emergency_stop: bool,
@@ -632,12 +633,46 @@ impl ModalRun {
             hardware,
             _guard: guard,
         };
-        std::thread::Builder::new()
+        // The thread's parts wait in a slot it takes them from, so that, when it cannot
+        // start, they come back here to stop the station and close the record.
+        let slot = Arc::new(Mutex::new(Some((session, facts, rx))));
+        let taken = slot.clone();
+        let h = host.clone();
+        let spawned = std::thread::Builder::new()
             .name(format!("modal-test {}", self.id))
-            .spawn(move || run.watch(host, session, rx, facts))
-            .map_err(|e| {
-                MethodError::internal(format!("could not start the test's thread: {e}"))
-            })?;
+            .spawn(move || {
+                let Some((mut session, mut facts, rx)) = lock(&taken).take() else {
+                    return;
+                };
+                let r = h.guard(|| run.watch(&h, &mut session, rx, &mut facts));
+                if let Err(why) = r {
+                    run.watch_failed(&h, &mut session, &mut facts, &why);
+                }
+            });
+        if let Err(e) = spawned {
+            let message =
+                format!("the test's thread could not start ({e}); the station was stopped");
+            host.abort_for("run_not_started", message.clone());
+            host.join(Duration::from_secs(10));
+            if let Some((session, mut facts, _)) = lock(&slot).take() {
+                let mut v = (*self.view()).clone();
+                v.state = "finished";
+                v.end = Some(End {
+                    outcome: "run_not_started",
+                    message: message.clone(),
+                    emergency_stop: true,
+                    at_s: None,
+                });
+                self.shared.publish(&self.id, v);
+                self.shared.add_log_data(
+                    "outcome",
+                    format!("ended (run_not_started): {message}"),
+                    Some(json!({"outcome": "run_not_started", "emergency_stop": true})),
+                );
+                self.finish_record(&mut facts, &session);
+            }
+            return Err(MethodError::internal(message));
+        }
         let asked = Instant::now();
         loop {
             let v = self.view();
@@ -651,13 +686,49 @@ impl ModalRun {
         }
     }
 
+    /// The run's thread failed: the host has taken the drive to zero with the
+    /// emergency stop; the end is published and the record closed.
+    fn watch_failed(&self, host: &ModalHost, session: &mut Session, facts: &mut Facts, why: &str) {
+        let st = host.status();
+        let message = st.end.as_ref().map_or_else(
+            || format!("the run's thread panicked ({why})"),
+            |o| o.message.clone(),
+        );
+        self.shared.add_log_data(
+            "abort",
+            format!("abort: {message}"),
+            Some(json!({"outcome": "run_panicked"})),
+        );
+        self.shared.add_log_data(
+            "outcome",
+            format!("ended (run_panicked): {message}"),
+            Some(json!({"outcome": "run_panicked", "emergency_stop": true})),
+        );
+        let end = End {
+            outcome: "run_panicked",
+            message,
+            emergency_stop: true,
+            at_s: Some(st.generated as f64 / session.setup.fs_hz),
+        };
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.publish(session, host, Some(end.clone()));
+            self.finish_record(facts, session);
+        }));
+        if r.is_err() {
+            let mut v = (*self.view()).clone();
+            v.state = "finished";
+            v.end = Some(end);
+            self.shared.publish(&self.id, v);
+        }
+    }
+
     /// The run's own thread.
     fn watch(
-        self: Arc<Self>,
-        host: Arc<ModalHost>,
-        mut session: Session,
+        &self,
+        host: &ModalHost,
+        session: &mut Session,
         rx: mpsc::Receiver<(Cmd, Reply)>,
-        mut facts: Facts,
+        facts: &mut Facts,
     ) {
         let mut capture = lock(&host.capture).take();
         let width = host.inputs + host.outputs;
@@ -680,18 +751,11 @@ impl ModalRun {
             d.rate_hz = fs;
             d.freqs = session.freqs().to_vec();
         }
-        self.publish(&session, &host, None);
+        self.publish(session, host, None);
         loop {
             // The operator's calls.
             while let Ok((cmd, reply)) = rx.try_recv() {
-                let r = self.handle(
-                    &mut session,
-                    &host,
-                    &mut facts,
-                    cmd,
-                    &mut want_measure,
-                    &mut ending,
-                );
+                let r = self.handle(session, host, facts, cmd, &mut want_measure, &mut ending);
                 let _ = reply.send(r);
             }
             // The captured frames.
@@ -724,11 +788,11 @@ impl ModalRun {
                 }
             }
             let changed = !events.is_empty();
-            self.on_events(&mut session, &host, &mut facts, events);
+            self.on_events(session, host, facts, events);
             let st = host.status();
             if let Some(o) = st.end.clone().filter(|_| host.finished()) {
                 let ev = session.end();
-                self.on_events(&mut session, &host, &mut facts, ev);
+                self.on_events(session, host, facts, ev);
                 let by = self.shared.ended_by();
                 let outcome = if o.outcome == "ended" {
                     "ended"
@@ -757,15 +821,15 @@ impl ModalRun {
                     emergency_stop: o.emergency_stop,
                     at_s: Some(o.generated as f64 / fs),
                 };
-                self.publish(&session, &host, Some(end));
-                self.finish_record(&mut facts, &session);
-                self.publish(&session, &host, self.view().end.clone());
+                self.publish(session, host, Some(end));
+                self.finish_record(facts, session);
+                self.publish(session, host, self.view().end.clone());
                 break;
             }
             if changed || last_display.elapsed() > Duration::from_millis(100) {
                 last_display = Instant::now();
-                self.update_display(&session);
-                self.publish(&session, &host, None);
+                self.update_display(session);
+                self.publish(session, host, None);
             }
             std::thread::sleep(POLL);
         }
@@ -785,6 +849,19 @@ impl ModalRun {
     ) -> Result<Value, MethodError> {
         let as_err = |e: hertzforge_modal_test::session::Refused| refuse(e.reason, e.message);
         let shaker = s.setup.mode == Mode::Shaker;
+        // Once an end or an abort is asked, nothing new starts: no drive, no arm, no hit
+        // taken. The host refuses a drive start on its own too.
+        if (*ending || host.closed())
+            && matches!(
+                cmd,
+                Cmd::DriveStart | Cmd::Arm | Cmd::Accept | Cmd::SimHit(_)
+            )
+        {
+            return Err(refuse(
+                "ending",
+                "The test is ending: nothing new starts after an end or an abort.",
+            ));
+        }
         let ev = match cmd.clone() {
             Cmd::Select(k) => s.select(k).map_err(as_err)?,
             Cmd::Step(d) => {
@@ -828,7 +905,12 @@ impl ModalRun {
                         format!("The drive is {}.", host.shared().phase().name()),
                     ));
                 }
-                host.start_drive();
+                if !host.start_drive() {
+                    return Err(refuse(
+                        "ending",
+                        "The test is ending: nothing new starts after an end or an abort.",
+                    ));
+                }
                 *want = true;
                 self.shared.add_log_data(
                     "state",
@@ -860,7 +942,9 @@ impl ModalRun {
                     Some(json!({"action": "end"})),
                 );
                 host.finish();
-                Vec::new()
+                let mut ev = s.disarm();
+                ev.extend(s.stop_measuring());
+                ev
             }
             Cmd::SimHit(k) => {
                 if facts.hardware {

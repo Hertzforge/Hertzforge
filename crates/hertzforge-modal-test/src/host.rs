@@ -17,7 +17,7 @@
 //!   does no analysis and no file work.
 
 use crate::setup::{STOP_RAMP_DEPTH_DB, STOP_RAMP_S};
-use crate::source::{Feeder, Frames, Source, SourceBuild};
+use crate::source::{panic_words, Feeder, Frames, Source, SourceBuild};
 use hertzforge_channel_table::{AbortLimits, ChannelRole, ChannelTable};
 use hertzforge_engine::ring::{Consumer, Producer};
 use hertzforge_engine::{AbortTrip, Engine, EngineConfig, ProcessStep, StopReason, VecCaptureSink};
@@ -98,6 +98,9 @@ pub struct StepShared {
     pub start: AtomicBool,
     pub stop: AtomicBool,
     pub abort: AtomicBool,
+    /// Set once an end or an abort is asked: the step takes no drive start after it, so
+    /// the drive never leaves [`DrivePhase::Idle`] or [`DrivePhase::Zeroed`] again.
+    pub closed: AtomicBool,
     pub underrun: AtomicBool,
     pub ceiling_trip: AtomicBool,
     pub trip_drive: AtomicU32,
@@ -209,6 +212,11 @@ impl ModalStep {
         if self.phase == DrivePhase::Zeroed {
             return;
         }
+        // A failed source zeroes the drive on this sample, not when the loop next looks.
+        if feed.failed.load(Ordering::Acquire) {
+            self.zero();
+            return;
+        }
         if !ring.pop(&mut self.sample) {
             self.shared.underrun.store(true, Ordering::Release);
             self.zero();
@@ -259,7 +267,9 @@ impl ModalStep {
             return;
         };
         for (k, slot) in b.slots.iter().enumerate() {
-            let v = f64::from(self.sample[k]) * self.gain;
+            // Judged as the f32 the station is handed, so the cast cannot round past it.
+            let w = (f64::from(self.sample[k]) * self.gain) as f32;
+            let v = f64::from(w);
             if v.abs() > ceiling || !v.is_finite() {
                 self.shared.trip_drive.store(k as u32, Ordering::Relaxed);
                 self.shared.trip_value.store(v.to_bits(), Ordering::Relaxed);
@@ -269,7 +279,7 @@ impl ModalStep {
                 return;
             }
             if let Some(o) = self.out.get_mut(*slot) {
-                *o = v as f32;
+                *o = w;
             }
         }
     }
@@ -296,10 +306,13 @@ impl ProcessStep for ModalStep {
                     _ => {}
                 }
             }
-            if s.start.swap(false, Ordering::AcqRel)
-                && self.phase == DrivePhase::Idle
-                && self.drive.is_some()
-            {
+            let start = s.start.swap(false, Ordering::AcqRel);
+            if s.closed.load(Ordering::Acquire) {
+                // Ended: a start asked before or after the end is dropped.
+                if self.phase == DrivePhase::Waiting {
+                    self.enter(DrivePhase::Idle);
+                }
+            } else if start && self.phase == DrivePhase::Idle && self.drive.is_some() {
                 self.enter(DrivePhase::Waiting);
             }
         }
@@ -360,7 +373,8 @@ impl std::fmt::Display for HostError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outcome {
     /// `ended`, `aborted`, `response_abort`, `drive_underrun`, `source_failed`,
-    /// `drive_ceiling`, `input_overload`, `loop_faulted` or `loop_panicked`.
+    /// `drive_ceiling`, `input_overload`, `loop_faulted`, `loop_panicked` or
+    /// `run_panicked`.
     pub outcome: &'static str,
     pub message: String,
     pub trip: Option<AbortTrip>,
@@ -387,6 +401,20 @@ struct Inner {
     status: Mutex<HostStatus>,
     step: Arc<StepShared>,
     finish: AtomicBool,
+    /// The outcome and words an abort ends with when it is not the operator's.
+    why: Mutex<Option<(&'static str, String)>>,
+}
+
+/// How the host starts a thread: [`std_spawn`], or a test's own.
+pub type Spawn =
+    fn(std::thread::Builder, Box<dyn FnOnce() + Send>) -> std::io::Result<JoinHandle<()>>;
+
+/// The standard library's spawn.
+pub fn std_spawn(
+    b: std::thread::Builder,
+    f: Box<dyn FnOnce() + Send>,
+) -> std::io::Result<JoinHandle<()>> {
+    b.spawn(f)
 }
 
 /// A started test.
@@ -430,8 +458,21 @@ impl ModalHost {
         b: HostBuild,
         frames: Option<F>,
         table: ChannelTable,
+        backend: Box<dyn Backend>,
+        station: StationClass,
+    ) -> Result<ModalHost, HostError> {
+        ModalHost::start_with_spawn(b, frames, table, backend, station, std_spawn)
+    }
+
+    /// [`ModalHost::start_with_frames`] with the pump's thread started by `spawn`. When
+    /// it cannot start, the station is stopped and closed and the start refused.
+    pub fn start_with_spawn<F: Frames>(
+        b: HostBuild,
+        frames: Option<F>,
+        table: ChannelTable,
         mut backend: Box<dyn Backend>,
         station: StationClass,
+        spawn: Spawn,
     ) -> Result<ModalHost, HostError> {
         let fs = b.fs_hz;
         let block = hertzforge_hal::default_block_frames(fs);
@@ -517,7 +558,7 @@ impl ModalHost {
             ((CAPTURE_RING_S * fs) as usize).max(4 * b.block),
             inputs + outputs,
         );
-        let (mut step, step_shared) = ModalStep::new(drive_parts, cap_tx, lead_in);
+        let (step, step_shared) = ModalStep::new(drive_parts, cap_tx, lead_in);
         if let Err(e) = backend.start() {
             let _ = backend.emergency_stop();
             return Err(HostError::Arm(format!("start: {e}")));
@@ -537,6 +578,7 @@ impl ModalHost {
             }),
             step: step_shared,
             finish: AtomicBool::new(false),
+            why: Mutex::new(None),
         });
         let limited: Vec<bool> = table
             .channels
@@ -548,9 +590,16 @@ impl ModalHost {
         let pacing = b.pacing;
         let record_until = b.record_until.clone();
         let group = actual.group_delay_frames.unwrap_or(0) as u64;
-        let pump = std::thread::Builder::new()
-            .name("modal-test-pump".into())
-            .spawn(move || {
+        // The loop's parts wait in a slot its thread takes them from, so they come back
+        // here, the station still open, when the thread cannot start.
+        let slot = Arc::new(Mutex::new(Some((backend, engine, step, feeder))));
+        let taken = slot.clone();
+        let spawned = spawn(
+            std::thread::Builder::new().name("modal-test-pump".into()),
+            Box::new(move || {
+                let Some((backend, mut engine, mut step, feeder)) = lock(&taken).take() else {
+                    return;
+                };
                 let mut p = Pump {
                     inner: pump_inner,
                     backend,
@@ -564,8 +613,23 @@ impl ModalHost {
                     record_until,
                 };
                 p.run();
-            })
-            .map_err(|e| HostError::Arm(format!("the test's loop could not start: {e}")))?;
+            }),
+        );
+        let pump = match spawned {
+            Ok(t) => t,
+            Err(e) => {
+                if let Some((mut backend, _, _, feeder)) = lock(&slot).take() {
+                    let _ = backend.emergency_stop();
+                    let _ = backend.close();
+                    if let Some(mut f) = feeder {
+                        f.cancel();
+                    }
+                }
+                return Err(HostError::Arm(format!(
+                    "the test's loop could not start ({e}); the station was stopped and closed"
+                )));
+            }
+        };
         Ok(ModalHost {
             inner,
             pump: Mutex::new(Some(pump)),
@@ -583,9 +647,19 @@ impl ModalHost {
         self.inner.step.clone()
     }
 
-    /// Start the drive: the ramp begins on the next frame's start.
-    pub fn start_drive(&self) {
+    /// Start the drive: the ramp begins on the next frame's start. `false`, and nothing
+    /// asked, once the test is ending or aborted.
+    pub fn start_drive(&self) -> bool {
+        if self.closed() {
+            return false;
+        }
         self.inner.step.start.store(true, Ordering::Release);
+        true
+    }
+
+    /// Whether an end or an abort has been asked: no drive starts after it.
+    pub fn closed(&self) -> bool {
+        self.inner.step.closed.load(Ordering::Acquire)
     }
 
     /// The controlled stop of the drive: it ramps down, then idles at zero.
@@ -595,11 +669,37 @@ impl ModalHost {
 
     /// Abort: the drive goes to zero at once and the emergency stop is issued.
     pub fn abort(&self) {
+        self.inner.step.closed.store(true, Ordering::Release);
         self.inner.step.abort.store(true, Ordering::Release);
+    }
+
+    /// Abort for a fault, not the operator: the test ends as `outcome` with `message`.
+    pub fn abort_for(&self, outcome: &'static str, message: String) {
+        lock(&self.inner.why).get_or_insert((outcome, message));
+        self.abort();
+    }
+
+    /// Run `body`, the run's own thread, on guard: a panic in it aborts the host as
+    /// `run_panicked` and waits for the loop to end in the emergency stop; the panic's
+    /// words come back.
+    pub fn guard(&self, body: impl FnOnce()) -> Result<(), String> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+            Ok(()) => Ok(()),
+            Err(p) => {
+                let why = panic_words(p.as_ref());
+                self.abort_for(
+                    "run_panicked",
+                    format!("the run's thread panicked ({why}); the drive went to zero at once"),
+                );
+                self.join(Duration::from_secs(10));
+                Err(why)
+            }
+        }
     }
 
     /// End the test: once the drive is at zero and the record whole, the station stops.
     pub fn finish(&self) {
+        self.inner.step.closed.store(true, Ordering::Release);
         self.inner.step.stop.store(true, Ordering::Release);
         self.inner.finish.store(true, Ordering::Release);
     }
@@ -639,6 +739,7 @@ struct Pump<'a> {
 
 impl Pump<'_> {
     fn emergency(&mut self) -> bool {
+        self.inner.step.closed.store(true, Ordering::Release);
         self.inner.step.abort.store(true, Ordering::Release);
         let _ = self.backend.emergency_stop();
         true
@@ -680,7 +781,27 @@ impl Pump<'_> {
         written >= until && h.frames_in >= until.saturating_add(self.group)
     }
 
+    /// The loop, on guard: a panic anywhere in it, not only in the engine's ticks, ends
+    /// in the emergency stop.
     fn run(&mut self) {
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.turn()));
+        if let Err(p) = caught {
+            let why = panic_words(p.as_ref());
+            let e = self.emergency();
+            self.end(
+                "loop_panicked",
+                format!("the test's loop panicked ({why}); the emergency stop was issued"),
+                None,
+                e,
+            );
+        }
+        if let Some(f) = self.feeder.as_mut() {
+            f.cancel();
+        }
+        let _ = self.backend.close();
+    }
+
+    fn turn(&mut self) {
         let began = Instant::now();
         let mut zero_wait = 0u32;
         let mut until: Option<u64> = None;
@@ -688,12 +809,11 @@ impl Pump<'_> {
             let st = self.inner.step.clone();
             if st.abort.load(Ordering::Acquire) {
                 let e = self.emergency();
-                self.end(
+                let (outcome, message) = lock(&self.inner.why).take().unwrap_or((
                     "aborted",
                     "operator abort: the drive went to zero at once".into(),
-                    None,
-                    e,
-                );
+                ));
+                self.end(outcome, message, None, e);
                 break;
             }
             let mut sink = VecCaptureSink::new();
@@ -705,11 +825,7 @@ impl Pump<'_> {
                 Ok(r) => r,
                 Err(p) => {
                     let e = self.emergency();
-                    let why = p
-                        .downcast_ref::<&str>()
-                        .map(|x| (*x).to_owned())
-                        .or_else(|| p.downcast_ref::<String>().cloned())
-                        .unwrap_or_default();
+                    let why = panic_words(p.as_ref());
                     self.end(
                         "loop_panicked",
                         format!("the test's loop panicked ({why}); the emergency stop was issued"),
@@ -722,6 +838,7 @@ impl Pump<'_> {
             match report.reason {
                 StopReason::InputEnded => {}
                 StopReason::AbortTripped(t) => {
+                    st.closed.store(true, Ordering::Release);
                     st.abort.store(true, Ordering::Release);
                     self.end(
                         "response_abort",
@@ -840,10 +957,6 @@ impl Pump<'_> {
                 }
             }
         }
-        if let Some(f) = self.feeder.as_mut() {
-            f.cancel();
-        }
-        let _ = self.backend.close();
     }
 }
 

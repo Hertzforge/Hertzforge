@@ -8,7 +8,8 @@ use hertzforge_hal::{
     AcquisitionConfig, Backend, BackendStatus, Caps, ConfiguredActual, HalError, InputRead,
 };
 use hertzforge_modal_test::host::{
-    capture_only_table, stop_ramp_frames, DriveBuild, DrivePhase, HostBuild, ModalHost, Pacing,
+    capture_only_table, stop_ramp_frames, DriveBuild, DrivePhase, HostBuild, HostError, ModalHost,
+    Pacing,
 };
 use hertzforge_modal_test::setup::SourceKind;
 use hertzforge_modal_test::source::{Frames, Source, SourceBuild};
@@ -22,6 +23,9 @@ struct Seen {
     calls: u64,
     estops: Vec<usize>,
     after_estop_peak: f32,
+    closed: bool,
+    /// Panic in the loop's look at the overloads once driven this many samples.
+    panic_after: Option<usize>,
 }
 
 struct Spy {
@@ -38,6 +42,7 @@ impl Backend for Spy {
         self.inner.open()
     }
     fn close(&mut self) -> Result<(), HalError> {
+        self.seen.lock().unwrap().closed = true;
         self.inner.close()
     }
     fn configure(
@@ -75,6 +80,13 @@ impl Backend for Spy {
         self.inner.output_space()
     }
     fn input_overloads(&mut self) -> Vec<bool> {
+        let s = self.seen.lock().unwrap();
+        let driven = s.drive.iter().filter(|v| **v != 0.0).count();
+        if s.panic_after.is_some_and(|n| driven > n) {
+            drop(s);
+            panic!("the station's status broke");
+        }
+        drop(s);
         self.inner.input_overloads()
     }
     fn poll_status(&mut self) -> BackendStatus {
@@ -405,4 +417,97 @@ fn modal_test_shaker_host_source_thread_failure_ends_in_the_emergency_stop() {
     let s = seen.lock().unwrap();
     assert_eq!(s.estops.len(), 1);
     assert_eq!(s.after_estop_peak, 0.0);
+}
+
+#[test]
+fn modal_test_shaker_host_takes_no_drive_start_after_the_end() {
+    let (b, seen) = sim(1, 1);
+    let h = ModalHost::start(shaker(1, 1.0), table(1), b, StationClass::HertzforgeSim).unwrap();
+    h.finish();
+    assert!(!h.start_drive(), "the host refuses a start once ending");
+    // Past the host's refusal, straight to the step: the step drops it too.
+    h.shared()
+        .start
+        .store(true, std::sync::atomic::Ordering::Release);
+    assert!(h.join(Duration::from_secs(20)), "the test ended");
+    let o = h.status().end.unwrap();
+    assert_eq!(o.outcome, "ended", "{}", o.message);
+    let s = seen.lock().unwrap();
+    assert!(
+        s.drive.iter().all(|v| *v == 0.0),
+        "nothing driven after the end"
+    );
+}
+
+#[test]
+fn modal_test_shaker_host_loop_panic_outside_the_ticks_ends_in_the_emergency_stop() {
+    let (b, seen) = sim(1, 1);
+    seen.lock().unwrap().panic_after = Some(2 * N);
+    let h = ModalHost::start(shaker(1, 1.0), table(1), b, StationClass::HertzforgeSim).unwrap();
+    h.start_drive();
+    assert!(h.join(Duration::from_secs(30)));
+    let o = h.status().end.expect("the loop ended with an outcome");
+    assert_eq!(o.outcome, "loop_panicked", "{}", o.message);
+    assert!(
+        o.message.contains("the station's status broke"),
+        "{}",
+        o.message
+    );
+    assert!(o.emergency_stop);
+    let s = seen.lock().unwrap();
+    assert_eq!(s.estops.len(), 1, "the emergency stop");
+    assert_eq!(s.after_estop_peak, 0.0);
+    assert!(s.closed, "the station closed");
+}
+
+#[test]
+fn modal_test_shaker_host_run_thread_panic_ends_in_the_emergency_stop() {
+    let (b, seen) = sim(1, 1);
+    let h = ModalHost::start(shaker(1, 1.0), table(1), b, StationClass::HertzforgeSim).unwrap();
+    h.start_drive();
+    assert!(wait_for(
+        || h.status().phase == DrivePhase::Driving,
+        Duration::from_secs(20)
+    ));
+    // The run's own thread fails while the shaker drives.
+    let r = h.guard(|| panic!("the run broke"));
+    assert_eq!(r, Err("the run broke".to_owned()));
+    assert!(h.finished(), "the loop ended before the guard returned");
+    let o = h.status().end.unwrap();
+    assert_eq!(o.outcome, "run_panicked", "{}", o.message);
+    assert!(o.message.contains("the run broke"), "{}", o.message);
+    assert!(o.emergency_stop);
+    let s = seen.lock().unwrap();
+    assert!(s.drive.iter().any(|v| *v != 0.0), "it drove first");
+    assert_eq!(s.estops.len(), 1);
+    assert_eq!(s.after_estop_peak, 0.0);
+}
+
+#[test]
+fn modal_test_shaker_host_that_cannot_start_its_loop_closes_the_station() {
+    fn refuse(
+        _: std::thread::Builder,
+        _: Box<dyn FnOnce() + Send>,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        Err(std::io::Error::other("no thread"))
+    }
+    let (b, seen) = sim(1, 1);
+    let build = shaker(1, 1.0);
+    let frames = build.drive.as_ref().map(|(sb, _)| Source::new(sb.clone()));
+    let r = ModalHost::start_with_spawn(
+        build,
+        frames,
+        table(1),
+        b,
+        StationClass::HertzforgeSim,
+        refuse,
+    );
+    let Err(HostError::Arm(m)) = r else {
+        panic!("the start is refused");
+    };
+    assert!(m.contains("no thread"), "{m}");
+    let s = seen.lock().unwrap();
+    assert!(s.closed, "the station closed");
+    assert_eq!(s.estops.len(), 1, "the station stopped");
+    assert!(s.drive.iter().all(|v| *v == 0.0));
 }

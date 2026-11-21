@@ -276,10 +276,24 @@ impl Source {
                     x
                 }
             };
+            let mut x = x;
+            // Bounded as the f32 the station is handed: no sample's cast passes the crest.
+            clip(&mut x, f64::from(f32_within(self.b.kind.crest() * level)));
             out.push(x);
         }
         self.frame += 1;
         out
+    }
+}
+
+/// The largest f32 not above `at` (`at` at least 0): every f64 inside it casts to an f32
+/// inside it, since rounding to the nearest f32 keeps the order.
+pub fn f32_within(at: f64) -> f32 {
+    let f = at as f32;
+    if f64::from(f) > at {
+        f.next_down()
+    } else {
+        f
     }
 }
 
@@ -341,7 +355,7 @@ impl Frames for Source {
 }
 
 /// A caught panic's words.
-fn panic_words(p: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn panic_words(p: &(dyn std::any::Any + Send)) -> String {
     p.downcast_ref::<&str>()
         .map(|x| (*x).to_owned())
         .or_else(|| p.downcast_ref::<String>().cloned())
