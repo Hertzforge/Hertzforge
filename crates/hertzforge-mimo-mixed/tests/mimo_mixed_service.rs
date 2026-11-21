@@ -277,7 +277,8 @@ fn mimo_mixed_laws_work_by_configuration_alone() {
         let mut cfg = run_config(s, 0.5, parts, 6.0);
         cfg.law.floor = hertzforge_mixed::LawPick::new(floor_law);
         cfg.law.tones = hertzforge_mixed::LawPick::new(tone_law);
-        let mut svc = service(s, cfg);
+        // The laws' answers are judged here, not their speed in a debug build.
+        let mut svc = service_unhurried(s, cfg);
         engage(&mut svc);
         assert!(
             run_until(&mut svc, MimoMixedPhase::FullLevel, 60.0),
