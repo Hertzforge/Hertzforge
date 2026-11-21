@@ -111,6 +111,10 @@ async fn mimo_mixed_runs_by_hand_through_the_wire_to_a_complete_folder() {
     c.ok("mimo_mixed.stop", json!({})).await;
     let end = mmix::state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "operator_stop", "{}", end["end"]);
+    // Once the run has ended nothing plays: no part is on, the band included.
+    for p in ["floor", "t1", "t2", "b1"] {
+        assert_eq!(part(&end, p)["on"], false, "{p}: {}", end["parts"]);
+    }
     let folder = mmix::folder(&end);
     let run = mmix::complete(&folder).await;
     assert_eq!(run["test"], "mimo_mixed", "{run}");

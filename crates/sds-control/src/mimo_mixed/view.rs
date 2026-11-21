@@ -292,8 +292,13 @@ fn part_rows(v: &MimoMixedView) -> Vec<Value> {
                                    "alarm": b.and_then(|b| b.alarm.get(i)).copied().unwrap_or(false)})
                         })
                         .collect();
+                    // A band folded into the floor keeps its level past the end; it plays
+                    // only while the run does.
+                    let running = s.is_some_and(|s| {
+                        s.state == hertzforge_mimo_mixed::service::MimoMixedState::Running
+                    });
                     (
-                        b.is_some_and(|b| b.part_level > 0.0),
+                        running && b.is_some_and(|b| b.part_level > 0.0),
                         b.map(|b| b.center_hz),
                         b.is_some_and(|b| b.limiting),
                         b.map(|b| b.part_level),
