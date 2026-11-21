@@ -29,7 +29,8 @@ from typing import Any
 #: the test modules a setup can be for, by the name a run's manifest
 #: gives its test (`RunRecord.test`)
 MODULES = ('random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer',
-           'recorder', 'mimo_random', 'mimo_shock', 'mimo_sine', 'playback')
+           'recorder', 'mimo_random', 'mimo_shock', 'mimo_sine', 'playback',
+           'modal_test')
 
 #: each module's configure request on the control service, and the member
 #: of its params that holds the configuration
@@ -44,7 +45,8 @@ CONFIGURE = {'random': ('random.configure', 'config'),
              'mimo_random': ('mimo_random.setup', 'setup'),
              'mimo_shock': ('mimo_shock.configure', 'config'),
              'mimo_sine': ('mimo_sine.configure', 'config'),
-             'playback': ('playback.configure', 'config')}
+             'playback': ('playback.configure', 'config'),
+             'modal_test': ('modal_test.configure', 'config')}
 
 #: the protocol a setup is written under when it does not say
 PROTOCOL = 'sds/1'

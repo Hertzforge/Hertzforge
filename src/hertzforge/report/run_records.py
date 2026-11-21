@@ -42,7 +42,8 @@ TEST_NAMES = {'random': 'Random', 'mimo_random': 'MIMO Random', 'sine': 'Sine',
               'mixed': 'Mixed Mode', 'classical_shock': 'Classical Shock',
               'srs': 'SRS Shock', 'twr': 'Time Waveform Replication',
               'mimo_shock': 'MIMO Shock', 'explorer': 'Explorer',
-              'recorder': 'Recorder', 'playback': 'Playback'}
+              'recorder': 'Recorder', 'playback': 'Playback',
+              'modal_test': 'Modal Test'}
 
 #: how a run ended, in words; an outcome not here is printed as written
 OUTCOMES = {'completed': 'completed', 'aborted': 'aborted',
