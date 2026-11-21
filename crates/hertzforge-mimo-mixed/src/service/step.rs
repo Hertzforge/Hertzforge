@@ -421,10 +421,13 @@ impl MimoMixedStep {
         self.stop.value() <= 0.0 && self.stop.settled()
     }
 
-    /// Start the stop ramp over `seconds`.
+    /// Start the stop ramp over `seconds`. A ramp to zero already running
+    /// is shortened if this one would end sooner, never lengthened, so an
+    /// abort during a stop ramps at the abort ramp.
     pub(crate) fn ramp_down(&mut self, seconds: f64) {
-        if self.stop.target() > 0.0 {
-            self.stop.go(0.0, (seconds * self.fs).max(1.0));
+        let frames = (seconds * self.fs).max(1.0);
+        if self.stop.target() > 0.0 || self.stop.ahead(frames) > 0.0 {
+            self.stop.go(0.0, frames);
         }
     }
 
@@ -450,7 +453,7 @@ impl MimoMixedStep {
                         channel_index: idx,
                         value: v,
                     });
-                    self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
+                    self.ramp_down(ABORT_RAMP_S);
                     break;
                 }
             }
@@ -471,7 +474,7 @@ impl MimoMixedStep {
             let x = self.d[j] * stop;
             if x.abs() >= self.abort_v[j] && self.trip.is_none() {
                 self.trip = Some(StepTrip::DriveVpk { drive: j, volts: x });
-                self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
+                self.ramp_down(ABORT_RAMP_S);
             }
             let pk = self.peak_v[j];
             let y = if x.abs() > pk {
@@ -865,6 +868,7 @@ impl ProcessStep for MimoMixedStep {
             let out = &mut drive_out[f * w..(f + 1) * w];
             self.frame_step(inp, out);
         }
+        let mut kin_trip = None;
         if let Some(kin) = self.kin.as_mut() {
             self.kin_scratch.clear();
             let take = (n_frames * n_in).min(input.len());
@@ -872,16 +876,16 @@ impl ProcessStep for MimoMixedStep {
                 self.kin_scratch
                     .extend(input[..take].iter().map(|&v| v as f64));
                 if let Some(t) = kin.feed(&self.kin_scratch) {
-                    if self.trip.is_none() {
-                        self.trip = Some(StepTrip::Kinematic {
-                            channel_index: t.channel_index,
-                            value: t.value,
-                            limit: t.limit,
-                        });
-                        self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
-                    }
+                    kin_trip = Some(StepTrip::Kinematic {
+                        channel_index: t.channel_index,
+                        value: t.value,
+                        limit: t.limit,
+                    });
                 }
             }
+        }
+        if let Some(t) = kin_trip {
+            self.latch(t);
         }
     }
 }

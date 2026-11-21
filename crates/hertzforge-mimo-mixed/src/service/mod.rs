@@ -1200,10 +1200,17 @@ impl MimoMixedService {
         self.phase = MimoMixedPhase::Stopping;
     }
 
-    /// Ramp the drive to zero on the way to `end`.
+    /// Ramp the drive to zero on the way to `end`. An abort replaces an
+    /// ending that is not one (a stop ramping down) and shortens its ramp
+    /// to the abort ramp; anything else keeps the ending already set.
     pub(crate) fn begin_end(&mut self, end: RunEnd, ramp_s: f64) {
-        if self.ending.is_some() || self.state == MimoMixedState::Ended {
+        if self.state == MimoMixedState::Ended {
             return;
+        }
+        if let Some(e) = self.ending.as_ref() {
+            if e.aborted || !end.aborted {
+                return;
+            }
         }
         if let Some(s) = self.step.as_mut() {
             s.ramp_down(ramp_s.max(ABORT_RAMP_S));
@@ -1356,9 +1363,10 @@ impl MimoMixedService {
         Ok(())
     }
 
-    /// The operator's abort: the abort ramp.
+    /// The operator's abort: the abort ramp. Taken while a stop ramps down
+    /// too: the abort replaces the stop and shortens its ramp.
     pub fn abort(&mut self, reason: &str) -> Result<(), MimoMixedError> {
-        self.running()?;
+        self.running_or_ending()?;
         self.abort_with(RunEnd {
             name: "operator_abort",
             aborted: true,
@@ -1420,7 +1428,7 @@ impl MimoMixedService {
         self.t_s += frames as f64 / self.fs;
         if let Some(t) = self.step.as_ref().and_then(|s| s.trip.clone()) {
             let end = self.step_end(&t);
-            if self.ending.is_none() {
+            if self.ending.as_ref().is_none_or(|e| !e.aborted) {
                 self.note(format!("Trip: {} ({})", end.name, end.words));
                 self.ending = Some(end);
                 self.phase = MimoMixedPhase::Stopping;

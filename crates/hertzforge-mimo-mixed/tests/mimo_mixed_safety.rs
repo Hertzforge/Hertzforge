@@ -235,6 +235,129 @@ fn mimo_mixed_abort_takes_the_drive_to_zero() {
     assert_aborted_to_zero(&svc, &e);
 }
 
+/// Requirement: an operator abort while a 5 s stop ramps down is taken: it
+/// replaces the stop, the drive is at zero within two chunks (0.5 s) of it,
+/// and the run ends `operator_abort`, an abort.
+#[test]
+fn mimo_mixed_an_abort_during_a_stop_takes_over_at_the_abort_ramp() {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = two_tone_config(30.0);
+    cfg.shutdown_ramp_s = 5.0;
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    assert!(run_until(&mut svc, MimoMixedPhase::FullLevel, 60.0));
+    svc.stop().expect("stop");
+    assert!(svc.run_chunk().expect("chunk"));
+    svc.abort("test").expect("an abort during the stop");
+    let t0 = svc.status().t_s;
+    let peaks = run_out(&mut svc, t0 + 10.0);
+    println!("after the abort {peaks:.3?}");
+    let at_zero = peaks.iter().position(|p| *p == 0.0).expect("reaches zero");
+    assert!(at_zero <= 2, "zero after {at_zero} chunks");
+    let e = ended(&svc);
+    assert_eq!(e.name, "operator_abort");
+    assert_aborted_to_zero(&svc, &e);
+}
+
+/// The simulator with control 1's input forced to 1000 once `spike` is set.
+struct Spike {
+    inner: Box<dyn hertzforge_hal::Backend>,
+    n_in: usize,
+    spike: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl hertzforge_hal::Backend for Spike {
+    fn caps(&self) -> hertzforge_hal::Caps {
+        self.inner.caps()
+    }
+    fn open(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.open()
+    }
+    fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.close()
+    }
+    fn configure(
+        &mut self,
+        table: &hertzforge_channel_table::ChannelTable,
+        acq: &hertzforge_hal::AcquisitionConfig,
+    ) -> Result<hertzforge_hal::ConfiguredActual, hertzforge_hal::HalError> {
+        self.inner.configure(table, acq)
+    }
+    fn arm(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.arm()
+    }
+    fn start(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.start()
+    }
+    fn stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.stop()
+    }
+    fn read_input(
+        &mut self,
+        out: &mut [f32],
+    ) -> Result<hertzforge_hal::InputRead, hertzforge_hal::HalError> {
+        let r = self.inner.read_input(out)?;
+        if let hertzforge_hal::InputRead::Frames(f) = r {
+            if self.spike.load(Ordering::Relaxed) {
+                for k in 0..f {
+                    out[k * self.n_in] = 1000.0;
+                }
+            }
+        }
+        Ok(r)
+    }
+    fn write_drive(&mut self, drive: &[f32]) -> Result<usize, hertzforge_hal::HalError> {
+        self.inner.write_drive(drive)
+    }
+    fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
+        self.inner.poll_status()
+    }
+    fn emergency_stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.emergency_stop()
+    }
+}
+
+/// Requirement: an input overload while a 5 s stop ramps down is reported
+/// as the end (`input_overload`, an abort, naming control 0) and ramps at
+/// the abort ramp: the drive is at zero within two chunks of it.
+#[test]
+fn mimo_mixed_a_trip_during_a_stop_is_the_end_and_ramps_at_once() {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = two_tone_config(30.0);
+    cfg.shutdown_ramp_s = 5.0;
+    let mut t = table(s);
+    t.channels[0].range_max = 100.0;
+    let spike = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let laws = MimoMixedLaws::builtin(&cfg).expect("laws");
+    let b = Spike {
+        inner: backend(s, 7),
+        n_in: s.dims().0,
+        spike: spike.clone(),
+    };
+    let mut svc = MimoMixedService::new(
+        cfg,
+        t,
+        Box::new(b),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        laws,
+    )
+    .expect("service");
+    engage(&mut svc);
+    assert!(run_until(&mut svc, MimoMixedPhase::FullLevel, 60.0));
+    svc.stop().expect("stop");
+    assert!(svc.run_chunk().expect("chunk"));
+    spike.store(true, Ordering::Relaxed);
+    let t0 = svc.status().t_s;
+    let peaks = run_out(&mut svc, t0 + 10.0);
+    println!("after the overload {peaks:.3?}");
+    let at_zero = peaks.iter().position(|p| *p == 0.0).expect("reaches zero");
+    assert!(at_zero <= 2, "zero after {at_zero} chunks");
+    let e = ended(&svc);
+    assert_eq!(e.name, "input_overload");
+    assert_eq!(e.control, Some(0));
+    assert_aborted_to_zero(&svc, &e);
+}
+
 // =============================================================================
 // Law faults in either role.
 // =============================================================================

@@ -534,6 +534,8 @@ hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_mv8_shared_ceiling_co
 hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_the_law_call_record_is_written_to_the_run_folder
 hertzforge-mimo-mixed  test:mimo_mixed_step_cost  mimo_mixed_step_does_not_allocate
 hertzforge-mimo-mixed  test:mimo_mixed_step_cost  mimo_mixed_step_cost_at_twelve_tones_is_under_the_frame_period
+hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_an_abort_during_a_stop_takes_over_at_the_abort_ramp
+hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_a_trip_during_a_stop_is_the_end_and_ramps_at_once
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_fixed_tones_on_floor
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_narrowband_fixed
