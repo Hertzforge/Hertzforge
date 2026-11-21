@@ -15,6 +15,7 @@
 	import ShockRunView from '$lib/acquire/shock/ShockRunView.svelte';
 	import MsRunView from '$lib/acquire/mimoshock/MsRunView.svelte';
 	import MsineRunView from '$lib/acquire/mimosine/MsineRunView.svelte';
+	import MmixRunView from '$lib/acquire/mimomixed/MmixRunView.svelte';
 	import SrsRunView from '$lib/acquire/srs/SrsRunView.svelte';
 	import SineRunView from '$lib/acquire/sine/SineRunView.svelte';
 	import MixedRunView from '$lib/acquire/mixed/MixedRunView.svelte';
@@ -42,7 +43,8 @@
 	const recorderRun = $derived(app.config.popoutTest === 'recorder');
 	const mimoShockRun = $derived(app.config.popoutTest === 'mimo_shock');
 	const mimoSineRun = $derived(app.config.popoutTest === 'mimo_sine');
-	const randomRun = $derived(!mimoRun && !shockRun && !srsRun && !sineRun && !mixedRun && !twrRun && !explorerRun && !recorderRun && !mimoShockRun && !mimoSineRun);
+	const mimoMixedRun = $derived(app.config.popoutTest === 'mimo_mixed');
+	const randomRun = $derived(!mimoRun && !shockRun && !srsRun && !sineRun && !mixedRun && !twrRun && !explorerRun && !recorderRun && !mimoShockRun && !mimoSineRun && !mimoMixedRun);
 	const mimo = $derived(app.mimo);
 	const shock = $derived(app.shock);
 	const srs = $derived(app.srs);
@@ -53,15 +55,16 @@
 	const recorder = $derived(app.recorder);
 	const mimoShock = $derived(app.mimoShock);
 	const mimoSine = $derived(app.mimoSine);
+	const mimoMixed = $derived(app.mimoMixed);
 	const views = $derived(app.mimoViews);
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
-	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : mixedRun ? 'Mixed Mode' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : mimoShockRun ? 'MIMO Shock' : mimoSineRun ? 'MIMO Sine' : 'Random');
+	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : mixedRun ? 'Mixed Mode' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : mimoShockRun ? 'MIMO Shock' : mimoSineRun ? 'MIMO Sine' : mimoMixedRun ? 'MIMO Mixed Mode' : 'Random');
 	/** The test types on the test screen's frame: one header line, and their run's own dock. */
-	const framed = $derived(sineRun || mixedRun || shockRun || srsRun || twrRun || explorerRun || recorderRun || mimoShockRun || mimoSineRun);
-	const framedHost = $derived(mimoSineRun ? mimoSine : mimoShockRun ? mimoShock : shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : mixedRun ? mixed : sine);
-	const framedScreen = $derived(mimoSineRun ? app.mimoSineViews : mimoShockRun ? app.mimoShockViews : shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : mixedRun ? app.mixedViews : app.sineViews);
-	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : mixedRun ? app.mixedViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : mimoShockRun ? app.mimoShockViews.page.name : mimoSineRun ? app.mimoSineViews.page.name : display.page.name);
+	const framed = $derived(sineRun || mixedRun || shockRun || srsRun || twrRun || explorerRun || recorderRun || mimoShockRun || mimoSineRun || mimoMixedRun);
+	const framedHost = $derived(mimoMixedRun ? mimoMixed : mimoSineRun ? mimoSine : mimoShockRun ? mimoShock : shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : mixedRun ? mixed : sine);
+	const framedScreen = $derived(mimoMixedRun ? app.mimoMixedViews : mimoSineRun ? app.mimoSineViews : mimoShockRun ? app.mimoShockViews : shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : mixedRun ? app.mixedViews : app.sineViews);
+	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : mixedRun ? app.mixedViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : mimoShockRun ? app.mimoShockViews.page.name : mimoSineRun ? app.mimoSineViews.page.name : mimoMixedRun ? app.mimoMixedViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
@@ -123,6 +126,11 @@
 					e.preventDefault();
 					void mimoSine.abort();
 				}
+			} else if (mimoMixedRun) {
+				if (mimoMixed.actions.abort.enabled) {
+					e.preventDefault();
+					void mimoMixed.abort();
+				}
 			} else if (acq.actions.abort.enabled) {
 				e.preventDefault();
 				void acq.abort();
@@ -178,6 +186,10 @@
 			<MsineRunView ms={mimoSine} views={app.mimoSineViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_sine')}>
 				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</MsineRunView>
+		{:else if mimoMixedRun}
+			<MmixRunView mm={mimoMixed} views={app.mimoMixedViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_mixed')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</MmixRunView>
 		{:else if srsRun}
 			<SrsRunView {srs} views={app.srsViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'srs')}>
 				{#snippet station()}<StationPanel {acq} />{/snippet}
