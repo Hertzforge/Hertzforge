@@ -321,19 +321,19 @@ def test_the_impact_fit_recovers_the_structure_less_the_window(converted):
                                        rtol=0, atol=2e-2)
 
 
-def test_the_shaker_fit_finds_the_two_modes_its_four_frames_resolve(converted):
-    """Four burst-random frames over 101 lines: the fit finds the modes at 42 and 118 Hz
-    within a tenth of a percent and their damping within 2 %; its third find is a spurious
-    pole near 44 Hz, and the mode at 196 Hz, four lines from the band's end, is not found."""
+def test_the_shaker_fit_finds_the_structures_three_modes_and_nothing_else(converted):
+    """Four burst-random frames of a 1024-sample block over 201 lines: three finds give the
+    modes at 42, 118 and 196 Hz, each within a tenth of a percent in frequency and 1 % in
+    damping, one find to each mode, and no other mode."""
     _f, _done, project = converted[SHAKER]
     assert fit_refusal(project['modal_frf']) == ''
     shapes = _fit(project, 'modal_frf')
     modes = _structure(SHAKER)['modes']
     found = sorted(zip(shapes.frequency, shapes.damping, strict=True))
-    for mode in modes[:2]:
-        f, zeta = min(found, key=lambda p: abs(p[0] - mode['f_hz']))
-        assert abs(f / mode['f_hz'] - 1) < 1e-3 and abs(zeta / mode['damping'] - 1) < 2e-2
-    assert not any(abs(f - modes[2]['f_hz']) < 2.0 for f, _z in found)
+    assert len(found) == len(modes) == 3
+    for (f, zeta), mode in zip(found, modes, strict=True):
+        assert abs(f / mode['f_hz'] - 1) < 1e-3, (f, mode)
+        assert abs(zeta / mode['damping'] - 1) < 1e-2, (zeta, mode)
 
 
 def _cut_off(tmp_path, name, *, drop=(), lose=0):
