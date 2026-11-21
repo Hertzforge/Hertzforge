@@ -359,7 +359,7 @@ describe('modal test after review', () => {
 	it('modal test force labels: inside the drawing area beside the second impact, near its top', () => {
 		expect(forceNotes(null, 1, false)).toEqual([]);
 		const [early] = forceNotes(0.08, 1, false);
-		expect(early).toEqual({ id: 'double-hit', text: 'Double Hit', fx: 0.1, fy: 0.03 });
+		expect(early).toEqual({ id: 'double-hit', text: 'Double\u00a0Hit', fx: 0.1, fy: 0.03 });
 		// late in the block the label sits on the marker's left, so it stays inside the plot
 		expect(forceNotes(0.9, 1, false)[0].fx).toBeCloseTo(0.6, 12);
 		const both = forceNotes(0.08, 1, true);

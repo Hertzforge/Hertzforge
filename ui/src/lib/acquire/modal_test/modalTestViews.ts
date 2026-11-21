@@ -146,7 +146,7 @@ export function forceNotes(second: number | null, blockEnd: number, overload: bo
 	const out: PaneNote[] = [];
 	if (second !== null && blockEnd > 0) {
 		const at = Math.min(1, Math.max(0, second / blockEnd));
-		out.push({ id: 'double-hit', text: 'Double Hit', fx: at > 0.6 ? Math.max(0, at - 0.3) : at + 0.02, fy: 0.03 });
+		out.push({ id: 'double-hit', text: 'Double\u00a0Hit', fx: at > 0.6 ? Math.max(0, at - 0.3) : at + 0.02, fy: 0.03 });
 	}
 	if (overload) out.push({ id: 'overload', text: 'Overload', fx: 0.02, fy: second !== null ? 0.2 : 0.03 });
 	return out;

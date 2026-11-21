@@ -685,6 +685,11 @@
 		flex-direction: column;
 	}
 
+	/* a plot's title keeps its words: a readout beside it goes to the next line rather than cut it */
+	.plot :global(.head .title) {
+		flex: 1 0 auto;
+	}
+
 	.empty {
 		margin: auto;
 		padding: var(--sp-3);
@@ -939,6 +944,14 @@
 
 		.points {
 			min-height: 64px;
+		}
+
+		.left {
+			gap: var(--sp-2);
+		}
+
+		.left .panel {
+			padding: var(--sp-2) var(--sp-3);
 		}
 	}
 </style>
