@@ -723,6 +723,8 @@ export interface Shown {
 		limits: boolean;
 		complex: boolean;
 		projection: boolean;
+		/** With `projection`: the distance nodes are matched within, typed or the default, and whether its geometries have units (else it is in the model's own). */
+		match_distance: { value: number; defined: boolean } | null;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
 		values_dofs: string[];
@@ -752,8 +754,8 @@ export interface ShowPrefs {
 	projection: boolean;
 	/** The warning and abort limits of a specification, drawn on its 2-D plot. */
 	limits: boolean;
-	/** Two shape sets on two geometries: how far a test node may be from its model node, in percent of the test geometry's extent. */
-	match_tolerance: number;
+	/** Two shape sets on two geometries: how far a test node may be from its model node, in meters (the model's own units when its geometries have none); 0 for 2 % of the size of the geometry projected onto. */
+	match_distance: number;
 	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';

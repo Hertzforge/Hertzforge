@@ -261,7 +261,7 @@ class AnalyzeState {
 			this.shapeView = null;
 			// each selection opens as it is: Projection is asked for again, not carried over
 			// and so is a loosened node match: one pair's tolerance is not the next pair's
-			if (this.prefs.projection || this.prefs.match_tolerance !== 2) this.prefs = { ...this.prefs, projection: false, match_tolerance: 2 };
+			if (this.prefs.projection || this.prefs.match_distance !== 0) this.prefs = { ...this.prefs, projection: false, match_distance: 0 };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -282,7 +282,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						match_tolerance: this.prefs.match_tolerance,
+						match_distance: this.prefs.match_distance,
 						limits: this.prefs.limits,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
@@ -655,6 +655,26 @@ class AnalyzeState {
 			if (view.view === 'shape3d' && view.cursor === 'frequency') return view.modes[0]?.frequency_hz ?? null;
 		}
 		return null;
+	}
+
+	/**
+	 * The distance two shape sets on two geometries are matched within, as the bar shows it: in the
+	 * display system's length, or the model's own numbers when its geometries have no units. Null when
+	 * the selection compares no such pair.
+	 */
+	get matchShown(): { value: number; unit: string } | null {
+		const held = this.shown?.offers?.match_distance;
+		if (!held) return null;
+		const length = held.defined ? this.app.units.length : null;
+		return { value: Number((held.value / (length?.to_si ?? 1)).toPrecision(4)), unit: length?.unit ?? '' };
+	}
+
+	/** A node match distance typed in the bar, in the units it shows it in, 0 for the default; false, and nothing asked, for one below 0. */
+	setMatchDistance(typed: number): boolean {
+		if (!Number.isFinite(typed) || typed < 0) return false;
+		const held = this.shown?.offers?.match_distance;
+		this.setPref('match_distance', typed * (held?.defined ? (this.app.units.length?.to_si ?? 1) : 1));
+		return true;
 	}
 
 	/** One of the bar's choices changed: kept, and the selection read again. */
@@ -1610,7 +1630,7 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
-		match_tolerance: 2,
+		match_distance: 0,
 		limits: true,
 		bars: true,
 		values_dofs: 'all',
