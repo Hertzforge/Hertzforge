@@ -752,9 +752,11 @@ async fn m3(b: &mut Bench) -> Result<RowOut, String> {
 }
 
 /// The coherence between the looped references 1 and 2 over the frames taken, the band's mean.
-fn ref_coherence(f: &Path) -> Option<f64> {
+/// The coherence between reference inputs `a` and `b` over the frames averaged, the mean
+/// over the band's lines.
+fn ref_coherence(f: &Path, a: u32, b: u32) -> Option<f64> {
     let inp = Stream::read(f, "inputs")?;
-    let (x, y) = (inp.ch(1), inp.ch(2));
+    let (x, y) = (inp.ch(a), inp.ch(b));
     let (lo, hi) = (
         (BAND.0 * BLOCK as f64 / FS).round() as usize,
         (BAND.1 * BLOCK as f64 / FS).round() as usize,
@@ -791,7 +793,7 @@ async fn m4(b: &mut Bench) -> Result<RowOut, String> {
         .is_some_and(|e| e.iter().any(|x| x["reason"] == "too_few_averages"));
     let cfg = shaker("M4", "burst_random", &[5, 6], RANDOM_LEVEL, 30);
     let (_, f) = b.shaker_run(&cfg, &[1, 2]).await?;
-    let c = ref_coherence(&f).unwrap_or(f64::NAN);
+    let c = ref_coherence(&f, 1, 2).unwrap_or(f64::NAN);
     let side = json_at(&f.join("results/modal_reference_spectra.json"));
     let shape = &side["arrays"][1]["shape"];
     let v = f64s(&f.join("results/modal_reference_spectra.bin"));
@@ -822,6 +824,87 @@ async fn m4(b: &mut Bench) -> Result<RowOut, String> {
                 format!("refused too_few_averages: {refused}"),
                 "refused by name",
                 Some(refused),
+            ),
+        ],
+    })
+}
+
+async fn m5(b: &mut Bench) -> Result<RowOut, String> {
+    // Three drives, references inputs 1 to 3, the response input 4, drive 8 idle.
+    let refs = [1, 2, 3];
+    let rows = table(&b.modules, &refs, 1.0);
+    let few = shaker("M5", "periodic_random", &[5, 6, 7], RANDOM_LEVEL, 5);
+    let r = b.configure(&few, &rows).await?;
+    let refused = r["error"]["detail"]["errors"]
+        .as_array()
+        .is_some_and(|e| e.iter().any(|x| x["reason"] == "too_few_averages"));
+    let cfg = shaker("M5", "periodic_random", &[5, 6, 7], RANDOM_LEVEL, 30);
+    let (_, f) = b.shaker_run(&cfg, &refs).await?;
+    let pairs = [(1, 2), (1, 3), (2, 3)];
+    let coh: Vec<f64> = pairs
+        .iter()
+        .map(|(x, y)| ref_coherence(&f, *x, *y).unwrap_or(f64::NAN))
+        .collect();
+    let worst_c = coh.iter().fold(0.0f64, |m, v| m.max(*v));
+    let side = json_at(&f.join("results/modal_reference_spectra.json"));
+    let nl = side["arrays"][1]["shape"][0].as_u64().unwrap_or(0) as usize;
+    let v = f64s(&f.join("results/modal_reference_spectra.bin"));
+    let cond: Vec<f64> = v.iter().rev().take(nl).copied().collect();
+    let worst = cond.iter().fold(0.0f64, |m, v| m.max(*v));
+    let finite = nl > 0 && cond.iter().all(|v| v.is_finite());
+    // Drive 8 idle: every sample it was given zero, and its looped input (the response,
+    // input 4) at the floor.
+    let drv = Stream::read(&f, "drives").ok_or("no drives stream")?;
+    let inp = Stream::read(&f, "inputs").ok_or("no inputs stream")?;
+    let d8 = drv.ch(8);
+    let idle = drv.index.contains(&8) && d8.iter().all(|v| *v == 0.0);
+    let resp = rms(&inp.ch(4)) / b.gain;
+    Ok(RowOut {
+        id: "M5",
+        what: "Three drives, periodic random",
+        folder: Some(f),
+        not_run: None,
+        crits: vec![
+            crit(
+                "coherence between the references",
+                format!(
+                    "1-2 {:.4}, 1-3 {:.4}, 2-3 {:.4} over the band",
+                    coh[0], coh[1], coh[2]
+                ),
+                "each below 0.1",
+                Some(worst_c < 0.1),
+            ),
+            crit(
+                "condition number per line",
+                format!("{nl} lines, largest {worst:.3}"),
+                "finite and reported",
+                Some(finite),
+            ),
+            crit(
+                "5 averages for 3 references",
+                format!("refused too_few_averages: {refused}"),
+                "refused by name",
+                Some(refused),
+            ),
+            crit(
+                "drive 8 idle",
+                format!(
+                    "{} samples recorded, largest {:.2e} V",
+                    d8.len(),
+                    d8.iter().fold(0.0f64, |m, v| m.max(v.abs()))
+                ),
+                "every sample zero",
+                Some(idle),
+            ),
+            crit(
+                "input 4 (looped from idle drive 8)",
+                format!("{resp:.2e} V RMS"),
+                if b.rehearse {
+                    NOT_SIM
+                } else {
+                    "at the floor (under 2 mV)"
+                },
+                loopback(b.rehearse, resp < FLOOR_V),
             ),
         ],
     })
@@ -1007,7 +1090,17 @@ async fn m8(b: &mut Bench) -> Result<RowOut, String> {
     })
     .await?;
     tokio::time::sleep(Duration::from_secs_f64(2.0 / b.speed())).await;
+    // The wall time from the abort's request to its answer, then the state at once.
+    let t0 = Instant::now();
     b.c.ok("modal_test.abort", json!({})).await?;
+    let answer_ms = t0.elapsed().as_secs_f64() * 1e3;
+    let at_once = b.c.state().await?;
+    let z =
+        b.c.until(Duration::from_secs(10), "the drive reported zeroed", |s| {
+            s["drive_phase"] == "zeroed"
+        })
+        .await?;
+    let zeroed_ms = t0.elapsed().as_secs_f64() * 1e3;
     let s =
         b.c.until(Duration::from_secs(60), "the end", |s| {
             s["state"] == "finished"
@@ -1036,10 +1129,19 @@ async fn m8(b: &mut Bench) -> Result<RowOut, String> {
                 ),
             ),
             crit(
-                "drive at zero within the abort bound",
-                "the recorded streams end with the loop at the abort".into(),
-                "not computable from the run folder",
-                None,
+                "drive reported at zero after the abort's answer",
+                format!(
+                    "phase {} at the first state read after the answer, {} by {zeroed_ms:.1} ms, {} at the end",
+                    at_once["drive_phase"], z["drive_phase"], s["drive_phase"]
+                ),
+                "zeroed within 10 s, and at the end",
+                Some(z["drive_phase"] == "zeroed" && s["drive_phase"] == "zeroed"),
+            ),
+            crit(
+                "abort request to its answer",
+                format!("{answer_ms:.1} ms wall time"),
+                "recorded",
+                Some(answer_ms.is_finite()),
             ),
             crit(
                 "looped input after the abort",
@@ -1270,6 +1372,10 @@ async fn main() {
             shaker("M4", "burst_random", &[5, 6], RANDOM_LEVEL, 30),
             vec![1, 2],
         ),
+        (
+            shaker("M5", "periodic_random", &[5, 6, 7], RANDOM_LEVEL, 30),
+            vec![1, 2, 3],
+        ),
         (shaker("M6", "random", &[5], 0.2, 30), vec![1]),
         (shaker("M7", "random", &[5], RANDOM_LEVEL, 10000), vec![1]),
         (impact("M9"), vec![1]),
@@ -1331,13 +1437,7 @@ async fn main() {
             "M2" => m2(&mut b).await,
             "M3" => m3(&mut b).await,
             "M4" => m4(&mut b).await,
-            "M5" => Ok(RowOut {
-                id: "M5",
-                what: "Four drives, periodic random",
-                crits: Vec::new(),
-                folder: None,
-                not_run: Some("four references take all four inputs and leave no response row, which the setup refuses (no_response): the row needs a fifth input".into()),
-            }),
+            "M5" => m5(&mut b).await,
             "M6" => m6(&mut b).await,
             "M7" => m7(&mut b).await,
             "M8" => m8(&mut b).await,
