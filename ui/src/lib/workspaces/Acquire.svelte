@@ -22,6 +22,8 @@
 	import { EXPLORER_STATE_WORDS } from '$lib/acquire/explorer/explorerWords';
 	import RecorderScreen from '$lib/acquire/recorder/RecorderScreen.svelte';
 	import PlaybackScreen from '$lib/acquire/playback/PlaybackScreen.svelte';
+	import ModalTestScreen from '$lib/acquire/modal_test/ModalTestScreen.svelte';
+	import { MODAL_CHIP_WORDS, chipState } from '$lib/acquire/modal_test/modalTestWords';
 	import { RECORDER_STATE_WORDS } from '$lib/acquire/recorder/recorderWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
@@ -55,7 +57,9 @@
 											? MS_STATE_WORDS[app.mimoShock.status.state]
 											: app.mimoSine.isLive && app.mimoSine.status
 												? MSINE_STATE_WORDS[app.mimoSine.status.state]
-												: null
+												: app.modalTest.isLive && app.modalTest.now
+													? MODAL_CHIP_WORDS[chipState(app.modalTest.now.state)]
+													: null
 	);
 </script>
 
@@ -85,6 +89,8 @@
 	<RecorderScreen {app} />
 {:else if tests.screen === 'playback'}
 	<PlaybackScreen {app} />
+{:else if tests.screen === 'modal_test'}
+	<ModalTestScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

@@ -124,6 +124,9 @@
 			} else if (app.recorder.actions.abort.enabled) {
 				e.preventDefault();
 				void app.recorder.abort();
+			} else if (app.modalTest.actions.abort.enabled) {
+				e.preventDefault();
+				void app.modalTest.abort();
 			}
 			return;
 		}

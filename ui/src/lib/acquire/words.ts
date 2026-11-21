@@ -98,7 +98,8 @@ export const OUTCOME_WORDS: Record<RandomOutcome, string> = {
 export function outcomeTone(outcome: RandomOutcome | (string & {})): Status {
 	if (outcome === 'completed') return 'pass';
 	// Playback's controlled stop is the operator's, as `operator_stop` is everywhere else
-	if (outcome === 'operator_stop' || outcome === 'stopped') return 'info';
+	// a Modal Test's End Test is the operator's too
+	if (outcome === 'operator_stop' || outcome === 'stopped' || outcome === 'ended') return 'info';
 	return 'fail';
 }
 

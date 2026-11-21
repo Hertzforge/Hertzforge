@@ -84,7 +84,7 @@ pub fn describe(random: &Value, sim: &Value) -> Option<String> {
 
 /// Each module's state, the states in which its run is live, and its name in words. A module
 /// the service does not answer for is taken as idle.
-const MODULE_STATES: [(&str, &[&str], &str); 10] = [
+const MODULE_STATES: [(&str, &[&str], &str); 11] = [
     (
         "random.state",
         &["armed", "running", "review", "stopping"],
@@ -134,6 +134,19 @@ const MODULE_STATES: [(&str, &[&str], &str); 10] = [
         "recorder.state",
         &["starting", "running", "stopping"],
         "A Recorder run",
+    ),
+    (
+        "modal_test.state",
+        &[
+            "starting",
+            "idle",
+            "armed",
+            "captured",
+            "measuring",
+            "stopping",
+            "point_done",
+        ],
+        "A Modal Test",
     ),
 ];
 
