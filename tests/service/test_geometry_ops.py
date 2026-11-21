@@ -846,7 +846,7 @@ def test_select_mode_clicks_and_deletes_the_tables_elements(project, validate):
 def test_an_element_added_in_a_groups_edit_shows_the_groups_again(project, validate):
     geometry = project['Geometry']
     group = int(geometry.group_id[0])
-    drawn, groups, elements = _edited(project, {'kind': 'group', 'id': group}, validate)
+    drawn, _groups, _elements = _edited(project, {'kind': 'group', 'id': group}, validate)
     pick = drawn['pick']
     assert pick['params']['family'] == 'quads' and pick['params']['group'] == group
     assert pick['params']['groups'] == str(group)

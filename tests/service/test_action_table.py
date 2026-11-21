@@ -222,11 +222,13 @@ def test_a_part_offers_its_own_verbs_alone(plate):
     assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
 
 
-def test_a_family_fills_the_element_it_adds(plate):
+def test_a_family_opens_its_edit_which_adds_its_elements(plate):
     geometry = named(plate, 'geometry')
     family = table(plate, geometry, part={'name': geometry, 'kind': 'family', 'id': 'hexes'})[0]
-    assert row(family, 'Add Element')['fill']['family'] == 'hexes'
-    assert row(family, 'Add Element')['part'] is True and 'Add Group' in verbs_in(family)
+    # an element is added in Edit's Add mode, which the family fills
+    assert row(family, 'Edit')['fill']['family'] == 'hexes'
+    assert row(family, 'Edit')['part'] is True and 'Add Group' in verbs_in(family)
+    assert 'Add Element' not in verbs_in(family)
 
 
 def test_element_groups_picked_together_fill_what_ties_them(plate):
