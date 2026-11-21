@@ -204,6 +204,11 @@ class Service:
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
                  workers: int = 2) -> None:
         self.operations: dict[str, Operation] = {op.id: op for op in operations}
+        #: the clients connected now, and the event loop's time when the last one left (None
+        #: until one has come and gone): `hertzforge` with no command stops once its browser
+        #: tab has been closed for a while (`__main__._closed_for`)
+        self.connections: int = 0
+        self.last_closed: float | None = None
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             workers, thread_name_prefix='hertzforge-service')
 
@@ -835,7 +840,13 @@ async def start(service: Service, host: str = '127.0.0.1',
 
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
-        await Connection(service, socket).serve()
+        service.connections += 1
+        try:
+            await Connection(service, socket).serve()
+        finally:
+            service.connections -= 1
+            if not service.connections:
+                service.last_closed = asyncio.get_running_loop().time()
         log.info('connection from %s closed', socket.remote_address)
 
     # no per-message compression: loopback, and deflating a dense model's

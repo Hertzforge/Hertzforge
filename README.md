@@ -24,7 +24,8 @@ hertzforge
 ```
 
 The interface opens at `http://127.0.0.1:8791/`, or on another port when the
-desktop app already holds that one, and stops with Ctrl-C. On a machine with no
+desktop app already holds that one. It stops a few seconds after its browser tab
+is closed, or with Ctrl-C. On a machine with no
 browser, such as over SSH, the command prints the address to open instead. Files
 are opened by typing their path, since a browser does not hand a page the paths
 of the files it picks.
