@@ -56,8 +56,11 @@ impl MimoMixedService {
             }
             let got = self.take_records();
             self.t_s += got as f64 / self.fs;
-            if let Some(t) = self.step.as_ref().and_then(|s| s.trip.clone()) {
-                let end = self.step_end(&t);
+            let trip = self.step.as_ref().and_then(|s| s.trip.clone());
+            if let Some(end) = trip
+                .map(|t| self.step_end(&t))
+                .or_else(|| self.judge_drive_rms())
+            {
                 self.ident_rec = None;
                 self.wind_down(end);
                 return Err(self.ended_error());
@@ -70,6 +73,39 @@ impl MimoMixedService {
                 return Ok(self.ident_rec.take().expect("record"));
             }
         }
+    }
+
+    /// Each limit channel of an identification estimate against its
+    /// ceiling plus its abort margin at full level (MIMO Random's
+    /// identification rule, the level at 0 dB: one line over aborts
+    /// `limit_abort`). `Some` with the end when one is over.
+    fn ident_limit_trip(&self, e: &hertzforge_mimo_random::estimate::Estimate) -> Option<RunEnd> {
+        let (n, q) = (self.cfg.n(), self.cfg.n() + self.cfg.p());
+        for (i, l) in self.cfg.limits.iter().enumerate() {
+            let margin = 10f64.powf(l.abort_margin_db / 10.0);
+            for line in self.band.0..self.band.1 {
+                let c = l.ceiling(line);
+                let v = e.auto[line * q + n + i];
+                if c > 0.0 && v > c * margin {
+                    let over_db = 10.0 * (v / c).log10();
+                    return Some(RunEnd {
+                        name: "limit_abort",
+                        aborted: true,
+                        part: None,
+                        control: None,
+                        drive: None,
+                        words: format!(
+                            "limit channel {} read {over_db:.1} dB over its ceiling at {:.1} Hz \
+                             while identifying, past its {:.1} dB abort margin",
+                            l.channel_index,
+                            line as f64 * self.df,
+                            l.abort_margin_db
+                        ),
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// The error a run that ended reports.
@@ -230,6 +266,10 @@ impl MimoMixedService {
                 lag = best_lag(&ctl, &rec.drive[0][settle..settle + w + max_lag], max_lag);
             }
             let e = self.ident_estimate(&rec, settle, lag);
+            if let Some(end) = self.ident_limit_trip(&e) {
+                self.wind_down(end);
+                return Err(self.ended_error());
+            }
             level = self.level_vs_reference(&e.g_cc);
             steps += 1;
             if (level - target).abs() <= idc.tolerance_db {
@@ -270,6 +310,10 @@ impl MimoMixedService {
         // The record.
         let rec = self.ident_play(self.nfft + seg(idc.frames) + max_lag)?;
         let e = self.ident_estimate(&rec, self.nfft, lag);
+        if let Some(end) = self.ident_limit_trip(&e) {
+            self.wind_down(end);
+            return Err(self.ended_error());
+        }
         level = self.level_vs_reference(&e.g_cc);
         drop(rec);
         self.ident_park()?;

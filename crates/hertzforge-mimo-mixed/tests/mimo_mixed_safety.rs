@@ -447,6 +447,158 @@ fn mimo_mixed_a_tone_over_a_limit_ceiling_ends_the_run() {
     assert_eq!(end.name, "completed", "{}", end.words);
 }
 
+/// A floor-only run on Linear4x4 held 12 s at full level, each drive's rms
+/// ceiling `ceiling_v` (its abort at the ceiling when `abort_at_ceiling`,
+/// else the default ceiling plus 1 dB); the end and whether the drive is at
+/// zero.
+fn rms_run(ceiling_v: f64, abort_at_ceiling: bool) -> (RunEnd, bool) {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = run_config(s, 0.5, vec![], 12.0);
+    for d in &mut cfg.drives {
+        d.ceiling_vrms = ceiling_v;
+        d.abort_vrms = abort_at_ceiling.then_some(ceiling_v);
+    }
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    run_out(&mut svc, 80.0);
+    (ended(&svc), svc.drive_is_zero())
+}
+
+/// Requirement: each drive's random part is judged against its rms abort
+/// (MIMO Random's `drive_vrms`, at `abort_vrms` or the ceiling plus 1 dB)
+/// on every window of `nfft` frames. The floor alone on this fixture asks
+/// 0.156 to 0.158 V rms of each drive at full level (its drive matrix's
+/// rms, read while writing this test), so a 0.15 V ceiling holds every
+/// drive at its ceiling, 0.4 dB under what it asks, with the floor still
+/// equalizing. With the abort at the ceiling the windows scatter about
+/// their abort and the run ends `drive_vrms`, an abort at zero naming a
+/// drive; with the default abort 1 dB over the ceiling the same run
+/// completes.
+#[test]
+fn mimo_mixed_a_drive_at_its_rms_abort_ends_the_run() {
+    let (end, zero) = rms_run(0.15, true);
+    assert_eq!(end.name, "drive_vrms", "{}", end.words);
+    assert!(end.aborted && end.drive.is_some());
+    assert!(zero, "drive left playing");
+    let (end, _) = rms_run(0.15, false);
+    assert_eq!(end.name, "completed", "{}", end.words);
+}
+
+/// A run on Linear4x4 with the floor and one 40 Hz band at 900 Hz, servoed
+/// by `scalar_servo`, of `level` g^2/Hz added (abort band 40 dB either way, so the band's own
+/// abort stays out of it), each drive's rms ceiling `ceiling_v` and the
+/// change cap's rise `up_db`, held 12 s at full level; the end, whether the
+/// band was ever shown limiting, and the band's error over the controls at
+/// the end, dB.
+fn band_run(level: f64, ceiling_v: f64, up_db: f64) -> (RunEnd, bool, f64) {
+    let s = SineStructure::Linear4x4;
+    let mut b = band("nb", fixed(900.0), 40.0, added(level, 0.5));
+    if let MimoPartBody::Narrowband(nb) = &mut b.body {
+        nb.alarm_db = hertzforge_mimo_mixed::config::PerControl::All((40.0, 40.0));
+        nb.abort_db = hertzforge_mimo_mixed::config::PerControl::All((40.0, 40.0));
+    }
+    let mut cfg = run_config(s, 0.5, vec![b], 12.0);
+    cfg.law.bands = hertzforge_mixed::LawPick::new("scalar_servo");
+    for d in &mut cfg.drives {
+        d.ceiling_vrms = ceiling_v;
+    }
+    cfg.caps.up_db = up_db;
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    let mut limiting = false;
+    let mut err = f64::NAN;
+    while svc.status().t_s < 80.0 {
+        let st = svc.status();
+        if st.phase == MimoMixedPhase::FullLevel {
+            let e = &st.bands[0].error_db;
+            err = e.iter().sum::<f64>() / e.len() as f64;
+        }
+        let going = svc.run_chunk().expect("chunk");
+        limiting |= svc.status().bands.iter().any(|b| b.limiting);
+        if !going {
+            break;
+        }
+    }
+    println!(
+        "band {level} g^2/Hz, ceilings {ceiling_v} V, cap {up_db} dB: limiting {limiting}, \
+         band error {err:.2} dB"
+    );
+    (ended(&svc), limiting, err)
+}
+
+/// Requirement: a servoed band's drive is held under the drives' rms
+/// ceilings with the floor's (the bands' share cut to what the floor's
+/// leaves) and its rise under the change cap, and the band is shown
+/// limiting while either holds it, so its servo does not wind up. The
+/// floor alone asks about 0.157 V rms of each drive and a band of 0.01
+/// g^2/Hz over 40 Hz about 0.075 V more: with the default ceilings the band
+/// reaches its level and is never shown limiting; with 0.16 V ceilings the
+/// band gets what the floor leaves, reads well short of its level, and is
+/// shown limiting. With the default ceilings and a 0.3 dB change cap (the
+/// floor still equalizes under it) the servo's rises are capped: the band
+/// is shown limiting there too.
+#[test]
+fn mimo_mixed_a_band_is_held_by_the_drive_ceilings_and_the_change_cap() {
+    let (end, limiting, free_db) = band_run(1e-2, 2.0, 3.5);
+    assert_eq!(end.name, "completed", "{}", end.words);
+    assert!(!limiting, "shown limiting with nothing holding it");
+    assert!(free_db.abs() < 1.5, "the free band read {free_db:.2} dB");
+    let (end, limiting, held_db) = band_run(1e-2, 0.165, 3.5);
+    assert_eq!(end.name, "completed", "{}", end.words);
+    assert!(
+        limiting,
+        "the ceilings held the band but it was not shown limiting"
+    );
+    assert!(held_db < -3.0, "the held band read {held_db:.2} dB");
+    let (_, limiting, _) = band_run(3e-3, 2.0, 0.3);
+    assert!(
+        limiting,
+        "the change cap held the band but it was not shown limiting"
+    );
+}
+
+/// Requirement: the identification holds MIMO Random's protections on
+/// each segment: a drive whose identification rms reaches its rms abort
+/// ends it `drive_vrms` (each ceiling here half the rms a probe
+/// identification settles on), and a limit channel over its ceiling plus
+/// its margin at full level ends it `limit_abort` (BaseArticle6x4's
+/// monitor channel 5 under a ceiling of 1e-12 g^2/Hz); each an abort with
+/// the drive at zero.
+#[test]
+fn mimo_mixed_the_identification_aborts_on_drive_rms_and_limits() {
+    let s = SineStructure::Linear4x4;
+    let cfg = run_config(s, 0.5, vec![], 6.0);
+    let mut svc = service(s, cfg.clone());
+    svc.arm().expect("arm");
+    let used = svc.identify().expect("identify").drive_vrms.clone();
+    println!("identified at {used:.4?} V rms");
+    let mut cfg = cfg;
+    for (d, v) in cfg.drives.iter_mut().zip(&used) {
+        d.ceiling_vrms = v / 2.0;
+    }
+    let mut svc = service(s, cfg);
+    svc.arm().expect("arm");
+    assert!(svc.identify().is_err(), "identified past the rms abort");
+    let e = ended(&svc);
+    assert_eq!(e.name, "drive_vrms", "{}", e.words);
+    assert!(e.drive.is_some());
+    assert_aborted_to_zero(&svc, &e);
+
+    let s = SineStructure::BaseArticle6x4;
+    let mut cfg = run_config(s, 0.5, vec![], 6.0);
+    cfg.limits = vec![hertzforge_mimo_random::config::LimitSpec {
+        channel_index: 5,
+        ceiling_psd: vec![1e-12],
+        abort_margin_db: 3.0,
+    }];
+    let mut svc = service(s, cfg);
+    svc.arm().expect("arm");
+    assert!(svc.identify().is_err(), "identified past the limit");
+    let e = ended(&svc);
+    assert_eq!(e.name, "limit_abort", "{}", e.words);
+    assert_aborted_to_zero(&svc, &e);
+}
+
 // =============================================================================
 // Law faults in either role.
 // =============================================================================

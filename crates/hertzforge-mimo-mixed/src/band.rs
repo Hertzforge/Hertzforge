@@ -459,8 +459,9 @@ pub struct BandLawParams {
     pub gain: f64,
     /// Largest move per loop, dB (`cap_db`, default 1).
     pub cap_db: f64,
-    /// `per_control` with more controls than drives: the largest gain either
-    /// way, dB (`max_gain_db`, default 6), the anti-windup cap.
+    /// `scalar_servo`, and `per_control` with more controls than drives:
+    /// the largest gain either way, dB (`max_gain_db`, default 6), the
+    /// anti-windup cap.
     pub max_gain_db: f64,
 }
 
@@ -615,10 +616,13 @@ fn feed_forward(
 /// band-over-floor ratios read in the moving frame
 /// (`level_b = sum_i v_i ahat_i / sum_i v_i a_i`, `v_i = 1 / a_i`), by
 /// single-output Mixed Mode's [`BandServo`]. While the band is limiting its
-/// gain does not rise.
+/// gain does not rise, and the gain is held within `max_gain_db` either way
+/// (anti-windup, as `per_control`'s: a band whose level cannot be reached
+/// does not wind its gain without bound).
 #[derive(Debug, Clone)]
 pub struct ScalarServo {
     servo: BandServo,
+    max_gain_db: f64,
     setup: Option<BandSetup>,
 }
 
@@ -634,6 +638,7 @@ impl ScalarServo {
                 k: p.gain,
                 cap_db: p.cap_db,
             },
+            max_gain_db: p.max_gain_db,
             setup: None,
         }
     }
@@ -675,6 +680,11 @@ impl BandLaw for ScalarServo {
                 capped = self.servo.update(num / den, 1.0);
                 if i.limiting && self.servo.gain_db > before.gain_db {
                     self.servo = before;
+                }
+                let cap = self.max_gain_db;
+                if self.servo.gain_db.abs() > cap {
+                    self.servo.gain_db = self.servo.gain_db.clamp(-cap, cap);
+                    capped = true;
                 }
             }
         }

@@ -170,6 +170,9 @@ pub(crate) struct StepRecords {
     /// The random part's gain at drive time (level, random ramp and stop
     /// ramp together).
     pub(crate) gain: Vec<f64>,
+    /// Per drive: the random part's sum of squares over the frames held,
+    /// volts squared (the drive's rms abort reads it).
+    pub(crate) rand_sq: Vec<f64>,
     pub(crate) dropped: u64,
     /// The tone laws' call records since the loop side last took them.
     pub(crate) law: Vec<LawRecord>,
@@ -182,6 +185,7 @@ impl StepRecords {
             raw: Vec::with_capacity(q * frames),
             drive: Vec::with_capacity(m * frames),
             gain: Vec::with_capacity(frames),
+            rand_sq: vec![0.0; m],
             dropped: 0,
             law: Vec::with_capacity(4096),
         }
@@ -197,6 +201,7 @@ impl StepRecords {
         self.raw.clear();
         self.drive.clear();
         self.gain.clear();
+        self.rand_sq.fill(0.0);
     }
 }
 
@@ -284,6 +289,9 @@ pub struct MimoMixedStep {
     pub(crate) trip: Option<StepTrip>,
     pub(crate) clamped: u64,
     pub(crate) records: StepRecords,
+    /// The loop side's rms window: per drive the random part's sum of
+    /// squares, and the frames in it (judged every `nfft` frames).
+    pub(crate) rms_window: (Vec<f64>, usize),
     /// Frames since the step was built.
     pub(crate) frame: u64,
     pub(crate) tick_frames: u64,
@@ -390,6 +398,7 @@ impl MimoMixedStep {
             trip: None,
             clamped: 0,
             records: StepRecords::new(q, m, s.record_frames),
+            rms_window: (vec![0.0; m], 0),
             frame: 0,
             tick_frames,
             tick_s,
@@ -503,6 +512,10 @@ impl MimoMixedStep {
             r.raw.extend_from_slice(&self.ch[..q]);
             r.drive.extend_from_slice(&self.d[..m]);
             r.gain.push(g * stop);
+            for j in 0..m {
+                let x = g * stop * self.rnd[j];
+                r.rand_sq[j] += x * x;
+            }
         } else {
             r.dropped += 1;
         }

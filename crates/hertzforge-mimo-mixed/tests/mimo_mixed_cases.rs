@@ -1233,3 +1233,70 @@ fn mimo_mixed_static_structure_gives_c_equals_h_d() {
     assert!(worst < 1e-6);
     assert!(worst_res < 1e-6);
 }
+
+// =============================================================================
+// The scalar band servo's gain bound.
+// =============================================================================
+
+/// Requirement: `scalar_servo` holds its gain within `max_gain_db` either
+/// way (anti-windup): a band that never reads its added level (the
+/// estimate sits on the floor) asks more every loop, by at most its
+/// per-loop cap of 1 dB, and stops at the 6 dB default bound, where 60
+/// loops unbounded reach 60 dB.
+#[test]
+fn mimo_mixed_the_scalar_band_servo_holds_its_gain_bound() {
+    use hertzforge_mimo_mixed::band::{
+        BandLaw, BandLawParams, BandLoopInputs, BandSetup, ScalarServo,
+    };
+    let offs = 3;
+    let flat = |v: f64| {
+        let mut h = HermitianStack::zeros(offs, 1);
+        for o in 0..offs {
+            h.set(o, 0, 0, c(v, 0.0));
+        }
+        h
+    };
+    let (floor, inc, zero) = (flat(1e-3), flat(1e-3), flat(0.0));
+    let mut z = MatrixStack::zeros(offs, 1, 1);
+    for o in 0..offs {
+        z.set(o, 0, 0, c(1.0, 0.0));
+    }
+    let p = BandLawParams::default();
+    let mut law = ScalarServo::new(p);
+    law.setup(&BandSetup {
+        n: 1,
+        m: 1,
+        statement: added(1e-3, 0.5),
+        additive: true,
+        offsets: offs,
+        df_hz: 4.0,
+        inner: (1, 2),
+        alarm_db: vec![(1.0, 1.0)],
+        abort_db: vec![(3.0, 3.0)],
+    })
+    .expect("setup");
+    let mut worst = 0.0f64;
+    for _ in 0..60 {
+        let out = law
+            .iterate(&BandLoopInputs {
+                floor_reference: &floor,
+                increment: &inc,
+                estimate: &floor,
+                dof: 100.0,
+                model_next: &z,
+                floor_drive: &zero,
+                band_drive: &zero,
+                sweep_rate_hz_s: 0.0,
+                limiting: false,
+            })
+            .expect("iterate");
+        assert_eq!(out.drive.lines(), offs);
+        worst = worst.max(law.gains_db()[0]);
+    }
+    println!(
+        "largest gain over 60 loops: {worst:.3} dB (bound {} dB)",
+        p.max_gain_db
+    );
+    assert!(worst > 0.0, "the servo never asked more");
+    assert!(worst <= p.max_gain_db + 1e-9, "{worst} dB");
+}

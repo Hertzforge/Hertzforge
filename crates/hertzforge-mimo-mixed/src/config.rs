@@ -810,7 +810,8 @@ impl fmt::Display for MimoMixedConfigError {
                 peak_v,
             } => write!(
                 f,
-                "drive {drive}: a peak abort of {abort_vpk} V; above its peak ceiling ({peak_v} V)                  is accepted"
+                "drive {drive}: a peak abort of {abort_vpk} V; above its peak ceiling ({peak_v} V) \
+                 is accepted"
             ),
             MimoMixedConfigError::RampTooShort {
                 field,

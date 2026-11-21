@@ -347,6 +347,9 @@ pub struct BandStatus {
     pub error_db: Vec<f64>,
     /// Per control: outside its alarm band.
     pub alarm: Vec<bool>,
+    /// A drive's rms ceiling or the change cap holds its drive (its servo's
+    /// gain does not rise meanwhile).
+    pub limiting: bool,
 }
 
 /// One drive's line in the status.
@@ -430,6 +433,8 @@ pub(crate) struct BandCtl {
     pub(crate) center_hz: f64,
     pub(crate) error_db: Vec<f64>,
     pub(crate) limiting: bool,
+    /// The change cap cut the band law's last rise.
+    pub(crate) cap_bound: bool,
     pub(crate) alarm_db: Vec<(f64, f64)>,
     pub(crate) abort_db: Vec<(f64, f64)>,
     /// Its center's rate, Hz per second.
@@ -1456,6 +1461,9 @@ impl MimoMixedService {
                 self.phase = MimoMixedPhase::Stopping;
             }
         }
+        if let Some(t) = self.judge_drive_rms() {
+            self.abort_with(t);
+        }
         self.judge_limits();
         if self.ending.is_none() {
             self.advance();
@@ -1751,6 +1759,7 @@ impl MimoMixedService {
                         .zip(&b.alarm_db)
                         .map(|(e, (lo, hi))| e.is_finite() && (*e < -lo || *e > *hi))
                         .collect(),
+                    limiting: b.limiting,
                 })
                 .collect(),
             drives,
@@ -2216,6 +2225,7 @@ impl MimoMixedService {
                 center_hz: center,
                 error_db: vec![f64::NAN; n],
                 limiting: false,
+                cap_bound: false,
                 alarm_db: alarm,
                 abort_db: abort,
                 rate_hz_s: 0.0,
