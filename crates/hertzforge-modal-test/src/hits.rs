@@ -84,6 +84,48 @@ pub struct TargetCheck {
     pub verdict: &'static str,
 }
 
+/// The decay check's window: this fraction of the block, at least one sample.
+pub const DECAY_WINDOW_FRACTION: f64 = 0.05;
+
+/// How far a response has decayed by the frame's end, as the estimate sees it (after the
+/// windows): the RMS over the frame's last [`DECAY_WINDOW_FRACTION`] of samples divided by
+/// the largest RMS over any window of that length in the frame. `0` for a silent frame.
+pub fn decay_ratio(x: &[f64]) -> f64 {
+    let n = x.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let w = ((n as f64 * DECAY_WINDOW_FRACTION).round() as usize).clamp(1, n);
+    let sq: Vec<f64> = x.iter().map(|v| v * v).collect();
+    let mut sum: f64 = sq[..w].iter().sum();
+    let mut loud = sum;
+    for k in w..n {
+        sum += sq[k] - sq[k - w];
+        loud = loud.max(sum);
+    }
+    let last: f64 = sq[n - w..].iter().sum();
+    if loud <= 0.0 {
+        0.0
+    } else {
+        (last / loud).sqrt()
+    }
+}
+
+/// The decay check of one hit or frame: the response row (its table index) with the
+/// largest ratio, the ratio, and whether it is over the setup's threshold.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Decay {
+    pub row: u32,
+    pub ratio: f64,
+    pub warning: bool,
+}
+
+impl Decay {
+    pub fn to_json(&self) -> Value {
+        json!({"row": self.row, "ratio": self.ratio, "warning": self.warning})
+    }
+}
+
 /// A hit's report.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HitReport {
@@ -105,6 +147,8 @@ pub struct HitReport {
     /// Every reason the automatic rule rejects the hit for, in order: `overload`,
     /// `double_hit`.
     pub reasons: Vec<&'static str>,
+    /// A warning only: the decay check (set by the session, after the windows).
+    pub decay: Option<Decay>,
 }
 
 impl HitReport {
@@ -122,6 +166,9 @@ impl HitReport {
         }
         if self.window_cut.is_some() {
             w.push("force_window_cuts_pulse");
+        }
+        if self.decay.is_some_and(|d| d.warning) {
+            w.push("response_not_decayed");
         }
         if let Some(t) = self.target.as_ref().filter(|t| t.verdict != "on_target") {
             w.push(if t.verdict == "high" {
@@ -145,6 +192,7 @@ impl HitReport {
             "tip_warning": self.tip_warning,
             "no_response": self.no_response,
             "force_window_cut": self.window_cut.as_ref().map(|c| json!({"pulse_end_frame": c.pulse_end_frame, "window_end_frame": c.window_end_frame})),
+            "decay": self.decay.as_ref().map(Decay::to_json),
             "rejected": self.rejected(),
             "reasons": self.reasons,
             "warnings": self.warnings(),
@@ -316,6 +364,7 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
         target,
         window_cut,
         reasons,
+        decay: None,
     }
 }
 
@@ -394,6 +443,21 @@ mod tests {
 
     fn dh(f: &[f64]) -> Option<DoubleHit> {
         double_hit(f, 1.0, 0.05, DH_PRE)
+    }
+
+    #[test]
+    fn modal_test_decay_ratio_is_the_last_window_over_the_loudest() {
+        // 100 samples, windows of 5: loud 2.0 at the start, 0.1 at the end.
+        let mut x = vec![0.5; 100];
+        x[10..15].iter_mut().for_each(|v| *v = 2.0);
+        x[95..].iter_mut().for_each(|v| *v = 0.1);
+        assert!(
+            (decay_ratio(&x) - 0.05).abs() < 1e-12,
+            "{}",
+            decay_ratio(&x)
+        );
+        assert_eq!(decay_ratio(&[0.0; 40]), 0.0);
+        assert_eq!(decay_ratio(&[1.0; 40]), 1.0);
     }
 
     #[test]

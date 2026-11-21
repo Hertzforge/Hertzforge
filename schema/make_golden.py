@@ -6556,10 +6556,15 @@ _MODAL_RESPONSES = [{'index': 2, 'node': 4, 'direction': 'Z+', 'unit': 'g'},
                     {'index': 3, 'node': 7, 'direction': 'Z+', 'unit': 'g'}]
 
 
-def _modal_tile(n: int, seq: int, start_frame: int, peak: float) -> dict:
+def _modal_decay(ratio: float) -> dict:
+    """A hit's decay check: response row 3, under the 2 percent warning."""
+    return {'row': 3, 'ratio': ratio, 'warning': False}
+
+
+def _modal_tile(n: int, seq: int, start_frame: int, peak: float, decay: float) -> dict:
     return {'n': n, 'seq': seq, 'status': 'accepted', 'reason': None, 'overload': False,
-            'double_hit': False, 'start_frame': start_frame, 'peak': peak,
-            'tip_warning': False, 'force_window_cut': False}
+            'double_hit': False, 'start_frame': start_frame, 'decay': _modal_decay(decay),
+            'peak': peak, 'tip_warning': False, 'force_window_cut': False}
 
 
 def _modal_point_count(index: int) -> dict:
@@ -6575,17 +6580,21 @@ MODAL_FINISHED = {
     'point_dofs': {'references': [{'index': 1, 'node': 3, 'direction': 'Z+', 'unit': 'lbf'}],
                    'responses': _MODAL_RESPONSES},
     'counts': {'unit': 'hits',
-               'point': {'index': 2, 'accepted': 2, 'rejected': 0, 'asked': 2},
+               'point': {'index': 2, 'accepted': 2, 'rejected': 0, 'asked': 2,
+                         'decay': _modal_decay(0.0004045332899574412)},
                'points': [_modal_point_count(k) for k in range(3)],
                'totals': {'accepted': 6, 'taken': 6, 'points_measured': 3,
                           'points_planned': 3}},
-    'hits': [_modal_tile(1, 5, 6631, 18.478137969970703),
-             _modal_tile(2, 6, 8167, 18.477951049804688)],
-    'latest': {**_modal_tile(2, 6, 8167, 18.477951049804688), 'point': 2,
+    'hits': [_modal_tile(1, 5, 6631, 18.478137969970703, 0.0004045332899574412),
+             _modal_tile(2, 6, 8167, 18.477951049804688, 0.0003918717610187733)],
+    'latest': {**_modal_tile(2, 6, 8167, 18.477951049804688, 0.0003918717610187733),
+               'point': 2,
                'report': {'peak': 18.477951049804688, 'peak_frame': 27, 'overloaded': [],
                           'double_hit': None, 'tip_drop_db': 6.021501954408373,
                           'tip_warning': False, 'no_response': [False, False],
-                          'force_window_cut': None, 'rejected': None, 'reasons': [],
+                          'force_window_cut': None,
+                          'decay': _modal_decay(0.0003918717610187733),
+                          'rejected': None, 'reasons': [],
                           'warnings': []}},
     'record': {'folder': '/home/operator/Hertzforge_Data/golden_roving_hammer',
                'streams': True, 'problem': None},

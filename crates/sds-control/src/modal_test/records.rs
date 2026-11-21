@@ -22,6 +22,7 @@ use crate::station::{source_of, StationPlan};
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_hal::{Caps, DiscoveredDevice};
 use hertzforge_modal_test::average::Estimates;
+use hertzforge_modal_test::hits::Decay;
 use hertzforge_modal_test::plan::Measurement;
 use hertzforge_modal_test::session::Session;
 use hertzforge_modal_test::setup::Mode;
@@ -272,7 +273,8 @@ pub fn frame_line(s: &Session, point: usize, at: usize, m: &Measurement, event: 
                "point": "the point", "n": "its number at the point", "seq": "its number in the test",
                "status": "pending, accepted, rejected or undone",
                "reason": "why it was rejected: overload, double_hit or operator",
-               "report": "impact mode: the hit's checks"}),
+               "report": "impact mode: the hit's checks",
+               "decay": "a hit or a burst frame: the response row whose last 5 percent of the block, after the windows, has the largest RMS as a fraction of its loudest 5 percent window; that ratio; and whether it is over decay_warn_pct (a warning, never a rejection)"}),
     );
     let mut line = t.to_json();
     if let Some(o) = line.as_object_mut() {
@@ -319,12 +321,14 @@ pub fn measurement_results(
     let line = json!({"measurement": measurement, "point": point, "replaces": replaces,
                       "averages": e.averages,
                       "estimator": if s.plan.refs.len() > 1 { "matrix H1" } else { s.setup.estimator.name() },
-                      "rows": rows(s, m)});
+                      "rows": rows(s, m),
+                      "decay": s.points[point].decay().as_ref().map(Decay::to_json)});
     let records = json!({"measurement": "the measurement's number in the test",
                          "point": "the point", "replaces": "the measurement of the point it replaces, if any",
                          "averages": "the hits or frames averaged",
                          "estimator": "H1, H2 or Hv with one reference; matrix H1 with several",
-                         "rows": "the references and responses at the point"});
+                         "rows": "the references and responses at the point",
+                         "decay": "the largest decay check over the hits or frames averaged, or null when none was checked"});
     let mut out = Vec::new();
 
     let mut d = described("frf", axis.clone(), rows(s, m));

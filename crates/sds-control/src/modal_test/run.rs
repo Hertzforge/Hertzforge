@@ -23,6 +23,7 @@ use hertzforge_modal_test::setup::Mode;
 use hertzforge_modal_test::source::SourceBuild;
 use hertzforge_modal_test::structure::HitKind;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -828,6 +829,7 @@ impl ModalRun {
             record: Some(record),
             run_uid,
             hardware,
+            decay_warned: HashSet::new(),
             _guard: guard,
         };
         // The thread's parts wait in a slot it takes them from, so that, when it cannot
@@ -1210,6 +1212,16 @@ impl ModalRun {
                         None => format!("frame {} at point {point}: {}", t.n, t.status),
                     };
                     self.shared.add_log_data("hit", words, Some(json!({"point": point, "seq": t.seq, "status": t.status, "reason": t.reason})));
+                    // The decay warning, once per measurement of the point: when first seen.
+                    if let Some(d) = t.decay.filter(|d| d.warning) {
+                        if facts.decay_warned.insert(point) {
+                            self.shared.add_log_data(
+                                "warning",
+                                format!("point {point}: response row {} not decayed by the block's end ({} of its loudest)", d.row, num(d.ratio)),
+                                Some(json!({"event": "response_not_decayed", "point": point, "seq": t.seq, "row": d.row, "ratio": d.ratio})),
+                            );
+                        }
+                    }
                     if let Some(rec) = facts.record.as_ref() {
                         let (name, d, arrays, line) = records::frame_line(s, point, at, m, "taken");
                         rec.put_result(&name, d, arrays, Some(line));
@@ -1235,6 +1247,7 @@ impl ModalRun {
                     replaces,
                     estimates,
                 } => {
+                    facts.decay_warned.remove(&point);
                     self.shared.add_log_data(
                         "result",
                         format!("point {point} measured: {} averages (measurement {measurement})", estimates.averages),
@@ -1409,5 +1422,7 @@ struct Facts {
     record: Option<RunRecord>,
     run_uid: String,
     hardware: bool,
+    /// The points whose measurement in progress has logged its decay warning.
+    decay_warned: HashSet<usize>,
     _guard: Option<hertzforge_station::lock::LockGuard>,
 }

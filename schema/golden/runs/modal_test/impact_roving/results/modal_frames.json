@@ -34,7 +34,8 @@
     "seq": "its number in the test",
     "status": "pending, accepted, rejected or undone",
     "reason": "why it was rejected: overload, double_hit or operator",
-    "report": "impact mode: the hit's checks"
+    "report": "impact mode: the hit's checks",
+    "decay": "a hit or a burst frame: the response row whose last 5 percent of the block, after the windows, has the largest RMS as a fraction of its loudest 5 percent window; that ratio; and whether it is over decay_warn_pct (a warning, never a rejection)"
   },
   "arrays": [
     {

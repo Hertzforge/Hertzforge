@@ -41,7 +41,12 @@
     "index": 2,
     "accepted": 2,
     "rejected": 0,
-    "asked": 2
+    "asked": 2,
+    "decay": {
+     "row": 3,
+     "ratio": 0.0004045332899574412,
+     "warning": false
+    }
    },
    "points": [
     {
@@ -82,6 +87,11 @@
     "overload": false,
     "double_hit": false,
     "start_frame": 6631,
+    "decay": {
+     "row": 3,
+     "ratio": 0.0004045332899574412,
+     "warning": false
+    },
     "peak": 18.478137969970703,
     "tip_warning": false,
     "force_window_cut": false
@@ -94,6 +104,11 @@
     "overload": false,
     "double_hit": false,
     "start_frame": 8167,
+    "decay": {
+     "row": 3,
+     "ratio": 0.0003918717610187733,
+     "warning": false
+    },
     "peak": 18.477951049804688,
     "tip_warning": false,
     "force_window_cut": false
@@ -107,6 +122,11 @@
    "overload": false,
    "double_hit": false,
    "start_frame": 8167,
+   "decay": {
+    "row": 3,
+    "ratio": 0.0003918717610187733,
+    "warning": false
+   },
    "peak": 18.477951049804688,
    "tip_warning": false,
    "force_window_cut": false,
@@ -123,6 +143,11 @@
      false
     ],
     "force_window_cut": null,
+    "decay": {
+     "row": 3,
+     "ratio": 0.0003918717610187733,
+     "warning": false
+    },
     "rejected": null,
     "reasons": [],
     "warnings": []

@@ -107,6 +107,71 @@ async fn modal_test_two_shaker_burst_random_matrix_h1_matches_the_structure() {
     let _ = std::fs::remove_dir_all(folder.parent().unwrap());
 }
 
+/// A two-shaker burst random point at the given block: the state at the point's end
+/// and the run folder.
+async fn burst_point(block: u32) -> (Value, PathBuf) {
+    let mut c = rig(true, 16.0).await;
+    let mut cfg = shaker_config("burst_random");
+    cfg["block"] = json!(block);
+    cfg["averages"] = json!(4);
+    c.ok("modal_test.configure", json!({"config": cfg})).await;
+    c.ok("modal_test.start", json!({})).await;
+    c.ok("modal_test.drive_start", json!({})).await;
+    let st = until(&mut c, Duration::from_secs(60), "the point", |s| {
+        s["counts"]["totals"]["points_measured"] == 1
+    })
+    .await;
+    until(&mut c, Duration::from_secs(20), "the drive idle", |s| {
+        s["drive_phase"] == "idle"
+    })
+    .await;
+    c.ok("modal_test.end", json!({})).await;
+    let fin = until(&mut c, Duration::from_secs(20), "the end", |s| {
+        s["state"] == "finished"
+    })
+    .await;
+    let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
+    record_done(&mut c, &folder).await;
+    (st, folder)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn modal_test_a_short_burst_block_warns_response_not_decayed_and_a_long_one_does_not() {
+    // At 1024 Hz a 512-frame block is half a second: with the burst on for 40 percent of
+    // it, the 42 Hz mode is still ringing at the frame's end. At 1024 frames it is not.
+    for (block, warns) in [(512u32, true), (1024, false)] {
+        let (st, folder) = burst_point(block).await;
+        let frames = lines(&folder.join("results/modal_frames.jsonl"));
+        let accepted: Vec<&Value> = frames
+            .iter()
+            .filter(|f| f["event"] == "taken" && f["status"] == "accepted")
+            .collect();
+        assert_eq!(accepted.len(), 4, "block {block}");
+        let worst = accepted
+            .iter()
+            .map(|f| f["decay"]["ratio"].as_f64().unwrap())
+            .fold(0.0, f64::max);
+        eprintln!("block {block}: worst decay ratio {worst:.5}");
+        assert_eq!(worst > 0.02, warns, "block {block}: {worst}");
+        for f in &accepted {
+            assert!(f["decay"]["row"] == 2 || f["decay"]["row"] == 3, "{f}");
+        }
+        // The measurement and the live state carry the worst over the accepted frames.
+        let rec = &lines(&folder.join("results/modal_frf.jsonl"))[0];
+        assert_eq!(rec["decay"]["ratio"].as_f64().unwrap(), worst, "{rec}");
+        assert_eq!(rec["decay"]["warning"], warns, "{rec}");
+        assert_eq!(st["counts"]["point"]["decay"]["warning"], warns, "{st}");
+        // The timeline: once for the measurement, when first seen.
+        let log = lines(&folder.join("log.jsonl"));
+        let seen = log
+            .iter()
+            .filter(|e| e["data"]["event"] == "response_not_decayed")
+            .count();
+        assert_eq!(seen, usize::from(warns), "block {block}");
+        let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn modal_test_refusals_are_named() {
     let mut c = rig(true, 8.0).await;
@@ -125,6 +190,16 @@ async fn modal_test_refusals_are_named() {
         .refused("modal_test.configure", json!({"config": s}))
         .await;
     assert!(e.to_string().contains("level_over_ceiling"), "{e}");
+    // A decay threshold out of its range, by its field.
+    let mut s = shaker_config("burst_random");
+    s["decay_warn_pct"] = json!(0);
+    let e = c
+        .refused("modal_test.configure", json!({"config": s}))
+        .await;
+    assert_eq!(
+        e["detail"]["errors"][0]["field"], "config.decay_warn_pct",
+        "{e}"
+    );
     // An unknown key.
     let mut s = shaker_config("burst_random");
     s["bogus"] = json!(1);
@@ -313,7 +388,7 @@ async fn modal_test_hits_carry_their_status_and_the_counts_follow() {
     assert_eq!(hits[1]["overload"], true);
     assert_eq!(
         s["counts"]["point"],
-        json!({"index": 0, "accepted": 0, "rejected": 2, "asked": 3})
+        json!({"index": 0, "accepted": 0, "rejected": 2, "asked": 3, "decay": null})
     );
     // The operator accepts the latest (overloaded) hit anyway.
     let r = c.ok("modal_test.accept", json!({})).await;

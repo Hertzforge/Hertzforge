@@ -335,6 +335,12 @@ pub const LEVEL_DEFAULT_VRMS: f64 = 0.05;
 /// The default averages: a hammer's, and a shaker's.
 pub const AVERAGES_IMPACT: u32 = 5;
 pub const AVERAGES_SHAKER: u32 = 30;
+/// The default decay warning, percent: a burst frame's or a hit's response whose last
+/// 5 % is above this share of its loudest 5 % carries `response_not_decayed`.
+pub const DECAY_WARN_PCT_DEFAULT: f64 = 2.0;
+/// The decay warning's bounds, percent.
+pub const DECAY_WARN_PCT_MIN: f64 = 0.01;
+pub const DECAY_WARN_PCT_MAX: f64 = 100.0;
 
 /// A whole setup.
 #[derive(Debug, Clone, PartialEq)]
@@ -352,6 +358,8 @@ pub struct ModalSetup {
     pub roving: Option<Roving>,
     pub impact: ImpactSet,
     pub shaker: ShakerSet,
+    /// The decay check's threshold, percent (a warning, never a rejection).
+    pub decay_warn_pct: f64,
 }
 
 /// A refusal by name: the reason, the field it points at and the words.
@@ -420,6 +428,7 @@ impl ModalSetup {
             roving: None,
             impact: ImpactSet::default(),
             shaker: ShakerSet::default(),
+            decay_warn_pct: DECAY_WARN_PCT_DEFAULT,
         }
     }
 
@@ -552,6 +561,14 @@ impl ModalSetup {
                 }
             }
         }
+        pct_in(
+            &mut r,
+            "decay_warn_pct",
+            self.decay_warn_pct,
+            DECAY_WARN_PCT_MIN,
+            DECAY_WARN_PCT_MAX,
+            "The decay warning (percent of the loudest window)",
+        );
         match self.mode {
             Mode::Impact => self.impact_refusals(&mut r),
             Mode::Shaker => self.shaker_refusals(&mut r),
@@ -924,6 +941,20 @@ mod tests {
         s.averages = 5;
         assert_eq!(reasons(&s), vec!["too_few_averages"]);
         s.averages = 6;
+        assert!(s.refusals().is_empty());
+    }
+
+    #[test]
+    fn modal_test_decay_warning_threshold_is_checked() {
+        let mut s = shaker(SourceKind::BurstRandom, 2);
+        assert_eq!(s.decay_warn_pct, DECAY_WARN_PCT_DEFAULT);
+        for bad in [0.0, -1.0, 100.5, f64::NAN] {
+            s.decay_warn_pct = bad;
+            let r = s.refusals();
+            assert_eq!(r.len(), 1, "{bad}");
+            assert_eq!(r[0].field, "decay_warn_pct");
+        }
+        s.decay_warn_pct = 0.5;
         assert!(s.refusals().is_empty());
     }
 

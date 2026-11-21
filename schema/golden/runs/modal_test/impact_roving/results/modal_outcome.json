@@ -19,7 +19,12 @@
       "index": 2,
       "accepted": 2,
       "rejected": 0,
-      "asked": 2
+      "asked": 2,
+      "decay": {
+        "row": 3,
+        "ratio": 0.0004045332899574412,
+        "warning": false
+      }
     },
     "points": [
       {

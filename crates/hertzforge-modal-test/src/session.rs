@@ -26,7 +26,7 @@
 //! start at the point goes on with the same average, a pause.
 
 use crate::average::{frame_spectra, Averager, Estimates, FrameSpectra};
-use crate::hits::{self, HitReport};
+use crate::hits::{self, Decay, HitReport};
 use crate::plan::Plan;
 use crate::setup::{AcceptMode, ModalSetup, Mode, SourceKind};
 use crate::window::{ExpWindow, ForceWindow, Windows};
@@ -75,6 +75,8 @@ pub struct Taken {
     pub frames: usize,
     pub report: Option<HitReport>,
     pub overload: bool,
+    /// The decay check, for a hit or a burst frame (a warning, never a rejection).
+    pub decay: Option<Decay>,
 }
 
 impl Taken {
@@ -88,6 +90,7 @@ impl Taken {
             "overload": self.overload,
             "double_hit": self.report.as_ref().is_some_and(|r| r.double_hit.is_some()),
             "start_frame": self.start_frame,
+            "decay": self.decay.as_ref().map(Decay::to_json),
         });
         if let (Some(r), Some(o)) = (&self.report, v.as_object_mut()) {
             o.insert("peak".into(), json!(r.peak));
@@ -119,6 +122,15 @@ impl PointState {
 
     pub fn rejected(&self) -> usize {
         self.taken.iter().filter(|t| t.status == "rejected").count()
+    }
+
+    /// The worst decay check over the accepted hits or frames: those in the average.
+    pub fn decay(&self) -> Option<Decay> {
+        self.taken
+            .iter()
+            .filter(|t| t.status == "accepted")
+            .filter_map(|t| t.decay)
+            .reduce(|a, b| if b.ratio > a.ratio { b } else { a })
     }
 }
 
@@ -561,6 +573,30 @@ impl Session {
         )
     }
 
+    /// The decay check over the response rows, after the windows (what the estimate
+    /// sees): the worst row, its ratio, and whether it is over the setup's threshold.
+    fn decay(&self, b: &[Vec<f64>]) -> Option<Decay> {
+        let r = self.plan.refs.len();
+        let mut worst: Option<Decay> = None;
+        for (k, row) in self.plan.resps.iter().enumerate() {
+            let x: Vec<f64> = b[r + k]
+                .iter()
+                .zip(&self.data_w[r + k])
+                .zip(&self.analysis_w)
+                .map(|((x, d), a)| x * d * a)
+                .collect();
+            let ratio = hits::decay_ratio(&x);
+            if worst.is_none_or(|w| ratio > w.ratio) {
+                worst = Some(Decay {
+                    row: row.index,
+                    ratio,
+                    warning: ratio * 100.0 > self.setup.decay_warn_pct,
+                });
+            }
+        }
+        worst
+    }
+
     fn take_hit(&mut self, start: u64, pre: usize, b: Vec<Vec<f64>>) -> Vec<Event> {
         let mut ev = Vec::new();
         let r = self.plan.refs.len();
@@ -584,6 +620,8 @@ impl Session {
             target: self.setup.impact.target,
             force_window_end: self.windows.force.as_ref().map(ForceWindow::flat_end),
         });
+        let decay = self.decay(&b);
+        let report = HitReport { decay, ..report };
         let spectra = self.spectra(&b);
         let p = self.point;
         self.seq += 1;
@@ -606,6 +644,7 @@ impl Session {
             frames: self.setup.block,
             report: Some(report),
             overload,
+            decay,
         };
         let accepted = t.status == "accepted";
         self.points[p].taken.push(t);
@@ -641,6 +680,11 @@ impl Session {
             .iter()
             .zip(&rows)
             .any(|(x, r)| *r > 0.0 && x.iter().any(|v| v.abs() >= frac * r));
+        let decay = if self.setup.shaker.source.is_burst() {
+            self.decay(&b)
+        } else {
+            None
+        };
         let p = self.point;
         self.seq += 1;
         self.seg_taken += 1;
@@ -653,6 +697,7 @@ impl Session {
             frames: self.setup.block,
             report: None,
             overload,
+            decay,
         };
         self.points[p].taken.push(t);
         let at = self.points[p].taken.len() - 1;
@@ -882,7 +927,7 @@ impl Session {
             .collect();
         json!({
             "unit": if self.setup.mode == Mode::Impact { "hits" } else { "frames" },
-            "point": {"index": self.point, "accepted": p.accepted(), "rejected": p.rejected(), "asked": self.setup.averages},
+            "point": {"index": self.point, "accepted": p.accepted(), "rejected": p.rejected(), "asked": self.setup.averages, "decay": p.decay().as_ref().map(Decay::to_json)},
             "points": points,
             "totals": self.totals_json(),
         })
@@ -1071,6 +1116,68 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A hammer session of one point with the given block, and the exponential window
+    /// at the given end value when one is given.
+    fn short_session(block: usize, exp_end_pct: Option<f64>) -> Session {
+        let mut s = ModalSetup::new(Mode::Impact, 1024.0, block);
+        s.band = (0.0, 250.0);
+        s.averages = 2;
+        if let Some(e) = exp_end_pct {
+            s.impact.exp_window.on = true;
+            s.impact.exp_window.end_pct = e;
+        }
+        let plan = Plan::build(&crate::plan::tests::table(false), &s).unwrap();
+        Session::new(s, plan)
+    }
+
+    #[test]
+    fn modal_test_a_short_hit_block_warns_response_not_decayed_and_still_accepts() {
+        // 256 frames at 1024 Hz is 0.25 s: the 42 Hz mode (zeta 0.04) is still ringing at
+        // the block's end. A warning only: the hit is accepted.
+        let mut s = short_session(256, None);
+        s.arm().unwrap();
+        hit(&mut s, HitKind::Clean);
+        let t = &s.points[0].taken[0];
+        assert_eq!(t.status, "accepted");
+        let r = t.report.as_ref().unwrap();
+        let d = r.decay.expect("a decay check on a hit");
+        assert!(d.warning, "ratio {}", d.ratio);
+        assert!(d.ratio > 0.02, "ratio {}", d.ratio);
+        assert_eq!(d.row, s.plan.resps[0].index);
+        assert!(r.warnings().contains(&"response_not_decayed"));
+        let tile = t.to_json();
+        assert_eq!(tile["decay"]["warning"], true);
+        assert_eq!(tile["decay"]["row"], d.row);
+        assert!(r.to_json()["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "response_not_decayed"));
+        let c = s.counts_json();
+        assert_eq!(c["point"]["decay"]["ratio"], d.ratio);
+        assert_eq!(c["point"]["decay"]["warning"], true);
+    }
+
+    #[test]
+    fn modal_test_the_exponential_window_clears_the_decay_warning() {
+        // The same hit, with the exponential window ending at 1 %: the check is made on
+        // what the estimate sees, after the windows, so it does not warn.
+        let mut s = short_session(256, Some(1.0));
+        s.arm().unwrap();
+        hit(&mut s, HitKind::Clean);
+        let r = s.points[0].taken[0].report.clone().unwrap();
+        let d = r.decay.unwrap();
+        assert!(!d.warning, "ratio {}", d.ratio);
+        assert!(d.ratio < 0.02, "ratio {}", d.ratio);
+        assert!(!r.warnings().contains(&"response_not_decayed"));
+        // A long block decays on its own.
+        let mut s = short_session(1024, None);
+        s.arm().unwrap();
+        hit(&mut s, HitKind::Clean);
+        let d = s.points[0].taken[0].report.as_ref().unwrap().decay.unwrap();
+        assert!(!d.warning, "ratio {}", d.ratio);
     }
 
     #[test]

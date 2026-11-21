@@ -60,7 +60,12 @@
         "index": 0,
         "accepted": 4,
         "rejected": 0,
-        "asked": 4
+        "asked": 4,
+        "decay": {
+          "row": 2,
+          "ratio": 0.017373535638139887,
+          "warning": false
+        }
       },
       "points": [
         {
@@ -86,7 +91,12 @@
         "reason": null,
         "overload": false,
         "double_hit": false,
-        "start_frame": 1096
+        "start_frame": 1096,
+        "decay": {
+          "row": 2,
+          "ratio": 0.017373535638139887,
+          "warning": false
+        }
       },
       {
         "n": 2,
@@ -95,7 +105,12 @@
         "reason": null,
         "overload": false,
         "double_hit": false,
-        "start_frame": 1608
+        "start_frame": 1608,
+        "decay": {
+          "row": 2,
+          "ratio": 0.010161778207699838,
+          "warning": false
+        }
       },
       {
         "n": 3,
@@ -104,7 +119,12 @@
         "reason": null,
         "overload": false,
         "double_hit": false,
-        "start_frame": 2120
+        "start_frame": 2120,
+        "decay": {
+          "row": 3,
+          "ratio": 0.005830079433255509,
+          "warning": false
+        }
       },
       {
         "n": 4,
@@ -113,7 +133,12 @@
         "reason": null,
         "overload": false,
         "double_hit": false,
-        "start_frame": 2632
+        "start_frame": 2632,
+        "decay": {
+          "row": 2,
+          "ratio": 0.012196481671152335,
+          "warning": false
+        }
       }
     ],
     "latest": {
@@ -123,7 +148,12 @@
       "reason": null,
       "overload": false,
       "double_hit": false,
-      "start_frame": 2632
+      "start_frame": 2632,
+      "decay": {
+        "row": 2,
+        "ratio": 0.012196481671152335,
+        "warning": false
+      }
     },
     "record": {
       "folder": "golden-shaker_burst_random",

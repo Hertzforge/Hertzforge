@@ -37,7 +37,8 @@
     "replaces": "the measurement of the point it replaces, if any",
     "averages": "the hits or frames averaged",
     "estimator": "H1, H2 or Hv with one reference; matrix H1 with several",
-    "rows": "the references and responses at the point"
+    "rows": "the references and responses at the point",
+    "decay": "the largest decay check over the hits or frames averaged, or null when none was checked"
   },
   "layout": [
     "reference",

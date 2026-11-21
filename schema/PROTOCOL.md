@@ -6898,6 +6898,7 @@ forgets the configured test (`none`).
 | `band.lo_hz`, `band.hi_hz` | 0, `fs_hz / 2.56` | The FRF's lines, inclusive |
 | `estimator` | `H1` | `H1`, `H2` or `Hv` with one reference; several references always take matrix H1 |
 | `averages` | 5 (impact), 30 (shaker) | Hits or frames per point, 1 to 10000 |
+| `decay_warn_pct` | 2 | The decay check's threshold, percent, 0.01 to 100: a hit or burst frame whose ratio (below) is over it carries `response_not_decayed`, never a rejection |
 | `roving.channels` | none | The table rows (`index`) that move from point to point |
 | `roving.points` | none | A list of `{"node","direction"}`, or `{"start","step","count"}` nodes in the rows' own direction |
 | `impact.trigger_level_pct` | 10 | The trigger, percent of the hammer row's range |
@@ -6967,6 +6968,15 @@ impact after the force window still is. The report's `double_hit` is then
 `{"frame","peak","ratio"}`: its top's frame, its value in the row's unit, and its ratio to the
 peak.
 
+**The decay check**, on every hit and on every frame of the burst sources (`burst_random`,
+`burst_chirp`), per response row, made after the windows: on `x[n] w_data[n] w_analysis[n]`,
+what the estimate sees, so the exponential window counts toward it. With `N` the block and
+`L = max(1, round(0.05 N))`, the ratio is the RMS of the last `L` samples over the largest RMS of
+any `L` consecutive samples in the block (0 for a silent row). The hit or frame carries
+`decay: {"row","ratio","warning"}`: the response row (its table `index`) with the largest ratio,
+that ratio as a fraction (not percent), and whether `100 x ratio` is over `decay_warn_pct`.
+Other shaker sources carry `decay: null`.
+
 **Frames in a hit's report** (`peak_frame`, `double_hit.frame`, `force_window_cut.pulse_end_frame`
 and `.window_end_frame`) count from the captured block's start, sample 0; the block starts at
 the tile's `start_frame` in station frames.
@@ -6982,7 +6992,8 @@ the tile's `start_frame` in station frames.
   hit is checked: an overloaded channel or a double hit rejects it (`reason` `overload` or
   `double_hit`); a tip rolled off, a response with nothing in it, a force window that cuts the
   pulse (the force has not fallen below 5 % of its peak before `pre + width`), or a peak off the
-  target are warnings on the hit, never rejections. In `auto` a clean hit is accepted; in `manual`
+  target, and a response not decayed by the block's end (the decay check), are warnings on the
+  hit, never rejections. In `auto` a clean hit is accepted; in `manual`
   it waits (`captured`) for `accept` or `reject`. `accept`, `reject` and `undo` act on the
   latest hit. Once a point's averages are in, its FRF is measured and, with `auto_advance`, the
   next point is selected and armed.
@@ -6990,7 +7001,8 @@ the tile's `start_frame` in station frames.
   are averaged from the ramp's end plus the station's input delay: random after its
   `delay_frames`, pseudo random and periodic chirp after their `delay_frames` at full level,
   periodic random the last frame of each group of `delay_frames + 1`, the first group played
-  wholly after the ramp, and the burst sources from the first frame. Once a point's averages are
+  wholly after the ramp, and the burst sources from the first frame. A burst frame over the decay
+  check's threshold is averaged all the same, with its warning. Once a point's averages are
   in, the drive is stopped with the shared stop ramp, 40 dB down over 3 s. `drive_stop` stops it
   the same way.
 - **`modal_test.end`** ends the test (`ended`), in shaker mode through the stop ramp;
@@ -7012,15 +7024,18 @@ the tile's `start_frame` in station frames.
  "point_dofs":{"references":[{"index":1,"node":3,"direction":"Z+","unit":"lbf"}],
                "responses":[{"index":2,"node":4,"direction":"Z+","unit":"g"},
                             {"index":3,"node":7,"direction":"Z+","unit":"g"}]},
- "counts":{"unit":"hits","point":{"index":2,"accepted":2,"rejected":0,"asked":2},
+ "counts":{"unit":"hits","point":{"index":2,"accepted":2,"rejected":0,"asked":2,
+                                   "decay":{"row":3,"ratio":0.000405,"warning":false}},
            "points":[{"index":0,"accepted":2,"rejected":0,"taken":2,"measured":true},...],
            "totals":{"accepted":6,"taken":6,"points_measured":3,"points_planned":3}},
  "hits":[{"n":1,"seq":5,"status":"accepted","reason":null,"overload":false,
-          "double_hit":false,"start_frame":6631,"peak":18.478,"tip_warning":false,
-          "force_window_cut":false},...],
+          "double_hit":false,"start_frame":6631,
+          "decay":{"row":3,"ratio":0.000405,"warning":false},"peak":18.478,
+          "tip_warning":false,"force_window_cut":false},...],
  "latest":{...,"point":2,"report":{"peak":18.478,"peak_frame":27,"overloaded":[],
            "double_hit":null,"tip_drop_db":6.02,"tip_warning":false,
-           "no_response":[false,false],"force_window_cut":null,"rejected":null,
+           "no_response":[false,false],"force_window_cut":null,
+           "decay":{"row":3,"ratio":0.000392,"warning":false},"rejected":null,
            "reasons":[],"warnings":[]}},
  "record":{"folder":"/home/operator/Hertzforge_Data/golden_roving_hammer","streams":true,
            "problem":null},
@@ -7034,18 +7049,23 @@ hit waits for accept or reject), `measuring`
 `drive_phase`: `idle`, `waiting`, `ramping`, `driving`, `stopping`, `zeroed`. `counts` is kept
 current after every take, accept, reject and undo; its `unit` is `hits` in impact mode and
 `frames` in shaker mode, counted in the same fields; `point.accepted` of `point.asked` reads
-as the averages taken of the averages asked. `point_dofs` orders the point's `references` and
+as the averages taken of the averages asked; `point.decay` is the largest decay check over the
+point's accepted hits or frames (null when none was checked). `point_dofs` orders the point's `references` and
 `responses`; the live frame's `frf.pairs` indices follow them. `hits` are the selected point's
 tiles:
 `status` `pending`, `accepted`, `rejected` or `undone`, `reason` (rejected only) `overload`,
-`double_hit` or `operator`; `peak`, `tip_warning` and `force_window_cut` in impact mode, and
+`double_hit` or `operator`; `decay` (the decay check, null when not checked); `peak`,
+`tip_warning` and `force_window_cut` in impact mode, and
 `target_verdict` (`high`, `low`, `on_target`) with `target_diff_pct` when a target is set.
 `latest` is the latest tile with its point and its whole report; a report's `warnings` are
 `tip_roll_off`, `no_response`, `force_window_cuts_pulse` (with
-`force_window_cut: {"pulse_end_frame","window_end_frame"}`), `force_high` and `force_low`.
+`force_window_cut: {"pulse_end_frame","window_end_frame"}`), `force_high`, `force_low` and
+`response_not_decayed` (the report's `decay` then names the row and its ratio).
 `end`, once finished: `{"outcome","message","emergency_stop","at_s"}`, `at_s` station seconds.
 `modal_test.state` is sent when the state changes; `modal_test.log` with each run's new log
-entries (`{"run_id","entries"}`).
+entries (`{"run_id","entries"}`). The first hit or frame of a point's measurement over the decay
+check's threshold adds one `warning` entry, data
+`{"event":"response_not_decayed","point","seq","row","ratio"}`; no more for that measurement.
 
 ### Modal Test Display
 

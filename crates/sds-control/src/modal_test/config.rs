@@ -281,6 +281,7 @@ pub fn parse(config: &Value) -> Result<WireModal, MethodError> {
             "band",
             "estimator",
             "averages",
+            "decay_warn_pct",
             "roving",
             "impact",
             "shaker",
@@ -318,6 +319,7 @@ pub fn parse(config: &Value) -> Result<WireModal, MethodError> {
     if let Some(a) = c.opt_count("averages")? {
         s.averages = u32::try_from(a).unwrap_or(u32::MAX);
     }
+    s.decay_warn_pct = c.f64_or("decay_warn_pct", s.decay_warn_pct)?;
     if let Some(r) = c.opt_obj("roving")? {
         s.roving = Some(roving(&r)?);
     }

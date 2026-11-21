@@ -1,4 +1,4 @@
-{"n":1,"seq":1,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":1096,"event":"taken","point":0}
-{"n":2,"seq":2,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":1608,"event":"taken","point":0}
-{"n":3,"seq":3,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":2120,"event":"taken","point":0}
-{"n":4,"seq":4,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":2632,"event":"taken","point":0}
+{"n":1,"seq":1,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":1096,"decay":{"row":2,"ratio":0.017373535638139887,"warning":false},"event":"taken","point":0}
+{"n":2,"seq":2,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":1608,"decay":{"row":2,"ratio":0.010161778207699838,"warning":false},"event":"taken","point":0}
+{"n":3,"seq":3,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":2120,"decay":{"row":3,"ratio":0.005830079433255509,"warning":false},"event":"taken","point":0}
+{"n":4,"seq":4,"status":"accepted","reason":null,"overload":false,"double_hit":false,"start_frame":2632,"decay":{"row":2,"ratio":0.012196481671152335,"warning":false},"event":"taken","point":0}
