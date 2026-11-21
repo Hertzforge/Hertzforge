@@ -1096,6 +1096,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
+		toneLaws: () => mimoSine.laws(),
 		record: options.record,
 		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_mixed')}`
 	});
