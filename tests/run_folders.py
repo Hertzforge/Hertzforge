@@ -585,7 +585,9 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
                    tau_s: float | None = None, torn: Sequence[int] = (),
                    unfinished: Sequence[int] = (), directions: Mapping[int, str] = {},
                    modes=None, noise_db: float | None = None,
-                   target: bool = False) -> str:
+                   target: bool = False, undecayed: Sequence[int] = (),
+                   checks: bool = True, outcome: str = 'ended',
+                   emergency_stop: bool = False) -> str:
     """A Modal Test run of the structure above, in the control service's
     shapes, every name from the converter's one table
     (`hertzforge.io.modal_run.WIRE`), so the two cannot drift; the golden
@@ -617,7 +619,15 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
     windows, and the FRFs are written with the structure's poles moved
     left by 1 / tau_s, as the window moves them (`modal_poles`). `modes`
     puts (frequencies, damping) in place of the structure's; `noise_db`
-    adds complex noise that many dB below each FRF's own RMS, seeded."""
+    adds complex noise that many dB below each FRF's own RMS, seeded.
+    Every frame line and measurement line has the decay check, its first
+    response's last RMS a fraction of its largest: 3.1 % and over the
+    warning at the points in `undecayed`, 0.03 % elsewhere; a measurement
+    line's is the largest of its hits'. The double hit's report gives its
+    second peak and ratio, and the check the hammer's polarity. `checks`
+    False writes the folder as one made before the decay check and the
+    polarity were (none of them). `outcome` and `emergency_stop` are how
+    the run ended."""
     from hertzforge.io.modal_run import WIRE as W
 
     lines = np.arange(MODAL_LINES) * MODAL_STEP
@@ -669,6 +679,11 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
             W['end']: float(np.exp(-MODAL_BLOCK / (tau_s * FS))),
             'added_damping': '1/(2*pi*f_n*tau_s)'}
     averages = hits if mode == 'impact' else 40
+
+    def decay(point, a, responses):
+        ratio = (0.031 if point in undecayed else 0.0003) + 1e-5 * a
+        return {W['decay_row']: responses[0][0], W['decay_ratio']: ratio,
+                W['decay_warning']: ratio > 0.02}
     estimator = 'H1' if len(planned[0][2]) == 1 else 'matrix H1'
     frf_records, coherence_records, spectra_records = [], [], []
     frf_values, coherence_values, spectra_values, condition = [], [], [], []
@@ -695,6 +710,8 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
                 W['estimator']: estimator,
                 W['rows']: {W['references']: [channel(i, p) for i, p in references],
                             W['responses']: [channel(i, p) for i, p in responses]}}
+        if checks:
+            line[W['decay']] = decay(point, 1 + hits if mode == 'impact' else 0, responses)
         if k not in selected_again:
             frf_records.append(line)
             frf_values.append(values)
@@ -734,13 +751,20 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
                     W['overload']: False, W['double_hit']: kind == 'double',
                     'start_frame': at, W['peak']: peak, W['tip_warning']: a == 2,
                     W['force_window_cut']: False}
+            report: dict[str, Any] = {W['peak']: peak, 'warnings': []}
+            if checks:
+                tile[W['decay']] = report[W['decay']] = decay(point, a, responses)
+                report[W['double_hit']] = ({W['double_hit_frame']: pre + 40,
+                                            W['double_hit_peak']: peak,
+                                            W['double_hit_ratio']: 1.0}
+                                           if kind == 'double' else None)
             if target:
                 diff = (peak - 120.0) / 120.0 * 100.0
                 tile[W['target_verdict']] = ('on_target' if abs(diff) <= 10 else
                                              'high' if diff > 0 else 'low')
                 tile[W['target_diff_pct']] = diff
             frame_lines.append({**tile, W['event']: W['taken'], W['point']: point,
-                                'report': {'peak': peak, 'warnings': []}})
+                                W['report']: report})
             spans.append([at, MODAL_BLOCK])
             if kind == 'undone':
                 frame_lines.append({**tile, W['status']: 'undone', W['event']: W['changed'],
@@ -781,8 +805,9 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
               W['points_planned']: len(planned)}
     if complete:
         results[W['outcome']] = ({'kind': W['outcome_kind'], 'abscissa': None, 'channels': [],
-                                  W['mode']: mode, 'outcome': 'ended',
-                                  'reason': 'the test was ended', 'emergency_stop': False,
+                                  W['mode']: mode, 'outcome': outcome,
+                                  'reason': 'the test was ended',
+                                  'emergency_stop': emergency_stop,
                                   W['totals']: totals, 'counts': {'totals': totals}},
                                  {key: np.array([float(v)]) for key, v in totals.items()},
                                  None)
@@ -802,6 +827,8 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
     if mode == 'impact':
         check[W['impact']] = {W['trigger']: {'level': 10, 'unit': 'N',
                                              W['pretrigger_frames']: pre}}
+        if checks:
+            check[W['impact']][W['trigger']][W['polarity']] = 'positive'
     else:
         check[W['shaker']] = {W['shaker_window']: 'hann', W['overlap_pct']: 50}
     config = {W['mode']: mode, 'fs_hz': FS, W['block']: MODAL_BLOCK,
@@ -826,6 +853,6 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
               'text': 'measuring'}],
         end=None if not complete else {
             'run_uid': 'uid-modal_test-0001',
-            'end': {'outcome': 'ended', 'message': 'the test was ended',
-                    'emergency_stop': False, 'at_s': 60.0},
+            'end': {'outcome': outcome, 'message': 'the test was ended',
+                    'emergency_stop': emergency_stop, 'at_s': 60.0},
             'at_unix': START['unix'] + 60, 'station_frames': 61440, W['totals']: totals})

@@ -39,7 +39,7 @@ from hertzforge.core.modal_test import (
     window_corrected,
 )
 from hertzforge.core.run_record import RunRecord
-from hertzforge.io import run_convert, run_folder
+from hertzforge.io import modal_run, run_convert, run_folder
 from hertzforge.service import fitting
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -140,8 +140,13 @@ def test_the_impact_frfs_are_each_measurements_at_its_dofs_in_si(converted):
     windows = side['windows']
     assert windows == _json(IMPACT, 'setup.json')['resolved']['windows']
     force = windows['force']
+    decay = lines[0]['decay']
+    decayed = next(_dof(r) for r in lines[0]['rows']['responses'] if r['index'] == decay['row'])
+    assert (decay['warning'], decay['row'], decayed) == (False, 3, '7Z+')
     assert frf.comment[0] == (
-        f'H1 from 1 reference, 2 averages; measurement 1, point 1; uniform analysis window; '
+        f'H1 from 1 reference, 2 averages; measurement 1, point 1; decayed to '
+        f"{decay['ratio'] * 100:.3g} % by the block's end at row 3 (7Z+); uniform analysis "
+        'window; '
         f'force window on the references, {force["width_frames"]} samples after the trigger '
         f'at sample {force["pre_frames"]} and a fall of {force["fall_frames"]}; exponential '
         f'window on every channel, tau {windows["exponential"]["tau_s"]:.12g} s (adds a decay '
@@ -191,8 +196,11 @@ def test_the_shaker_frfs_are_matrix_h1_from_both_references(converted):
     assert frf.response_dof == ['4Z+', '4Z+', '7Z+', '7Z+']
     assert frf.reference_dof == ['1Z+', '8Z+', '1Z+', '8Z+']
     np.testing.assert_allclose(frf.ordinate, raw[0].reshape(4, -1) * G / LBF, rtol=1e-12)
+    decay = _lines(SHAKER, 'modal_frf')[0]['decay']
+    assert (decay['warning'], decay['row']) == (False, 2)
     assert frf.comment[0] == ('matrix H1 from 2 references, 4 averages; measurement 1, '
-                              'point 1; uniform analysis window')
+                              f"point 1; decayed to {decay['ratio'] * 100:.3g} % by the block's "
+                              'end at row 2 (4Z+); uniform analysis window')
     assert frf_tau(frf) is None
     assert frf.averaging.frames == 4 and frf.averaging.window == 'boxcar'
     assert frf.averaging.overlap == 0.0
@@ -241,7 +249,12 @@ def test_the_impact_hit_inside_the_stream_is_time_data_with_its_checks(converted
     hammer = history.ordinate[0] / LBF
     assert abs(int(np.argmax(hammer)) - lines[0]['report']['peak_frame']) <= 1
     assert hammer.max() == pytest.approx(lines[0]['peak'], rel=1e-6)
-    assert history.comment[0] == f'measurement 1, point 1, hit 1; peak {lines[0]["peak"]:.6g} lbf'
+    decay = lines[0]['decay']
+    assert setup['check']['impact']['trigger']['polarity'] == 'positive'
+    assert history.comment[0] == (
+        f'measurement 1, point 1, hit 1; positive hammer; peak {lines[0]["peak"]:.6g} lbf, '
+        f"decayed to {decay['ratio'] * 100:.3g} % by the block's end at row {decay['row']} "
+        '(7Z+)')
     assert history.channel_roles()[('1Z+', 'force')] == 'reference'
 
 
@@ -265,6 +278,11 @@ def test_the_run_record_holds_the_setup_the_frame_lines_and_the_outcome(converte
     for result in ('modal_frf', 'modal_coherence', 'modal_reference_spectra'):
         assert record.results[result]['records'] == _lines(name, result)
     assert record.missing == [_cut_line(name, 'hit' if name == IMPACT else 'frame')]
+    # every frame and measurement line carries the decay check, none over the warning
+    lines = [*frames['records'], *record.results['modal_frf']['records']]
+    assert all(set(line['decay']) == {'row', 'ratio', 'warning'} for line in lines)
+    assert not any(line['decay']['warning'] for line in lines)
+    assert modal_run.findings(record) == []
 
 
 def test_save_and_reopen_loses_nothing(converted, tmp_path):

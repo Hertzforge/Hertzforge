@@ -67,8 +67,11 @@ def test_modal_test_frames_are_each_measurements_accepted_hits(tmp_path):
     assert history.ordinate.shape == (21, rf.MODAL_BLOCK)
     assert history.block[:3] == ['hit 3', 'hit 4', 'hit 5']
     # each record says what the run checked of its hit
-    assert history.comment[0] == 'measurement 1, point 1, hit 3; peak 120 N, tip warning'
-    assert history.comment[1] == 'measurement 1, point 1, hit 4; peak 130 N'
+    decayed = "by the block's end at row 1 (1Z+)"
+    assert history.comment[0] == ('measurement 1, point 1, hit 3; positive hammer; peak 120 N, '
+                                  f'tip warning, decayed to 0.032 % {decayed}')
+    assert history.comment[1] == ('measurement 1, point 1, hit 4; positive hammer; peak 130 N, '
+                                  f'decayed to 0.033 % {decayed}')
     # timed from the trigger: the pre-trigger samples at negative times
     assert history.abscissa[64] == 0.0 and history.abscissa[0] < 0.0
     assert history.channel_roles()[('1Z+', 'force')] == 'reference'
@@ -356,12 +359,12 @@ def test_modal_test_coherence_is_the_kind_its_array_names(tmp_path, layout, chan
 def test_modal_test_a_hits_target_and_checks_reach_its_frames_and_the_run_record(tmp_path):
     _done, project = _open(tmp_path, 'fixed_hammer', target=True)
     history = project['Measurement 1 frames (point 1)']
+    head = 'measurement 1, point 1, hit {}; positive hammer; peak {} N, {} from the force target'
+    tail = "decayed to {} % by the block's end at row 1 (1Z+)"
     assert history.comment[:3] == [
-        ('measurement 1, point 1, hit 3; peak 120 N, +0 % from the force target (on target), '
-         'tip warning'),
-        ('measurement 1, point 1, hit 4; peak 130 N, +8.333 % from the force target '
-         '(on target)'),
-        'measurement 1, point 1, hit 5; peak 140 N, +16.67 % from the force target (high)']
+        f'{head.format(3, 120, "+0 %")} (on target), tip warning, {tail.format(0.032)}',
+        f'{head.format(4, 130, "+8.333 %")} (on target), {tail.format(0.033)}',
+        f'{head.format(5, 140, "+16.67 %")} (high), {tail.format(0.034)}']
     lines = _record(project).results['modal_frames']['records']
     # the undone hit (100 N, and its status line), the double hit (110 N), then the three
     assert [line.get('target_verdict') for line in lines] == [
@@ -411,3 +414,69 @@ def test_modal_test_accepted_hits_of_no_finished_measurement_are_said(tmp_path):
     assert ('2 accepted hits of point 1 belong to no finished measurement; they stay in the '
             'stream and the frame lines') in done.lacked
     assert not any(name.startswith('Measurement') for name in done.objects)
+
+
+def test_modal_test_a_response_not_decayed_is_said_on_its_frames_frfs_and_findings(tmp_path):
+    _done, project = _open(tmp_path, undecayed=[2])
+    frf = project['modal_frf']
+    k = frf.reference_dof.index('3Z+')
+    assert "response not decayed by the block's end, 3.1 % at row 1 (1Z+)" in frf.comment[k]
+    assert "decayed to 0.034 % by the block's end at row 1 (1Z+)" in frf.comment[0]
+    history = project['Measurement 3 frames (point 3)']
+    assert history.comment[0].endswith(
+        "tip warning, response not decayed by the block's end, 3.1 % at row 1 (1Z+)")
+    record = _record(project)
+    line = record.results['modal_frf']['records'][2]
+    assert line['decay'] == {'row': 1, 'ratio': pytest.approx(0.03104), 'warning': True}
+    assert [w for w in modal_run.findings(record) if 'decayed' in w] == [
+        'response not decayed at point 3, 3.1 % at row 1 (measurement 3)']
+
+
+def test_modal_test_a_double_hits_second_peak_and_ratio_are_in_the_findings(tmp_path):
+    _done, project = _open(tmp_path, 'fixed_hammer')
+    record = _record(project)
+    rejected = [line for line in record.results['modal_frames']['records']
+                if line['reason'] == 'double_hit']
+    assert rejected[0]['report']['double_hit'] == {'frame': 104, 'peak': 110.0, 'ratio': 1.0}
+    assert modal_run.findings(record) == [
+        'point 1, hit 2: double hit (a second hit at sample 104, peak 110 N, 1 of the first)']
+
+
+def test_modal_test_the_hammers_polarity_is_on_every_hit(tmp_path):
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer')
+    path = os.path.join(folder, 'setup.json')
+    with open(path, encoding='utf-8') as f:
+        setup = json.load(f)
+    setup['check']['impact']['trigger']['polarity'] = 'negative'
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(setup, f)
+    history = Project.open(run_convert.convert(folder).path)['Measurement 1 frames (point 1)']
+    assert all('; negative hammer; ' in c for c in history.comment)
+
+
+def test_modal_test_a_folder_from_before_the_decay_check_converts_as_before(tmp_path):
+    now, project = _open(tmp_path, checks=True)
+    before, older = _open(tmp_path, name='older', checks=False)
+    assert before.objects == now.objects and before.lacked == now.lacked
+    for name in ('modal_frf', 'Measurement 1 frames (point 1)'):
+        assert not any('decay' in c or 'hammer;' in c for c in older[name].comment)
+        assert any('decay' in c for c in project[name].comment)
+    record = _record(older)
+    assert 'decay' not in record.results['modal_frf']['records'][0]
+    assert modal_run.findings(record) == []
+
+
+@pytest.mark.parametrize(('outcome', 'words'), [
+    ('run_panicked', 'stopped by a fault in the control service'),
+    ('run_not_started', 'not started'),
+    ('source_failed', 'stopped when the drive source failed')])
+def test_modal_test_the_new_outcomes_are_said_with_the_emergency_stop(tmp_path, outcome, words):
+    from hertzforge.report.run_records import facts
+
+    _done, project = _open(tmp_path, 'fixed_hammer', outcome=outcome,
+                           emergency_stop=outcome != 'source_failed')
+    record = _record(project)
+    assert record.outcome == outcome
+    stop = '' if outcome == 'source_failed' else '; the emergency stop was issued'
+    assert facts(record).outcome_text == f'{words}: the test was ended{stop}'
+    assert record.results['modal_outcome']['outcome'] == outcome

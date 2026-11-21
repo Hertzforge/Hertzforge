@@ -16,15 +16,16 @@ What a Modal Test run becomes:
   in SI, timed from the trigger (an impact's pre-trigger samples at
   negative times) or from the frame's start. Each record's comment says
   the measurement, the point, the hit and what the run checked of it:
-  the peak force, the distance from a force target and its verdict, and
-  any warning. Rejected and undone hits are not in it: they stay in the
+  the hammer's polarity, the peak force, the distance from a force target
+  and its verdict, any warning, a double hit's second peak and ratio, and
+  the decay check. Rejected and undone hits are not in it: they stay in the
   stream, and the run record's frame lines say what each was. A shaker's
   drive stream is in the same history, as monitors.
 - **modal_frf**: one `Frf` of every measurement's FRFs, each record a
   response against a reference at the DOFs the measurement named, in SI
   from the channel rows' units; a point measured again replaces what the
   earlier measurement gave. Each record's comment says the estimator,
-  the averages, the measurement and point, and the windows (the force
+  the averages, the measurement and point, the decay check, and the windows (the force
   window in samples and the exponential window's time constant, which
   `core.modal_test.frf_tau` reads back after a save). The averaging holds
   the block, the averages and the analysis window.
@@ -131,6 +132,19 @@ WIRE: dict[str, Any] = {
     'target_verdict': 'target_verdict',
     'target_diff_pct': 'target_diff_pct',
     'verdicts': {'high': 'high', 'low': 'low', 'on_target': 'on target'},
+    'report': 'report',
+    # a hit report's double hit: the second lobe's frame (from the block's
+    # start), its peak and its ratio to the first
+    'double_hit_frame': 'frame',
+    'double_hit_peak': 'peak',
+    'double_hit_ratio': 'ratio',
+    # the decay check, on a frame line, a hit report and a measurement line:
+    # the response row worst decayed by the block's end, the ratio of its last
+    # RMS to its largest (a fraction) and whether that was over the warning
+    'decay': 'decay',
+    'decay_row': 'row',
+    'decay_ratio': 'ratio',
+    'decay_warning': 'warning',
     # a stream's first station frame, and the frames a cut stream was cut from
     'first_station_frame': 'first_station_frame',
     'cut_from_frames': 'cut_from_frames',
@@ -146,6 +160,8 @@ WIRE: dict[str, Any] = {
     'points': 'points',
     'trigger': 'trigger',
     'pretrigger_frames': 'pretrigger_frames',
+    # the hammer's polarity, on the check's trigger: 'positive' or 'negative'
+    'polarity': 'polarity',
     'shaker_window': 'window',
     'overlap_pct': 'overlap_pct',
     # the outcome (`modal_outcome` and `end.json`)
@@ -507,9 +523,14 @@ def _spectral(run: run_folder.RunFolder, result: run_folder.Result, channels: _C
                  + (f', point {_point_said(point)}' if point is not None else ''))
         if frf:
             count = len(_rows(record, 'references'))
+            row = (_decay(record) or (None,))[0]
+            decayed = next((channels.dof(e) for e in _rows(record, 'responses')
+                            if _number(e.get(_w('index'))) == row), None)
+            decay = _decay_words(record, decayed)
             comments.append(f'{record.get(_w("estimator")) or "estimator not recorded"} from '
                             f'{count} reference{"s" * (count != 1)}, '
                             f'{record.get(_w("averages"), "?")} averages; {where}'
+                            + (f'; {decay}' if decay else '')
                             + (f'; {words}' if words else ''))
         else:
             comments.append(f'{"multiple" if multiple else "ordinary"} coherence; {where}')
@@ -660,9 +681,43 @@ def _read_frames(stream: run_folder.Stream, spans: Sequence[tuple[int, int]]) ->
     return np.asarray(out)
 
 
-def _hit_words(hit: Mapping[str, Any], unit: str) -> str:
+def _decay(entry: Mapping[str, Any]) -> tuple[int | None, float, bool] | None:
+    """A frame line's or measurement line's decay check: the row, the ratio
+    (a fraction) and the warning; None when the line has none (a folder
+    written before the check, or a shaker source it does not apply to)."""
+    decay = _mapping(entry.get(_w('decay')))
+    ratio = _real(decay.get(_w('decay_ratio')))
+    if ratio is None:
+        return None
+    return _number(decay.get(_w('decay_row'))), ratio, decay.get(_w('decay_warning')) is True
+
+
+def _decay_words(entry: Mapping[str, Any], dof: str | None = None) -> str:
+    """The decay check in words: 'response not decayed by the block's end,
+    3.1 % at row 3 (1Z+)' or 'decayed to 0.031 % by the block's end at row 3';
+    '' when the line has no check."""
+    found = _decay(entry)
+    if found is None:
+        return ''
+    row, ratio, warning = found
+    at = (f' at row {row}' if row is not None else '') + (f' ({dof})' if dof else '')
+    if warning:
+        return f"response not decayed by the block's end, {ratio * 100:.3g} %{at}"
+    return f"decayed to {ratio * 100:.3g} % by the block's end{at}"
+
+
+def _polarity(run: run_folder.RunFolder) -> str:
+    """The hammer's polarity as the check states it, '' when it does not
+    (a shaker run, or a folder written before the polarity was set)."""
+    trigger = _mapping(_mapping(_check(run).get(_w('impact'))).get(_w('trigger')))
+    polarity = trigger.get(_w('polarity'))
+    return str(polarity) if isinstance(polarity, str) and polarity else ''
+
+
+def _hit_words(hit: Mapping[str, Any], unit: str, dof: str | None = None) -> str:
     """What the run checked of a hit, in words: its peak force, its distance
-    from the force target and the verdict, and its warnings."""
+    from the force target and the verdict, its warnings, a double hit's
+    second peak and ratio, and the decay check (`dof` the decay row's DOF)."""
     said = []
     peak = _real(hit.get(_w('peak')))
     if peak is not None:
@@ -677,6 +732,22 @@ def _hit_words(hit: Mapping[str, Any], unit: str) -> str:
                        ('overload', 'overload'), ('double_hit', 'double hit')):
         if hit.get(_w(key)) is True:
             said.append(words)
+    double = _mapping(_mapping(hit.get(_w('report'))).get(_w('double_hit')))
+    if double:
+        second = _real(double.get(_w('double_hit_peak')))
+        ratio = _real(double.get(_w('double_hit_ratio')))
+        frame = _number(double.get(_w('double_hit_frame')))
+        part = 'a second hit' + (f' at sample {frame}' if frame is not None else '')
+        if second is not None:
+            part += f', peak {second:.6g} {unit}'.rstrip()
+        if ratio is not None:
+            part += f', {ratio:.3g} of the first'
+        if 'double hit' in said:
+            said.remove('double hit')
+        said.append(f'double hit ({part})')
+    decay = _decay_words(hit, dof)
+    if decay:
+        said.append(decay)
     return ', '.join(said)
 
 
@@ -723,6 +794,7 @@ def frames(run: run_folder.RunFolder, table: Any,
     pre = 0 if shaker else (_number(_mapping(_mapping(_check(run).get(_w('impact'))).get(
         _w('trigger'))).get(_w('pretrigger_frames'))) or 0)
     word = 'frame' if shaker else 'hit'
+    polarity = _polarity(run)
     identity = _identity(run)
     measurements = _measurement_hits(run, lacked)
     if _hits(run) and not any(hits for _p, hits in measurements.values()):
@@ -790,11 +862,14 @@ def frames(run: run_folder.RunFolder, table: Any,
                     units.append(u)
                     n = _number(hit.get(_w('n')))
                     labels.append(f'{word} {n if n is not None else k + 1}')
-                    checked = _hit_words(hit, unit)
+                    row = (_decay(hit) or (None,))[0]
+                    checked = _hit_words(hit, unit, None if row not in channels.row else (
+                        named.get(m, {}).get(row) or channels.planned(row, point)))
                     comments.append(f'measurement {_measurement_said(m)}'
                                     + (f', point {_point_said(point)}'
                                        if point is not None else '')
                                     + (f', {word} {n}' if n is not None else '')
+                                    + (f'; {polarity} hammer' if polarity else '')
                                     + (f'; {checked}' if checked else '')
                                     + {'replaced': '; replaced by a later measurement',
                                        'incomplete': '; incomplete and left out of the '
@@ -827,6 +902,50 @@ def _totals(run: run_folder.RunFolder) -> Mapping[str, Any]:
     outcome = run.results.get(_w('outcome'))
     totals = _mapping(outcome.description.get(_w('totals'))) if outcome is not None else {}
     return totals or _mapping(_mapping(run.end).get(_w('totals')))
+
+
+def findings(record: Any) -> list[str]:
+    """What a Modal Test run's checks found, in words a report can print,
+    from its run record (`core.run_record.RunRecord`): each finished
+    measurement whose response had not decayed by the block's end ("response
+    not decayed at point 3, 3.1 % at row 4"), and each hit rejected as a
+    double hit, with its second peak and ratio. Empty for a run with no such
+    finding, or one written before the checks existed.
+
+    Parameters
+    ----------
+    record : RunRecord
+        A Modal Test run's record.
+
+    Returns
+    -------
+    list of str
+    """
+    results = getattr(record, 'results', {}) or {}
+    setup = getattr(record, 'setup', {}) or {}
+    references = _mapping(_mapping(setup).get(_w('check'))).get(_w('references')) or []
+    unit = next((str(r.get(_w('unit')) or '') for r in references if isinstance(r, Mapping)),
+                '')
+    said = []
+    for line in _mapping(results.get(_w('frf'))).get('records') or []:
+        found = _decay(_mapping(line))
+        if found is None or not found[2]:
+            continue
+        row, ratio, _warning = found
+        said.append(f'response not decayed at point '
+                    f'{_point_said(_number(line.get(_w("point"))))}, {ratio * 100:.3g} %'
+                    + (f' at row {row}' if row is not None else '')
+                    + f' (measurement {_measurement_said(_number(line.get(_w("measurement"))))})')
+    for line in _mapping(results.get(_w('frames'))).get('records') or []:
+        if line.get(_w('event')) != _w('taken'):
+            continue
+        double = _mapping(_mapping(line.get(_w('report'))).get(_w('double_hit')))
+        if not double:
+            continue
+        hit = _hit_words({_w('report'): {_w('double_hit'): double}}, unit)
+        said.append(f'point {_point_said(_number(line.get(_w("point"))))}, hit '
+                    f'{_number(line.get(_w("n")))}: {hit}')
+    return said
 
 
 def results(run: run_folder.RunFolder, table: Any, lacked: list[str]

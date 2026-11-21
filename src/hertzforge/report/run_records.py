@@ -49,7 +49,9 @@ TEST_NAMES = {'random': 'Random', 'mimo_random': 'MIMO Random', 'sine': 'Sine',
 OUTCOMES = {'completed': 'completed', 'aborted': 'aborted',
             'operator_stop': 'stopped by the operator',
             'law_fault': 'stopped: the control law faulted',
-            'held': 'held', 'stopped': 'stopped'}
+            'held': 'held', 'stopped': 'stopped',
+            'run_panicked': 'stopped by a fault in the control service',
+            'run_not_started': 'not started', 'source_failed': 'stopped when the drive source failed'}
 
 #: the end's summary counts a report prints, in the order it prints them
 SUMMARY_COUNTS = (('loops', 'control loop', 'control loops'),
@@ -100,7 +102,8 @@ class RunFacts:
     `resumes`, `alarms`, `trips`, `overloads` and `operator` are the
     log's entries of each sort. `counts` are (count, words) in the order
     printed. `outcome` is the end's code ('' for a run that did not end
-    cleanly) and `outcome_text` it in words with the end's message.
+    cleanly) and `outcome_text` it in words with the end's message, and
+    that the emergency stop was issued when the end says so.
     """
 
     test: str
@@ -308,6 +311,8 @@ def facts(record: Any) -> RunFacts:
         words = OUTCOMES.get(outcome, outcome.replace('_', ' '))
         message = str(end.get('message') or '').strip()
         outcome_text = f'{words}: {message}' if message else words
+        if end.get('emergency_stop') is True:
+            outcome_text += '; the emergency stop was issued'
     else:
         outcome_text = 'did not end cleanly: the run record holds no end'
     counts: list[tuple[int, str]] = []
