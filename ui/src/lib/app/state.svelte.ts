@@ -34,6 +34,7 @@ import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
 import { PlaybackStore } from '$lib/acquire/playback/playbackStore.svelte';
 import { PlaybackViewsState } from '$lib/acquire/playback/playbackViews.svelte';
+import { ModalTestStore } from '$lib/acquire/modal_test/modalTestStore.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -2298,6 +2299,8 @@ export class AppState {
 	readonly recorderRunOpen: RunOpen;
 	/** A finished Playback run's way to its data: its inputs and drives, in the Signals workspace. */
 	readonly playbackRunOpen: RunOpen;
+	/** A finished Modal Test's way to its FRFs: the modal fit, in the Modal workspace. */
+	readonly modalTestRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2346,6 +2349,8 @@ export class AppState {
 	readonly playback: PlaybackStore;
 	/** The Playback run's pages, drawn from its live frames. */
 	readonly playbackViews: PlaybackViewsState;
+	/** The Modal Test's setup, its points, its hits and its live frame; the station and table (with each row's DOF) are the Acquire store's. */
+	readonly modalTest: ModalTestStore;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -2390,6 +2395,7 @@ export class AppState {
 		this.twrRunOpen = new RunOpen(runHost, 'twr');
 		this.recorderRunOpen = new RunOpen(runHost, 'recorder');
 		this.playbackRunOpen = new RunOpen(runHost, 'playback');
+		this.modalTestRunOpen = new RunOpen(runHost, 'modal_test');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -2400,6 +2406,7 @@ export class AppState {
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.modalTest = new ModalTestStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.playback = new PlaybackStore(this.acquire, config.popout ? { local: null, drafts: false } : { analysis: this.analysis, objects: () => this.project.summary?.objects ?? [] });
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
@@ -2608,7 +2615,7 @@ export class AppState {
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine, this.modalTest);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2651,6 +2658,8 @@ export class AppState {
 		if (onMimoSine || this.mimoSine.isLive) return this.mimoSine.source;
 		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
 		if (onPlayback || this.playback.isLive) return this.playback.source;
+		const onModal = this.workspace === 'acquire' && this.tests.screen === 'modal_test';
+		if (onModal || this.modalTest.isLive) return this.modalTest.source;
 		return null;
 	}
 
@@ -2712,6 +2721,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.playback.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.modalTest.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -2729,6 +2741,7 @@ export class AppState {
 		this.mimoShock.watch();
 		this.mimoSine.watch();
 		this.playback.watch();
+		this.modalTest.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();

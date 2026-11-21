@@ -20,6 +20,7 @@ import { fromTwrConfig, toTwrConfig } from '../twr/twrSetup';
 import { fromExplorerConfig, toExplorerConfig } from '../explorer/explorerSetup';
 import { fromRecorderConfig, toRecorderConfig } from '../recorder/recorderSetup';
 import { fromPlaybackConfig, toPlaybackConfig } from '../playback/playbackSetup';
+import { fromModalConfig, toModalConfig } from '../modal_test/modalTestSetup';
 import { fitChannels, fromMsConfig, toMsConfig } from '../mimoshock/msSetup';
 import { fitChannels as fitMsineChannels, fromMsineConfig, toMsineConfig } from '../mimosine/msineSetup';
 import { toWireSetup } from '../mimo/mimoSetup';
@@ -210,6 +211,10 @@ export function hostFor(app: AppState, module: SetupModule): SetupHost {
 		case 'playback': {
 			const s = app.playback;
 			return wireHost(module, s, protocol, (c) => fromPlaybackConfig(c as never), (d) => toPlaybackConfig(d));
+		}
+		case 'modal_test': {
+			const s = app.modalTest;
+			return wireHost(module, s, protocol, (c) => fromModalConfig(c as never), (d) => toModalConfig(d));
 		}
 		case 'mimo_random':
 			return mimoHost(app, protocol);
