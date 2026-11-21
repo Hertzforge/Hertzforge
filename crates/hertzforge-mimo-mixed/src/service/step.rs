@@ -217,6 +217,10 @@ pub(crate) struct ToneCtl {
     pub(crate) misses: u32,
     pub(crate) watch: DivergenceWatch,
     pub(crate) limiting: bool,
+    /// Seconds left of the limiting mark's hold: a reading trails a cut by
+    /// the tracker's delay and the judging average, so a tone stays marked
+    /// that long after the ceiling last held it.
+    pub(crate) limited_s: f64,
     /// Per control.
     pub(crate) judging: Vec<ToneJudging>,
     pub(crate) ms: Vec<f64>,
@@ -599,7 +603,14 @@ impl MimoMixedStep {
                 self.refv[i] = self.tones[k].reference[i * lines + line] * lam;
             }
             if shown {
+                // Told on target, the law carries its own last ask, not the
+                // drive the ceiling rule left in force: rebased on a scaled
+                // drive with no error to see, each tick's cut would stay
+                // (found: three 2 g tones read -3 dB on every control the
+                // moment they were usable after the level's last step, with
+                // no tone limiting at full level).
                 self.y[..n].copy_from_slice(&self.refv);
+                self.dif.copy_from_slice(&self.tones[k].ask);
             }
             for v in self.dif.iter_mut() {
                 *v *= lam;
@@ -737,7 +748,19 @@ impl MimoMixedStep {
                 *pv = *a * s;
             }
             self.tones[k].scale = s;
-            self.tones[k].limiting = self.limiting[k];
+            let hold = self.tones[k]
+                .judging
+                .iter()
+                .map(|j| j.judge_s)
+                .fold(0.0, f64::max)
+                + hertzforge_dsp::tone::TRACKER_DELAY_FACTOR / self.bank.bn_hz();
+            let tc = &mut self.tones[k];
+            tc.limited_s = if self.limiting[k] {
+                hold
+            } else {
+                (tc.limited_s - self.tick_s).max(0.0)
+            };
+            tc.limiting = self.limiting[k] || tc.limited_s > 0.0;
             self.bank.set_drive(k, &self.prop, tf);
         }
     }
