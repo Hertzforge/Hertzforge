@@ -5,14 +5,13 @@
 
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import { MIMO_MIXED_TOPICS, type MimoMixedData, type MimoMixedQuantity, type MimoMixedSubscribeResult } from '$lib/protocol/mimoMixed';
-import { pulseHooks } from '../pulse/pulseScreen';
 import { PulseScreenState } from '../pulse/pulseScreenState.svelte';
 import type { ScreenHooks, ScreenOptions } from '../screen/screen.svelte';
-import { MMIX_SCREEN } from './mmixLayout';
+import { mmixHooks } from './mmixLayout';
 
 export const MMIX_TEST_TYPE = 'mimo_mixed';
 
-export const MMIX_HOOKS: ScreenHooks = pulseHooks(MMIX_SCREEN, { method: 'mimo_mixed.subscribe', topic: MIMO_MIXED_TOPICS.data });
+export const MMIX_HOOKS: ScreenHooks = mmixHooks({ method: 'mimo_mixed.subscribe', topic: MIMO_MIXED_TOPICS.data });
 
 export class MmixViewsState extends PulseScreenState<MimoMixedData, MimoMixedSubscribeResult> {
 	constructor(control: ServiceClient, opts: ScreenOptions) {
@@ -25,12 +24,15 @@ export interface ReviewPages {
 	proceeded: string | null;
 }
 
-/** The identification page when the run holds for review, then the controls once it drives again: once each per run. */
+/**
+ * The run's pages when the run holds for review (the Run card gives the identification and the
+ * prediction there), then the controls once it drives again: once each per run.
+ */
 export function reviewPage(s: { state: string; run_id: string | null } | null, seen: ReviewPages): MimoMixedQuantity | null {
 	if (!s?.run_id) return null;
 	if (s.state === 'review' && seen.review !== s.run_id) {
 		seen.review = s.run_id;
-		return 'identification';
+		return 'control';
 	}
 	if (s.state === 'running' && seen.review === s.run_id && seen.proceeded !== s.run_id) {
 		seen.proceeded = s.run_id;

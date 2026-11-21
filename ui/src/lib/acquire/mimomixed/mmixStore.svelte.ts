@@ -24,6 +24,7 @@ import {
 	type MimoMixedLogEvent,
 	type MimoMixedLogResult,
 	type MimoMixedOverrideReason,
+	type MimoMixedRefusalReason,
 	type MimoMixedReportItem,
 	type MimoMixedState
 } from '$lib/protocol/mimoMixed';
@@ -52,7 +53,7 @@ import {
 	type MmixSection
 } from './mmixSetup';
 import { mmixBarActions, mmixIsLive, mmixModuleVerbs, mmixPartToggle, mmixPrimary, type MmixVerbContext, type MmixVerbId } from './mmixVerbs';
-import { MMIX_OUTCOME_WORDS, MMIX_PHASE_WORDS, MMIX_STATE_WORDS, PART_REFUSED_WORDS } from './mmixWords';
+import { MMIX_OUTCOME_WORDS, MMIX_PHASE_WORDS, MMIX_REFUSAL_WORDS, MMIX_STATE_WORDS, mmixRefusalFacts } from './mmixWords';
 
 const SETUP_KEY = 'hertzforge.acquire.mimo_mixed.setup.v1';
 const HELD_KEY = 'hertzforge.acquire.mimo_mixed.held.v1';
@@ -329,12 +330,8 @@ export class MimoMixedStore {
 			state: l.state,
 			phase: l.phase,
 			mode: l.mode,
-			level_db: l.commanded_db ?? s.level_db,
+			level_db: l.level_db,
 			t_s: l.t_s,
-			elapsed_s: l.elapsed_s ?? s.elapsed_s,
-			parts_s: l.parts_s,
-			at_level_s: l.at_level_s,
-			remaining_at_level_s: l.remaining_at_level_s,
 			held: l.held,
 			alarm: l.alarm,
 			limiting: l.limiting,
@@ -380,13 +377,20 @@ export class MimoMixedStore {
 		return mmixPartToggle(this.verbContext, row);
 	}
 
-	/** The run's control and drive names: the shape the service reports, else the draft's. */
+	/** The run's control and drive names, by channel, from the table: the service reports channels, not names. */
 	get runControlLabels(): string[] {
-		return this.status?.shape?.labels ?? this.controlLabels;
+		const s = this.now;
+		return s?.parts[0]?.controls.length ? s.parts[0].controls.map((c) => rowLabel(this.rows, c.channel)) : this.controlLabels;
 	}
 
 	get runDriveLabels(): string[] {
-		return this.status?.shape?.drive_labels ?? this.driveLabels;
+		const s = this.now;
+		return s?.drives.length ? s.drives.map((d) => rowLabel(this.rows, d.channel)) : this.driveLabels;
+	}
+
+	/** A channel's name in the table, for the rows the service reports by channel. */
+	channelLabel(channel: number | null | undefined): string {
+		return channel === null || channel === undefined ? '' : rowLabel(this.rows, channel);
 	}
 
 	partName(id: string): string {
@@ -406,8 +410,9 @@ export class MimoMixedStore {
 			mode: s.mode,
 			levels_db: s.levels_db,
 			level_db: s.level_db,
-			at_level_s: s.at_level_s,
-			remaining_at_level_s: s.remaining_at_level_s,
+			// the service does not report the time at a level, nor what is left of it
+			at_level_s: null,
+			remaining_at_level_s: null,
 			end: s.end ? ({ outcome: s.end.outcome, message: s.end.message, at_s: s.end.at_s, level_db: s.end.level_db, trip: null } as unknown as RunHead['end']) : null,
 			record: s.record ?? null
 		};
@@ -416,7 +421,7 @@ export class MimoMixedStore {
 	get frame(): { level_db: number | null; at_level_s: number | null; remaining_at_level_s: number | null } | null {
 		const l = this.frameOfRun;
 		if (!l || this.status?.state === 'finished') return null;
-		return { level_db: l.level_db, at_level_s: l.at_level_s, remaining_at_level_s: l.remaining_at_level_s };
+		return { level_db: l.level_db, at_level_s: null, remaining_at_level_s: null };
 	}
 
 	get record(): RunRecordRef | null {
@@ -427,8 +432,9 @@ export class MimoMixedStore {
 	readonly phaseWords: Record<string, string> = MMIX_PHASE_WORDS;
 	readonly stateWords: Record<string, string> = MMIX_STATE_WORDS;
 
+	/** The run's time since start, station seconds. */
 	get elapsed(): number | null {
-		return this.frameOfRun?.elapsed_s ?? this.status?.elapsed_s ?? null;
+		return this.frameOfRun?.t_s ?? this.status?.t_s ?? null;
 	}
 
 	get source(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
@@ -762,8 +768,9 @@ export class MimoMixedStore {
 		return true;
 	}
 
-	async arm(ack?: string): Promise<boolean> {
-		const res = await this.act<MimoMixedState>(ack ? 'Arm Past Feasibility' : 'Arm', 'mimo_mixed.arm', ack ? { override_ack: ack } : {});
+	/** Open the station; nothing is driven. The arm takes no parameters. */
+	async arm(): Promise<boolean> {
+		const res = await this.act<MimoMixedState>('Arm', 'mimo_mixed.arm', {});
 		if (res) this.onStatus(res);
 		return res !== null;
 	}
@@ -778,19 +785,32 @@ export class MimoMixedStore {
 		return res !== null;
 	}
 
+	/** Past a review that holds nothing: the proceed takes no parameters. */
 	async proceed(): Promise<boolean> {
-		const ack = this.acknowledgement.trim();
-		const res = await this.act<MimoMixedState>('Proceed', 'mimo_mixed.proceed', ack ? { acknowledge: ack } : {});
+		const res = await this.act<MimoMixedState>('Proceed', 'mimo_mixed.proceed', {});
 		if (res) this.onStatus(res);
 		return res !== null;
 	}
 
-	/** Past a failed gate or a prediction over a ceiling, with the operator's words (MIMO Random's). */
+	/** The hold in force at the review, the one an override acknowledges; null when nothing holds. */
+	get holdInForce(): MimoMixedOverrideReason | null {
+		const s = this.now;
+		return s?.state === 'review' && (s.phase === 'gate_failed' || s.phase === 'prediction_exceeded') ? s.phase : null;
+	}
+
+	/**
+	 * Past a failed gate or a prediction over a ceiling, with the operator's words. The override
+	 * names the hold it acknowledges; past a gate, the run goes on to the prediction's review, which
+	 * may hold again.
+	 */
 	async override(reason?: MimoMixedOverrideReason): Promise<boolean> {
 		const ack = this.acknowledgement.trim();
-		const why = reason ?? (this.status?.phase === 'prediction_exceeded' ? 'prediction_exceeded' : 'gate_failed');
-		const res = await this.act<MimoMixedState>('Proceed With Words', 'mimo_mixed.override', { ack, reason: why });
-		if (res) this.onStatus(res);
+		const why = reason ?? this.holdInForce;
+		const res = await this.act<MimoMixedState>('Override', 'mimo_mixed.override', why ? { ack, reason: why } : { ack });
+		if (res) {
+			this.acknowledgement = '';
+			this.onStatus(res);
+		}
 		return res !== null;
 	}
 
@@ -821,15 +841,7 @@ export class MimoMixedStore {
 	/** Switch one part on or off live, as a ramp. A refusal says why in the part's words. */
 	async part(id: string, on: boolean): Promise<boolean> {
 		const res = await this.act<{ id: string; on: boolean }>(on ? 'Part On' : 'Part Off', 'mimo_mixed.part', { id, on });
-		if (!res) {
-			const why = (this.#refusal?.detail as { why?: string } | undefined)?.why;
-			if (why && PART_REFUSED_WORDS[why] && this.#refusal) this.#refusal = { ...this.#refusal, message: PART_REFUSED_WORDS[why] };
-		}
 		return res !== null;
-	}
-
-	async adjust(key: string, value: number): Promise<boolean> {
-		return (await this.act<{ key: string; value: number }>('Adjust', 'mimo_mixed.adjust', { key, value })) !== null;
 	}
 
 	async stop(): Promise<boolean> {
@@ -863,13 +875,20 @@ export class MimoMixedStore {
 		return true;
 	}
 
+	/** A refusal under this module's heading for its name, with the facts its detail carries in words. */
+	private inWords(r: Refusal): Refusal {
+		const title = r.reason ? MMIX_REFUSAL_WORDS[r.reason as MimoMixedRefusalReason] : undefined;
+		const facts = mmixRefusalFacts(r.reason, r.detail, { channel: (c) => this.channelLabel(c), part: (id) => this.partName(id) });
+		return { ...r, title: title ?? r.title, facts: facts.length ? facts : r.facts };
+	}
+
 	private async act<R>(verb: string, method: string, params: Record<string, unknown> = {}, exclusive = true): Promise<R | null> {
 		if (exclusive) this.busy = verb;
 		this.#refusal = null;
 		try {
 			return await this.control.request<R>(method, params);
 		} catch (err) {
-			this.#refusal = toRefusal(verb, err);
+			this.#refusal = this.inWords(toRefusal(verb, err));
 			return null;
 		} finally {
 			if (exclusive && this.busy === verb) this.busy = null;

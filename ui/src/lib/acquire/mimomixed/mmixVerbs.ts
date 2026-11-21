@@ -1,8 +1,10 @@
 /**
  * What a MIMO Mixed Mode run offers now, and why a verb waits. The run's states and phases are
  * Mixed Mode's, so its rules are: the run bar's verbs (Random's), Hold and Resume, and a part
- * switched on or off once the parts have come in. MIMO Random's identification gate adds one: past
- * a failed gate, or a prediction over a ceiling, only with the operator's words.
+ * switched on or off once the parts have come in. The review adds two holds, a failed coherence
+ * gate and a prediction over a drive ceiling: past either only by an override with the operator's
+ * words, which names the hold. A forecast that refuses (no drive budget fits) holds the Proceed
+ * with no override.
  */
 
 import type { MimoMixedPartRow, MimoMixedState } from '$lib/protocol/mimoMixed';
@@ -12,7 +14,7 @@ import { mixedBarActions, mixedIsLive, mixedModuleVerbs, mixedPrimary, partToggl
 export interface MmixVerbContext {
 	connected: boolean;
 	controller: boolean;
-	run: Pick<MimoMixedState, 'state' | 'phase' | 'mode' | 'held'> | null;
+	run: (Pick<MimoMixedState, 'state' | 'phase' | 'mode' | 'held'> & Partial<Pick<MimoMixedState, 'prediction'>>) | null;
 	setup: SetupStatus;
 	setupErrors: number;
 	busy: string | null;
@@ -36,7 +38,9 @@ export function mmixIsLive(s: { state: MimoMixedState['state'] } | null | undefi
 export function mmixBarActions(ctx: MmixVerbContext): Record<ActionId, ActionState> {
 	const out = mixedBarActions(mixedContext(ctx));
 	const p = ctx.run?.phase;
-	if ((p === 'gate_failed' || p === 'prediction_exceeded') && out.proceed) out.proceed = { visible: true, enabled: false, reason: p === 'gate_failed' ? 'The identification gate did not pass: proceed with your words, or abort.' : 'The prediction is over a ceiling: proceed with your words, or abort.' };
+	if ((p === 'gate_failed' || p === 'prediction_exceeded') && out.proceed) out.proceed = { visible: true, enabled: false, reason: p === 'gate_failed' ? 'The coherence gate did not pass: override with your words, or stop.' : 'The prediction is over a drive ceiling: override with your words, or stop.' };
+	else if (p === 'awaiting_review' && ctx.run?.prediction?.forecast.refused && out.proceed)
+		out.proceed = { visible: true, enabled: false, reason: ctx.run.prediction.forecast.refused === 'budget_cannot_fit' ? 'The forecast finds no drive budget that fits the schedule; no override passes it. Change the setup, or stop.' : "The model is not usable at a tone's frequency; change the setup, or stop." };
 	return out;
 }
 
