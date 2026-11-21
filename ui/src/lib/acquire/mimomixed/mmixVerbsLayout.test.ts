@@ -11,7 +11,8 @@ import { MIMO_MIXED_END_NAMES, MIMO_MIXED_NOT_BUILT, MIMO_MIXED_OUTCOMES, MIMO_M
 import type { PlotPanel } from '../screen/screen.svelte';
 import { MMIX_PLOT_TYPES, MMIX_QUANTITIES, MMIX_SCREEN, mmixSubscription } from './mmixLayout';
 import { mmixBarActions, mmixModuleVerbs, mmixPartToggle, type MmixVerbContext } from './mmixVerbs';
-import { endWords, MMIX_END_WORDS, MMIX_OUTCOME_WORDS, MMIX_PHASE_WORDS, MMIX_REFUSAL_WORDS, mmixRefusalFacts, needWords, PART_REFUSED_WORDS, scaleWords } from './mmixWords';
+import { LOG_WORDS } from '../words';
+import { coherenceAgainst, endWords, gateWords, MMIX_END_WORDS, MMIX_LOG_WORDS, MMIX_OUTCOME_WORDS, MMIX_PHASE_WORDS, MMIX_REFUSAL_WORDS, mmixRefusalFacts, needWords, PART_REFUSED_WORDS, scaleWords } from './mmixWords';
 
 const ctx = (run: Partial<MimoMixedState> | null): MmixVerbContext => ({
 	connected: true,
@@ -69,6 +70,24 @@ describe('words', () => {
 		const refusals = ['not_configured', 'wrong_state', 'run_finished', 'run_active', 'shutting_down', 'config_invalid', 'config_unreadable', 'table_invalid', 'law_not_checked', 'arm_refused', 'record_unwritable', 'hardware_busy', 'gate_failed', 'prediction_exceeded', 'override_not_needed', 'budget_cannot_fit', 'tone_model_not_finite', 'manual_mode_required', 'not_a_rung', 'part_refused', 'bad_params', ...Object.values(MIMO_MIXED_NOT_BUILT)];
 		for (const r of refusals) expect(MMIX_REFUSAL_WORDS[r as keyof typeof MMIX_REFUSAL_WORDS], r).toBeTruthy();
 		for (const why of ['unknown_part', 'floor', 'band_folded']) expect(PART_REFUSED_WORDS[why], why).toBeTruthy();
+	});
+
+	it('has a short word for every kind the service logs', () => {
+		const kinds = ['state', 'note', 'station', 'identification', 'engage', 'floor', 'level', 'alarm', 'part', 'limit', 'hold', 'override', 'record', 'stop'];
+		const words: Record<string, string> = { ...LOG_WORDS, ...MMIX_LOG_WORDS };
+		for (const k of kinds) {
+			expect(words[k], k).toBeTruthy();
+			expect(words[k].length, k).toBeLessThanOrEqual(9);
+		}
+	});
+
+	it("never shows a failed gate's worst coherence at or over the gate", () => {
+		const ident = { level_db: -20.04, steps: 2, frames: 64, lag_frames: 0, band_coherence: [0.999, 0.9991, null, 0.9995], gate_coherence: 0.999999, passed: false, drive_vrms: [] };
+		expect(gateWords(ident)).toContain("did not pass: the worst band coherence is 0.999 against the gate's 0.999999");
+		expect(coherenceAgainst(0.9937, 0.5)).toBe('0.99');
+		expect(coherenceAgainst(0.99999, 0.99)).toBe('0.99');
+		expect(coherenceAgainst(0.5, 0.5)).toBe('0.50');
+		expect(gateWords({ ...ident, band_coherence: [0.9943, 0.9937], gate_coherence: 0.5, passed: true })).toContain("passed: the worst band coherence is 0.99 against the gate's 0.5");
 	});
 
 	it("says a refusal's detail in words, naming channels by the table", () => {

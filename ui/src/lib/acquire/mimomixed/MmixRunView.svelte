@@ -22,6 +22,7 @@
 	import MmixRunVerbs from './MmixRunVerbs.svelte';
 	import type { MimoMixedStore } from './mmixStore.svelte';
 	import type { MmixViewsState } from './mmixViews.svelte';
+	import { gateWords, MMIX_LOG_WORDS } from './mmixWords';
 
 	interface Props {
 		mm: MimoMixedStore;
@@ -41,10 +42,6 @@
 	const channels = $derived(mm.runConfig ? mm.runConfig.controls.map((c) => ({ index: c, name: mm.channelLabel(c) || `Control ${c}` })) : mm.setup.controls.map((c, i) => ({ index: c.channel, name: mm.controlLabels[i] })));
 	const ident = $derived(status?.identification ?? null);
 	const hold = $derived(mm.holdInForce);
-	const worstCoherence = $derived.by(() => {
-		const c = (ident?.band_coherence ?? []).filter((x): x is number => x !== null);
-		return c.length ? Math.min(...c).toFixed(2) : '-';
-	});
 
 	// The plots' part choice offers the run's tones and narrowbands (the setup's before a run).
 	$effect(() => {
@@ -81,7 +78,7 @@
 		<div class="review" data-testid="mmix-review-notes" data-phase={status.phase}>
 			{#if ident}
 				<p class="aq-small" data-testid="mmix-gate-words" data-passed={ident.passed ? 'true' : 'false'}>
-					{ident.passed ? 'The coherence gate passed' : 'The coherence gate did not pass'}: the worst band coherence is {worstCoherence} against the gate's {ident.gate_coherence}, identified at {ident.level_db} dB in {ident.steps} {ident.steps === 1 ? 'step' : 'steps'} of {ident.frames} frames.
+					{gateWords(ident)}
 				</p>
 			{/if}
 			{#if status.prediction}<MmixPrediction prediction={status.prediction} names={(c) => mm.channelLabel(c)} testid="mmix-review-prediction" />{/if}
@@ -106,7 +103,7 @@
 	{:else if kind === 'limits'}
 		<MmixLimitsCard {mm} />
 	{:else if kind === 'log'}
-		<MixedLogCard log={mm.log as unknown as MixedLogEntry[]} />
+		<MixedLogCard log={mm.log as unknown as MixedLogEntry[]} words={MMIX_LOG_WORDS} />
 	{:else if kind === 'station' && station}
 		{@render station()}
 	{/if}

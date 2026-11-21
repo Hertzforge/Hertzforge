@@ -6,7 +6,7 @@
  * service's.
  */
 
-import type { MimoMixedEnd, MimoMixedOutcome, MimoMixedPhase, MimoMixedRefusalReason } from '$lib/protocol/mimoMixed';
+import type { MimoMixedEnd, MimoMixedIdentificationView, MimoMixedOutcome, MimoMixedPhase, MimoMixedRefusalReason } from '$lib/protocol/mimoMixed';
 import { formatNumber } from '$lib/viz/format';
 import { errDb, hz, partValue, PART_KIND_WORDS } from '../mixed/mixedWords';
 
@@ -182,3 +182,36 @@ export function scaleWords(scale: number | null, rule: string | null): string {
 	if (scale === null) return 'No tone is playing.';
 	return scale >= 0.9995 ? 'No drive is short of room: every tone at its target.' : `Every tone at ${pct(scale)} of its target: a drive is out of room.`;
 }
+
+/**
+ * A coherence to set beside the gate: at least two decimals and as many as the gate has, cut
+ * (not rounded) so a coherence under the gate never reads as at or over it.
+ */
+export function coherenceAgainst(c: number, gate: number | null): string {
+	const places = Math.min(6, Math.max(2, gate === null ? 0 : (String(gate).split('.')[1] ?? '').length));
+	const f = 10 ** places;
+	const cut = (Math.floor(c * f + 1e-9) / f).toFixed(places);
+	return cut.replace(/(\.\d\d\d*?)0+$/, '$1');
+}
+
+/** The identification's coherence gate in words: passed or not, the worst band coherence against the gate, where it was identified. */
+export function gateWords(ident: MimoMixedIdentificationView): string {
+	const c = ident.band_coherence.filter((x): x is number => x !== null);
+	const worst = c.length ? coherenceAgainst(Math.min(...c), ident.gate_coherence) : '-';
+	const gate = ident.gate_coherence === null ? '-' : String(ident.gate_coherence);
+	return `${ident.passed ? 'The coherence gate passed' : 'The coherence gate did not pass'}: the worst band coherence is ${worst} against the gate's ${gate}, identified at ${ident.level_db} dB in ${ident.steps} ${ident.steps === 1 ? 'step' : 'steps'} of ${ident.frames} frames.`;
+}
+
+/**
+ * The log's kinds the service names that the shared list has no word for, each short enough for
+ * the log card's kind column.
+ */
+export const MMIX_LOG_WORDS: Record<string, string> = {
+	identification: 'Sys ID',
+	engage: 'Engage',
+	floor: 'Floor',
+	hold: 'Hold',
+	limit: 'Limit',
+	stop: 'Stop',
+	part: 'Part'
+};
