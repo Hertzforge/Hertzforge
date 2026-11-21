@@ -234,12 +234,35 @@ def _averaging_reading(name: str, history: Any) -> dict:
     return v.reading(f'Averaging of {name}', rows)
 
 
+def _own_averaging(project: Any, name: str) -> None:
+    """Refuse an averaging for a history of transformed responses: it is
+    framed as the recording it was made from, and takes that recording's
+    averaging (`Project.follow_averaging`)."""
+    source = project.transformed_from(name)
+    if source is not None:
+        raise refused(f'{name} takes its averaging from {source}, which its rows are '
+                      f'computed from; set it on {source}')
+
+
+def _store_averaging(project: Any, name: str, averaging: Any) -> None:
+    """An averaging stored on a history and journaled, and given to the
+    histories of transformed responses made from it."""
+    project[name].averaging = averaging
+    project.record_setting(name, 'averaging', averaging)
+    # journaled as the call a script makes after assigning one, and only
+    # where there is something to follow
+    if any(project.transformed_from(other) == name for other in project.names):
+        project.follow_averaging(name)
+
+
 def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_averaging`: the frames a history's spectra are averaged
-    from. Refused when the record cannot hold them."""
+    from. Refused when the record cannot hold them, and for a history of
+    transformed responses, which takes its recording's."""
     from hertzforge.core.averaging import Averaging
 
     name = params['source']
+    _own_averaging(project, name)
     history = project[name]
     try:
         averaging = Averaging(params['frame_length'], params['overlap'],
@@ -252,8 +275,7 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} holds {most} such frames from {averaging.start:g} s, '
                       f'not {averaging.frames}')
     record = _shown(history, name, params)
-    history.averaging = averaging
-    project.record_setting(name, 'averaging', averaging)
+    _store_averaging(project, name, averaging)
     return [_trace(history, name, record, averaging_regions(name, history)),
             _averaging_reading(name, history)]
 
@@ -296,6 +318,7 @@ def drag_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.averaging import Averaging
 
     name = params['source']
+    _own_averaging(project, name)
     history = project[name]
     try:
         drawn = Averaging(params['frame_length'], params['overlap'], params['window'], 1,
@@ -308,8 +331,7 @@ def drag_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
                     params['was_stop'] if params['was_stop'] >= 0 else None)
     if not moved.fits(len(history.abscissa), rate):
         raise refused(f'{name} is shorter than one frame of {moved.frame_length} samples')
-    history.averaging = moved
-    project.record_setting(name, 'averaging', moved)
+    _store_averaging(project, name, moved)
     return [_averaging_reading(name, history)]
 
 
@@ -318,13 +340,14 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     and as many frames as fit in it (`TimeHistory.suggest_averaging`),
     keeping the frame, window and overlap it already has."""
     name = params['source']
+    _own_averaging(project, name)
     history = project[name]
     record = _shown(history, name, params)
     try:
-        history.averaging = history.suggest_averaging()
+        found = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_setting(name, 'averaging', history.averaging)
+    _store_averaging(project, name, found)
     return [_trace(history, name, record, averaging_regions(name, history)),
             _averaging_reading(name, history)]
 

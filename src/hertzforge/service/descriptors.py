@@ -251,6 +251,9 @@ class Operation:
     #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
     #: it false for its Preview button and true for Apply (Brandon, 2026-11-11)
     commits: str | None = None
+    #: for an operation that `commits`: the form runs its preview as soon as it opens and has
+    #: no Preview button, only Apply, when the preview is quick and asks nothing (Fit Sensors)
+    opens_previewed: bool = False
     #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
     says_lengths: bool = False
 
@@ -266,6 +269,8 @@ class Operation:
             out['previews'] = True
         if self.commits:
             out['commits'] = self.commits
+        if self.opens_previewed:
+            out['opens_previewed'] = True
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,

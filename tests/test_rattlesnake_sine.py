@@ -208,8 +208,8 @@ def test_a_sweep_over_a_virtual_point_beside_a_plain_random(tmp_path):
     channel against one per row — so the file did not load at all.
 
     It is over the rows now, numbered as the random reads them; the
-    rows' time histories ride the recording beside the raw channels,
-    which is what the sweep's levels are read from."""
+    rows' time histories are made beside the recording, and the sweep's
+    levels are read from them."""
     matrix = [[0.5, 0.5]]
     path = _write_run(tmp_path / 'mixed.nc4', random=True,
                       sine_transformation=matrix)
@@ -225,8 +225,13 @@ def test_a_sweep_over_a_virtual_point_beside_a_plain_random(tmp_path):
         'the row shares its control channels\' unit'
     assert out['Random_specification'].response_dof[:2] == \
         ['101Z+', '104Z+'], 'the random still controls the raw channels'
-    history = out['time_data']
-    assert '1' in history.response_dof, 'the row is recorded as well'
+    assert '1' not in out['time_data'].response_dof, 'the channels only'
+    project = hertzforge.Project()
+    project.import_file(path)
+    assert project['Time History Transformed'].response_dof == ['1'], \
+        'the row is a history of its own'
+    assert project.recording_for('Sine Sweep Specification', 'Time History') == \
+        'Time History Transformed'
 
 
 def test_control_channels_are_marked_from_the_sine_spec(tmp_path):

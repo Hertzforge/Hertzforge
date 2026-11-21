@@ -129,40 +129,47 @@ def test_the_specification_is_over_the_transformations_rows(tmp_path):
     assert np.allclose(spec.limits['abort_upper'][1], 8.0)
 
 
-def test_the_transformed_responses_are_records_of_the_same_history(tmp_path):
+def test_the_transformed_responses_are_a_history_of_their_own(tmp_path):
     """The controller applied `T @ frame`; the same rows over the raw
-    channels come in after them, in the control channels' unit, in the
-    one history — so they are averaged, filtered and banded with the
-    raw channels rather than processed twice (Brandon, 2026-09-18,
-    reversing the separate object he first asked for)."""
+    channels are made beside the recording, in the control channels'
+    unit, as a history of their own, so two environments that both
+    number their rows from 1 never share one. They take the
+    recording's averaging and keep taking it, which is what keeping
+    them in the one history was for (Brandon, 2026-09-18)."""
     path, raw = write_run(str(tmp_path / 'virtual.nc4'))
     out = hertzforge.import_file(path)
-    assert 'Random_transformed' not in out, 'no second object'
-    history = out['time_data']
-    assert history.num_records == MEASURED + DRIVES + 2
-    assert history.response_dof[-2:] == ['1', '2']
-    assert history.ordinate_dim[-2:] == ['acceleration', 'acceleration']
-    assert history.ordinate_unit[-2:] == ['m/s**2', 'm/s**2']
-    assert np.allclose(history.ordinate[-2:].real, MATRIX @ raw[CONTROL])
-    assert np.allclose(history.ordinate[:MEASURED + DRIVES].real, raw), \
-        'the raw channels first, untouched'
-    assert history.comment[-1].startswith('row 2 of the Random response transformation')
-    assert history.comment[0] == ''
+    assert out['time_data'].num_records == MEASURED + DRIVES, 'the reader gives the channels'
+    project = hertzforge.Project()
+    names = project.import_file(path)
+    assert names[-1] == 'Time History Transformed'
+    history, rows = project['Time History'], project['Time History Transformed']
+    assert np.allclose(history.ordinate.real, raw), 'the raw channels, untouched'
+    assert rows.response_dof == ['1', '2']
+    assert rows.ordinate_dim == ['acceleration', 'acceleration']
+    assert rows.ordinate_unit == ['m/s**2', 'm/s**2']
+    assert np.allclose(rows.ordinate.real, MATRIX @ raw[CONTROL])
+    assert rows.comment[-1].startswith('row 2 of the Random response transformation')
+    assert rows.averaging == history.averaging
+    assert project.transformed_from('Time History Transformed') == 'Time History'
+    assert 'Time History Transformed' in project.object_group_of('Time History')
+    assert project.journal[-1].startswith('project.import_file('), 'one line, the import'
 
 
 def test_a_transformation_over_mixed_units_imports_raw(tmp_path):
-    """A row combining g and V is a number in no unit; it is imported
-    undeclared rather than labelled with either."""
+    """A row combining g and V is a number in no unit; it is made
+    undeclared rather than labelled with either, from the numbers the
+    controller multiplied, each channel in its own unit."""
     path, raw = write_run(str(tmp_path / 'mixed.nc4'),
                           units=['g', 'g', 'V', 'V', 'N', 'N'])
-    out = hertzforge.import_file(path)
-    history = out['time_data']
-    assert history.ordinate_dim[-2:] == ['unknown', 'unknown']
-    assert history.ordinate_unit[-2:] == [None, None]
-    assert np.allclose(history.ordinate[-2:].real, MATRIX @ raw[CONTROL]), \
+    project = hertzforge.Project()
+    project.import_file(path)
+    rows = project['Time History Transformed']
+    assert rows.ordinate_dim == ['unknown', 'unknown']
+    assert rows.ordinate_unit == [None, None]
+    assert np.allclose(rows.ordinate.real, MATRIX @ raw[CONTROL]), \
         'the raw combination, unscaled'
-    spec = out['Random_specification']
-    assert spec.ordinate_dim[0] == 'unknown'
+    out = hertzforge.import_file(path)
+    assert out['Random_specification'].ordinate_dim[0] == 'unknown'
 
 
 def test_the_spectra_are_over_the_rows_too(tmp_path):

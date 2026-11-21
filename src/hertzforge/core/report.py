@@ -2294,6 +2294,20 @@ def sine_template(objects: Mapping[str, Any],
     return Report('Sine Sweep Test Report', blocks)
 
 
+def _of_transformed_rows(objects: Mapping[str, Any], name: str) -> bool:
+    """Whether `name` is a control loop's transformed rows, or was
+    computed from them (`Project.transform_responses`): part of the
+    recording they came from, never a second recording."""
+    provenance = getattr(objects, 'provenance', None) or {}
+    seen = set()
+    while name in provenance and name not in seen:
+        seen.add(name)
+        if provenance[name].get('verb') == 'transform_responses':
+            return True
+        name = provenance[name].get('source')
+    return False
+
+
 def sysid_template(objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A system identification report: the measured plant, and its quality.
@@ -2320,7 +2334,8 @@ def sysid_template(objects: Mapping[str, Any],
     from .data import Psd, Specification, TimeHistory
     densities = [(name, obj) for name, obj in objects.items()
                  if isinstance(obj, Psd)
-                 and not isinstance(obj, Specification)]
+                 and not isinstance(obj, Specification)
+                 and not _of_transformed_rows(objects, name)]
     # the ratio binds the pair by name, louder over quieter — there is
     # no symbolic selector for "the second Psd", and a generated
     # template knows its own project's names
@@ -2336,7 +2351,8 @@ def sysid_template(objects: Mapping[str, Any],
     # draws with its own averaging frames so the figure says which
     # part of each stream the densities came from
     histories = [(name, obj) for name, obj in objects.items()
-                 if isinstance(obj, TimeHistory)]
+                 if isinstance(obj, TimeHistory)
+                 and not _of_transformed_rows(objects, name)]
     if len(histories) >= 2:
         by_level = sorted(
             histories,

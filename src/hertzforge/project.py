@@ -246,7 +246,7 @@ _PARAMS_NAMING: dict[str, tuple[str, ...]] = {
     'compute_modal_responses': ('shapes',),
     'extract_sine': ('specification',),
     'derive_specification': ('sources',),
-    'plan_instrumentation': ('geometry',)}
+    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',)}
 
 
 def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
@@ -795,7 +795,8 @@ class Project(dict):
         from .io import project_type_of, run_convert, run_folder
         from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
-        if run_folder.folder_of(path) is not None:
+        converted = run_folder.folder_of(path) is not None
+        if converted:
             # a control run's folder is imported as the project file it
             # converts to, so a large stream is held by reference to it
             path = run_convert.converted(path)
@@ -854,7 +855,10 @@ class Project(dict):
                 self.project_type = result.project_type
                 if result.active_geometry in mapping:
                     self.active_geometry = mapping[result.active_geometry]
-            return list(mapping.values())
+            # a run converted just now has its loops' rows made here, as a
+            # read run does; a project opened has them saved in it
+            return list(mapping.values()) + (
+                self._transformed_on_import(list(mapping.values())) if converted else [])
         if isinstance(result, dict):
             # a reader's keys are for code; the name is what the object
             # *is*, and the key stays available on the result
@@ -873,7 +877,29 @@ class Project(dict):
             if large:
                 refer(added[0], '')
         self._index_import(local, result, added, checksum)
-        return added
+        # computed from the file's objects, not read from it, so the
+        # index lists what the file holds and these follow it
+        return added + self._transformed_on_import(added)
+
+    def _transformed_on_import(self, added: Sequence[str]) -> list[str]:
+        """For a run read with its channel table, the rows of each
+        environment's response transformation as a history of their own
+        (`transform_responses`). A recording that lacks one of a loop's
+        control channels (a subset of the channels read) cannot give
+        that loop's rows, and they are left out rather than made up."""
+        tables = [name for name in added if isinstance(self[name], ChannelTable)]
+        histories = [name for name in added if isinstance(self[name], TimeHistory)]
+        made = []
+        for table in tables:
+            for environment, loop in self[table].environments.items():
+                if loop.response_transformation is None:
+                    continue
+                for history in histories:
+                    try:
+                        made.append(self.transform_responses(history, environment, table))
+                    except ValueError:
+                        continue
+        return made
 
     def _adopt_provenance(self, records: Mapping[str, dict[str, Any]],
                           mapping: Mapping[str, str]) -> None:
@@ -1918,7 +1944,7 @@ class Project(dict):
 
     def set_sensor(self, source: Any, sensor: Any, **chosen: Any) -> dict[str, Any]:
         """Choose what a measured accelerometer is made as: its node, its
-        model, and its size. The choice is kept on the geometry holding
+        model, and its length and diameter. The choice is kept on the geometry holding
         the measured points and is what `create_sensors` makes it from.
 
         Parameters
@@ -1931,18 +1957,18 @@ class Project(dict):
         **chosen
             Any of ``node`` (a whole number above 0), ``model`` (a
             catalog model, a size written as one such as
-            ``'Block 17.5 mm'``, or any name), ``size`` (a cube's side,
-            or a round body's diameter) and ``length`` (a round body's
-            length), the last two in meters once the geometry's unit is
-            declared and in its own numbers before. None takes a choice
-            back, leaving it to the fit and the catalog. Naming a model
-            takes back a size and a length typed before it, so the
-            model's own are used.
+            ``'Block 17.5 mm'``, or any name), ``length`` (a cube's
+            side, or a round body's length) and ``diameter`` (a round
+            body's diameter), the last two in meters once the
+            geometry's unit is declared and in its own numbers before.
+            None takes a choice back, leaving it to the fit and the
+            catalog. Naming a model takes back a length and a diameter
+            typed before it, so the model's own are used.
 
         Returns
         -------
         dict
-            What is now chosen for the sensor.
+            What is now chosen for the sensor, named as it is typed.
 
         Raises
         ------
@@ -1950,22 +1976,26 @@ class Project(dict):
             If the source is not a geometry.
         ValueError
             If the geometry holds no measured points, the sensor is not
-            among them, a choice is not one of the four, or a value is
-            not one its choice can hold.
+            among them, a choice is not one of the four, a diameter is
+            given for a cube, or a value is not one its choice can hold.
         """
-        from .core.scan_sensors import CHOICES
+        from .core.scan_sensors import TYPED, kept_as_typed, typed_choice
 
         source = self.name_of(source)
         fits, _notes = self.fit_sensors(source)
         sensor = str(sensor).strip()
-        if sensor not in {fit.sensor for fit in fits}:
+        kinds = {fit.sensor: fit.kind for fit in fits}
+        if sensor not in kinds:
             raise ValueError(f'{source!r} has no sensor {sensor} among its measured points')
-        stray = sorted(set(chosen) - set(CHOICES))
+        stray = sorted(set(chosen) - set(TYPED))
         if stray:
             raise ValueError(f'a sensor\'s {stray[0]} is not chosen; its '
-                             f'{", ".join(CHOICES)} are')
+                             f'{", ".join(TYPED)} are')
+        kind = kinds[sensor]
+        kept = {typed_choice(kind, word) for word in chosen}
         held = dict(self[source].sensor_choices.get(sensor, {}))
-        for key, value in chosen.items():
+        for word, value in chosen.items():
+            key = typed_choice(kind, word)
             if value is None or (isinstance(value, str) and not value.strip()):
                 held.pop(key, None)
             elif key == 'node':
@@ -1974,19 +2004,18 @@ class Project(dict):
                 held[key] = int(value)
             elif key == 'model':
                 held[key] = str(value).strip()
-                if 'size' not in chosen:
-                    held.pop('size', None)
-                if 'length' not in chosen:
-                    held.pop('length', None)
+                for size in ('size', 'length'):
+                    if size not in kept:
+                        held.pop(size, None)
             else:
                 if not float(value) > 0:
-                    raise ValueError(f'a {key} is a length above 0')
+                    raise ValueError(f'a {word} is a length above 0')
                 held[key] = float(value)
         if held:
             self[source].sensor_choices[sensor] = held
         else:
             self[source].sensor_choices.pop(sensor, None)
-        return held
+        return kept_as_typed(kind, held)
 
     def set_scan_set(self, source: Any, scan_set: str, sensor: Any = None,
                      surface: str | None = None) -> str:
@@ -2164,6 +2193,12 @@ class Project(dict):
         if isinstance(obj, TimeHistory):
             for other, _rows in self._role_partners(name):
                 return other, self[other]
+            # transformed rows name no channel of a table: theirs is the
+            # one whose matrix made them
+            if self.transformed_from(name) is not None:
+                table = self.provenance[name]['params'].get('table')
+                if isinstance(self.get(table), ChannelTable):
+                    return table, self[table]
             return None
         if obj is None or isinstance(obj, ChannelTable):
             return None
@@ -2321,6 +2356,7 @@ class Project(dict):
         target is read whole."""
         from .core.data import TransientSpecification
 
+        self._borrow_averaging(source)
         history = self[source]
         if (history.averaging is None
                 and not isinstance(history, TransientSpecification)
@@ -2347,6 +2383,171 @@ class Project(dict):
         source = self.name_of(source)
         return self._derive(source, self._framed(source).compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
+
+    def transform_responses(self, source: Any, environment: str,
+                            table: Any = None) -> str:
+        """The rows a control loop's response transformation made of a
+        recording, as a time history of their own
+        (`ChannelTable.transformed_responses`).
+
+        A Rattlesnake run that controlled a virtual response has its
+        specification and spectra over the matrix's rows, numbered from
+        1, and the import adds these rows for each such environment, so
+        each specification is compared with the history that holds its
+        own rows. They are kept apart from the hardware channels, and
+        from another environment's rows, which are numbered from 1 too.
+        The new history takes its source's averaging and keeps taking
+        it (`follow_averaging`); an averaging set on it alone is
+        refused, so its rows are framed as the channels they come from.
+
+        Parameters
+        ----------
+        source : str or object
+            The recording, holding every control channel of the loop.
+        environment : str
+            The loop, by the name the controller gave it.
+        table : str or object, optional
+            The channel table holding the loop; by default the one
+            linked with the recording (`channel_table_for`).
+
+        Returns
+        -------
+        str
+            The name the history was added under: '<source> Transformed',
+            or '<source> Transformed (<environment>)' when the table holds
+            more than one loop with a response transformation.
+
+        Raises
+        ------
+        ValueError
+            If there is no channel table, the loop holds no response
+            transformation, or the recording lacks a control channel.
+        """
+        source = self.name_of(source)
+        if table is None:
+            found = self.channel_table_for(source)
+            if found is None:
+                raise ValueError(f'{source!r} has no linked channel table')
+            table = found[0]
+        table = self.name_of(table)
+        held = self[table]
+        rows = held.transformed_responses(self[source], environment)
+        transformed = [name for name, loop in held.environments.items()
+                       if loop.response_transformation is not None]
+        name = (f'{source} Transformed' if len(transformed) < 2
+                else f'{source} Transformed ({environment})')
+        return self._derive(source, rows, name, recipe=(
+            'transform_responses', {'environment': environment, 'table': table}))
+
+    def _borrow_averaging(self, name: str) -> None:
+        """Frame a history of transformed responses as its recording is:
+        the recording's averaging, detected on the recording first when it
+        is one capture with none, so the rows are never framed on their
+        own. Anything else is left as it is."""
+        source = self.transformed_from(name)
+        if source is None or source not in self:
+            return
+        recording = self[source]
+        if (recording.averaging is None
+                and max(recording.records_per_channel.values(), default=0) <= 1):
+            recording.averaging = recording.suggest_averaging()
+        self.follow_averaging(source)
+
+    def transformed_from(self, name: Any) -> str | None:
+        """The recording a history of transformed responses
+        (`transform_responses`) was made from.
+
+        Parameters
+        ----------
+        name : str or object
+            The object.
+
+        Returns
+        -------
+        str or None
+            The recording's name, or None for any other object.
+        """
+        record = self.provenance.get(self.name_of(name)) or {}
+        return record.get('source') if record.get('verb') == 'transform_responses' else None
+
+    def recording_for(self, specification: Any, source: Any) -> str:
+        """The history a specification is read against, among a
+        recording and the histories of transformed responses made from
+        it: the recording when it holds every channel the specification
+        names, else the one transformed history that holds them all (a
+        loop that controlled its transformation's rows).
+
+        Parameters
+        ----------
+        specification : str or object
+            The specification.
+        source : str or object
+            The recording.
+
+        Returns
+        -------
+        str
+            The history's name.
+
+        Raises
+        ------
+        ValueError
+            If neither the recording nor exactly one of its transformed
+            histories holds every channel the specification names.
+        """
+        source = self.name_of(source)
+        wanted = set(self[self.name_of(specification)].response_dof)
+        if wanted <= set(self[source].response_dof):
+            return source
+        holding = [name for name in self.names if self.transformed_from(name) == source
+                   and wanted <= set(self[name].response_dof)]
+        if len(holding) > 1:
+            # every loop numbers its rows from 1: the loop that ran this
+            # kind of test is the one whose rows the specification is over
+            kind = _specification_kind(self[self.name_of(specification)])
+            holding = [name for name in holding
+                       if self._loop_of(name).kind in ('', kind)] or holding
+        if len(holding) != 1:
+            named = ', '.join(sorted(wanted))
+            raise ValueError(
+                f'{source!r} has no record of {named}' if not holding else
+                f'{len(holding)} histories made from {source!r} hold {named}: '
+                f'{", ".join(repr(name) for name in holding)}')
+        return holding[0]
+
+    def _loop_of(self, name: str) -> Any:
+        """The control loop (`Environment`) a transformed history's rows
+        are the rows of."""
+        params = self.provenance[name]['params']
+        return self[params['table']].environments[params['environment']]
+
+    def follow_averaging(self, source: Any) -> list[str]:
+        """Give a recording's averaging to every history of transformed
+        responses made from it (`transform_responses`), so they are
+        framed as the channels they come from. The app does this after
+        every averaging it stores on a recording. An averaging assigned
+        by a script marks those histories stale until this is called or
+        they are refreshed (`refresh`), which gives it to them too.
+
+        Parameters
+        ----------
+        source : str or object
+            The recording.
+
+        Returns
+        -------
+        list of str
+            The histories given it.
+        """
+        source = self.name_of(source)
+        out = []
+        for name in list(self.provenance):
+            if name in self and self.transformed_from(name) == source:
+                self[name].averaging = self[source].averaging
+                self.provenance[name]['state'] = self._analysis_state(
+                    source, 'transform_responses')
+                out.append(name)
+        return out
 
     def averaging_of(self, name: Any) -> Any:
         """The `Averaging` a computed spectrum was made with, from its
@@ -3043,6 +3244,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
+        self._borrow_averaging(source)
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
@@ -3255,6 +3457,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
+        self._borrow_averaging(source)
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
@@ -8651,11 +8854,16 @@ class Project(dict):
             # the recipe and a count from the record's beginning, and
             # that came through to the report undetected (Brandon,
             # 2026-11-18). A burst record has no steady stretch to find.
+            if self.transformed_from(record) is not None:
+                # framed as its recording is, never on its own
+                self._borrow_averaging(record)
+                return
             own = self[record].averaging
             random = project_type in ('Random Vibration', 'Random and Sine')
             if own is None or (random and not own.start_set):
                 with contextlib.suppress(ValueError):
                     self[record].averaging = self[record].suggest_averaging()
+            self.follow_averaging(record)
 
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
@@ -8688,6 +8896,12 @@ class Project(dict):
                         else:
                             settled(record)
                         make(self.compute_psds, record)
+                        # a transformed loop's specification is over its
+                        # rows, so their PSDs are what it is read against
+                        for rows in self.names:
+                            if (self.transformed_from(rows) == record
+                                    and derived(rows, 'compute_psds') is None):
+                                make(self.compute_psds, rows)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
                     # spectrum is the requirement the run is read against
@@ -9115,6 +9329,19 @@ class Project(dict):
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]
+        held = set(self[source].response_dof)
+        if not set(spec.response_dof) <= held:
+            # a sweep that controlled a transformation's rows is read from
+            # the history holding them; it is named rather than read in its
+            # place, so the result is filed under the history it came from
+            try:
+                rows = self.recording_for(spec_name, source)
+            except ValueError:
+                rows = None
+            if rows is not None:
+                raise ValueError(f'{spec_name!r} is over the rows of a response '
+                                 f'transformation, which are in {rows!r}: '
+                                 'extract from that')
         history = self[source]
         # the settings are the history's own; with none set, the
         # suggestion is adopted the way `filter_data` adopts its filter,
@@ -9181,6 +9408,9 @@ class Project(dict):
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
         'filter_data': 'filtering', 'truncate_data': 'truncation',
+        # the rows are the recording's values through the matrix, framed
+        # by the recording's averaging, which they keep taking
+        'transform_responses': 'transform',
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
@@ -9208,7 +9438,7 @@ class Project(dict):
     #: were kept still compares its settings and opens with nothing stale
     _READS_VALUES_TOO: ClassVar[frozenset[str]] = frozenset({
         'averaging', 'averaging+roles', 'shocks', 'filtering', 'truncation',
-        'sine_extraction'})
+        'sine_extraction', 'transform'})
 
     def _source_values(self, source: str, verb: str) -> str | None:
         """The digest of the source's values when `verb` reads them and
@@ -9283,6 +9513,9 @@ class Project(dict):
                                          (dof, quantity), role
                                          in resolved.items())})
             return ('averaging', state)
+        if reads == 'transform':
+            averaging = getattr(obj, 'averaging', None)
+            return ('transform', None if averaging is None else asdict(averaging))
         if reads == 'filtering':
             filtering = getattr(obj, 'filtering', None)
             return ('filtering', None if filtering is None
@@ -10266,6 +10499,7 @@ _JOURNALED_VERBS = (
     'tie_elements', 'mate_surfaces', 'add_mated_surfaces',
     'edit_mated_surfaces', 'delete_mated_surfaces',
     'merge_groups', 'set_view', 'set_comparison_scale',
+    'transform_responses', 'follow_averaging',
     'convert_to_specification', 'convert_to_psd',
     'author_specification', 'derive_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
@@ -10343,6 +10577,8 @@ _RECOMPUTE = {
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
+    'transform_responses': lambda p, s, k: p[k['table']].transformed_responses(
+        p[s], k['environment']),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
     'fit_modes': lambda p, s, k: _fitted_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
@@ -10653,6 +10889,9 @@ def _summarize_state(state):
         named = _named_state(kind, value)
         return (f'{named["frames"]} frames of {named["frame_length"]} '
                 f'({named["window"]})')
+    if kind == 'transform':
+        # what a transformed history keeps taking from its recording
+        return _summarize_state(('averaging', value))
     if kind == 'averaging+roles':
         framing = _summarize_state(('averaging', value['averaging']))
         named = ', '.join(f'{dof} {quantity}' for dof, quantity, role
@@ -10708,6 +10947,30 @@ def _state_story(was, now):
         return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
+
+
+def _specification_kind(specification) -> str:
+    """The kind of test a specification is for, as a control loop names
+    its kind (`Environment.kind`)."""
+    from .core.data import TransientSpecification
+    from .core.sine import SineSweepSpecification
+
+    if isinstance(specification, SineSweepSpecification):
+        return 'sine'
+    if isinstance(specification, TransientSpecification):
+        return 'transient'
+    return 'random'
+
+
+def _sweep_recording(project, history):
+    """The history the project's sine sweep specification is read from:
+    `history`, or the transformed history made from it that holds the
+    sweep's control rows (`Project.recording_for`)."""
+    from .core.sine import SineSweepSpecification
+
+    sweeps = [name for name, obj in project.items()
+              if isinstance(obj, SineSweepSpecification)]
+    return project.recording_for(sweeps[0], history) if len(sweeps) == 1 else history
 
 
 def _last_window(run, last):
@@ -10824,6 +11087,11 @@ def random_vibration_run(run: str | os.PathLike,
                           if isinstance(obj, Specification)), None)
     if specification is not None:
         project.compute_octave(specification, per_octave)
+        # a loop that controlled its transformation's rows is judged on
+        # their PSDs, framed as the recording is
+        against = project.recording_for(specification, history)
+        if against != history:
+            project.compute_octave(project.compute_psds(against), per_octave)
     project.compute_multiple_coherence(history)
     extras: list[str] = []
     if geometry is not None:
@@ -10846,8 +11114,9 @@ def _quiet_and_driven(project: Project) -> tuple[str | None, str]:
     A file holding one recording has no ambient, and the report's
     signal-to-noise stands down on its own.
     """
+    # a loop's transformed rows are part of the recording they came from
     names = [name for name, obj in project.items()
-             if isinstance(obj, TimeHistory)]
+             if isinstance(obj, TimeHistory) and project.transformed_from(name) is None]
     if not names:
         raise ValueError('no time data to work up')
     ranked = sorted(names, key=lambda name: float(
@@ -11099,7 +11368,7 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
         raise ValueError(
             f'{run} holds no sine sweep specification: it is not a random '
             'and sine run — random_vibration_run is the call for it')
-    project.extract_sine(project.time_history)
+    project.extract_sine(_sweep_recording(project, project.time_history))
     return project
 
 
@@ -11155,7 +11424,7 @@ def sine_run(run: str | os.PathLike, *,
                     if isinstance(obj, TimeHistory)), None)
     if history is None:
         raise ValueError(f'{run} holds no time data to work up')
-    project.extract_sine(history)
+    project.extract_sine(_sweep_recording(project, history))
     extras: list[str] = []
     if geometry is not None:
         options = {} if length_unit is None else {'length_unit': length_unit}

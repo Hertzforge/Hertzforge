@@ -130,6 +130,10 @@ class SensorFit:
         extent: A tri-axial accelerometer's side is at least this: the
             furthest a measured point lies behind another face. A
             uni-axial accelerometer's diameter, as measured.
+        length: A uni-axial accelerometer's length, as measured: twice
+            how far its top lies along the axis from the middle of the
+            points on its side, which is taken as the middle of the
+            body. None when the top is not past that middle.
         planes: The plane fitted to each flat face, by its label.
         cylinder: The cylinder fitted to a uni-axial accelerometer's
             side.
@@ -144,6 +148,7 @@ class SensorFit:
     anchor: np.ndarray | None = None
     axes: tuple[int, ...] = ()
     extent: float | None = None
+    length: float | None = None
     planes: dict[str, PlaneFit] = field(default_factory=dict)
     cylinder: CylinderFit | None = None
     moved: float = 0.0
@@ -440,8 +445,9 @@ def fit_uniaxial(sensor: str, side: np.ndarray, top: np.ndarray, label: str = '3
     -------
     SensorFit
         With a frame unless a surface has too few points; `anchor` is
-        where the cylinder's axis meets the top, and `extent` the
-        diameter.
+        where the cylinder's axis meets the top, `extent` the diameter
+        and `length` twice how far the top is from the middle of the
+        side's points.
     """
     fit = SensorFit(sensor, 'uniaxial')
     side = np.asarray(side, dtype=float).reshape(-1, 3)
@@ -484,6 +490,9 @@ def fit_uniaxial(sensor: str, side: np.ndarray, top: np.ndarray, label: str = '3
     # where the axis meets the top
     reach = ((plane.point - cylinder.point) @ normal) / (axis @ normal)
     fit.anchor = cylinder.point + reach * axis
+    # the side is measured around its middle more often than its whole height, so the body
+    # is taken to reach as far past the middle of the side's points as the top does
+    fit.length = 2.0 * reach
     k = abs(int(label)) - 1
     laid = surface_frame(np.sign(int(label)) * normal)      # rows: two in the top, then the axis
     fit.frame = np.roll(laid, k + 1, axis=0)

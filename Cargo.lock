@@ -861,7 +861,7 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hertzforge-automation"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-hal",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-backendd"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "futures-util",
  "hertzforge-breakpoints",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-breakpoints"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-buildinfo"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-capture"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "nix 0.29.0",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-channel-table"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-data"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-demo"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -955,11 +955,11 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-dsp"
-version = "0.1.19"
+version = "0.1.20"
 
 [[package]]
 name = "hertzforge-engine"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-explorer-host"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-formats"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -995,7 +995,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-hal"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "serde",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-hal-ni"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-hal-sim"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-host"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-engine",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-insight"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-data",
@@ -1049,18 +1049,18 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-ipc"
-version = "0.1.19"
+version = "0.1.20"
 
 [[package]]
 name = "hertzforge-law-band-average-math"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-sdm",
 ]
 
 [[package]]
 name = "hertzforge-law-hinv"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-random",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-host"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-band-average"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-broyden-congruence"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-buzz"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-independent"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-min-drive"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1122,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-nearly-independent"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-open-loop"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1138,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-pinv"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shape"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-inverse"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-paired"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-shape"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1184,42 +1184,42 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-sine-matrix"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "hertzforge-law-mimo-sine-paired"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "hertzforge-law-mimo-sine-ratio"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "hertzforge-law-mimo-sine-secant"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "hertzforge-law-mimo-sine-steepest-descent"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "hertzforge-law-mimo-zero"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-mimo-laws",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-ratio"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-ratio-math",
  "hertzforge-law-sdk",
@@ -1235,11 +1235,11 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-ratio-math"
-version = "0.1.19"
+version = "0.1.20"
 
 [[package]]
 name = "hertzforge-law-sdk"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-mimo-shock-law-math",
  "hertzforge-mimo-sine-law-math",
@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-shock-fdc"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-shock-srs-ratio"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -1267,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-sine-servo"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-sine",
@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-twr-correct"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -1283,7 +1283,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-band-average-math",
  "hertzforge-law-host",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-random"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-capture",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock-law-math"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-mimo-shock-law-math",
@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine-law-math"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-mimo-sine-law-math",
  "hertzforge-sdm",
@@ -1385,7 +1385,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-engine",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mixed"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-capture",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mixed-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-channel-table",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-module-abi"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-playback"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-protocol"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-random"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-capture",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-random-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-capture",
@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-recorder"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-reference"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "flate2",
  "hertzforge-breakpoints",
@@ -1555,7 +1555,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-sdm"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "faer",
  "num-complex",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-shaker-db"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "serde",
@@ -1573,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-shock-common"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1585,7 +1585,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-shock-host"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1604,7 +1604,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-shock-law-math"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-twr",
@@ -1612,7 +1612,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-shock-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-sine"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-sine-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-hal",
@@ -1661,7 +1661,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-srs"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1678,7 +1678,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-station"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-buildinfo",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-twr"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-twr-laws"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-hal",
@@ -1918,42 +1918,42 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-bad-manifest"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-mimo-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-shock-mimo-minimal"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "wit-bindgen",
 ]
 
 [[package]]
 name = "law-fixture-shock-mimo-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-shock-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -1961,42 +1961,42 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-shock-template"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-sine-mimo-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-sine-mimo-template"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-sine-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-sine-template"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-srs-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -2004,14 +2004,14 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-srs-template"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
 
 [[package]]
 name = "law-fixture-twr-misbehave"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
  "hertzforge-shock-law-math",
@@ -2019,7 +2019,7 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-twr-template"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-law-sdk",
 ]
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "mimo_compile_probe"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-module-abi",
 ]
@@ -2493,7 +2493,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "random_sim_slice"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-module-abi",
@@ -2604,7 +2604,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sds-control"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "futures-util",
  "hertzforge-breakpoints",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "smart"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",

@@ -600,7 +600,8 @@ operation without `previews` is a `bad_request`, and nothing runs.
 **Commits.** An operation with `commits` names a boolean param that says go ahead. Run with it
 false, the operation answers with what it would do and changes nothing; run with it true, it does
 it. The shell's form does not ask that param: its Preview button sends it false and Apply sends it
-true.
+true. One that is also `opens_previewed` is run with it false as soon as its form opens, and its
+form has no Preview button, only Apply.
 
 **Test Setups.** A test's setup is an object in the project, of kind `test_setup`
 (`docs/hforge-format.md`): `{"module","protocol","config","table","title","notes","origin"}`.

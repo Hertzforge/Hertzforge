@@ -577,6 +577,7 @@
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "previews": {"type": "boolean"},
         "commits": {"type": "string"},
+        "opens_previewed": {"type": "boolean"},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}

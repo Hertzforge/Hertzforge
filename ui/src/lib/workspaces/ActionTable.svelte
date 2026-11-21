@@ -212,7 +212,7 @@
 				<p class="muted live" data-testid="form-live">Each change applies when you leave its field{a.formRow?.part ? ', or let go of the gimbal' : ', or let go of a handle on the plot'}.</p>
 			{:else}
 			<div class="runrow">
-				{#if a.op.commits}
+				{#if a.op.commits && !a.op.opens_previewed}
 					<button class="btn run" data-testid="preview-op" onclick={() => a.run(true)} disabled={a.running || !app.analysis.isOpen} title="Show what Apply would do, without changing the project">Preview</button>
 				{/if}
 				<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>
