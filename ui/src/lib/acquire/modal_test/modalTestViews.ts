@@ -9,7 +9,8 @@
 
 import type { ModalLatest, ModalRowDof, ModalTestLive, ModalTrace, ModalTraceRole } from '$lib/protocol/modal_test';
 import type { NumericArray, Region, SpectrumView } from '$lib/protocol/types';
-import type { PaneNote } from '$lib/viz/paneOptions';
+import type { PaneNote, SeriesOverride } from '$lib/viz/paneOptions';
+import { TRACE_COLORS } from '$lib/viz/roles';
 import { num } from './modalTestWords';
 
 const arr = (v: Float32Array | number[]): NumericArray => (v instanceof Float32Array ? v : Float64Array.from(v));
@@ -149,6 +150,19 @@ export function forceNotes(second: number | null, blockEnd: number, overload: bo
 	}
 	if (overload) out.push({ id: 'overload', text: 'Overload', fx: 0.02, fy: second !== null ? 0.2 : 0.03 });
 	return out;
+}
+
+/** The colors several traces of one role take, in order: apart under the common color-vision deficiencies. */
+const OVERLAY = ['blue', 'orange', 'green', 'vermillion', 'purple', 'sky'].map((id) => TRACE_COLORS.find((c) => c.id === id)!.hex);
+
+/**
+ * Several forces, drives or reference spectra in one plot, overlaid: each its own color, the
+ * role's line kept, so each has its own legend entry to tell it by. One trace keeps its role's look.
+ */
+export function overlayStyles(view: SpectrumView | null): SeriesOverride[] {
+	const n = view?.series.length ?? 0;
+	if (n < 2) return [];
+	return view!.series.map((_, k) => ({ color: OVERLAY[k % OVERLAY.length], width: 1.3 }));
 }
 
 /** A second impact in words, from the service's report: where, and how large against the peak. */

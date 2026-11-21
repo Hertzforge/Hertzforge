@@ -10,7 +10,7 @@ import { MODAL_KEY_WORDS, modalKeyAction, takesTyping, type KeyLike } from './mo
 import { defaultModalSetup, fromModalConfig, localErrors, setModalMode, modalItemKey, modalRows, modalSectionOf, modalSections, parsePoints, pointsText, toModalConfig } from './modalTestSetup';
 import { loadModalSetup, saveModalSetup } from './modalTestStore.svelte';
 import { modalBarActions, modalMeasureVerbs, modalPrimary, type ModalVerbContext } from './modalTestVerbs';
-import { exponentialWeights, forceNotes, forceSpectrumView, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
+import { exponentialWeights, forceNotes, forceSpectrumView, overlayStyles, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
 import { counterWords, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, pct, refusalWords, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, getAttribute: (k: string) => (extra[k] as string) ?? null, ...extra }) as unknown as EventTarget;
@@ -107,6 +107,8 @@ describe('modal test counter, tiles and flags', () => {
 		expect(tileWords(tile({ status: 'pending' })).status).toBe('Waiting');
 		expect(tileWords(tile({ status: 'undone' })).tone).toBe('muted');
 		expect(tileWords(tile({ overload: true, force_window_cut: true })).flags.map((f) => f.word)).toEqual(['Overload', 'Window Cuts Pulse']);
+		expect(tileWords(tile({ decay: { row: 3, ratio: 0.08, warning: true } })).flags).toEqual([{ word: 'Not Died Away', kind: 'decay' }]);
+		expect(tileWords(tile({ decay: { row: 3, ratio: 0.001, warning: false } })).flags).toEqual([]);
 	});
 
 	it('modal test flags: the target flag reads the service percent and never rejects', () => {
@@ -343,6 +345,15 @@ describe('modal test after review', () => {
 		expect(hitViews({ ...live, hit: null } as ModalTestLive, latest, dofs, 0).force).toBeNull();
 		const shaker = { ...live, hit: undefined, references: { frequency_hz: [1, 2], averages: 3, autospectra: [{ index: 1, unit: 'lbf^2/Hz', values: [1, 2] }] } } as unknown as ModalTestLive;
 		expect(referenceSpectraView(shaker, dofs)?.series[0].name).toBe('1Z+ (row 1)');
+	});
+
+	it('modal test overlays: several drives or forces each take a color of their own, one keeps its role', () => {
+		const v = (n: number) => ({ series: Array.from({ length: n }, () => ({ role: 'drive' })) }) as never;
+		expect(overlayStyles(v(1))).toEqual([]);
+		expect(overlayStyles(null)).toEqual([]);
+		const four = overlayStyles(v(4)).map((s) => s.color);
+		expect(new Set(four).size).toBe(4);
+		expect(four.every((c) => /^#[0-9a-f]{6}$/.test(c ?? ''))).toBe(true);
 	});
 
 	it('modal test force labels: inside the drawing area beside the second impact, near its top', () => {

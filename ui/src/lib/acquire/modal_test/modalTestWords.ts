@@ -191,7 +191,7 @@ export interface TileWords {
 	/** Why it was rejected, in words, or null. */
 	reason: string | null;
 	/** Every flag the tile carries, in words: Double Hit, Overload, High +26%, Tip, Window Cuts Pulse. */
-	flags: { word: string; kind: 'double' | 'overload' | 'high' | 'low' | 'on' | 'tip' | 'cut' }[];
+	flags: { word: string; kind: 'double' | 'overload' | 'high' | 'low' | 'on' | 'tip' | 'cut' | 'decay' }[];
 }
 
 /** One hit tile in words: its status, why it was rejected, and every flag it carries. */
@@ -206,6 +206,7 @@ export function tileWords(t: ModalTile): TileWords {
 	if (tf && tf.tone === 'on') flags.push({ word: tf.word, kind: 'on' });
 	if (t.tip_warning) flags.push({ word: 'Tip', kind: 'tip' });
 	if (t.force_window_cut) flags.push({ word: 'Window Cuts Pulse', kind: 'cut' });
+	if (t.decay?.warning) flags.push({ word: 'Not Died Away', kind: 'decay' });
 	return { status, tone, reason: t.status === 'rejected' && t.reason ? REJECT_WORDS[t.reason] : null, flags };
 }
 
