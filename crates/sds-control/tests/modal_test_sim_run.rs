@@ -34,6 +34,10 @@ async fn modal_test_three_point_roving_hammer_matches_the_structure() {
     })
     .await;
     assert_eq!(fin["end"]["outcome"], "ended", "{fin}");
+    // Impact mode has no drive: its end does not speak of one.
+    let words = fin["end"]["message"].as_str().unwrap();
+    assert!(words.starts_with("the test was ended"), "{words}");
+    assert!(!words.contains("drive"), "{words}");
     let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
     record_done(&mut c, &folder).await;
     let (recs, frf, start, step) = frf_records(&folder);
@@ -84,6 +88,11 @@ async fn modal_test_two_shaker_burst_random_matrix_h1_matches_the_structure() {
     })
     .await;
     assert_eq!(fin["end"]["outcome"], "ended", "{fin}");
+    let words = fin["end"]["message"].as_str().unwrap();
+    assert!(
+        words.starts_with("the test was ended with the drive at zero"),
+        "{words}"
+    );
     let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
     record_done(&mut c, &folder).await;
     let (recs, frf, start, step) = frf_records(&folder);

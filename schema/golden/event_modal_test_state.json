@@ -160,7 +160,7 @@
   },
   "end": {
    "outcome": "ended",
-   "message": "the test was ended with the drive at zero (by Shell (controller))",
+   "message": "the test was ended (by Shell (controller))",
    "emergency_stop": false,
    "at_s": 16.0
   }

@@ -32,4 +32,4 @@
 {"seq":31,"at_unix":1794240031.25,"frame":16384,"kind":"state","text":"state point_done","data":{"event":"state","state":"point_done"}}
 {"seq":32,"at_unix":1794240032.25,"frame":16384,"kind":"operator","text":"end of test asked","data":{"action":"end"}}
 {"seq":33,"at_unix":1794240033.25,"frame":16384,"kind":"state","text":"state ended","data":{"event":"state","state":"ended"}}
-{"seq":34,"at_unix":1794240034.25,"frame":16384,"kind":"outcome","text":"ended (ended): the test was ended with the drive at zero (by Shell (controller))","data":{"outcome":"ended","emergency_stop":false}}
+{"seq":34,"at_unix":1794240034.25,"frame":16384,"kind":"outcome","text":"ended (ended): the test was ended (by Shell (controller))","data":{"outcome":"ended","emergency_stop":false}}

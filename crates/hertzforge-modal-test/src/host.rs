@@ -939,12 +939,13 @@ impl Pump<'_> {
                 zero_wait += 1;
                 if self.record_whole(u) || zero_wait > ZERO_WAIT_BATCHES {
                     let _ = self.backend.stop();
-                    self.end(
-                        "ended",
-                        "the test was ended with the drive at zero".into(),
-                        None,
-                        false,
-                    );
+                    // Impact mode has no drive (no feeder): its end does not speak of one.
+                    let words = if self.feeder.is_some() {
+                        "the test was ended with the drive at zero"
+                    } else {
+                        "the test was ended"
+                    };
+                    self.end("ended", words.into(), None, false);
                     break;
                 }
             }

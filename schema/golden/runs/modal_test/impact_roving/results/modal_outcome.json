@@ -5,7 +5,7 @@
   "channels": [],
   "mode": "impact",
   "outcome": "ended",
-  "reason": "the test was ended with the drive at zero (by Shell (controller))",
+  "reason": "the test was ended (by Shell (controller))",
   "emergency_stop": false,
   "totals": {
     "accepted": 6,

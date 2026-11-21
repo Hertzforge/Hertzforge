@@ -6599,7 +6599,7 @@ MODAL_FINISHED = {
     'record': {'folder': '/home/operator/Hertzforge_Data/golden_roving_hammer',
                'streams': True, 'problem': None},
     'end': {'outcome': 'ended',
-            'message': 'the test was ended with the drive at zero (by Shell (controller))',
+            'message': 'the test was ended (by Shell (controller))',
             'emergency_stop': False, 'at_s': 16.0},
 }
 
