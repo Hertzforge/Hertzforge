@@ -540,6 +540,7 @@ hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_the_clamp_is_a_backstop_u
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_level_step_between_ticks_stays_inside_the_budget
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_tone_switched_on_under_a_bound_rule_stays_inside_the_budget
 hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_each_drive_aborts_above_its_peak_ceiling
+hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_a_tone_over_a_limit_ceiling_ends_the_run
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_fixed_tones_on_floor
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_narrowband_fixed

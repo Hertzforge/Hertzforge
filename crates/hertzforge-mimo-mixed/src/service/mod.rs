@@ -398,6 +398,21 @@ pub struct MimoMixedStatus {
     pub clamped: u64,
     /// How it ended.
     pub end: Option<RunEnd>,
+    /// Each limit channel, in the setup's order.
+    pub limits: Vec<LimitStatus>,
+}
+
+/// One limit channel's reading.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct LimitStatus {
+    /// The channel's index in the channel table.
+    pub channel_index: u32,
+    /// What the channel carries on its worst line (the random part and
+    /// every tone on it) over its ceiling, dB; negative infinity before
+    /// anything is read. It aborts `limit_abort` past its abort margin.
+    pub over_db: f64,
+    /// That line's frequency, Hz.
+    pub at_hz: f64,
 }
 
 /// One band's control state.
@@ -486,6 +501,8 @@ pub struct MimoMixedService {
     pub(crate) floor_ref: Option<HermitianStack>,
     pub(crate) bands: Vec<BandCtl>,
     pub(crate) floor_err_db: Vec<f64>,
+    /// Each limit's worst line over its ceiling, dB, and the line.
+    pub(crate) limit_over_db: Vec<(f64, usize)>,
     pub(crate) equalized: bool,
     pub(crate) clean_lines: usize,
     pub(crate) fill_report: Option<crate::fill::FillReport>,
@@ -624,6 +641,7 @@ impl MimoMixedService {
         let real_time = station.is_hardware();
         Ok(MimoMixedService {
             floor_err_db: vec![f64::NAN; n],
+            limit_over_db: vec![(f64::NEG_INFINITY, 0); cfg.p()],
             cfg,
             table,
             backend,
@@ -1438,6 +1456,7 @@ impl MimoMixedService {
                 self.phase = MimoMixedPhase::Stopping;
             }
         }
+        self.judge_limits();
         if self.ending.is_none() {
             self.advance();
         }
@@ -1739,6 +1758,17 @@ impl MimoMixedService {
             dropped: self.step.as_ref().map_or(0, |s| s.records.dropped),
             clamped: self.step.as_ref().map_or(0, |s| s.clamped),
             end: self.end.clone(),
+            limits: self
+                .cfg
+                .limits
+                .iter()
+                .zip(&self.limit_over_db)
+                .map(|(l, &(db, line))| LimitStatus {
+                    channel_index: l.channel_index,
+                    over_db: db,
+                    at_hz: line as f64 * self.df,
+                })
+                .collect(),
         }
     }
 

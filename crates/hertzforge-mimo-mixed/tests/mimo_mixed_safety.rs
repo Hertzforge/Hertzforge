@@ -387,6 +387,66 @@ fn mimo_mixed_each_drive_aborts_above_its_peak_ceiling() {
     }
 }
 
+/// A run on BaseArticle6x4 (four controls, two monitors) with one 2 g tone
+/// at 150 Hz and monitor channel 5 a limit with a flat ceiling of
+/// `ceiling` and a 3 dB abort margin; the worst `over_db` it read, and the
+/// end.
+fn limit_run(ceiling: f64) -> (f64, RunEnd) {
+    let s = SineStructure::BaseArticle6x4;
+    let mut cfg = run_config(s, 0.5, vec![tone("t1", fixed(150.0), 2.0)], 10.0);
+    cfg.limits = vec![hertzforge_mimo_random::config::LimitSpec {
+        channel_index: 5,
+        ceiling_psd: vec![ceiling],
+        abort_margin_db: 3.0,
+    }];
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    let mut worst = f64::NEG_INFINITY;
+    while svc.status().t_s < 80.0 {
+        let going = svc.run_chunk().expect("chunk");
+        let st = svc.status();
+        worst = worst.max(st.limits[0].over_db);
+        if !going {
+            break;
+        }
+    }
+    (worst, ended(&svc))
+}
+
+/// Requirement: a limit channel is judged on what it carries, the tones
+/// included (the residual the floor law sees has every tone subtracted).
+/// A run whose limit ceiling is 1e3 reads the channel's worst line; with
+/// the ceiling 6 dB under that reading the run ends `limit_abort` (past the
+/// 3 dB margin), an abort, at zero; with it 6 dB over the run completes.
+/// The tone alone carries that worst line: the random part's worst line on
+/// the monitor reads 1.3e-2 g^2/Hz (measured with the tones left out of the
+/// check), 14 dB under the tone's 0.37 g^2/Hz and 8 dB under the lower
+/// ceiling, so judging the residual alone never ends this run.
+#[test]
+fn mimo_mixed_a_tone_over_a_limit_ceiling_ends_the_run() {
+    let (probe_db, probe_end) = limit_run(1e3);
+    assert_eq!(probe_end.name, "completed", "{}", probe_end.words);
+    let carried = 1e3 * 10f64.powf(probe_db / 10.0);
+    println!("probe: worst line carries {carried:.4e} (g^2/Hz)");
+    assert!(
+        carried > 1e-1,
+        "the tone's line, not the floor: {carried:e}"
+    );
+    let (over_db, end) = limit_run(carried / 10f64.powf(0.6));
+    println!(
+        "ceiling 6 dB under: worst {over_db:.2} dB, end {}",
+        end.name
+    );
+    assert_eq!(end.name, "limit_abort", "{}", end.words);
+    assert!(end.aborted);
+    let (under_db, end) = limit_run(carried * 10f64.powf(0.6));
+    println!(
+        "ceiling 6 dB over: worst {under_db:.2} dB, end {}",
+        end.name
+    );
+    assert_eq!(end.name, "completed", "{}", end.words);
+}
+
 // =============================================================================
 // Law faults in either role.
 // =============================================================================

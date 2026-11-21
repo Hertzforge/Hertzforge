@@ -425,7 +425,7 @@ impl MimoMixedService {
     /// One floor loop: the estimate, the fill, the judging, the law, the
     /// bands.
     fn floor_loop(&mut self) {
-        let (n, p) = (self.cfg.n(), self.cfg.p());
+        let n = self.cfg.n();
         let band = self.band;
         let lines = self.lines;
         let Some(est) = self.est.as_mut() else { return };
@@ -440,15 +440,11 @@ impl MimoMixedService {
             .map(|l| clean[l] && est.dof(l) >= MIN_ENVELOPE_DOF)
             .collect();
         let mut meas = HermitianStack::zeros(lines, n);
-        let mut lim = vec![0.0; lines * p];
         for l in 0..lines {
             for r in 0..n {
                 for c in r..n {
                     meas.set(l, r, c, est.get(l, r, c));
                 }
-            }
-            for i in 0..p {
-                lim[l * p + i] = est.get(l, n + i, n + i).re;
             }
         }
         let Some(floor_ref) = self.floor_ref.clone() else {
@@ -489,7 +485,7 @@ impl MimoMixedService {
         self.floor_err_db = err.clone();
         let judged = (band.0..band.1).any(|l| ripe[l]);
         self.equalized = judged && err.iter().all(|e| e.abs() <= FLOOR_EQUALIZED_DB);
-        if judged && !self.judge_floor(&meas, &ripe, &lim) {
+        if judged && !self.judge_floor(&meas, &ripe) {
             return;
         }
         if !self.judge_folded_bands(&meas, &floor_ref, &ripe) {
@@ -615,11 +611,10 @@ impl MimoMixedService {
     }
 
     /// The floor's envelope per control on clean lines (relaxed while the
-    /// floor plays alone at the soft start) and each limit's abort. `false`
-    /// when the run is ending.
-    fn judge_floor(&mut self, meas: &HermitianStack, clean: &[bool], lim: &[f64]) -> bool {
+    /// floor plays alone at the soft start). `false` when the run is ending.
+    /// The limits are judged every batch ([`Self::judge_limits`]).
+    fn judge_floor(&mut self, meas: &HermitianStack, clean: &[bool]) -> bool {
         let n = self.cfg.n();
-        let p = self.cfg.p();
         let tol = self.floor_tolerances();
         let relax_db = if self.phase == MimoMixedPhase::FloorAlone {
             self.cfg.soft_start_relax_db
@@ -653,35 +648,82 @@ impl MimoMixedService {
                 return false;
             }
         }
-        // The limits, at the level in force.
-        let lam = self.step.as_ref().map_or(0.0, |s| s.level.value());
+        true
+    }
+
+    /// Each limit channel against its ceiling plus its abort margin on what
+    /// the channel carries, every batch (MIMO Random's rule: one line over
+    /// aborts `limit_abort`). What it carries on a line is the residual's
+    /// estimate there (the random part, normalized by the random gain) at
+    /// the random gain in force, read once the line's estimate holds
+    /// [`MIN_ENVELOPE_DOF`], plus every sounding tone's tracked power on
+    /// that channel, `A^2 / 2` over the line width, on the tone's line.
+    /// The tones are subtracted from the residual, so the floor law's limit
+    /// machinery holds only the random part (design D15); this check is
+    /// what catches a tone that drives a limit channel too hard. Judged
+    /// while the run ends too: an abort replaces a stop.
+    pub(crate) fn judge_limits(&mut self) {
+        let (n, p) = (self.cfg.n(), self.cfg.p());
+        if p == 0 || self.state != MimoMixedState::Running {
+            return;
+        }
+        let Some(s) = self.step.as_ref() else { return };
+        let g = s.level.value() * s.rand_ramp.value() * s.stop.value();
+        let (lines, df) = (self.lines, self.df);
+        let mut carried = vec![0.0; lines];
+        let mut trip = None;
         for i in 0..p {
-            let spec = &self.cfg.limits[i];
-            let over = 10f64.powf(spec.abort_margin_db / 10.0);
-            let mut worst = 0usize;
-            for l in self.band.0..self.band.1 {
-                let c = spec.ceiling(l);
-                if c > 0.0 && lim[l * p + i] * lam * lam > c * over {
-                    worst += 1;
+            carried.fill(0.0);
+            if let Some(est) = self.est.as_ref() {
+                for (l, c) in carried.iter_mut().enumerate() {
+                    if est.dof(l) >= MIN_ENVELOPE_DOF {
+                        *c = est.get(l, n + i, n + i).re.max(0.0) * g * g;
+                    }
                 }
             }
-            if worst >= self.cfg.protections.envelope_abort_lines {
-                let words = format!(
-                    "limit channel {} was over its ceiling plus {:.1} dB on {worst} lines",
-                    spec.channel_index, spec.abort_margin_db
-                );
-                self.abort_with(RunEnd {
+            for k in 0..s.tones.len() {
+                if s.bank.part_level(k) <= 0.0 {
+                    continue;
+                }
+                let l = (s.bank.frequency(k) / df).round();
+                if !(l >= 0.0 && (l as usize) < lines) {
+                    continue;
+                }
+                let a = s.bank.tracked(k, n + i).norm();
+                carried[l as usize] += a * a / 2.0 / df;
+            }
+            let spec = &self.cfg.limits[i];
+            let (mut worst_db, mut worst_line) = (f64::NEG_INFINITY, 0usize);
+            for l in self.band.0..self.band.1.min(lines) {
+                let c = spec.ceiling(l);
+                if c > 0.0 && carried[l] > 0.0 {
+                    let db = 10.0 * (carried[l] / c).log10();
+                    if db > worst_db {
+                        (worst_db, worst_line) = (db, l);
+                    }
+                }
+            }
+            self.limit_over_db[i] = (worst_db, worst_line);
+            if worst_db > spec.abort_margin_db && trip.is_none() {
+                trip = Some(RunEnd {
                     name: "limit_abort",
                     aborted: true,
-                    part: self.floor_id(),
+                    part: None,
                     control: None,
                     drive: None,
-                    words,
+                    words: format!(
+                        "limit channel {} carried {worst_db:.1} dB over its ceiling at {:.1} Hz, \
+                         past its {:.1} dB abort margin",
+                        spec.channel_index,
+                        worst_line as f64 * df,
+                        spec.abort_margin_db
+                    ),
                 });
-                return false;
             }
         }
-        true
+        if let Some(t) = trip {
+            self.abort_with(t);
+        }
     }
 
     /// One call of the floor law (the seed at loop 0), under MIMO Random's
