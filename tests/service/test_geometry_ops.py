@@ -692,3 +692,38 @@ def test_a_geometry_alone_draws_its_solids_as_its_parts_do():
     alone = show.show(project, ['Geometry'], {}, None)['views'][0]
     row = show.show(project, ['Geometry'], {}, {'kind': 'solids', 'id': 0})['views'][0]
     assert len(alone['triangles']) == len(row['triangles']) == 12
+
+
+@pytest.mark.parametrize('family, nodes', [('quads', '101 102 202 201'), ('beams', '101 102'),
+                                           ('triangles', '101 102 201')])
+def test_a_familys_table_stays_the_familys_through_its_edits(project, validate, family, nodes):
+    """Adding, typing over and deleting in a family's table shows that family's elements
+    again, and a click in the view still adds one of that family."""
+    from hertzforge.core.geometry import element_family
+
+    geometry = project['Geometry']
+    other = ('beams', '301 302') if family != 'beams' else ('triangles', '301 302 401')
+    run(project, 'project.add_element', family=other[0], nodes=other[1])
+    others = {element_family(int(c)) for c in geometry.elem_type} - {family}
+    assert others, 'the geometry holds elements of other families'
+
+    def only_family(views):
+        drawn, table = views
+        wire_views(views, validate)
+        kept = [int(row[0]) for row in table['rows']]
+        rows = [int(np.flatnonzero(np.asarray(geometry.elem_id) == e)[0]) for e in kept]
+        assert {element_family(int(geometry.elem_type[r])) for r in rows} <= {family}
+        assert drawn['pick']['params']['family'] == family
+        return table
+
+    added = only_family(run(project, 'project.add_element', family=family, nodes=nodes))
+    count = len(added['rows'])
+    assert count == sum(element_family(int(c)) == family for c in geometry.elem_type)
+    edit = added['edit']
+    assert edit['params'] == {'geometry': 'Geometry', 'kind': 'elements', 'family': family}
+    only_family(run(project, 'project.set_entity_cell', **edit['params'], row=1,
+                    column='nodes', value=added['rows'][0][3]))
+    remove = edit['remove']
+    assert remove['params'] == edit['params']
+    left = only_family(run(project, remove['op'], **remove['params'], ids=added['rows'][-1][0]))
+    assert len(left['rows']) == count - 1

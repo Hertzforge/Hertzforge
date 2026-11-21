@@ -261,7 +261,7 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
         # the rows are the entities, so Delete takes rows, not cells: each by its id,
         # the first column
         edit['remove'] = {'op': 'project.delete_entities',
-                          'params': {'geometry': name, 'kind': kind}, 'column': 0}
+                          'params': {'geometry': name, 'kind': kind, **part}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
     if name is not None and kind == 'nodes':
         # its rows and the nodes of the view beside it are marked together
@@ -401,9 +401,8 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
         return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
                                     name, groups=runs), elements]
     if family:
-        element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
         return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
-                      element, family=family)
+                      _family_element(family), family=family)
     views = _shown(name, geometry, params['kind'], adds=False)
     if params['kind'] == 'coordinate_systems':
         ids = [int(c) for c in geometry.cs_id]
@@ -411,6 +410,11 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
         if cs:
             views = _with_gizmo(views, name, geometry, cs)
     return views
+
+
+def _family_element(family: str) -> dict[str, Any] | None:
+    """What a click adds while a family's table is open: an element of that family."""
+    return {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
 
 
 def _optional_id(value: int) -> int | None:
@@ -557,8 +561,9 @@ def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
                     f'{int(geometry.elem_id[row])}')
     except ValueError as error:
         raise refused(str(error)) from None
+    # the family's own table again, as its Edit opened it, not every element
     return _shown(name, geometry, 'elements', said,
-                  {key: params[key] for key in ('family', 'type', 'group')})
+                  {key: params[key] for key in ('family', 'type', 'group')}, family=family)
 
 
 GROUP_NAME = Param('name', 'Name', 'string', default='')
@@ -762,9 +767,11 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
                        params['field'], params['value'])
 
 
-def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str
-                ) -> list[dict]:
-    """One field of the entity on `row` written; ids may repeat, so the row says which."""
+def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str,
+                part: dict[str, str] | None = None) -> list[dict]:
+    """One field of the entity on `row` written; ids may repeat, so the row says which.
+    The table shown after is the `part`'s (`family` or `groups`) when one is named."""
+    part = part or {}
     geometry = project[name]
     if field not in FIELDS[kind]:
         raise refused(f'a {LABELS[kind]} has the fields {", ".join(filter(None, FIELDS[kind]))}; '
@@ -783,7 +790,8 @@ def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value:
         if said.startswith(('could not convert', 'invalid literal')):
             said = f'{value!r} is not a number'
         raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
-    views = _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set', adds=False)
+    views = _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set',
+                   _family_element(part.get('family', '')), adds=False, **part)
     if kind == 'coordinate_systems':
         # the arrows and rings stay on the system just typed into
         views = _with_gizmo(views, name, geometry, int(geometry.cs_id[row]))
@@ -803,13 +811,9 @@ def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'the {LABELS[kind]} table has {count} rows; there is no row '
                       f'{params["row"]}')
     at = params['row'] - 1 if picked is None else int(picked[params['row'] - 1])
-    views = _set_at_row(project, params['geometry'], kind, at, params['column'],
-                        params['value'])
-    part = {key: value for key, value in part.items() if value}
-    if part:
-        # the part's own table again, not every row of the kind
-        views[-1] = entity_table(geometry, kind, views[-1]['title'], params['geometry'], **part)
-    return views
+    # the part's own table again, not every row of the kind
+    return _set_at_row(project, params['geometry'], kind, at, params['column'],
+                       params['value'], {key: value for key, value in part.items() if value})
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
@@ -855,7 +859,10 @@ def delete_entities(project: Any, params: dict[str, Any]) -> list[dict]:
                 'coordinate_systems': 'coordinate system'}
     removed = ', '.join(f'{count} {singular[key]}{"s" * (count != 1)}'
                         for key, count in report.items() if count and key in singular)
-    return _shown(name, geometry, kind, f'removed {removed}' if removed else '', adds=False)
+    # the table the rows were deleted from: a family's or element groups' own
+    part = {key: params[key] for key in ('family', 'groups') if params[key]}
+    return _shown(name, geometry, kind, f'removed {removed}' if removed else '',
+                  _family_element(part.get('family', '')), adds=False, **part)
 
 
 # ---- turning and sliding a coordinate system ----------------------------------------
@@ -1544,7 +1551,10 @@ OPERATIONS = (
     _model('project.delete_entities', 'Delete Entities',
            'Nodes, coordinate systems, elements or element groups deleted by id; nodes '
            'data is measured at, and the last coordinate system, are kept.',
-           (GEOMETRY, KIND, IDS), (*DRAWN, 'reading'), delete_entities),
+           (GEOMETRY, KIND, IDS,
+            Param('family', 'Family whose elements the table shows', 'string', default=''),
+            Param('groups', 'Element groups the table shows', 'string', default='')),
+           (*DRAWN, 'reading'), delete_entities),
     _model('project.rotate_coordinate_system', 'Rotate Coordinate System',
            'A coordinate system turned by a typed angle about one of its own axes.',
            (GEOMETRY, CS, AXIS, ANGLE), DRAWN, rotate_coordinate_system),
