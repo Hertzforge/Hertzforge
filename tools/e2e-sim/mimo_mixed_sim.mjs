@@ -61,7 +61,19 @@ const OVERRIDE_WORDS = 'Simulator plant; the gate is set past what any identific
 
 const children = [];
 const stopAll = () => {
-	for (const c of children) if (c.exitCode === null) c.kill('SIGTERM');
+	for (const c of children) {
+		if (c.exitCode !== null) continue;
+		// on Windows the dev server runs under a shell: end the whole tree, not the shell alone
+		if (process.platform === 'win32') {
+			try {
+				execFileSync('taskkill', ['/pid', String(c.pid), '/T', '/F'], { stdio: 'ignore' });
+				continue;
+			} catch {
+				/* already gone: fall through */
+			}
+		}
+		c.kill('SIGTERM');
+	}
 };
 process.on('exit', stopAll);
 process.on('SIGINT', () => process.exit(130));
@@ -363,6 +375,8 @@ try {
 	check('the level steps up 3 dB', true, `${l0} to ${await runLevel(a)} dB; ${await text(a, 'mmix-level')}`);
 	await tid(a, 'level-goto').selectOption('0');
 	await until(a, 'full level', async (p) => (await runPhase(p)) === 'full_level', 60_000);
+	// the phase turns at the start of the level's ramp: the level reaches 0 dB at its end
+	await until(a, 'the level at 0 dB', async (p) => (await runLevel(p)) === 0, 15_000);
 	check('the level goes to full level', (await runLevel(a)) === 0, await text(a, 'mmix-level'));
 	await until(a, 'the time at full level', async (p) => /left/.test(await text(p, 'mmix-at-level').catch(() => '')), 15_000);
 	check('the level card gives the time at full level and what is left of it', true, await text(a, 'mmix-at-level'));
