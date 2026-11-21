@@ -196,7 +196,7 @@ drive. `iterate(inputs)` is called once per control loop.
 | Measured response SDM | `n_c` x `n_c`, packed | The latest control estimate, referred to full level |
 | Degrees of freedom | scalar | Of the measured estimate |
 | FRF | `n_c` x `n_d` | The plant estimate the core is using, held or updated (question 2) |
-| Multiple coherence | `n_c` | Of each control channel on all drives, 0 to 1 (`N * n_c` values, line after line), of the estimate the FRF comes from: system identification's while the FRF is held, the loop's own while it is updated |
+| Multiple coherence | `n_c` | Of each control channel on all drives, 0 to 1 (`N * n_c` values, line after line), system identification's while the FRF is held, the loop's own running estimate while it is updated. With the update blended in below 1 the FRF a law sees is a mix of identification's and the loop's, and the coherence is the loop's alone |
 | Line spacing, band, loop index | scalars | As in section 6; the loop index is 0 at the seed, then 1, 2, ... for each iteration |
 
 **Optional inputs**, passed only when the manifest declares them (at full scale each is tens of
