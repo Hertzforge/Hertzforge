@@ -335,6 +335,8 @@ export interface ModalTestLive {
 	};
 	/** Impact: the latest hit's own block (null until a hit is taken). */
 	hit?: ModalLiveHit | null;
+	/** Shaker: the latest frame taken, whole (null until a frame is taken). */
+	frame?: ModalLiveFrame | null;
 	/** Shaker: each reference's autospectrum in the present average. */
 	references?: ModalLiveReferences;
 }
@@ -359,6 +361,29 @@ export interface ModalLiveHit {
 		exponential: { tau_s: number; end: number } | null;
 	};
 	force_spectrum: { frequency_hz: Float32Array | number[]; unit: string; values: Float32Array | number[]; tip_drop_db: number | null };
+}
+
+/** The latest shaker frame taken, whole: every channel over the frame's own samples. */
+export interface ModalLiveFrame {
+	point: number;
+	n: number;
+	seq: number;
+	status: 'accepted' | 'rejected';
+	start_frame: number;
+	start_s: number;
+	/** The frame's length in samples; the values may be fewer when decimated. */
+	samples: number;
+	/** 1: every sample; otherwise each interval of `decimation` samples sends its two extremes. */
+	decimation: number;
+	/** The time between the values sent. */
+	step_s: number;
+	/** The burst sources: the input frame one past the burst's last sample; null otherwise. */
+	burst_end_frame: number | null;
+	/** The frames the inputs lag the drives by. */
+	input_delay_frames: number;
+	decay: ModalDecay | null;
+	/** The inputs in table order, then the drives. */
+	channels: ModalTrace[];
 }
 
 export interface ModalLiveReferences {
