@@ -635,3 +635,55 @@ describe('open, import and save in a browser', () => {
 		expect(sent.filter(([m]) => m === 'files.choose')).toHaveLength(1);
 	});
 });
+
+describe('a projection, whose distance its row fills in', () => {
+	const project = {
+		id: 'project.project_onto_basis',
+		title: 'Project onto Basis DOFs',
+		workspace: 'modal',
+		modules: ['modal'],
+		outputs: ['shape3d'],
+		params: [
+			{ name: 'source', label: 'Shape set', type: 'enum', options_from: 'verb:project_onto_basis' },
+			{ name: 'onto', label: 'Onto', type: 'enum', options_from: 'objects:shape_set|channel_table|geometry' },
+			{ name: 'distance', label: 'Node match tolerance', type: 'number', default: 0, unit: 'm', length: true }
+		]
+	} as unknown as OperationDescriptor;
+	const groups = (defined: boolean) =>
+		({
+			...summary,
+			active_geometry: null,
+			objects: [
+				{ name: 'Model', kind: 'geometry', records: 0, groups: ['A'], verbs: [], units_defined: defined },
+				{ name: 'Modes', kind: 'shape_set', records: 0, groups: ['A'], verbs: ['project_onto_basis'] },
+				{ name: 'Test', kind: 'geometry', records: 0, groups: ['B'], verbs: [], units_defined: defined }
+			]
+		}) as unknown as ProjectSummary;
+	const filled = { id: project.id, verb: 'Project', kind: 'run', ready: true, fill: { source: 'Modes', onto: 'Test', distance: '2.5' } } as unknown as ActionRow;
+
+	function projecting(defined = true) {
+		const made = make();
+		made.app.catalog = { operations: [project] } as never;
+		made.app.project.summary = groups(defined);
+		made.app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		return made;
+	}
+
+	it('opens its form on the distance rather than running at once', async () => {
+		const { a, runs } = projecting();
+		await a.perform(filled, column);
+		expect(a.formOpen).toBe(true);
+		expect(runs).toHaveLength(0);
+		expect(a.currentValues.distance).toBe(2.5);
+		expect(a.formParams.map((p) => p.name)).toEqual(['distance']);
+	});
+
+	it('shows the display unit when its geometries have units, and none when they have not', async () => {
+		const shown = projecting();
+		await shown.a.perform(filled, column);
+		expect(shown.a.formParams[0].unit).toBe('mm');
+		const own = projecting(false);
+		await own.a.perform(filled, column);
+		expect(own.a.formParams[0].unit).toBeUndefined();
+	});
+});

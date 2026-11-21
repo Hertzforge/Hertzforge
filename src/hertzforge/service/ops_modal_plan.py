@@ -26,6 +26,7 @@ from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
 from .op_progress import hook
 from .ops_model import _family, _groups
+from .ops_project import MATCH as TOLERANCE
 from .ops_project import _shape_view
 from .parsing import parse_id_runs, parse_optional_picks
 from .protocol import refused
@@ -413,8 +414,6 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
 
 PROJECTED = Param('source', 'Shape set', 'enum', options_from='objects:shape_set')
 ROWS = Param('rows', 'Channels (rows, blank: all)', 'string', default='')
-TOLERANCE = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
-                  min=0.01, max=100.0, step=0.5)
 BASIS = Param('first', 'Basis', 'enum', options_from='objects:shape_set')
 OTHER = Param('second', 'Projected', 'enum', options_from='objects:shape_set')
 
@@ -443,7 +442,7 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     rows = parse_optional_picks(params['rows'], count, 'row')
     try:
         added = project.project_onto_basis(source, onto=table, channels=rows,
-                                           tolerance=params['tolerance'] / 100.0)
+                                           distance=params['distance'] or None)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     found = project.geometry_for(added)
@@ -487,11 +486,11 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
         if flipped:
             columns = project[second]
             rows, report = project_shapes(project[first], home[1], columns, theirs[1],
-                                          tolerance=params['tolerance'] / 100.0)
+                                          distance=params['distance'] or None)
         else:
             rows = project[first]
             columns, report = project_shapes(project[second], theirs[1], rows, home[1],
-                                             tolerance=params['tolerance'] / 100.0)
+                                             distance=params['distance'] or None)
         values = cross_mac(rows, columns)
     except ValueError as error:
         # the cause is kept: the comparison tells no node matched from another refusal

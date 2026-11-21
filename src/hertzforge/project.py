@@ -3967,6 +3967,7 @@ class Project(dict):
     def expand(self, source: Any, shapes: Any, *,
                records: Sequence[int] | None = None,
                tolerance: float = 0.02,
+               distance: float | None = None,
                name: str | None = None) -> str:
         """Expand modal responses through a shape set back to physical
         responses (Expand to Physical Responses): `u = Φq` at every DOF
@@ -4003,6 +4004,9 @@ class Project(dict):
             With a channel table on another geometry, how far the
             nearest node may be, as a fraction of the table's geometry's
             extent (as `project_onto_basis`).
+        distance : float, optional
+            The same as a distance (`project_onto_basis`); it takes the
+            place of `tolerance` when given.
         name : str, optional
             What to call the result. Defaults to the record's name with
             'Modal Coordinates' replaced by 'Physical Responses', and the
@@ -4020,7 +4024,7 @@ class Project(dict):
         source, shapes = self.name_of(source), self.name_of(shapes)
         if isinstance(self[shapes], ChannelTable):
             return self._expand_at_table(source, shapes, records, tolerance,
-                                         name)
+                                         name, distance)
         data, shape_set = self._transform_pair(source, shapes)
         picked = None if records is None else [int(i) for i in records]
         result, report = to_physical(data, shape_set, picked)
@@ -4044,7 +4048,8 @@ class Project(dict):
 
     def channel_frfs(self, source: Any, table: Any, *,
                      records: Sequence[int] | None = None,
-                     tolerance: float = 0.02) -> Frf:
+                     tolerance: float = 0.02,
+                     distance: float | None = None) -> Frf:
         """The physical FRFs `expand` makes from modal FRFs at a channel
         table's channels, without adding them to the project: what
         Expand to Physical Responses previews.
@@ -4058,6 +4063,8 @@ class Project(dict):
         records : sequence of int, optional
             Which modal records; all of them when omitted.
         tolerance : float, default 0.02
+            As `expand`.
+        distance : float, optional
             As `expand`.
 
         Returns
@@ -4076,9 +4083,11 @@ class Project(dict):
         if records is not None:
             params['records'] = [int(i) for i in records]
         params['tolerance'] = float(tolerance)
+        if distance is not None:
+            params['distance'] = float(distance)
         return _at_channels(self, self.name_of(source), params)
 
-    def _expand_at_table(self, source, table, records, tolerance, name):
+    def _expand_at_table(self, source, table, records, tolerance, name, distance=None):
         """`expand` with a channel table: modal FRFs to physical FRFs
         between the table's channels."""
         params: dict[str, Any] = {'table': table}
@@ -4086,6 +4095,8 @@ class Project(dict):
             params['records'] = [int(i) for i in records]
         if tolerance != 0.02:
             params['tolerance'] = float(tolerance)
+        if distance is not None:
+            params['distance'] = float(distance)
         result = _at_channels(self, source, params)
         params['shapes'] = result.transform_report.basis
         added = self._derive(source, result, name or f'{source} @ {table}',
@@ -4095,7 +4106,8 @@ class Project(dict):
         return added
 
     def channel_shapes(self, shapes: Any, table: Any, *,
-                       tolerance: float = 0.02) -> tuple[ShapeSet, dict]:
+                       tolerance: float = 0.02,
+                       distance: float | None = None) -> tuple[ShapeSet, dict]:
         """A shape set at a channel table's DOFs, for the FRFs between
         its channels (`expand` with a table).
 
@@ -4114,6 +4126,9 @@ class Project(dict):
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the table's
             geometry's extent.
+        distance : float, optional
+            The same as a distance (`project_onto_basis`); it takes the
+            place of `tolerance` when given.
 
         Returns
         -------
@@ -4139,7 +4154,7 @@ class Project(dict):
         dofs = list(dict.fromkeys(d for d in table_obj.dof_strings() if d))
         target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
         return project_shapes(set_obj, self[theirs], target, self[home],
-                              tolerance=tolerance)
+                              tolerance=tolerance, distance=distance)
 
     def drive_points(self, table: Any) -> list[str]:
         """The DOFs a channel table says a force is applied at: its
@@ -4167,7 +4182,8 @@ class Project(dict):
     def driven_modes(self, source: Any, drive: str | None = None, *,
                      table: Any = None,
                      records: Sequence[int] | None = None,
-                     tolerance: float = 0.02) -> tuple[str, Any]:
+                     tolerance: float = 0.02,
+                     distance: float | None = None) -> tuple[str, Any]:
         """Each modal coordinate's response to a unit force at one DOF,
         from modal FRFs and the shape set they are of (`modal_basis`):
         what the operating deflection shape of modal FRFs is made from
@@ -4190,6 +4206,8 @@ class Project(dict):
             rigid-body modes' records out gives the elastic response.
         tolerance : float, default 0.02
             As `channel_shapes`.
+        distance : float, optional
+            As `channel_shapes`.
 
         Returns
         -------
@@ -4209,10 +4227,10 @@ class Project(dict):
 
         source = self.name_of(source)
         basis, at_drive, dof = self._drive(source, drive, table, records,
-                                           tolerance)
+                                           tolerance, distance)
         return basis, driven_modes(self[source], at_drive, dof, records)
 
-    def _drive(self, source, drive, table, records, tolerance):
+    def _drive(self, source, drive, table, records, tolerance, distance=None):
         """(the modal FRFs' shape set by name, the set to read at the
         drive, the drive DOF) for `driven_modes`."""
         if not isinstance(self[source], Frf):
@@ -4234,7 +4252,7 @@ class Project(dict):
                                      'name one as drive=')
                 drive = points[0]
             at_drive, _projection = self.channel_shapes(
-                basis, table, tolerance=tolerance)
+                basis, table, tolerance=tolerance, distance=distance)
         if drive is None:
             raise ValueError('give the DOF the force is at as drive=, or a '
                              'channel table with a force reference as table=')
@@ -6467,10 +6485,11 @@ class Project(dict):
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
                            tolerance: float = 0.02,
+                           distance: float | None = None,
                            name: str | None = None) -> str:
-        """Sample a shape set at the Basis shape set's DOFs, or at a
-        channel table's (Project onto Basis DOFs). Returns the new shape
-        set's name.
+        """Sample a shape set at the Basis shape set's DOFs, at a
+        channel table's, or at every node of a geometry (Project onto
+        Basis DOFs). Returns the new shape set's name.
 
         For each target DOF, the nearest node of the source's geometry
         is found, and the displacement there is dotted with the DOF's
@@ -6482,16 +6501,20 @@ class Project(dict):
         to compare with: its channels' DOFs, on the geometry the table
         answers to. `channels` narrows a channel table to some of its
         rows, such as the drives alone; each row's values are the same as
-        in the projection onto the whole table. With no target, or the
-        source or the target without a geometry, this raises ValueError.
+        in the projection onto the whole table. A geometry as the target
+        puts the set on another model: its X, Y and Z at each of the
+        geometry's nodes, in the node's own coordinate system, which only
+        a set holding three directions at its nodes can give. With no
+        target, or the source or the target without a geometry, this
+        raises ValueError.
 
         Parameters
         ----------
         source : str
             The shape set to project.
         onto : str, optional
-            The shape set or channel table to project onto. Defaults to
-            the shape set in the project's Basis.
+            The shape set, channel table or geometry to project onto.
+            Defaults to the shape set in the project's Basis.
         channels : iterable of int, optional
             Rows of the channel table `onto` (0-based, the table's
             order) whose DOFs are the target. Rows with no node or
@@ -6499,10 +6522,15 @@ class Project(dict):
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the Basis
             geometry's extent (the largest distance of a node from the
-            nodes' mean position).
+            nodes' mean position), when no `distance` is given.
+        distance : float, optional
+            How far the nearest node may be, in meters when the
+            geometries' units are defined and in the model's own units
+            otherwise. Left out, `match_distance` says.
         name : str, optional
             What to call the result. Defaults to the source's name
-            followed by '@ Basis DOFs', or by '@' and the table's name,
+            followed by '@ Basis DOFs', or by '@' and the table's or the
+            geometry's name,
             with the number of channels in parentheses when `channels`
             picks some.
 
@@ -6548,6 +6576,9 @@ class Project(dict):
         elif channels is not None:
             raise ValueError('channels picks rows of a channel table; '
                              f'{onto or "the Basis"} is not one')
+        elif onto is not None and isinstance(self[onto], Geometry):
+            target = _geometry_target(self, source, onto)
+            name = name or f'{source} @ {onto}'
         else:
             target = None
         basis = ((onto, target if target is not None else self[onto])
@@ -6556,7 +6587,10 @@ class Project(dict):
             raise ValueError('name the set to project onto, or declare a '
                              'Basis holding one')
         basis_name, basis_shapes = basis
-        home = self.geometry_for(basis_name)
+        # a geometry is its own home, linked to a group or not
+        home = ((basis_name, self[basis_name])
+                if isinstance(self[basis_name], Geometry)
+                else self.geometry_for(basis_name))
         theirs = self.geometry_for(source)
         if home is None or theirs is None:
             raise ValueError(f'{source} and {basis_name} each need a '
@@ -6572,7 +6606,8 @@ class Project(dict):
                     f'Project {basis_name} onto {source}')
         projected, report = project_shapes(self[source], theirs[1],
                                            basis_shapes, home[1],
-                                           tolerance=tolerance)
+                                           tolerance=tolerance,
+                                           distance=distance)
         # how it was made travels with it: matched and dropped counts,
         # the worst distance accepted
         projected.projection_report = report
@@ -6679,7 +6714,8 @@ class Project(dict):
         rows, columns, _said, _report = self.compared_sets(first, second)
         return cross_mac(rows, columns)
 
-    def compared_sets(self, first: str, second: str, *, tolerance: float = 0.02
+    def compared_sets(self, first: str, second: str, *, tolerance: float = 0.02,
+                      distance: float | None = None
                       ) -> tuple[ShapeSet, ShapeSet, str, dict | None]:
         """Two shape sets as they are compared: on DOFs they share.
 
@@ -6700,6 +6736,9 @@ class Project(dict):
             The other shape set, by name.
         tolerance : float, default 0.02
             How far the nearest node may be (`project_onto_basis`).
+        distance : float, optional
+            How far the nearest node may be as a distance
+            (`project_onto_basis`).
 
         Returns
         -------
@@ -6719,12 +6758,51 @@ class Project(dict):
         flipped, why = projection_order(self[first], self[second])
         if flipped:
             projected, report = project_shapes(self[first], home[1], self[second],
-                                               theirs[1], tolerance=tolerance)
+                                               theirs[1], tolerance=tolerance,
+                                               distance=distance)
             return (projected, self[second], f'{first} projected onto {second}: {why}',
                     report)
         projected, report = project_shapes(self[second], theirs[1], self[first],
-                                           home[1], tolerance=tolerance)
+                                           home[1], tolerance=tolerance,
+                                           distance=distance)
         return self[first], projected, f'{second} projected onto {first}: {why}', report
+
+    def match_distance(self, source: Any, onto: Any, *,
+                       tolerance: float = 0.02) -> float | None:
+        """How far a node may be from the nearest node of `source`'s
+        geometry when `source` is projected onto `onto` and no distance
+        is given (`core.correlate.match_distance`): `tolerance` of the
+        extent of `onto`'s geometry, plus half the thickest plate of
+        `source`'s. What a projection form opens on.
+
+        Parameters
+        ----------
+        source : str or object
+            The shape set that would be projected.
+        onto : str or object
+            The shape set, channel table or geometry it would be
+            projected onto.
+        tolerance : float, default 0.02
+            The share of the extent.
+
+        Returns
+        -------
+        float or None
+            In meters when the geometries' units are defined, in the
+            model's own units otherwise. None when either has no
+            geometry or their units do not agree, so no projection
+            would be made.
+        """
+        from .core.correlate import match_distance
+
+        source, onto = self.name_of(source), self.name_of(onto)
+        home = ((onto, self[onto]) if isinstance(self[onto], Geometry)
+                else self.geometry_for(onto))
+        theirs = self.geometry_for(source)
+        if (home is None or theirs is None
+                or home[1].units_defined != theirs[1].units_defined):
+            return None
+        return match_distance(theirs[1], home[1], tolerance)
 
     def merge(self, *names: str, name: str | None = None) -> str:
         """Combine compatible objects into one (Merge). The merged object
@@ -10332,6 +10410,46 @@ def _pair_reads(project, objects, direction):
             and _goes(data[0], sets[0], direction))
 
 
+def projection_why(project: Project, source: Any, onto: Any) -> str:
+    """Why the shape set `source` cannot be projected onto `onto` (a shape
+    set, channel table or geometry), as far as the objects say before
+    any node is matched; '' when it can be. The action table greys
+    Project out with it, and `project_onto_basis` refuses a geometry
+    with it."""
+    from .core.correlate import partial_nodes
+
+    source, onto = project.name_of(source), project.name_of(onto)
+    on_geometry = isinstance(project[onto], Geometry)
+    theirs = project.geometry_for(source)
+    home = (onto, project[onto]) if on_geometry else project.geometry_for(onto)
+    for name, found in ((source, theirs), (onto, home)):
+        if found is None:
+            return f'{name} has no geometry; link one to it'
+    if theirs[1] is home[1]:
+        return (f'{source} is on {onto} already' if on_geometry else
+                f'Both are on {home[0]}, so there is nothing to project')
+    if on_geometry:
+        if not home[1].num_nodes:
+            return f'{onto} has no nodes'
+        partial = partial_nodes(project[source])
+        if partial:
+            # what a node did not measure would be taken as no motion there
+            return (f'{source} has {partial} node{"s" * (partial != 1)} measured in '
+                    'fewer than three directions')
+    return ''
+
+
+def _geometry_target(project, source, onto):
+    """What `project_onto_basis` samples `source` at on the geometry `onto`:
+    X, Y and Z at each of its nodes, as a shape set of no modes."""
+    why = projection_why(project, source, onto)
+    if why:
+        raise ValueError(f'{source} cannot be projected onto {onto}: '
+                         f'{why[0].lower()}{why[1:]}')
+    dofs = [f'{int(node)}{axis}+' for node in project[onto].node_id for axis in 'XYZ']
+    return ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
+
+
 def _two_sets_on_two_geometries(project, objects):
     """Two shape sets, each answering to its own geometry — the
     projection samples one model's field at the other's points."""
@@ -10361,6 +10479,16 @@ def _set_and_table_apart(project, objects):
     homes = [project.geometry_for(sets[0]), project.geometry_for(tables[0])]
     return (all(home is not None for home in homes)
             and homes[0][1] is not homes[1][1])
+
+
+def _set_and_geometry_apart(project, objects):
+    """A shape set and a geometry it is not on, which it holds the whole motion to
+    be put on: the set on another model, at every node of the geometry."""
+    sets = [o for o in objects if isinstance(o, ShapeSet)]
+    geometries = [o for o in objects if isinstance(o, Geometry)]
+    if len(objects) != 2 or len(sets) != 1 or len(geometries) != 1:
+        return False
+    return not projection_why(project, sets[0], geometries[0])
 
 
 def _mergeable(project, objects):
@@ -10427,7 +10555,8 @@ _SELECTION_APPLIES: tuple = (
     ('expand', lambda p, o: (_pair_reads(p, o, 'modal')
                              or _modal_frfs_and_table(p, o))),
     ('project_onto_basis', lambda p, o: (_two_sets_on_two_geometries(p, o)
-                                         or _set_and_table_apart(p, o))),
+                                         or _set_and_table_apart(p, o)
+                                         or _set_and_geometry_apart(p, o))),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
         isinstance(x, ShapeSet) for x in o))),
     # a shape set at a channel table's channels, for Rattlesnake's
@@ -10681,7 +10810,8 @@ def _at_channels(project, source, params):
     if basis is None:
         raise ValueError(f'nothing says which shape set {source!r} is of')
     shapes, projection = project.channel_shapes(
-        basis, table, tolerance=params.get('tolerance', 0.02))
+        basis, table, tolerance=params.get('tolerance', 0.02),
+        distance=params.get('distance'))
     roles, kinds = channels.roles(), channels.types()
     dofs = channels.dof_strings()
     references, responses, skipped = [], [], {}

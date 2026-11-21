@@ -104,20 +104,57 @@ class NoNodeMatched(ValueError):
         self.report: dict[str, Any] = report
 
 
+def _si_points(geometry: Geometry) -> np.ndarray:
+    from ..drawing.viz.geometry import display_points
+    from ..units import SYSTEMS
+
+    return np.asarray(display_points(geometry, SYSTEMS['m-kg-N-s'])[0], dtype=float)
+
+
+def _extent(points: np.ndarray) -> float:
+    """The largest distance of a node from the nodes' mean position; 1 for none."""
+    if not len(points):
+        return 1.0
+    center = points.mean(axis=0)
+    return float(np.sqrt(((points - center) ** 2).sum(axis=1).max())) or 1.0
+
+
+def _surface(fem_geometry: Geometry) -> float:
+    """Half the thickest plate of a geometry with units defined, 0 for one with none.
+
+    A sensor sits on a plate's surface and a plate model is meshed at its mid-surface,
+    half the thickness away: the BARC's box sensors all sat 0.125 in off the model's wall
+    and every one was dropped (2026-09-26). The thickness is held in meters, so it is
+    allowed only when the units are defined."""
+    if not fem_geometry.units_defined:
+        return 0.0
+    thicknesses = [getattr(properties, 'thickness', None) for properties
+                   in (getattr(fem_geometry, 'group_properties', None) or {}).values()]
+    return 0.5 * max((t for t in thicknesses if t), default=0.0)
+
+
+def match_distance(fem_geometry: Geometry, test_geometry: Geometry,
+                   tolerance: float = 0.02) -> float:
+    """How far a test node's nearest FEM node may be when `project_shapes` is given no
+    distance: `tolerance` of the test geometry's extent (the largest distance of a test
+    node from the nodes' mean position), plus half the FEM geometry's thickest plate,
+    because sensors are on surfaces and plate nodes are on mid-surfaces. In meters when
+    the geometries' units are defined, in the model's own units otherwise."""
+    return float(tolerance) * _extent(_si_points(test_geometry)) + _surface(fem_geometry)
+
+
 def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
                    test_shapes: ShapeSet, test_geometry: Geometry,
-                   tolerance: float = 0.02
+                   tolerance: float = 0.02, *, distance: float | None = None
                    ) -> tuple[ShapeSet, dict[str, Any]]:
     """`fem_shapes` reduced to the DOFs of `test_shapes`.
 
-    `tolerance` is a fraction of the test geometry's extent (the
-    largest distance of a test node from the nodes' mean position): a
-    test node whose nearest FEM node is further away is not matched,
-    and its DOFs are dropped from the result rather than estimated.
-    When the FEM geometry has units defined and its element groups give
-    plate thicknesses, half the thickest plate is added to that limit,
-    because sensors are on surfaces and plate nodes are on
-    mid-surfaces.
+    A test node whose nearest FEM node is further than `distance` away
+    is not matched, and its DOFs are dropped from the result rather
+    than estimated. `distance` is in meters when the geometries' units
+    are defined, in the model's own units otherwise. Without one, the
+    limit is `match_distance`'s: `tolerance` of the test geometry's
+    extent, plus half the FEM geometry's thickest plate.
 
     Returns (shape_set, report): the projected ShapeSet and a dict with
     'matched' and 'total' test node counts, the 'worst' matched
@@ -130,22 +167,20 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     with no FEM node within the limit.
 
     Raises ValueError when only one geometry has units defined, when
-    either has no nodes, when none of the test DOFs are translations
-    on the test geometry, or when no test node is matched.
+    `distance` is not above zero, when either has no nodes, when none
+    of the test DOFs are translations on the test geometry, or when no
+    test node is matched.
     """
     from ..deform import dof_directions
-    from ..drawing.viz.geometry import display_points
-    from ..units import SYSTEMS
     from .shapes import ShapeSet
 
     if fem_geometry.units_defined != test_geometry.units_defined:
         raise ValueError('both geometries need units defined (or neither)'
                          ' to overlay them in one frame')
-    si = SYSTEMS['m-kg-N-s']
-    test_points = np.asarray(display_points(test_geometry, si)[0],
-                             dtype=float)
-    fem_points = np.asarray(display_points(fem_geometry, si)[0],
-                            dtype=float)
+    if distance is not None and not (np.isfinite(distance) and distance > 0):
+        raise ValueError(f'the node match distance is {distance}; it must be above zero')
+    test_points = _si_points(test_geometry)
+    fem_points = _si_points(fem_geometry)
     if not len(test_points) or not len(fem_points):
         raise ValueError('both geometries need nodes')
 
@@ -155,37 +190,22 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
         raise ValueError("none of the test shapes' DOFs are "
                          'translations on the test geometry')
 
-    center = test_points.mean(axis=0)
-    extent = float(np.sqrt(((test_points - center) ** 2)
-                           .sum(axis=1).max())) or 1.0
-    limit = float(tolerance) * extent
-    # A sensor sits on a plate's surface and a plate model is meshed at
-    # its mid-surface, half the thickness away: the BARC's box sensors
-    # all sat 0.125 in off the model's wall and every one was dropped
-    # (2026-09-26). So the thickest plate's half-thickness is allowed
-    # beyond the tolerance — held in meters, so only when the units are
-    # defined, and nothing at all for a geometry whose element groups give none.
-    surface = 0.0
-    if fem_geometry.units_defined:
-        thicknesses = [getattr(properties, 'thickness', None) for properties
-                       in (getattr(fem_geometry, 'group_properties', None)
-                           or {}).values()]
-        surface = 0.5 * max((t for t in thicknesses if t), default=0.0)
-    limit += surface
+    limit = (float(distance) if distance is not None
+             else float(tolerance) * _extent(test_points) + _surface(fem_geometry))
 
     # nearest FEM node per unique test node, one row at a time — the
     # full (test x fem) distance matrix would not fit for a real mesh
     unique_rows = np.unique(rows)
-    nearest, distance = {}, {}
+    nearest, gap = {}, {}
     for row in unique_rows:
         deltas = fem_points - test_points[row]
         squared = (deltas ** 2).sum(axis=1)
         best = int(np.argmin(squared))
         nearest[int(row)] = best
-        distance[int(row)] = float(np.sqrt(squared[best]))
-    matched_rows = {row for row in nearest if distance[row] <= limit}
+        gap[int(row)] = float(np.sqrt(squared[best]))
+    matched_rows = {row for row in nearest if gap[row] <= limit}
     if not matched_rows:
-        closest = min(distance.values())
+        closest = min(gap.values())
         unit = (' m' if fem_geometry.units_defined and test_geometry.units_defined
                 else ' in model units')
         raise NoNodeMatched(
@@ -240,7 +260,7 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     unmatched = [int(test_ids[row]) for row in unique_rows
                  if int(row) not in matched_rows]
     report = {'matched': len(matched_rows), 'total': len(unique_rows),
-              'worst': max(distance[row] for row in matched_rows),
+              'worst': max(gap[row] for row in matched_rows),
               'limit': limit, 'dropped': dropped, 'pairs': pairs,
               'unmatched': unmatched}
     return projected, report

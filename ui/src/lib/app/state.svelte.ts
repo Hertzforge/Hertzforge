@@ -151,10 +151,23 @@ class AnalyzeState {
 		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
 	}
 
-	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	/**
+	 * Whether the geometry an operation's lengths are typed on has no units, its numbers its own: the
+	 * form's geometry, or else the one the first object it names is drawn on, as the service takes them.
+	 */
 	private undefinedGeometry(op: OperationDescriptor): boolean {
-		const name = this.values[op.id]?.geometry;
-		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+		const summary = this.app.project.summary;
+		const objects = summary?.objects ?? [];
+		const values = this.values[op.id] ?? {};
+		const named = 'geometry' in values ? [values.geometry] : op.params.filter((p) => p.options_from).map((p) => values[p.name]);
+		for (const name of named) {
+			const obj = objects.find((o) => o.name === name);
+			if (!obj) continue;
+			const geometry =
+				obj.kind === 'geometry' ? obj : (objects.find((o) => o.kind === 'geometry' && o.groups.some((g) => obj.groups.includes(g))) ?? objects.find((o) => o.name === summary?.active_geometry));
+			if (geometry) return geometry.units_defined === false;
+		}
+		return false;
 	}
 
 	/**
@@ -497,8 +510,10 @@ class AnalyzeState {
 		this.openRow(row);
 		const op = this.op;
 		if (!op) return;
-		const filled = new Set(Object.keys(row.fill ?? {}));
-		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
+		// a field the row fills is asked for nothing only when the form hides it: an object, or
+		// one the row omits. A value it opens on, such as a projection's distance, is still asked
+		const fill = row.fill ?? {};
+		const asks = this.paramsOf(op).filter((p) => !p.in_view && !(p.name in fill && (p.options_from || row.omit?.includes(p.name))));
 		// a form that applies as it goes is filled in full and opens all the same
 		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
