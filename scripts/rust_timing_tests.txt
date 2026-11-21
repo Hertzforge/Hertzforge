@@ -558,6 +558,8 @@ hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_the_kinematic_monitor_jud
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_band_drive_that_cannot_play_is_named
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_tone_is_judged_at_the_line_it_is_at
 hertzforge-mimo-mixed  lib  service::records::tests::mimo_mixed_a_record_writer_that_cannot_start_says_so
+hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_folded_and_swept_servoed_bands_reach_level
+hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_folded_and_swept_servoed_bands_reach_level_other_seeds
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_fixed_tones_on_floor
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_narrowband_fixed

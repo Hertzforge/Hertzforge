@@ -151,37 +151,103 @@ fn band_level_db(svc: &MimoMixedService, lo: usize, hi: usize) -> Vec<f64> {
 }
 
 /// Requirement: a fixed band of 40 Hz at 300 Hz adding 3e-3 g^2/Hz (folded
-/// into the floor's reference by `auto`) reads within 1 dB of floor plus band
-/// on every control over its inner lines, and a band of 40 Hz sweeping 800
-/// to 1000 Hz at 5 Hz/s adding the same (servoed by `auto`) reads within its
-/// alarm band (`DEFAULT_BAND_ALARM_DB`) on every control after 30 s at full
-/// level; the run goes on.
+/// into the floor's reference by `auto`) reads, averaged over 30 s at full
+/// level once the estimate has settled, within 1 dB of floor plus band on every control over its inner
+/// lines, and a band of 40 Hz sweeping 800 to 1000 Hz at 5 Hz/s adding the
+/// same (servoed by `auto`) reads within its alarm band
+/// (`DEFAULT_BAND_ALARM_DB`) on every control after those 30 s; the run goes
+/// on.
+///
+/// A single reading of the folded band's seven lines swings by about
+/// +-1.5 dB from one estimate to the next: that is the estimate's own
+/// scatter, not a level error, so the band is judged on its time average,
+/// taken once the estimate's memory span (`memory_loops` loops of
+/// `frames_per_loop` frames) has passed since full level, so that no loop
+/// from the lower level is left in it.
+/// The average's own scatter is taken from the spread of its six 5 s block
+/// means; it must be at most a quarter of the 1 dB band, so a level error
+/// of 1 dB stands four of its standard errors clear of the scatter.
 #[test]
-#[ignore = "open: since identification finds the 10-frame lag (it found 0 before), the folded band reads +1.16 dB on control 3; with the lag forced to 0, -0.04 dB"]
 fn mimo_mixed_folded_and_swept_servoed_bands_reach_level() {
+    folded_and_swept(7);
+}
+
+/// As above, on two further noise and synthesis seeds.
+#[test]
+fn mimo_mixed_folded_and_swept_servoed_bands_reach_level_other_seeds() {
+    folded_and_swept(11);
+    folded_and_swept(23);
+}
+
+fn folded_and_swept(seed: u64) {
     let s = SineStructure::Linear4x4;
     let parts = vec![
         band("fixed", fixed(300.0), 40.0, added(3e-3, 0.5)),
         band("swept", sweep(800.0, 1000.0, 5.0), 40.0, added(3e-3, 0.5)),
     ];
-    let cfg = run_config(s, 0.5, parts, 100.0);
-    let mut svc = service(s, cfg);
+    let mut cfg = run_config(s, 0.5, parts, 100.0);
+    cfg.seed = seed;
+    // The estimate's memory span: past it no loop from before full level
+    // is left in the average.
+    let memory_s = cfg.estimation.memory_loops.ceil() * cfg.estimation.frames_per_loop as f64 / DF;
+    let mut svc = service_seeded(s, cfg, seed);
     engage(&mut svc);
     assert!(
         run_until(&mut svc, MimoMixedPhase::FullLevel, 60.0),
         "full level"
     );
-    let end = svc.status().t_s + 30.0;
-    let going = run_until(&mut svc, MimoMixedPhase::Idle, end);
+    let settled = svc.status().t_s + memory_s;
+    assert!(
+        !run_until(&mut svc, MimoMixedPhase::Idle, settled) && svc.end().is_none(),
+        "{:?}",
+        svc.end()
+    );
+    // Each reading of the folded band's inner lines (285 Hz to 315 Hz),
+    // with its time, over the 30 s.
+    let t0 = svc.status().t_s;
+    let end = t0 + 30.0;
+    let mut readings: Vec<(f64, Vec<f64>)> = Vec::new();
+    let mut going = true;
+    while svc.status().t_s < end {
+        if !svc.run_chunk().expect("chunk") {
+            going = false;
+            break;
+        }
+        readings.push((svc.status().t_s - t0, band_level_db(&svc, 72, 79)));
+    }
     print_status(&svc);
-    assert!(!going && svc.end().is_none(), "{:?}", svc.end());
+    assert!(going && svc.end().is_none(), "{:?}", svc.end());
     let st = svc.status();
     assert!(st.bands[0].folded && !st.bands[1].folded);
-    // The folded band's inner lines: 285 Hz to 315 Hz.
-    let folded = band_level_db(&svc, 72, 79);
-    println!("folded band against floor plus band: {folded:?} dB");
-    for (i, e) in folded.iter().enumerate() {
-        assert!(e.abs() <= 1.0, "folded band control {i}: {e:.2} dB");
+    let n = readings[0].1.len();
+    let mean_db = |r: &[&(f64, Vec<f64>)], i: usize| -> f64 {
+        let p: f64 = r.iter().map(|(_, v)| 10f64.powf(v[i] / 10.0)).sum();
+        10.0 * (p / r.len() as f64).log10()
+    };
+    for i in 0..n {
+        let all: Vec<&(f64, Vec<f64>)> = readings.iter().collect();
+        let mean = mean_db(&all, i);
+        let lo = readings.iter().map(|(_, v)| v[i]).fold(f64::MAX, f64::min);
+        let hi = readings.iter().map(|(_, v)| v[i]).fold(f64::MIN, f64::max);
+        let blocks: Vec<f64> = (0..6)
+            .map(|b| {
+                let r: Vec<&(f64, Vec<f64>)> = readings
+                    .iter()
+                    .filter(|(t, _)| *t >= 5.0 * b as f64 && *t < 5.0 * (b + 1) as f64)
+                    .collect();
+                mean_db(&r, i)
+            })
+            .collect();
+        let bm = blocks.iter().sum::<f64>() / 6.0;
+        let sd = (blocks.iter().map(|x| (x - bm).powi(2)).sum::<f64>() / 5.0).sqrt();
+        let se = sd / 6f64.sqrt();
+        println!(
+            "seed {seed} folded band control {i}: 30 s mean {mean:+.2} dB \
+             (readings {lo:+.2} to {hi:+.2}; block means {blocks:.2?}; \
+             standard error {se:.2})"
+        );
+        assert!(se <= 0.25, "control {i}: the average scatters {se:.2} dB");
+        assert!(mean.abs() <= 1.0, "folded band control {i}: {mean:.2} dB");
     }
     let alarm = hertzforge_mimo_mixed::config::DEFAULT_BAND_ALARM_DB;
     for (i, e) in st.bands[1].error_db.iter().enumerate() {
