@@ -244,8 +244,8 @@ class Operation:
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
-    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
-    #: copy of its geometry, so nothing in the project changes
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on
+    #: copies of the objects it takes, so nothing in the project changes
     previews: bool = False
     #: the boolean param that says go ahead, for an operation that shows what it would do
     #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
