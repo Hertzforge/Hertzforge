@@ -17,7 +17,12 @@
 	}
 	let { fit }: Props = $props();
 
-	const s = $derived(fit.state);
+	/**
+	 * The fit as last drawn: when the fit ends, the frame takes the panel away, and its plot reads
+	 * the state it drew until then rather than none (a null here stopped the page updating).
+	 */
+	let lastState: typeof fit.state = null;
+	const s = $derived.by(() => (lastState = fit.state ?? lastState));
 	/**
 	 * The modes picked in the table: a click picks a row, Shift picks to it, Cmd (Ctrl elsewhere)
 	 * adds or takes one away, and Delete takes the picked back (Brandon, 2026-11-14).
