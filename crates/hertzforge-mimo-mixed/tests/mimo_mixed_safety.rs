@@ -1112,6 +1112,174 @@ fn mimo_mixed_an_error_mid_run_stops_the_station_and_names_the_end() {
     assert!(!svc.run_chunk().expect("an ended run"), "the run went on");
 }
 
+/// The simulator, every drive frame written to it kept.
+struct Taping {
+    inner: Box<dyn hertzforge_hal::Backend>,
+    m: usize,
+    tape: Arc<std::sync::Mutex<Vec<f32>>>,
+}
+
+impl hertzforge_hal::Backend for Taping {
+    fn caps(&self) -> hertzforge_hal::Caps {
+        self.inner.caps()
+    }
+    fn open(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.open()
+    }
+    fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.close()
+    }
+    fn configure(
+        &mut self,
+        table: &hertzforge_channel_table::ChannelTable,
+        acq: &hertzforge_hal::AcquisitionConfig,
+    ) -> Result<hertzforge_hal::ConfiguredActual, hertzforge_hal::HalError> {
+        self.inner.configure(table, acq)
+    }
+    fn arm(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.arm()
+    }
+    fn start(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.start()
+    }
+    fn stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.stop()
+    }
+    fn read_input(
+        &mut self,
+        out: &mut [f32],
+    ) -> Result<hertzforge_hal::InputRead, hertzforge_hal::HalError> {
+        self.inner.read_input(out)
+    }
+    fn write_drive(&mut self, drive: &[f32]) -> Result<usize, hertzforge_hal::HalError> {
+        let k = self.inner.write_drive(drive)?;
+        let m = self.m;
+        self.tape
+            .lock()
+            .expect("tape")
+            .extend_from_slice(&drive[..(k * m).min(drive.len())]);
+        Ok(k)
+    }
+    fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
+        self.inner.poll_status()
+    }
+    fn emergency_stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.emergency_stop()
+    }
+}
+
+/// Requirement: a level step of the identification's search never splices
+/// the drive: the drive in force ramps out to zero, then the new level
+/// ramps in over the random part's ramp. Started 20 dB short, so the first
+/// step is the search's largest (ten times the drive). Each drive's rms
+/// over 256-frame windows, normalized to its level in the record and
+/// averaged over the four independent drives: a dip is a window under a
+/// quarter of the level half a second (twice the ramp) before it. Every
+/// step and the closing park show one; after each step's dip the drive
+/// takes at least three quarters of the ramp to reach 90 % of its new
+/// level (a linear ramp takes 90 % of it, less a window; a new level put
+/// in at once reaches it within the synthesis's crossfade, 2048 frames or
+/// fewer here, half the ramp).
+#[test]
+fn mimo_mixed_the_identification_level_steps_ramp_out_and_in() {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = two_tone_config(30.0);
+    let mut idc = cfg.identification();
+    idc.start_vrms /= 10.0;
+    cfg.identification = Some(idc);
+    let m = cfg.drives.len();
+    let laws = MimoMixedLaws::builtin(&cfg).expect("laws");
+    let tape = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let b = Taping {
+        inner: backend(s, 7),
+        m,
+        tape: tape.clone(),
+    };
+    let mut svc = MimoMixedService::new(
+        cfg,
+        table(s),
+        Box::new(b),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        laws,
+    )
+    .expect("service");
+    svc.arm().expect("arm");
+    let id = svc.identify().expect("identify");
+    let steps = id.steps;
+    println!("identified at {:.2} dB in {steps} steps", id.level_db);
+    assert!(steps >= 2, "no level step to judge");
+    let fs = svc.sample_rate_hz();
+    let tape = tape.lock().expect("tape").clone();
+    let (w, out) = (256, tape.len() / m);
+    let windows = out / w;
+    let mut mean = vec![0.0f64; windows];
+    for j in 0..m {
+        let rms: Vec<f64> = (0..windows)
+            .map(|k| {
+                let ss: f64 = (k * w..(k + 1) * w)
+                    .map(|f| (tape[f * m + j] as f64).powi(2))
+                    .sum();
+                (ss / w as f64).sqrt()
+            })
+            .collect();
+        // The record's level: the median over the windows before the
+        // park (the last third of the tape is the record).
+        let mut rec: Vec<f64> = rms[windows / 2..windows * 9 / 10].to_vec();
+        rec.sort_by(f64::total_cmp);
+        let full = rec[rec.len() / 2];
+        assert!(full > 0.0, "drive {j} never played");
+        for (a, r) in mean.iter_mut().zip(&rms) {
+            *a += r / full / m as f64;
+        }
+    }
+    let ramp = RANDOM_RAMP_S * fs;
+    let back = (2.0 * ramp) as usize / w;
+    let mut dips: Vec<usize> = Vec::new();
+    let mut k = back;
+    while k < windows {
+        if mean[k] < 0.25 * mean[k - back] {
+            let mut bottom = k;
+            while k < windows && mean[k] < 0.25 * mean[k - back] {
+                if mean[k] < mean[bottom] {
+                    bottom = k;
+                }
+                k += 1;
+            }
+            dips.push(bottom);
+        }
+        k += 1;
+    }
+    println!(
+        "{} dips over {windows} windows of {w} frames, at frames {:?}",
+        dips.len(),
+        dips.iter().map(|d| d * w).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        dips.len(),
+        steps,
+        "a level step played without ramping the drive out (one dip per step and the park)"
+    );
+    for &d in &dips[..steps - 1] {
+        let after = (2.0 * ramp) as usize / w;
+        let mut lvl: Vec<f64> = mean[d + after..(d + 2 * after).min(windows)].to_vec();
+        lvl.sort_by(f64::total_cmp);
+        let new = lvl[lvl.len() / 2];
+        let reach = (d..windows)
+            .find(|&k| mean[k] >= 0.9 * new)
+            .expect("the new level reached");
+        let frames = (reach - d) * w;
+        println!(
+            "the step at frame {}: from {:.3} to {new:.3} of full level in {frames} frames",
+            d * w,
+            mean[d]
+        );
+        assert!(
+            frames as f64 >= 0.75 * ramp,
+            "the new level came in over {frames} frames, under 3/4 of the {ramp} frame ramp"
+        );
+    }
+}
+
 // =============================================================================
 // Each drive to its own shaker.
 // =============================================================================

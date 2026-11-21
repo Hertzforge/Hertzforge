@@ -549,6 +549,7 @@ hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_tone_held_at_zero_by_th
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_tone_unread_is_carried_for_a_bounded_time_then_held_then_ends
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_law_running_away_behind_the_ceiling_ends_in_divergence
 hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_an_error_mid_run_stops_the_station_and_names_the_end
+hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_the_identification_level_steps_ramp_out_and_in
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_fixed_tones_on_floor
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_narrowband_fixed

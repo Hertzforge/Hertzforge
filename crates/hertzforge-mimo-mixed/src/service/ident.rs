@@ -170,6 +170,36 @@ impl MimoMixedService {
         e
     }
 
+    /// Ramp the identification's drive out over the random part's ramp and
+    /// play until it is out (the frames played are not recorded). `Err`
+    /// when the run had to end (it has).
+    fn ident_fade_out(&mut self) -> Result<(), MimoMixedError> {
+        let ramp = RANDOM_RAMP_S * self.fs;
+        let tick = match self.step.as_mut() {
+            Some(s) => {
+                s.go_random(0.0, ramp);
+                s.tick_frames as usize
+            }
+            None => return Ok(()),
+        };
+        let mut frames = ramp as usize + 2 * tick;
+        for _ in 0..16 {
+            self.ident_play(frames).map_err(|e| self.fail_run(e))?;
+            if self
+                .step
+                .as_ref()
+                .is_none_or(|s| s.rand_ramp.value() <= 0.0 && s.rand_ramp.settled())
+            {
+                self.ident_rec = None;
+                return Ok(());
+            }
+            frames = tick;
+        }
+        Err(self.fail_run(MimoMixedError::BadState(
+            "the identification's drive did not ramp out for its level step".into(),
+        )))
+    }
+
     /// Ramp out and park the station (the identification's end).
     fn ident_park(&mut self) -> Result<(), MimoMixedError> {
         if let Some(s) = self.step.as_mut() {
@@ -328,10 +358,16 @@ impl MimoMixedService {
             for (v, d) in vrms.iter_mut().zip(&self.cfg.drives) {
                 *v = (*v * gain).min(d.pretest_max_vrms);
             }
+            // The level step: the drive in force ramps out, the ring is
+            // cleared, the new level ramps in (the next record's settle
+            // covers the ramp in). Clearing the ring under a playing drive
+            // would splice the stream at up to ten times the rms.
+            self.ident_fade_out()?;
             self.drive_full = Some(self.ident_drive(&vrms));
             self.refactor = true;
             if let Some(s) = self.step.as_mut() {
                 s.ring.clear();
+                s.go_random(1.0, RANDOM_RAMP_S * self.fs);
             }
         }
         // The record.
