@@ -184,7 +184,7 @@ export interface ModalTestInvalidDetail {
 
 export type ModalRunState = 'none' | 'configured' | 'starting' | 'idle' | 'armed' | 'captured' | 'measuring' | 'stopping' | 'point_done' | 'finished';
 export type ModalDrivePhase = 'idle' | 'waiting' | 'ramping' | 'driving' | 'stopping' | 'zeroed';
-export type ModalOutcome = 'ended' | 'aborted' | 'response_abort' | 'drive_underrun' | 'drive_ceiling' | 'input_overload' | 'loop_faulted' | 'loop_panicked' | 'arm_refused';
+export type ModalOutcome = 'ended' | 'aborted' | 'response_abort' | 'drive_underrun' | 'drive_ceiling' | 'source_failed' | 'input_overload' | 'loop_faulted' | 'loop_panicked' | 'arm_refused';
 export type ModalTileStatus = 'pending' | 'accepted' | 'rejected' | 'undone';
 export type ModalRejectReason = 'overload' | 'double_hit' | 'operator';
 export type ModalTargetVerdict = 'high' | 'low' | 'on_target';

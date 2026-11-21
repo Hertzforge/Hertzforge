@@ -117,6 +117,7 @@ export const MODAL_OUTCOME_WORDS: Record<ModalOutcome, string> = {
 	response_abort: 'Response Abort',
 	drive_underrun: 'The Drive Was Not Made in Time',
 	drive_ceiling: 'Drive Ceiling',
+	source_failed: 'The Drive Source Failed',
 	input_overload: 'Input Overload',
 	loop_faulted: 'Control Loop Fault',
 	loop_panicked: 'Control Loop Failure',
