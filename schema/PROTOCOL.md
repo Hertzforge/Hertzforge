@@ -826,6 +826,12 @@ display unit system (the server puts its name in), `si` for the stored values.
 **Export's formats.** The Export row carries `formats`, each `{"value","label","suffix"}`: what that
 object can be written in, `.hforge` first. The desktop app lists them as the save window's file types.
 
+**A row's own words.** A row may carry `labels`, `{param: {option value: words}}`, the words its
+form shows for a param's options in place of the descriptor's. Project onto Basis DOFs with two shape
+sets names each `direction` after the sets, as "A onto B", the one that cannot be made followed by why
+in parentheses. Its fill chooses the direction only when one alone can be made, and fills `""` when
+both can, so the form asks; the order the sets were picked in decides nothing.
+
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose

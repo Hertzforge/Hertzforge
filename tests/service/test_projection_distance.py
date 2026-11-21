@@ -14,6 +14,7 @@ import pytest
 import hertzforge
 from hertzforge.service import display_units
 from hertzforge.service.action_table import action_table
+from hertzforge.service.protocol import ProtocolError
 
 from .test_projects import _exchange
 
@@ -259,3 +260,72 @@ def test_onto_a_table_a_node_with_no_channel_is_neither_matched_nor_unmatched():
     points, _segments = _layers(stage)
     assert points[UNREAD_COLOR] == pytest.approx(np.array([[5.0, 5.0, 5.0]]))
     assert len(points[MATCHED_COLOR]) == 2 and UNMATCHED_COLOR not in points
+
+
+def _row_for(project, names, op='project.project_onto_basis'):
+    table = action_table(project, names, {})
+    return next(row for row in table['columns'][0]['rows'] if row['id'] == op)
+
+
+def _way(row):
+    """(the set projected, the one onto) as the row's fill and direction say."""
+    fill = row['fill']
+    pair = (fill['source'], fill['onto'])
+    return pair[::-1] if fill['direction'] == 'reversed' else pair
+
+
+def test_the_direction_is_the_one_that_can_be_made_whichever_set_is_picked_first():
+    """The test set holds one direction at each node, so only the cube's modes go onto it. In
+    either order of picking, the row opens on that way and words the other with why."""
+    project = _project()
+    for names in (['Test Shapes', 'FEM Shapes'], ['FEM Shapes', 'Test Shapes']):
+        row = _row_for(project, names)
+        assert _way(row) == ('FEM Shapes', 'Test Shapes'), names
+        words = row['labels']['direction']
+        bad = 'named' if row['fill']['direction'] == 'reversed' else 'reversed'
+        assert words[bad] == ('Test Shapes onto FEM Shapes (not possible: Test Shapes has 2 '
+                              'nodes measured in fewer than three directions)')
+        assert words[row['fill']['direction']] == 'FEM Shapes onto Test Shapes'
+        assert float(row['fill']['distance']) == pytest.approx(
+            project.match_distance('FEM Shapes', 'Test Shapes'), rel=1e-3)
+
+
+def test_the_way_that_cannot_be_made_is_refused_with_why():
+    project = _project()
+    row = _row_for(project, ['FEM Shapes', 'Test Shapes'])
+    bad = 'named' if row['fill']['direction'] == 'reversed' else 'reversed'
+    with pytest.raises(ProtocolError, match='Test Shapes cannot be projected onto FEM Shapes: '
+                                            'Test Shapes has 2 nodes measured'):
+        _project_op(project, source=row['fill']['source'], onto=row['fill']['onto'],
+                    direction=bad, distance=0.0)
+    views = _project_op(project, source=row['fill']['source'], onto=row['fill']['onto'],
+                        direction=row['fill']['direction'], distance=0.0)
+    assert views[0]['title'] == 'Node matches: FEM Shapes onto Test Shapes'
+
+
+def test_when_both_ways_can_be_made_neither_is_chosen():
+    """Two sets that each hold every direction: the form asks which way, and opens on 0, the
+    default distance whichever way is chosen."""
+    project = _project()
+    project.add('Model B', copy.deepcopy(project['FEM Geometry']))
+    project.add('Modes B', copy.deepcopy(project['FEM Shapes']))
+    project.link('Model B', 'Modes B')
+    row = _row_for(project, ['FEM Shapes', 'Modes B'])
+    assert row['fill']['direction'] == ''
+    assert 'distance' not in row['fill']
+    assert row['labels']['direction'] == {'named': 'FEM Shapes onto Modes B',
+                                          'reversed': 'Modes B onto FEM Shapes'}
+
+
+def test_a_table_or_a_geometry_goes_one_way_and_is_not_asked():
+    from test_correlate import _channels
+
+    project = _project()
+    project.add('Channels', _channels())
+    project.link('Test Geometry', 'Channels')
+    for onto in ('Test Geometry', 'Channels'):
+        row = _row_for(project, ['FEM Shapes', onto])
+        assert 'direction' in row['omit'] and 'labels' not in row
+        assert 'direction' not in row['fill']
+    with pytest.raises(ProtocolError, match='only a shape set is projected the other way'):
+        _project_op(project, source='FEM Shapes', onto='Channels', direction='reversed')

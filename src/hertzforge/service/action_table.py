@@ -631,6 +631,13 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
                 continue
             more['omit'] = [*more.get('omit', []), 'mate']
+        if op.id == 'project.project_onto_basis':
+            directed = _directions(project, fill)
+            if directed is None:
+                more['omit'] = [*more.get('omit', []), 'direction']
+            else:
+                fill.update(directed[0])
+                more['labels'] = {'direction': directed[1]}
         if op.id in MATCHED:
             fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:
@@ -720,6 +727,25 @@ def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
     return fill
 
 
+def _directions(project: Any, fill: dict[str, str]) -> tuple[dict, dict] | None:
+    """Two shape sets for Project: which way it projects is chosen, never taken from the order
+    they were picked in. Each way is worded after the sets, the one that cannot be made with
+    why (`project.projection_why`); when only one can be made it is chosen, and when both can,
+    neither is, so the form asks. None for a set and a table or a geometry, which go one way."""
+    from hertzforge.core.shapes import ShapeSet
+    from hertzforge.project import projection_why
+
+    first, second = fill['source'], fill['onto']
+    if not isinstance(project[second], ShapeSet):
+        return None
+    ways = {'named': (first, second), 'reversed': (second, first)}
+    why = {key: projection_why(project, *pair) for key, pair in ways.items()}
+    words = {key: f'{a} onto {b}' + (f' (not possible: {why[key]})' if why[key] else '')
+             for key, (a, b) in ways.items()}
+    possible = [key for key in ways if not why[key]]
+    return {'direction': possible[0] if len(possible) == 1 else ''}, words
+
+
 #: the projections whose node match tolerance, a distance, the row fills in
 MATCHED = frozenset(('project.project_onto_basis', 'project.projection_overlay',
                      'project.project_onto_channels', 'project.expand'))
@@ -747,8 +773,13 @@ def _match_fill(project: Any, op_id: str, fill: dict[str, str]) -> dict[str, str
         if basis is None:
             return {}
         pair = (basis, fill['shapes'])
+    elif fill.get('direction') == '':
+        # which way is not chosen yet: 0, the default either way, until it is
+        return {}
     else:
         pair = (fill['source'], fill.get('onto') or fill['table'])
+        if fill.get('direction') == 'reversed':
+            pair = pair[::-1]
     distance = project.match_distance(*pair)
     if distance is None:
         return {}

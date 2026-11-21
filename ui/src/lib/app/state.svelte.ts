@@ -211,7 +211,12 @@ class AnalyzeState {
 			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
 			.filter((p) => p.name !== this.op?.commits)
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
-			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
+			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p))
+			.map((p) => {
+				// the row's own words for a param's options: Project's directions name the two sets
+				const words = row?.labels?.[p.name];
+				return words && p.options ? { ...p, options: p.options.map((o) => ({ ...o, label: words[String(o.value)] ?? o.label })) } : p;
+			});
 	}
 
 	get currentValues(): ParamValues {
@@ -769,11 +774,12 @@ class AnalyzeState {
 		this.previewDrawn = null;
 	}
 
-	/** Every field the form asks, but for what its row filled in, still holds its default. */
+	/** Every field the form asks still holds what it opened on: what its row filled in, or else its default. */
 	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
 		const defaults = defaultValues(this.paramsOf(op));
 		const filled = this.formRow?.fill ?? {};
-		return this.formParams.every((p) => p.name in filled || values[p.name] === defaults[p.name]);
+		// a filled field changed is typed into, as any other: Project's direction turned the way that cannot be made says why
+		return this.formParams.every((p) => (p.name in filled ? String(values[p.name]) === filled[p.name] : values[p.name] === defaults[p.name]));
 	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
