@@ -868,7 +868,8 @@ input stream is cut to the same 1536 frames (`cut_from_frames`);
 ## What a Modal Test Run Saves
 
 From start, before the station is opened: `run.json` (`test` `modal_test`, with
-the run's `metadata`; its `grid` adds `analysis_block`, the setup's block, and
+the run's `metadata` and, when the configuration names one, its
+`specification`; its `grid` adds `analysis_block`, the setup's block, and
 `df_hz`, the line spacing), `table.json`, `setup.json` and `log.jsonl`.
 `setup.json` holds `config` as accepted; `resolved`: `control` (impact mode:
 the words "no drive: impact mode writes no drive sample"; shaker mode: "open
@@ -881,7 +882,8 @@ zero) and the `aborts` in force, and on the simulator the simulated `structure`
 (its modes, scale, shapes, the hammer's force and the impulse responses'
 length); `check`, the check report the run was configured with (the rate, the
 block, the band and its lines, the estimator, the averages, the references, the
-responses, every point's DOFs, and the mode's settings). Then these, each checked
+responses, every point's DOFs, and the mode's settings; in impact mode the
+trigger's signed `level`, its `polarity` and the words of what it `watches`). Then these, each checked
 against the golden run folders (`schema/golden/runs/modal_test/impact_roving/` and
 `schema/golden/runs/modal_test/shaker_burst_random/`) by
 `tests/test_run_folder_golden_modal_test.py`:
@@ -890,7 +892,7 @@ against the golden run folders (`schema/golden/runs/modal_test/impact_roving/` a
 |---|---|
 | `streams/inputs` | Every measured row as read from the station, in table order (`kind` `inputs`), from the station's first frame |
 | `streams/drives` | Shaker mode only: every drive as the device accepted it, in volts (`kind` `drives`), frame for frame with the inputs. Impact mode opens no drive row and has no `drives` stream |
-| `results/modal_frames` | Repeating, a line per hit or frame taken (`event` `taken`) and per change of its status (`event` `status`): the tile (`n`, `seq`, `status`, `reason`, `overload`, `double_hit`, `start_frame`; in impact mode `peak`, `tip_warning`, `force_window_cut` and the hit's whole `report`; with a target `target_verdict` and `target_diff_pct`) and its `point`; array `span` (`f8` `[2]`, unit `frame`), the first station input frame and the length |
+| `results/modal_frames` | Repeating, a line per hit or frame taken (`event` `taken`) and per change of its status (`event` `status`): the tile (`n`, `seq`, `status`, `reason`, `overload`, `double_hit`, `start_frame`; in impact mode `peak`, `tip_warning`, `force_window_cut` and the hit's whole `report`, whose `double_hit` is null or `{"frame","peak","ratio"}` and whose frames count from the block's start; with a target `target_verdict` and `target_diff_pct`) and its `point`; array `span` (`f8` `[2]`, unit `frame`), the first station input frame and the length |
 | `results/modal_frf` | Repeating, a record per measured point (`kind` `frf`, `layout` `["response","reference","line"]`, the abscissa in Hz from the band's first line, `windows` as in `setup.json`); array `frf`, `c16` `[responses, references, lines]`, unit response over reference (`g/lbf`). The line: `measurement` (from 1), `point` (from 0), `replaces` (the measurement it replaces, or null), `averages`, `estimator` (`H1`, `H2` or `Hv`; `matrix H1` with several references) and the point's `rows` (each reference and response with its `index`, `node`, `direction` and `unit`) |
 | `results/modal_coherence` | Repeating, the same lines (`layout` `["response","line"]`): array `coherence` with one reference, `multiple_coherence` with several, `f8` `[responses, lines]` |
 | `results/modal_reference_spectra` | Repeating, the same lines (`layout` `["reference","line"]`): array `autospectra`, `f8` `[references, lines]`, unit the reference's squared per Hz (`lbf^2/Hz`); with several references also `condition_number`, `f8` `[lines]` |
@@ -904,10 +906,12 @@ point measured again is a new record whose `replaces` names the earlier one; a
 reader takes each point's last record.
 
 The log has an entry for the configure and the start (`state`, `data.event`
-`started`), each state the run enters (`state`, `data.event` `state`), each
+`started`), each state the run enters (`state`, `data.event` `state`; impact mode enters
+`arming` on every arm and re-arm, then `armed` once the pre-trigger is full), each
 point selected (`selected`), each hit or frame and its status (`hit`), each
 point measured (`result`, with its `measurement` and `replaces`), a drive
-start (`drive_start`), an operator's verb and who asked (`operator`), a force
+start (`drive_start`), an operator's verb and who asked (`operator`), a point cleared
+(`operator`, `clear_point`), a force
 target set from a hit (`operator`, `target_from_hit`), an abort (`abort`) and
 the outcome (`outcome`). With `record.streams` false there is no `streams/`
 folder. The Modal Test has no law.

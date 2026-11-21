@@ -6852,7 +6852,8 @@ gate.
 | `modal_test.select` | `{"point"}` (index from 0) | live | `{"ok","counts","state"}` |
 | `modal_test.next`, `modal_test.previous` | `{}` | live | `{"ok","counts","state"}`; the point after or before, wrapping |
 | `modal_test.arm`, `modal_test.disarm` | `{}` | live (arm: impact) | `{"ok","counts","state"}` |
-| `modal_test.accept`, `modal_test.reject`, `modal_test.undo` | `{}` | live | `{"ok","counts","state"}`; each acts on the latest hit or frame |
+| `modal_test.accept`, `modal_test.reject`, `modal_test.undo` | `{}` | live | `{"ok","counts","state"}`; each acts on the latest hit or frame only |
+| `modal_test.clear_point` | `{}` | live, not `measuring` or `captured` | `{"ok","counts","state"}`; every accepted average of the selected point out |
 | `modal_test.target_from_hit` | `{}` | live, impact | `{"ok","counts","state"}`; the force target's peak becomes the latest hit's |
 | `modal_test.drive_start`, `modal_test.drive_stop` | `{}` | live, shaker | `{"ok","counts","state"}` |
 | `modal_test.sim_hit` | `{"kind"}`: `clean`, `double` or `overload` | live, impact, simulator | `{"ok","counts","state"}`; the next simulated hit's kind |
@@ -6866,9 +6867,17 @@ gate.
 `drive_start` and `drive_stop` in impact mode, and `arm` and `sim_hit` in shaker mode,
 `not_in_mode`; `sim_hit` on hardware `not_simulated`. The session's own
 refusals name what stops the verb: `already` (armed twice), `busy` (a hit waits for accept or
-reject), `no_hit` (nothing to accept, reject or take a target from), `no_such_point`,
-`nothing_to_undo`, `point_done` (the point is measured: undo, or select another). `reset`
-configures the present configuration again; `clear` forgets it (`none`).
+reject, or a clear while the point is measuring), `no_hit` (nothing to accept, reject or take a
+target from), `no_such_point`, `nothing_to_undo`, `point_done` (the point is measured: undo, or
+select another). Once an end or an abort is asked, or the run has ended on its own,
+`drive_start`, `arm`, `accept` and `sim_hit` are refused `ending`: nothing new starts after an
+end. `undo` takes the selected point's latest accepted average out, a hit or (shaker) a frame,
+the drive on or off; `reject` in shaker mode takes the latest frame out while averaging goes on;
+`clear_point` takes every accepted average of the selected point out and opens the point again,
+its tiles kept and marked `undone`. In shaker mode `drive_stop` part way through a point is a
+pause: the frames taken stay, and a later `drive_start` goes on with the same average.
+`reset` configures the present configuration again, a new test with nothing measured; `clear`
+forgets the configured test (`none`).
 
 ### Modal Test Configuration
 
@@ -6891,10 +6900,11 @@ configures the present configuration again; `clear` forgets it (`none`).
 | `averages` | 5 (impact), 30 (shaker) | Hits or frames per point, 1 to 10000 |
 | `roving.channels` | none | The table rows (`index`) that move from point to point |
 | `roving.points` | none | A list of `{"node","direction"}`, or `{"start","step","count"}` nodes in the rows' own direction |
-| `impact.trigger_pct` | 10 | The trigger, percent of the hammer row's range |
+| `impact.trigger_level_pct` | 10 | The trigger, percent of the hammer row's range |
+| `impact.polarity` | `positive` | `positive` or `negative`: the hammer's sign. The trigger watches the force rising through the level in that sign, and the peak and the double hit are judged in it |
 | `impact.pretrigger_pct` | 5 | The pre-trigger, percent of the block |
 | `impact.holdoff_blocks` | 1 | Blocks after a capture before the trigger re-arms |
-| `impact.double_hit_pct` | 5 | A later force above this percent of the peak, after the pulse has fallen below 5 % of it, is a double hit |
+| `impact.double_hit_pct` | 5 | The double hit's fraction of the peak, percent (the rule is under "The double hit") |
 | `impact.tip_warn_db` | 20 | The force spectrum's drop to the band's top above which the tip is reported |
 | `impact.accept` | `auto` | `auto` (each clean hit accepted) or `manual` (each waits for accept or reject) |
 | `impact.force_window` | `{"on":true,"width_pct":10,"fall_pct":10}` | The force window: its width, percent of the block, after the trigger; its fall, percent of the width |
@@ -6910,7 +6920,7 @@ configures the present configuration again; `clear` forgets it (`none`).
 | `shaker.overlap_pct` | 50 | The overlap of random's frames: 0, 50 or 75 |
 | `shaker.seed` | 1 | The source's seed |
 | `capture.run_name` | `modal_test` | The run folder's name under the local data root |
-| `operator`, `article`, `notes`, `specification`, `metadata` | empty | Random's: for the run's record |
+| `operator`, `article`, `notes`, `specification`, `metadata` | empty | Random's: for the run's record; `run.json` carries `specification` when the configuration names one |
 | `record.streams` | true | Whether the run's record keeps its time histories |
 
 The table's rows carry each measured channel's DOF (`node`, `direction` spelled `Z+` or `Z-`)
@@ -6943,12 +6953,32 @@ finite, not above zero or under one sample, or `pre + width + fall` past the blo
 block's start, `tau = -T / ln(end)`, `T = block / fs`. FRFs are indexed
 `[response, reference, line]`, in the sign convention `X(f) = sum x(t) exp(-j 2 pi f t)`.
 
+A shaker level is refused `level_over_ceiling` when `level_vrms x crest` is over
+`ceiling_v x (1 - 0.001)`; the source clips each sample to its crest times the level as the
+float32 handed to the station, and the station judges that float32 against the ceiling.
+
+**The double hit**, in the hammer's polarity (`y = sign x force`). The peak is the largest `y`;
+the pulse ends at the first sample at or after the peak with `y` below 5 % of the peak. The
+threshold is the larger of `double_hit_pct` percent of the peak and six times the RMS of the
+pre-trigger. From the pulse's end the force is walked lobe by lobe (each run of one sign): a
+lobe of the hammer's sign whose top is over the threshold and larger than the opposite lobe just
+before it is a second impact. Ringing, an opposite undershoot and noise are not; a second
+impact after the force window still is. The report's `double_hit` is then
+`{"frame","peak","ratio"}`: its top's frame, its value in the row's unit, and its ratio to the
+peak.
+
+**Frames in a hit's report** (`peak_frame`, `double_hit.frame`, `force_window_cut.pulse_end_frame`
+and `.window_end_frame`) count from the captured block's start, sample 0; the block starts at
+the tile's `start_frame` in station frames.
+
 ### Running a Modal Test
 
 - **`modal_test.start`** passes the table's arm gate, checks the table still carries the plan,
   opens the run's record (`record_unwritable` when it cannot) and opens the station at `fs_hz`
   (`rate_mismatch` when it programs another). Impact mode opens the measured rows only.
-- **Impact.** `arm` waits for the trigger; a captured block is a hit at the selected point. A
+- **Impact.** `arm` waits for the trigger (`arming` until the pre-trigger has filled after the
+  arm or the hold-off, then `armed`: the trigger is live only once a whole pre-trigger is in
+  hand); a captured block is a hit at the selected point. A
   hit is checked: an overloaded channel or a double hit rejects it (`reason` `overload` or
   `double_hit`); a tip rolled off, a response with nothing in it, a force window that cuts the
   pulse (the force has not fallen below 5 % of its peak before `pre + width`), or a peak off the
@@ -6965,7 +6995,9 @@ block's start, `tau = -T / ln(end)`, `T = block / fs`. FRFs are indexed
   The run also ends with the emergency stop on a response abort (`response_abort`), a drive
   sample over the ceiling (`drive_ceiling`), an underrun (`drive_underrun`), the source thread's
   failure (`source_failed`), an input overload on a limited row (`input_overload`), a loop fault
-  (`loop_faulted`) or a panic (`loop_panicked`).
+  (`loop_faulted`), a panic in the station's loop (`loop_panicked`) or in the run's own thread
+  (`run_panicked`), or a run thread that could not start (`run_not_started`, the station
+  stopped and closed).
 - A later measurement of a point is a new record naming the one it replaces; points finished
   stay on the disk however the run ends.
 
@@ -6993,11 +7025,15 @@ block's start, `tau = -T / ln(end)`, `T = block / fs`. FRFs are indexed
 ```
 
 `state`: `none` (the object is then `{"run_id":null,"state":"none"}`), `configured`,
-`starting`, `idle`, `armed`, `captured` (a hit waits for accept or reject), `measuring`
+`starting`, `idle`, `arming` (impact: armed, the pre-trigger filling), `armed`, `captured` (a
+hit waits for accept or reject), `measuring`
 (shaker: averaging), `stopping` (shaker: the stop ramp), `point_done` or `finished`.
 `drive_phase`: `idle`, `waiting`, `ramping`, `driving`, `stopping`, `zeroed`. `counts` is kept
 current after every take, accept, reject and undo; its `unit` is `hits` in impact mode and
-`frames` in shaker mode, counted in the same fields. `hits` are the selected point's tiles:
+`frames` in shaker mode, counted in the same fields; `point.accepted` of `point.asked` reads
+as the averages taken of the averages asked. `point_dofs` orders the point's `references` and
+`responses`; the live frame's `frf.pairs` indices follow them. `hits` are the selected point's
+tiles:
 `status` `pending`, `accepted`, `rejected` or `undone`, `reason` (rejected only) `overload`,
 `double_hit` or `operator`; `peak`, `tip_warning` and `force_window_cut` in impact mode, and
 `target_verdict` (`high`, `low`, `on_target`) with `target_diff_pct` when a target is set.
@@ -7015,17 +7051,47 @@ finished, then once more: a binary frame
 
 ```
 {"run_id":"modal-test-0001","state":"armed","point":1,
- "time":{"rate_hz":1024,"channels":[{"values":{"$array":"t0"}},...]},
+ "time":{"rate_hz":1024,"channels":[{"index":1,"role":"reference","unit":"lbf",
+                                     "values":{"$array":"t0"}},...]},
  "frf":{"frequency_hz":{"$array":"f"},"averages":2,
         "pairs":[{"response":0,"reference":0,"magnitude":{"$array":"m0_0"},
                   "phase_deg":{"$array":"p0_0"}},...],
-        "coherence":[{"response":0,"values":{"$array":"c0"}},...]}}
+        "coherence":[{"response":0,"values":{"$array":"c0"}},...]},
+ "hit":{"point":1,"n":2,"seq":4,"start_frame":1536,"start_s":1.5,"samples":512,
+        "decimation":1,"step_s":0.0009765625,
+        "channels":[{"index":1,"role":"reference","unit":"lbf","values":{"$array":"h0"}},...],
+        "windows":{"force":{"pre_frames":26,"width_frames":51,"fall_frames":5},
+                   "exponential":{"tau_s":0.217,"end":0.1}},
+        "force_spectrum":{"frequency_hz":{"$array":"hf"},"unit":"lbf^2/Hz",
+                          "values":{"$array":"hs"},"tip_drop_db":6.02}}}
 ```
 
-`time` holds the latest 1024 frames (or the block, when shorter) of every measured channel, in
-table order;
-`frf` the selected point's present estimate, a pair per response and reference, and the
-coherence per response (multiple coherence with several references). Every array is float32.
+`time` holds the latest 1024 frames (or the block, when shorter) of every captured channel:
+the measured inputs in table order, then (shaker mode) the drives. Each `time.channels[k]` names
+its channel: `index` (the table row), `role` (`reference`, `response`, `monitor` or `drive`) and
+`unit`. `frf` is the selected point's present estimate, a pair per response and reference
+(`response` and `reference` index `point_dofs.responses` and `point_dofs.references`), and the
+coherence per response (multiple coherence with several references).
+
+`hit` (impact mode; null until a hit is taken) is the latest hit's own block: every measured
+channel, references then responses as `point_dofs` orders them, from the block's start
+(`start_frame` station frames, `start_s` seconds). `samples` is the block's length; with
+`decimation` 1 every sample is sent, otherwise each interval of `decimation` samples sends its
+two extremes in time order, `step_s` apart (`decimation / (2 fs)`). It carries the windows it was taken
+with (`force`, null when off: `pre_frames`, `width_frames`, `fall_frames`; `exponential`, null
+when off: `tau_s` and its value at the block's `end`); and the force autospectrum on the
+analysis lines with `tip_drop_db`, the tip's roll-off: the drop from the spectrum's largest
+value up to the band's top to its value at the top.
+
+`references` (shaker mode; absent in impact mode) is
+`{"frequency_hz","averages","autospectra":[{"index","unit","values"}]}`: each reference's
+autospectrum in the present average, `unit` the row's unit squared per Hz.
+
+The bound: every array is float32 and at most 1024 points. Time channels hold the latest 1024
+frames or fewer; the hit's block is decimated by its min/max intervals to 1024 values or fewer;
+frequency arrays
+(the FRF, coherence, force and reference spectra) take every k-th line, k the smallest whole
+step that leaves 1024 or fewer.
 
 ### Modal Test Records
 
