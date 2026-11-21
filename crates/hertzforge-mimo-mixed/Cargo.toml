@@ -18,8 +18,11 @@ publish = false
 # helpers, MIMO Random's estimation conventions and guards, and the SDM
 # crate's linear algebra, by dependency.
 #
-# The RUN SERVICE will live behind the `service` feature; the feature is an
-# empty placeholder until the engine is built.
+# The RUN SERVICE (`service`, off by default) is `MimoMixedService`: the run
+# lifecycle on a station (arm, identification, gate, review, the floor alone,
+# the parts in, the level schedule and its verbs, hold, part switching,
+# adjust, stop, abort), the real-time step, the tone ticks, the floor loop
+# between chunks, the guards and aborts, and the law-call record.
 [dependencies]
 # Single-output Mixed Mode's parts model, clock and helpers sit outside its
 # `service` feature.
@@ -36,8 +39,39 @@ hertzforge-breakpoints.workspace = true
 hertzforge-shaker-db.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+# Service deps, behind the `service` feature: the engine the station runs
+# through, the abstract station, the channel table and the station's class;
+# MIMO Sine's law seam, answer checks and guards (outside its own `service`
+# feature) and Sine's law clock and values; the MIMO Random law factory and
+# the law host's parameter values.
+hertzforge-engine = { path = "../hertzforge-engine", optional = true }
+hertzforge-hal = { workspace = true, optional = true }
+hertzforge-channel-table = { workspace = true, optional = true }
+hertzforge-module-abi = { workspace = true, optional = true }
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine", default-features = false, optional = true }
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false, optional = true }
+hertzforge-random-laws = { workspace = true, optional = true }
+hertzforge-law-host = { workspace = true, optional = true }
 
 [features]
 default = []
-# The run service, not built yet.
-service = []
+# The run service.
+service = [
+    "dep:hertzforge-engine",
+    "dep:hertzforge-hal",
+    "dep:hertzforge-channel-table",
+    "dep:hertzforge-module-abi",
+    "dep:hertzforge-mimo-sine",
+    "dep:hertzforge-sine",
+    "dep:hertzforge-random-laws",
+    "dep:hertzforge-law-host",
+]
+
+[dev-dependencies]
+# TEST FIXTURE ONLY: the simulator station the closed-loop runs drive the
+# service on. On deny.toml's hertzforge-hal-sim wrapper list for that reason.
+hertzforge-hal-sim.workspace = true
+
+[[test]]
+name = "mimo_mixed_service"
+required-features = ["service"]

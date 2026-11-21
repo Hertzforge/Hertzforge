@@ -116,3 +116,9 @@ opt-level = 3
 # law check.
 [profile.dev.package.hertzforge-mimo-sine]
 opt-level = 3
+
+# MIMO Mixed Mode: its step runs the tone bank's oscillators and trackers on every channel per
+# frame and its floor loop transforms and averages every channel's frames between chunks; the
+# closed-loop simulator runs drive both for tens of seconds of station time.
+[profile.dev.package.hertzforge-mimo-mixed]
+opt-level = 3

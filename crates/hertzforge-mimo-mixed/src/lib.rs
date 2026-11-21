@@ -34,6 +34,8 @@ pub mod exclusion;
 pub mod fill;
 pub mod mat;
 pub mod predict;
+#[cfg(feature = "service")]
+pub mod service;
 pub mod tone;
 
 pub use band::{
