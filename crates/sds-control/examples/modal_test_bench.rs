@@ -7,6 +7,8 @@
 //! cargo run -p sds-control --example modal_test_bench -- --rehearse [--out <dir>] [--row M1,M4]
 //! # the bench: a control service already running on the NI station, its modules named
 //! cargo run -p sds-control --example modal_test_bench -- --url ws://127.0.0.1:8765/ --ni <input module>,<output module> [--out <dir>] [--row M1]
+//! # the service's Modal Test state only (claims nothing, drives nothing)
+//! cargo run -p sds-control --example modal_test_bench -- --url ws://127.0.0.1:8765/ --ni <input module>,<output module> --state
 //! ```
 //!
 //! The table is the loopback's: inputs 1 to 4 read volts (1 unit per volt, IEPE off), drives
@@ -115,6 +117,19 @@ impl Client {
 
     async fn state(&mut self) -> Result<Value, String> {
         self.ok("modal_test.state", json!({})).await
+    }
+
+    /// Wait `secs`, reading the state once a second: the service treats a connection with
+    /// nothing inbound for three heartbeats (15 s) as gone, so a long wait must keep talking.
+    async fn hold(&mut self, secs: f64) -> Result<Value, String> {
+        let t0 = Instant::now();
+        let mut s = self.state().await?;
+        while t0.elapsed().as_secs_f64() < secs {
+            let left = secs - t0.elapsed().as_secs_f64();
+            tokio::time::sleep(Duration::from_secs_f64(left.clamp(0.0, 1.0))).await;
+            s = self.state().await?;
+        }
+        Ok(s)
     }
 
     /// Poll the state until `f` holds, at most `limit`.
@@ -1161,8 +1176,7 @@ async fn m9(b: &mut Bench) -> Result<RowOut, String> {
     }
     b.c.ok("modal_test.start", json!({})).await?;
     b.c.ok("modal_test.arm", json!({})).await?;
-    tokio::time::sleep(Duration::from_secs_f64(30.0 / b.speed())).await;
-    let s = b.c.state().await?;
+    let s = b.c.hold(30.0 / b.speed()).await?;
     let hits = s["counts"]["totals"]["taken"].as_u64().unwrap_or(0);
     b.c.ok("modal_test.disarm", json!({})).await?;
     let (_, f) = b.end("ended").await?;
@@ -1405,6 +1419,11 @@ async fn main() {
         flag("--url").expect("--url ws://... of the control service on the NI station")
     };
     let mut c = Client::connect(&url).await;
+    // `--state`: print the Modal Test state (open to every connection) and stop; drives nothing.
+    if args.iter().any(|a| a == "--state") {
+        println!("state: {}", c.state().await.unwrap_or_else(|e| json!(e)));
+        return;
+    }
     c.ok("session.claim", json!({"name": "Modal Test bench"}))
         .await
         .expect("claims control");
