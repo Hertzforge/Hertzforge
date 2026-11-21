@@ -181,6 +181,19 @@ pub(crate) fn diag_clamped() -> DiagDecl {
     }
 }
 
+pub(crate) fn diag_held() -> DiagDecl {
+    DiagDecl {
+        key: "held_rows",
+        label: "Held factor rows",
+        unit: "",
+        help: "Rows of the reference factor held this loop against wind-up, over all lines: \
+               a source whose response is below -15 dB of what its row commands, kept from \
+               growing, or a row brought down to 10 dB over its target. Rows held loop after \
+               loop are directions the FRF estimate holds and the structure does not follow.",
+        kind: DiagKind::Scalar,
+    }
+}
+
 /// The regularization a law's two parameters name.
 pub(crate) fn regularization(method: &str, amount: f64) -> Result<Regularization, LawError> {
     match method {

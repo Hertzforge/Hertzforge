@@ -114,6 +114,7 @@ impl OpenLoopLaw {
             kept,
             correction_db,
             clamped: 0,
+            held: 0,
         })
     }
 }

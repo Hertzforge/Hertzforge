@@ -82,7 +82,7 @@ fn law_ref() -> LawRef {
     LawRef {
         id: "pinv_closed".into(),
         name: "pseudo-inverse, closed loop".into(),
-        version: "1.0.0".into(),
+        version: "1.1.0".into(),
         sha256: String::new(),
     }
 }
