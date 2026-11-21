@@ -584,3 +584,54 @@ describe("a report's Print", () => {
 		expect(app.report.printing).toBe('<p>page</p>');
 	});
 });
+
+describe('open, import and save in a browser', () => {
+	function browser(answer: (method: string, params: Record<string, unknown>) => unknown) {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const sent: [string, Record<string, unknown>][] = [];
+		(app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+			sent.push([method, params]);
+			return answer(method, params);
+		});
+		app.project.summary = { ...summary, title: 'Plate', file: null, modified: false } as never;
+		return { app, sent };
+	}
+
+	it('opens, imports and saves the paths picked in the dialog the service shows', async () => {
+		const { app, sent } = browser((method, params) => {
+			if (method === 'files.choose') return { paths: params.purpose === 'import' ? ['/d/a.uff', '/d/b.csv'] : params.purpose === 'save' ? ['/d/Plate.hforge'] : ['/d/run.hforge'] };
+			return { project: summary, added: [] };
+		});
+		// Save As first: the open that follows replaces the project, and its title with it
+		await app.project.fileAct('save-as');
+		await app.project.fileAct('import');
+		await app.project.fileAct('open');
+		expect(sent.filter(([m]) => m === 'files.choose').map(([, p]) => p)).toEqual([{ purpose: 'save', name: 'Plate.hforge' }, { purpose: 'import' }, { purpose: 'open' }]);
+		expect(sent.filter(([m]) => m !== 'files.choose' && m.startsWith('project.') && m !== 'project.actions').map(([m, p]) => [m, p.path])).toEqual([
+			['project.save', '/d/Plate.hforge'],
+			['project.import', '/d/a.uff'],
+			['project.import', '/d/b.csv'],
+			['project.open', '/d/run.hforge']
+		]);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('does nothing when the dialog is cancelled', async () => {
+		const { app, sent } = browser(() => ({ paths: [] }));
+		await app.project.fileAct('open');
+		expect(sent.map(([m]) => m)).toEqual(['files.choose']);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('asks for a typed path where the service shows no dialog, and does not ask it again', async () => {
+		const { app, sent } = browser((method) => {
+			if (method === 'files.choose') throw new RequestError('refused', 'This service shows no file dialogs; type the path instead.', method);
+			return {};
+		});
+		await app.project.fileAct('import');
+		expect(app.project.asking).toBe('import');
+		await app.project.fileAct('open');
+		expect(app.project.asking).toBe('open');
+		expect(sent.filter(([m]) => m === 'files.choose')).toHaveLength(1);
+	});
+});

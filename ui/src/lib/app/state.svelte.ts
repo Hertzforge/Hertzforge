@@ -1064,6 +1064,8 @@ const PART_DELETES: Record<string, { op: string; param: string; words: string }>
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
+/** How long a file dialog the service shows may stay open: it waits on the person, not on work. */
+const DIALOG_TIMEOUT_MS = 3_600_000;
 
 // ---------------------------------------------------------------------------------------------
 
@@ -1653,6 +1655,8 @@ export class ProjectState {
 	namingGroup = $state<string | null>(null);
 	/** The path a browser is asking for in the top bar, and what it is for. */
 	asking = $state<'open' | 'import' | 'save' | null>(null);
+	/** The analysis service said it shows no file dialogs (`files.choose`): the top bar asks for a path. */
+	private noDialogs = false;
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1853,7 +1857,8 @@ export class ProjectState {
 
 	/**
 	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
-	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
+	 * which never gives the shell a file's path, the analysis service shows the system's dialog on its
+	 * own machine (`hertzforge` with no command), and where it shows none the top bar asks for a path.
 	 */
 	async fileAct(what: 'new' | 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
 		if (what === 'new') {
@@ -1875,7 +1880,32 @@ export class ProjectState {
 			if (paths) await (asked === 'import' ? this.importPaths(paths) : this.openPaths(paths));
 			return;
 		}
+		// a browser never gives the shell a file's path: the service on this machine shows the
+		// system's dialog instead, and where it shows none the top bar asks for a typed path
+		const chosen = await this.dialogPaths(asked, asked === 'save' ? `${this.summary?.title ?? 'Project'}.hforge` : '');
+		if (chosen !== null) {
+			if (!chosen.length) return;
+			if (asked === 'save') await this.save(chosen[0]);
+			else await (asked === 'import' ? this.importPaths(chosen) : this.openPaths(chosen));
+			return;
+		}
 		this.asking = this.asking === asked ? null : asked;
+	}
+
+	/**
+	 * The paths chosen in the system's dialog the analysis service shows (`files.choose`): none when
+	 * cancelled, null when the service shows none, which is remembered so the next act goes straight
+	 * to the typed path.
+	 */
+	private async dialogPaths(purpose: 'open' | 'import' | 'save', name: string): Promise<string[] | null> {
+		if (this.noDialogs) return null;
+		try {
+			const res = await this.app.analysis.request<{ paths: string[] }>('files.choose', name ? { purpose, name } : { purpose }, { timeoutMs: DIALOG_TIMEOUT_MS });
+			return res.paths;
+		} catch (err) {
+			if (err instanceof RequestError && (err.code === 'refused' || err.code === 'unknown_method')) this.noDialogs = true;
+			return null;
+		}
 	}
 
 	/** An act of the action table's on the selection itself, by its row's id. */

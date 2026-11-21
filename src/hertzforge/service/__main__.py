@@ -84,13 +84,14 @@ async def _closed_for(service: Any, seconds: float, poll: float = 0.25) -> None:
 
 async def _serve(host: str, port: int, *, watch_stdin: bool = False,
                  ready: Callable[[str, int], None] | None = None,
-                 quit_when_closed: float | None = None) -> None:
+                 quit_when_closed: float | None = None, dialogs: bool = False) -> None:
     """Serve on `host`:`port` until cancelled, until standard input
     closes with `watch_stdin`, or, with `quit_when_closed`, once no client
     has been connected for that many seconds after one was (`_closed_for`).
     The shell's built pages are served beside the protocol when the package
     carries them. `ready` is called with the bound address once the port is
-    open."""
+    open. With `dialogs`, `files.choose` shows the system's file dialogs on this
+    machine, for a browser on it."""
     from .server import SWITCH_INTERVAL, Service, preload, shell_folder, start
 
     # Process-wide setup, done here and not in start(), so a caller that
@@ -101,7 +102,7 @@ async def _serve(host: str, port: int, *, watch_stdin: bool = False,
     preload()
     sys.setswitchinterval(SWITCH_INTERVAL)
 
-    service = Service()
+    service = Service(dialogs=dialogs)
     server = await start(service, host, port, shell=shell_folder())
     bound = server.sockets[0].getsockname()
     # one line a launcher can wait for

@@ -38,6 +38,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
 from . import (
+    dialogs,
     display_units,
     drive_files,
     fitting,
@@ -203,13 +204,17 @@ class Service:
     threads. One per process."""
 
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
-                 workers: int = 2) -> None:
+                 workers: int = 2, dialogs: bool = False) -> None:
         self.operations: dict[str, Operation] = {op.id: op for op in operations}
         #: the clients connected now, and the event loop's time when the last one left (None
         #: until one has come and gone): `hertzforge` with no command stops once its browser
         #: tab has been closed for a while (`__main__._closed_for`)
         self.connections: int = 0
         self.last_closed: float | None = None
+        #: whether `files.choose` shows the system's file dialogs: only for `hertzforge`
+        #: with no command, whose browser is on this machine. `hertzforge serve` may run
+        #: where its client is not, and a dialog there would wait on a screen nobody sees.
+        self.dialogs: bool = dialogs
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             workers, thread_name_prefix='hertzforge-service')
 
@@ -660,6 +665,28 @@ class Connection:
             # writer can take it
             self.run_log.close()
 
+    async def choose_files(self, params: Any) -> dict[str, Any]:
+        """`files.choose`: the system's open or save dialog on this machine, and the
+        paths chosen in it (none when cancelled). Refused where the service shows no
+        dialogs or none can be shown here, so the shell asks for a typed path."""
+        _only(params, ('purpose', 'name'), 'files.choose')
+        purpose = params.get('purpose')
+        if purpose not in dialogs.PURPOSES:
+            raise bad_request(f'files.choose takes a purpose of {", ".join(dialogs.PURPOSES)}')
+        if not self.service.dialogs:
+            raise refused('This service shows no file dialogs; type the path instead.')
+        name = params.get('name') or ''
+        if not isinstance(name, str):
+            raise bad_request('files.choose takes a name as text')
+        try:
+            # a dialog waits on the person for as long as it takes: on a thread of its own,
+            # not one of the workers an operation needs
+            paths = await asyncio.to_thread(dialogs.choose, purpose, name)
+        except dialogs.DialogUnavailable as error:
+            raise refused(f'No file dialog could be shown: {error}. Type the path '
+                          'instead.') from None
+        return {'paths': paths}
+
     async def answer(self, request: dict[str, Any]) -> None:
         """Run one request and send its response. A ProtocolError becomes an
         error response with its code; any other exception is logged and sent
@@ -699,6 +726,9 @@ class Connection:
                 else:
                     frame = frames.encode_text({'type': 'response', 'id': ident,
                                                 'result': result})
+            elif method == 'files.choose':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': await self.choose_files(params)})
             elif method == 'units.system':
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': self.units_request(params)})

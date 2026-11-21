@@ -580,6 +580,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
+| `files.choose` | `{"purpose","name"?}` | `{"paths"}`: the paths picked in the system's dialog, none when cancelled (File Dialogs below) |
 | `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
 | `drive.inspect` | `{"path"}` or `{"objects"}` | `{"source","signals":[signal...],"rate_hz","notes"}` |
 | `drive.convert` | `{"path"` or `"objects","selections","rate_hz"?,"out"?,"fix_ends"?,"taper_s"?}` | `{"folder","drive","notes","fixed"?}` |
@@ -591,6 +592,15 @@ projects downloaded from hertzforge.com and opened like any other file.
 Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
 in the param `values` names for that axis, and what `adds` (optional) gives for that axis. `origin` is
 in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters. A `slide` with `"in_display":true` takes the length as dragged, in the view's unit, since its `op` takes it as a length typed in the display system; the view then has no `to_si`.
+
+**File Dialogs.** A browser never gives a page the path of a file it picks, and the service reads a
+file where it is. `files.choose` shows the system's own dialog on the service's machine (AppleScript on
+macOS, Windows Forms through PowerShell on Windows, zenity or kdialog on Linux) and answers with the
+paths picked. `purpose` is `open` (one project file), `import` (any number of files) or `save` (where
+to write a project, offered as `name`). Only the service `hertzforge` starts with no command shows them,
+since its browser is on the same machine; `hertzforge serve` refuses, as it may run where its client is
+not. A dialog that cannot be shown (no desktop session, no dialog program) is refused with the reason,
+and the shell then asks for a typed path. The desktop app uses its own dialogs and never sends this.
 
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
 `"preview": true` runs it on copies of the objects it takes (a geometry, a shape set) and answers `{"views"}`, with no `project`.
