@@ -172,7 +172,8 @@ class AnalyzeState {
 
 	/**
 	 * The display system changed: each form holds the same lengths, and the same amount of each
-	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new).
+	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new), and what is
+	 * drawn is drawn again in them.
 	 */
 	unitsChanged(ratio: number | null, ratios: Record<string, number>): void {
 		const next = { ...this.values };
@@ -182,6 +183,14 @@ class AnalyzeState {
 			if (op.params.some((p) => p.quantity)) next[op.id] = rescaledQuantities(op.params, next[op.id], ratios);
 		}
 		this.values = next;
+		// the same selection is read again, so its line, picks and Projection stay; a reading that
+		// was applied stays as it was answered, since running it again could change the project,
+		// but a preview only reads a copy and is asked for again
+		void this.showSelection(true, true);
+		if (this.reading && this.reading === this.previewDrawn) {
+			this.forgetPreview();
+			this.followPreview();
+		}
 	}
 
 	get params(): ParamDescriptor[] {
@@ -247,12 +256,17 @@ class AnalyzeState {
 		this.values = next;
 	}
 
-	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
-	async showSelection(redraw = false): Promise<void> {
+	/**
+	 * The tree's selection changed: ask the service what it shows, dropping answers overtaken by
+	 * later picks. `keepReading` redraws the selection under a reading without ending it.
+	 */
+	async showSelection(redraw = false, keepReading = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
-		this.reading = null;
-		this.readingId = null;
+		if (!keepReading) {
+			this.reading = null;
+			this.readingId = null;
+		}
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
