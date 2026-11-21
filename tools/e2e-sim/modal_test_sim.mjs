@@ -24,15 +24,20 @@
 //    rejected and flagged, its second impact marked on the force and worded with its ratio; an
 //    overload is rejected; clean hits are accepted with a High flag; R rejects, A and Enter accept
 //    again, U undoes; the point fills; the arrows change points; Clear Point asks, then clears; the
-//    counter and tiles read the service after each. Every line of the Keys card is on screen at
-//    1,440 by 900 (and what 1,280 by 800 shows is printed); End Test ends it.
+//    counter and tiles read the service after each. Double Hit and Overload are labeled inside the
+//    force plot and Soft Tip in the force spectrum's header, at 1,440 by 900 and 1,280 by 800; every
+//    legend is whole; every line of the Keys card and End Test are on screen at both sizes; End
+//    Test ends it. The second (dark) run takes a 256-sample block: against the real services the
+//    hit tile and the hit report say the response has not died away.
 // 6. Against the real services: the run folder holds its setup and outcome; Open in Analysis opens
 //    the run with its channel table, FRFs, coherence and frames; the modal fit opens on the FRFs and
 //    one mode is found and confirmed; Estimate Again is offered on the frames with its glyph and
 //    adds its FRFs and coherence.
-// 7. Measure (shaker): two shakers on rows 2 and 6, their force gauges on rows 1 and 5. A level over
+// 7. Measure (shaker): choosing Shaker clears a plan that roves the hammer, in words. Two shakers
+//    on rows 2 and 6, their force gauges on rows 1 and 5. A level over
 //    the drive ceiling and pseudo random on two drives are each refused on screen in the service's
-//    words; burst random checks clean; Start Driving; the averages build; Stop Driving; End Test;
+//    words; burst random checks clean; Start Driving; the averages build, each force, response and
+//    drive drawn with its legend entry and every legend whole at both sizes; Stop Driving; End Test;
 //    Open in Analysis brings the FRFs.
 //
 // `--only impact` or `--only shaker` runs one half. With MT_DEBUG set, a failure to find Estimate
@@ -322,15 +327,58 @@ async function watchStateWords(a) {
 }
 const stateWordsSeen = (a) => a.evaluate(() => (clearInterval(window.__stateTimer), window.__stateWords));
 
+/** Each Measure plot's legend: its entries, and whether any is cut off by the plot's edge or its box. */
+const legends = (a) => a.evaluate(() => [...document.querySelectorAll('.plots > .plot')].map((plot) => {
+	const box = plot.getBoundingClientRect();
+	const ul = plot.querySelector('ul.legend');
+	const items = ul ? [...ul.querySelectorAll('li')] : [];
+	const u = ul?.getBoundingClientRect();
+	const cut = !!ul && (ul.scrollHeight > ul.clientHeight + 1 || items.some((li) => { const r = li.getBoundingClientRect(); return r.bottom > Math.min(box.bottom, u.bottom) + 0.5 || r.top < u.top - 0.5; }));
+	return { title: plot.querySelector('.title')?.textContent?.trim() ?? '', entries: items.map((li) => li.querySelector('.name')?.textContent?.trim() ?? ''), cut };
+}));
+/** The Measure plots' titles cut short (an ellipsis): none should be. */
+const titlesCut = (a) => a.evaluate(() => [...document.querySelectorAll('.plots > .plot .head .title')].filter((h) => h.scrollWidth > h.clientWidth + 1).map((h) => h.textContent.trim()));
+const legendWords = (ls) => ls.map((l) => `${l.title}: ${l.entries.join(' + ')}${l.cut ? ' (cut)' : ''}`).join('; ');
+
+/** The labels over the force trace: each inside the plot's drawing area, clear of the axes. */
+const forceLabels = (a) => a.evaluate(() => [...document.querySelectorAll('[data-testid="mt-force-plot"] .area [role="note"]')].map((n) => {
+	const r = n.getBoundingClientRect();
+	const area = n.closest('.area').getBoundingClientRect();
+	return { text: n.textContent.replace(/\s+/g, ' ').trim(), lines: r.height > parseFloat(getComputedStyle(n).fontSize) * 2.2 ? 2 : 1, inside: r.left >= area.left - 0.5 && r.right <= area.right + 0.5 && r.top >= area.top - 0.5 && r.bottom <= area.bottom + 0.5 };
+}));
+
+/** Whether End Test is wholly on screen and on top where it is drawn. */
+const endOnScreen = (a) => a.evaluate(() => {
+	const b = document.querySelector('[data-testid="mt-end"]');
+	if (!b) return { seen: false, at: 'none' };
+	const r = b.getBoundingClientRect();
+	const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+	return { seen: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth && !!top && (top === b || b.contains(top)), at: `${Math.round(r.top)}-${Math.round(r.bottom)} of ${innerHeight}` };
+});
+
 const count = async (a) => Number(/^(\d+) of/.exec(await text(a, 'mt-count'))?.[1] ?? NaN);
 const accepted = async (a) => (await tiles(a)).filter((t) => t.status === 'accepted').length;
 const treeNames = (a) => a.locator('[data-testid="project-tree"] [data-testid^="object-"]').evaluateAll((els) => els.map((e) => e.dataset.testid.slice('object-'.length)));
 
 /** Arm, wait for `n` more tiles, disarm. */
-async function hits(a, n, what) {
+/** Space to arm; on the mock a Space just after another key is sometimes not taken, and is pressed again. */
+async function arm(a) {
 	const before = (await tiles(a)).length;
 	await press(a, 'Space');
-	await until(a, what, async (p) => (await tiles(p)).length >= before + n, 30_000);
+	const armed = await until(a, 'armed', async (p) => ['armed', 'arming'].includes(await measureState(p)) || (await tiles(p)).length > before, 3000).then(() => true, () => false);
+	if (!armed) {
+		lostSpace += 1;
+		await press(a, 'Space');
+	}
+}
+let lostSpace = 0;
+
+async function hits(a, n, what) {
+	const before = (await tiles(a)).length;
+	await arm(a);
+	await until(a, what, async (p) => (await tiles(p)).length >= before + n, 30_000).catch(async (e) => {
+		throw new Error(`${e.message} (the screen: ${await measureState(a)}; ${await text(a, 'mt-refusal').catch(() => 'no refusal')})`);
+	});
 	await press(a, 'Space');
 	await until(a, 'disarmed', async (p) => !['armed', 'arming'].includes(await measureState(p)), 10_000);
 }
@@ -353,6 +401,9 @@ async function impact(theme, full) {
 	if (full) check('the DOFs wait in the table until it is applied', (await tid(a, 'mt-dofs-dirty').count()) === 1 || (await tid(a, 'mt-summary-table').count()) === 1);
 	if (full) await shot(a, 'setup_dofs');
 
+	// the second run takes a block too short for the response to die away in: the decay check warns
+	await section(a, 'acquisition');
+	await tid(a, 'mt-block').selectOption(full ? '2048' : '256');
 	await section(a, 'roving');
 	await toggle(tid(a, 'mt-rov-on'), true);
 	await a.locator('[data-testid="mt-rov-row"][data-row="4"]').setChecked(true);
@@ -401,25 +452,52 @@ async function impact(theme, full) {
 	if (full) {
 		await until(a, 'the hit drawn', async (p) => (await p.locator('[data-testid="mt-force-plot"] .marker').count()) > 0, 10_000).catch(() => {});
 		check('the second impact is marked on the force', (await a.locator('[data-testid="mt-force-plot"] .marker').count()) > 0);
-		check('the second impact is worded with its ratio', /^Second impact at .+ s into the block, .+: \d+% of the peak\.$/.test(await text(a, 'mt-second-words')), await text(a, 'mt-second-words').catch(() => 'none'));
-		check('the double-hit flag is on the force, the words in its title', (await text(a, 'mt-double-flag')) === 'Double Hit' && /^Second impact at/.test((await attr(a, 'mt-double-flag', 'title')) ?? ''), await text(a, 'mt-double-flag').catch(() => 'none'));
+		check('the second impact is worded with its ratio', /^Second impact at .+ s into the block, .+: [\d.]+% of the peak\.$/.test(await text(a, 'mt-second-words')), await text(a, 'mt-second-words').catch(() => 'none'));
+		const labels = await forceLabels(a);
+		check('Double Hit is labeled inside the force plot on one line, clear of its axes', labels.some((l) => l.text === 'Double Hit' && l.inside && l.lines <= 1), JSON.stringify(labels));
+		const head = (await a.locator('[data-testid="mt-fspec-plot"] .head').innerText()).replace(/\s+/g, ' ');
+		if (/Tip/.test(first.text)) check("Soft Tip is said in the force spectrum's header beside the tip roll-off", /Tip roll-off: [^,]+, Soft Tip/.test(head), head);
 		check('the force window is drawn from the service', /window/i.test(await a.locator('[data-testid="mt-force-plot"]').innerText()), (await a.locator('[data-testid="mt-force-plot"]').innerText()).replace(/\s+/g, ' ').slice(0, 160));
 		check('the force spectrum gives its tip roll-off', /Tip roll-off/.test(await a.locator('[data-testid="mt-fspec-plot"]').innerText()), (await a.locator('[data-testid="mt-fspec-plot"]').innerText()).replace(/\s+/g, ' ').slice(0, 160));
+		const tc900 = await titlesCut(a);
+		check('no plot title is cut short at 1440 by 900 (impact)', tc900.length === 0, tc900.join(', '));
+		const l900 = await legends(a);
+		check('every legend on the Measure screen is whole at 1440 by 900 (impact)', l900.length >= 3 && l900.every((l) => !l.cut), legendWords(l900));
 		await shot(a, 'measure_impact');
+		await a.setViewportSize({ width: 1280, height: 800 });
+		await a.waitForTimeout(600);
+		const l800 = await forceLabels(a);
+		check('Double Hit stays inside the force plot at 1280 by 800', l800.some((l) => l.text === 'Double Hit') && l800.every((l) => l.inside), JSON.stringify(l800));
+		const tc800 = await titlesCut(a);
+		check('no plot title is cut short at 1280 by 800 (impact)', tc800.length === 0, tc800.join(', '));
+		const g800 = await legends(a);
+		check('every legend is whole at 1280 by 800 (impact)', g800.every((l) => !l.cut), legendWords(g800));
+		await a.screenshot({ path: path.join(SHOTS, 'modal_test_measure_impact_1280x800.png') });
+		await a.setViewportSize({ width: 1440, height: 900 });
+		await a.waitForTimeout(400);
 
 		// An overload: rejected, flagged.
 		await tid(a, 'mt-sim-overload').click();
 		await hits(a, 1, 'the overload');
 		const second = (await tiles(a))[1];
-		check('the overload is rejected, flagged in words', second.status === 'rejected' && /Overload/.test(second.text) && (await tid(a, 'mt-overload-flag').count()) === 1, second.text);
+		check('the overload is rejected, flagged in words inside the force plot', second.status === 'rejected' && /Overload/.test(second.text) && (await forceLabels(a)).some((l) => l.text === 'Overload' && l.inside), `${second.text}; ${JSON.stringify(await forceLabels(a))}`);
 		check('the rejected count is the service count', (await text(a, 'mt-rejected')) === '2 rejected', await text(a, 'mt-rejected'));
 	}
 
 	// Clean hits: accepted, a High flag with its percent.
 	await hits(a, 2, 'two clean hits');
-	check('clean hits are accepted with a High flag and its percent', (await tiles(a)).filter((t) => t.status === 'accepted' && /High \+\d+%/.test(t.text)).length >= 2, (await tiles(a)).map((t) => t.text).join(' | '));
+	// the simulator's hammer peaks just over the target; the mock's are made up, so any target flag
+	const flagRe = MOCK ? /High \+\d+%|Low −\d+%|On Target/ : /High \+\d+%/;
+	check(`clean hits are accepted with ${MOCK ? 'a target flag' : 'a High flag and its percent'}`, (await tiles(a)).filter((t) => t.status === 'accepted' && flagRe.test(t.text)).length >= 2, (await tiles(a)).map((t) => t.text).join(' | '));
 	check('the counter is the service count of accepted hits', (await count(a)) === (await accepted(a)), `${await text(a, 'mt-count')} with ${await accepted(a)} accepted tiles`);
 	check('the target flag is shown with its percent', /High|Low|On Target/.test(await text(a, 'mt-target-flag').catch(() => '')), await text(a, 'mt-target-flag').catch(() => 'none'));
+	if (!full && !MOCK) {
+		// the mock does not make the decay check; the control service does
+		const t = await tiles(a);
+		check('a 256-sample block: the hit tile says the response has not died away', t.some((x) => /Not Died Away/.test(x.text)), t.map((x) => x.text).join(' | '));
+		const rep = await text(a, 'mt-report');
+		check('and the hit report names the row and how loud the block ends', /Row \d+ has not died away by the end of the block: it ends at [\d.]+% of its loudest\./.test(rep), rep);
+	}
 	if (!full) {
 		await shot(a, 'dark_measure_impact');
 		await tid(a, 'mt-end').click();
@@ -451,7 +529,7 @@ async function impact(theme, full) {
 	check('the counter matches the accepted tiles after each', (await count(a)) === (await accepted(a)), `${await text(a, 'mt-count')} with ${await accepted(a)}`);
 
 	// The point fills with clean hits; the arrows change points; Clear Point asks first.
-	await press(a, 'Space');
+	await arm(a);
 	await until(a, 'point 1 measured', async (p) => (await text(p, 'mt-count')) === '5 of 5', 60_000);
 	await until(a, 'point 1 done', async (p) => (await measureState(p)) === 'point_done', 10_000);
 	check('point 1 is measured at 5 of 5', /Measured/.test(await a.locator('[data-testid="mt-points-list"] li').first().innerText()));
@@ -461,7 +539,7 @@ async function impact(theme, full) {
 	await hits(a, 2, 'two hits at point 2');
 	const at2 = await count(a);
 	await tid(a, 'mt-clear').click();
-	check('Clear Point asks first, in words', /Take all \d+ accepted hits at point 2 out\?/.test(await text(a, 'mt-clear-ask')), await text(a, 'mt-clear-ask').catch(() => 'none'));
+	check('Clear Point asks first, in words', /(Take all \d+ accepted hits|Take the accepted hit) at point 2 out\?/.test(await text(a, 'mt-clear-ask')), await text(a, 'mt-clear-ask').catch(() => 'none'));
 	await tid(a, 'mt-clear-no').click();
 	check('Keep Them keeps them', (await count(a)) === at2 && (await tid(a, 'mt-clear-ask').count()) === 0, await text(a, 'mt-count'));
 	await tid(a, 'mt-clear').click();
@@ -478,7 +556,9 @@ async function impact(theme, full) {
 	await a.setViewportSize({ width: 1280, height: 800 });
 	await a.waitForTimeout(400);
 	const k800 = await keysOnScreen(a);
-	console.log(`      at 1280 by 800: ${k800.lines.map((l) => `${l.text}@${l.bottom}${l.seen ? '' : ' (cut)'}`).join('; ')}`);
+	check('every line of the Keys card is on screen at 1280 by 800', k800.lines.length >= 5 && k800.lines.every((l) => l.seen), k800.lines.map((l) => `${l.text}@${l.bottom}${l.seen ? '' : ' (cut)'}`).join('; '));
+	const e800 = await endOnScreen(a);
+	check('End Test is on screen at 1280 by 800', e800.seen, e800.at);
 	await a.screenshot({ path: path.join(SHOTS, 'modal_test_keys_1280x800.png') });
 	await a.setViewportSize({ width: 1440, height: 900 });
 
@@ -578,8 +658,26 @@ async function analysis(a, mode) {
 async function shaker(theme, full) {
 	const a = await open(theme);
 	await table(a, true);
+	if (full) {
+		// a roving hammer plan, left from an impact test, cannot stay in shaker mode: it is cleared, in words
+		await section(a, 'acquisition');
+		if ((await attr(a, 'mt-mode-impact', 'aria-checked')) !== 'true') await tid(a, 'mt-mode-impact').click();
+		await section(a, 'dofs');
+		await dof(a, 1, 1, 'reference');
+		await section(a, 'roving');
+		await toggle(tid(a, 'mt-rov-on'), true);
+		for (const r of await a.locator('[data-testid="mt-rov-row"]').all()) await r.setChecked((await r.getAttribute('data-row')) === '1');
+		await fill(tid(a, 'mt-rov-text'), '1\n2\n3');
+	}
 	await section(a, 'acquisition');
 	await tid(a, 'mt-mode-shaker').click();
+	if (full) {
+		const note = await text(a, 'mt-roving-cleared').catch(() => 'none');
+		check('choosing Shaker clears a plan that roves the hammer, and says so', /^The roving plan was cleared: it moved row 1, a reference/.test(note), note);
+		await section(a, 'roving');
+		check('the roving plan is off, the note in Roving too', !(await tid(a, 'mt-rov-on').isChecked()) && (await tid(a, 'mt-roving-cleared-here').count()) === 1);
+		await section(a, 'acquisition');
+	}
 	await fill(field(a, 'mt-averages'), 12);
 	await section(a, 'dofs');
 	await dof(a, 1, 1, 'reference');
@@ -595,8 +693,8 @@ async function shaker(theme, full) {
 		await fill(a.locator('[data-testid="mt-drive-level"] input, input[data-testid="mt-drive-level"]').first(), 0.9);
 		// the DOFs are table edits: Apply Setup sends the table, then the service checks the setup
 		await tid(a, 'act-apply').click();
-		await until(a, 'the ceiling refusal', async (p) => /not inside the drive ceiling/.test(await said(p)), 30_000).catch(() => {});
-		check('a level over the ceiling is refused on screen', /not inside the drive ceiling/.test(await said(a)), (await said(a)).replace(/\s+/g, ' ').slice(0, 300));
+		await until(a, 'the ceiling refusal', async (p) => /not inside the drive ceiling|over the [\d.]+ V ceiling/.test(await said(p)), 30_000).catch(() => {});
+		check('a level over the ceiling is refused on screen', /not inside the drive ceiling|over the [\d.]+ V ceiling/.test(await said(a)), (await said(a)).replace(/\s+/g, ' ').slice(0, 300));
 		check('Proceed to Run waits while it is refused', (await attr(a, 'mt-ready', 'data-ready')) !== 'true');
 		await fill(a.locator('[data-testid="mt-drive-level"] input, input[data-testid="mt-drive-level"]').first(), 0.05);
 		await tid(a, 'mt-source').selectOption('pseudo_random');
@@ -621,13 +719,34 @@ async function shaker(theme, full) {
 	await until(a, 'frames mid-average', async (p) => (await count(p)) >= 6, 90_000);
 	check('the averages build from the service, mid-average', /^\d+ of 12$/.test(await text(a, 'mt-count')), await text(a, 'mt-count'));
 	check('the drive phase is in words', /Drive:/.test(await text(a, 'mt-drive-phase')), await text(a, 'mt-drive-phase'));
+	const ls = await legends(a);
+	const entries = (re) => ls.find((l) => re.test(l.title))?.entries ?? [];
+	check(`every reference, response and drive has its trace and legend entry (${theme})`, entries(/^Force$/).length === 2 && entries(/^Drive$/).length === 2 && entries(/^Reference Autospectra$/).length === 2, legendWords(ls));
+	check(`every legend is whole at 1440 by 900 (shaker, ${theme})`, ls.every((l) => !l.cut), legendWords(ls));
 	await shot(a, theme === 'dark' ? 'dark_measure_shaker' : 'measure_shaker');
+	await a.setViewportSize({ width: 1280, height: 800 });
+	await a.waitForTimeout(600);
+	const tcs = await titlesCut(a);
+	check(`no plot title is cut short at 1280 by 800 (shaker, ${theme})`, tcs.length === 0, tcs.join(', '));
+	const ls800 = await legends(a);
+	check(`every legend is whole at 1280 by 800 (shaker, ${theme})`, ls800.every((l) => !l.cut), legendWords(ls800));
+	const e800 = await endOnScreen(a);
+	check(`End Test is on screen at 1280 by 800 (shaker, ${theme})`, e800.seen, e800.at);
+	await a.screenshot({ path: path.join(SHOTS, `modal_test_${theme === 'dark' ? 'dark_' : ''}measure_shaker_1280x800.png`) });
+	await a.setViewportSize({ width: 1440, height: 900 });
+	await a.waitForTimeout(400);
 	if (!full) {
 		await tid(a, 'mt-end').click();
 		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
 		return a;
 	}
 	const n = await count(a);
+	if (MOCK && (await measureState(a)) !== 'measuring') {
+		// the mock's frames come fast: the point can have its averages before Stop Driving is reached
+		await tid(a, 'mt-end').click();
+		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
+		return a;
+	}
 	await tid(a, 'mt-drive_stop').click();
 	await until(a, 'the drive stopped', async (p) => (await measureState(p)) !== 'measuring', 30_000);
 	check('Stop Driving stops the drive and keeps the averages', (await count(a)) >= n, `${n} to ${await text(a, 'mt-count')}`);
@@ -664,6 +783,7 @@ try {
 }
 
 const passed = results.filter((r) => r.ok).length;
+if (lostSpace) console.log(`a Space that did not arm was pressed again ${lostSpace} time(s)`);
 console.log(`\nmodal test: ${passed} of ${results.length} checks passed${failed ? `; stopped: ${failed.message}` : ''}`);
 console.log(`screenshots in ${SHOTS}`);
 process.exit(failed ? 1 : 0);
