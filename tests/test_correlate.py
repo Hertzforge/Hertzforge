@@ -437,7 +437,8 @@ def test_the_mac_is_the_same_whichever_set_is_named_first():
 def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
     project = _two_geometries()
     with pytest.raises(ValueError, match='Test Shapes cannot be projected onto FEM Shapes: '
-                                         'it has 2 nodes measured in fewer than three'):
+                                         'Test Shapes has 2 nodes measured in fewer than '
+                                         r'three directions\. Project FEM Shapes onto Test Shapes'):
         project.project_onto_basis('Test Shapes', onto='FEM Shapes')
     made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
     assert list(project[made].coordinate) == list(project['Test Shapes'].coordinate)
@@ -532,8 +533,7 @@ def test_what_cannot_go_onto_a_geometry_is_refused_and_not_offered():
     for source, onto, why in cases:
         assert projection_why(project, source, onto) == why
         assert 'project_onto_basis' not in dict(project.selection_verbs(source, onto))
-        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: '
-                                             f'{why[0].lower()}{why[1:]}'):
+        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: {why}'):
             project.project_onto_basis(source, onto=onto)
     assert projection_why(project, 'FEM Shapes', 'Test Geometry') == ''
 

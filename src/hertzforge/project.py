@@ -6598,12 +6598,10 @@ class Project(dict):
         if target is None:
             # a set measured in fewer than three directions at a node has
             # no whole motion there to sample at another set's DOFs
-            from .core.correlate import projection_order
-            flipped, why = projection_order(self[source], basis_shapes)
-            if not flipped and why.startswith('it has') and 'measured' in why:
-                raise ValueError(
-                    f'{source} cannot be projected onto {basis_name}: {why}. '
-                    f'Project {basis_name} onto {source}')
+            why = _measured_why(self, source, basis_name)
+            if why:
+                raise ValueError(f'{source} cannot be projected onto {basis_name}: '
+                                 f'{why}. Project {basis_name} onto {source}')
         projected, report = project_shapes(self[source], theirs[1],
                                            basis_shapes, home[1],
                                            tolerance=tolerance,
@@ -10416,8 +10414,6 @@ def projection_why(project: Project, source: Any, onto: Any) -> str:
     any node is matched; '' when it can be. The action table greys
     Project out with it, and `project_onto_basis` refuses a geometry
     with it."""
-    from .core.correlate import partial_nodes
-
     source, onto = project.name_of(source), project.name_of(onto)
     on_geometry = isinstance(project[onto], Geometry)
     theirs = project.geometry_for(source)
@@ -10428,14 +10424,24 @@ def projection_why(project: Project, source: Any, onto: Any) -> str:
     if theirs[1] is home[1]:
         return (f'{source} is on {onto} already' if on_geometry else
                 f'Both are on {home[0]}, so there is nothing to project')
-    if on_geometry:
-        if not home[1].num_nodes:
-            return f'{onto} has no nodes'
-        partial = partial_nodes(project[source])
-        if partial:
-            # what a node did not measure would be taken as no motion there
-            return (f'{source} has {partial} node{"s" * (partial != 1)} measured in '
-                    'fewer than three directions')
+    if on_geometry and not home[1].num_nodes:
+        return f'{onto} has no nodes'
+    return _measured_why(project, source, onto)
+
+
+def _measured_why(project: Project, source: str, onto: str) -> str:
+    """Why `source` holds too little motion to be projected onto `onto`; '' when it
+    holds enough. What a node did not measure would be taken as no motion there, so a set
+    held in fewer than three directions is not projected onto a geometry, nor onto a set
+    that holds every direction, which is projected onto it instead (`projection_order`)."""
+    from .core.correlate import partial_nodes
+
+    partial = partial_nodes(project[source])
+    target = project[onto]
+    if partial and (isinstance(target, Geometry) or (isinstance(target, ShapeSet)
+                                                     and not partial_nodes(target))):
+        return (f'{source} has {partial} node{"s" * (partial != 1)} measured in '
+                'fewer than three directions')
     return ''
 
 
@@ -10444,8 +10450,7 @@ def _geometry_target(project, source, onto):
     X, Y and Z at each of its nodes, as a shape set of no modes."""
     why = projection_why(project, source, onto)
     if why:
-        raise ValueError(f'{source} cannot be projected onto {onto}: '
-                         f'{why[0].lower()}{why[1:]}')
+        raise ValueError(f'{source} cannot be projected onto {onto}: {why}')
     dofs = [f'{int(node)}{axis}+' for node in project[onto].node_id for axis in 'XYZ']
     return ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
 

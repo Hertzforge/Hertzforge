@@ -701,6 +701,8 @@ export interface ActionRow {
 	live?: true;
 	/** Export: the formats this object can be written in. */
 	formats?: ExportFormat[];
+	/** The words a param's options read in this row, by param and option value (Project's directions, named after the two sets). */
+	labels?: Record<string, Record<string, string>>;
 }
 
 /** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */

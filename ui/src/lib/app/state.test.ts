@@ -784,3 +784,68 @@ describe('the display system changed', () => {
 		expect(a.reading?.title).toBe('Add Block, preview');
 	});
 });
+
+describe("Project's direction, worded by its row", () => {
+	const project = {
+		id: 'project.project_onto_basis',
+		title: 'Project onto Basis DOFs',
+		workspace: 'modal',
+		modules: ['modal'],
+		outputs: ['shape3d'],
+		previews: true,
+		params: [
+			{ name: 'source', label: 'Shape set', type: 'enum', options_from: 'objects:shape_set' },
+			{ name: 'onto', label: 'Onto', type: 'enum', options_from: 'objects:shape_set|channel_table|geometry' },
+			{ name: 'direction', label: 'Direction', type: 'enum', default: 'named', options: [{ value: 'named', label: 'Shape set onto Onto' }, { value: 'reversed', label: 'Onto onto Shape set' }] }
+		]
+	} as unknown as OperationDescriptor;
+	const sets = {
+		...summary,
+		objects: [
+			{ name: 'Test', kind: 'shape_set', records: 0, groups: [], verbs: [] },
+			{ name: 'Model', kind: 'shape_set', records: 0, groups: [], verbs: [] }
+		]
+	} as unknown as ProjectSummary;
+	const labels = { direction: { named: 'Test onto Model (not possible: Test has 2 nodes measured in fewer than three directions)', reversed: 'Model onto Test' } };
+	const row = (direction: string) => ({ id: project.id, verb: 'Project', kind: 'run', ready: true, fill: { source: 'Test', onto: 'Model', direction }, labels }) as unknown as ActionRow;
+
+	function directed() {
+		const made = make();
+		made.app.catalog = { operations: [project] } as never;
+		made.app.project.summary = sets;
+		return made;
+	}
+
+	it('names each way after the two sets, the one that cannot be made with why', async () => {
+		const { a } = directed();
+		await a.perform(row('reversed'), column);
+		const direction = a.formParams.find((p) => p.name === 'direction');
+		expect(direction?.options?.map((o) => o.label)).toEqual([labels.direction.named, 'Model onto Test']);
+		expect(a.currentValues.direction).toBe('reversed');
+		expect(a.errors.direction).toBeUndefined();
+	});
+
+	it('says why when the way chosen is the one that cannot be made', async () => {
+		vi.useFakeTimers();
+		try {
+			const { a, answers } = directed();
+			await a.perform(row('reversed'), column);
+			answers.refuse = 'Test cannot be projected onto Model: Test has 2 nodes measured in fewer than three directions';
+			a.values = { ...a.values, [project.id]: { ...a.currentValues, direction: 'named' } };
+			a.followPreview();
+			await vi.advanceTimersByTimeAsync(400);
+			expect(a.runError).toBe(answers.refuse);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('asks which way when its row chose neither, and runs nothing until one is chosen', async () => {
+		const { a, runs } = directed();
+		await a.perform(row(''), column);
+		expect(a.formOpen).toBe(true);
+		expect(a.errors.direction).toBe('Choose one of the options.');
+		await a.run();
+		expect(runs).toHaveLength(0);
+	});
+});

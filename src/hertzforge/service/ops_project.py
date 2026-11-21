@@ -378,6 +378,11 @@ PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
 #: half its thickest plate (`Project.match_distance`), which the action table fills in
 MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
               default=0.0, unit='m', min=0.0, step=0.001, length=True)
+#: which of two shape sets is projected onto the other: as `source` and `onto` name them, or
+#: the other way. The action table opens on the way that can be made, words each way after
+#: the sets, and says why the other cannot be made when it cannot (`project.projection_why`)
+DIRECTION = Param('direction', 'Direction', 'enum', default='named', options=(
+    Option('named', 'Shape set onto Onto'), Option('reversed', 'Onto onto Shape set')))
 EXPAND_MATCH = Param('distance', 'Node match tolerance, on another geometry (0 for 2 % of '
                      "the target's size)", 'number', default=0.0, unit='m', min=0.0,
                      step=0.001, length=True)
@@ -569,10 +574,15 @@ def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     no node is matched, the first two and nothing added, so the distance can
     be set beside them."""
     from hertzforge.core.correlate import NoNodeMatched
+    from hertzforge.core.shapes import ShapeSet
 
     from .ops_modal_plan import _report_rows
 
     source, onto = params['source'], params['onto']
+    if params.get('direction') == 'reversed':
+        if not isinstance(project[onto], ShapeSet):
+            raise refused(f'only a shape set is projected the other way; {onto} is not one')
+        source, onto = onto, source
     try:
         added = project.project_onto_basis(source, onto=onto,
                                            distance=params['distance'] or None)
@@ -691,7 +701,7 @@ MODAL_VERB_OPERATIONS = (
         summary='A shape set sampled at another set\'s DOFs, at a channel table\'s '
                 'sensors, or at every node of another geometry, by the nearest node '
                 'within the tolerance and its direction.',
-        params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
+        params=(_source('project_onto_basis', 'Shape set'), ONTO, DIRECTION, MATCH),
         outputs=('shape3d', 'reading'), run=onto_basis, previews=True),
 )
 

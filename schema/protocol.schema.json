@@ -743,7 +743,8 @@
         "formats": {"type": "array", "items": {
           "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}
-        }}
+        }},
+        "labels": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string"}}}
       }
     },
     "solidRow": {
