@@ -100,14 +100,18 @@ def test_a_windowed_subset_reads_only_what_it_keeps(tmp_path, monkeypatch):
 
 def test_virtual_rows_follow_only_when_every_control_channel_does(tmp_path):
     path, raw = write_run(str(tmp_path / 'run.nc4'))
-    whole = hertzforge.import_file(
-        path, channels=[f'{101 + i}Z+' for i in range(MEASURED)])['time_data']
-    assert whole.num_records == MEASURED + 2, 'the controls, and the rows over them'
-    assert np.allclose(whole.ordinate[-2:].real, MATRIX @ raw[CONTROL])
-    part = hertzforge.import_file(path, channels=['101Z+', '102Z+'])['time_data']
-    assert part.num_records == 2, 'a row over a missing channel is left out, not made up'
-    windowed = hertzforge.import_file(path, start=0.5, stop=1.0)['time_data']
-    assert windowed.comment[-1].startswith('0.5 to 1 s of run.nc4; row 2 of the Random')
+    whole = hertzforge.Project()
+    whole.import_file(path, channels=[f'{101 + i}Z+' for i in range(MEASURED)])
+    assert whole['Time History'].num_records == MEASURED, 'the controls'
+    assert np.allclose(whole['Time History Transformed'].ordinate.real, MATRIX @ raw[CONTROL])
+    part = hertzforge.Project()
+    names = part.import_file(path, channels=['101Z+', '102Z+'])
+    assert 'Time History Transformed' not in names, \
+        'a row over a missing channel is left out, not made up'
+    windowed = hertzforge.Project()
+    windowed.import_file(path, start=0.5, stop=1.0)
+    assert windowed['Time History Transformed'].comment[-1].startswith(
+        '0.5 to 1 s of run.nc4; row 2 of the Random')
 
 
 def test_the_summary_costs_nothing_to_read(tmp_path):
