@@ -881,9 +881,10 @@ zero) and the `aborts` in force, and on the simulator the simulated `structure`
 (its modes, scale, shapes, the hammer's force and the impulse responses'
 length); `check`, the check report the run was configured with (the rate, the
 block, the band and its lines, the estimator, the averages, the references, the
-responses, every point's DOFs, and the mode's settings). Then these, each in
-the golden run folders (`schema/golden/runs/modal_test/impact_roving/` and
-`schema/golden/runs/modal_test/shaker_burst_random/`):
+responses, every point's DOFs, and the mode's settings). Then these, each checked
+against the golden run folders (`schema/golden/runs/modal_test/impact_roving/` and
+`schema/golden/runs/modal_test/shaker_burst_random/`) by
+`tests/test_run_folder_golden_modal_test.py`:
 
 | File | What |
 |---|---|

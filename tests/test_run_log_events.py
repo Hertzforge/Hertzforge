@@ -21,7 +21,9 @@ from hertzforge.io import run_convert
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN = os.path.join(ROOT, 'schema', 'golden', 'runs')
-NAMES = sorted(os.listdir(GOLDEN))
+#: every golden run folder, a module's own or one of the runs a module keeps several of
+NAMES = sorted(os.path.relpath(top, GOLDEN) for top, _, files in os.walk(GOLDEN)
+               if 'run.json' in files)
 
 
 @pytest.fixture(scope='module')
