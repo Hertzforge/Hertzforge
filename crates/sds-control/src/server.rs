@@ -91,7 +91,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 74] = [
+const DRIVE_METHODS: [&str; 76] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -163,7 +163,9 @@ const DRIVE_METHODS: [&str; 74] = [
     "mimo_mixed.arm",
     "mimo_mixed.start",
     "mimo_mixed.proceed",
+    "mimo_mixed.override",
     "mimo_mixed.level",
+    "mimo_mixed.mode",
     "mimo_mixed.resume",
     "mimo_mixed.part",
 ];
@@ -193,8 +195,9 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_sine.jog, mimo_sine.goto, mimo_sine.stop, mimo_sine.abort, mimo_sine.reset, \
     mimo_sine.clear, mimo_sine.state, mimo_sine.log, mimo_sine.report, mimo_sine.subscribe, \
     mimo_mixed.configure, mimo_mixed.config, mimo_mixed.arm, mimo_mixed.start, \
-    mimo_mixed.proceed, mimo_mixed.level, mimo_mixed.hold, mimo_mixed.resume, mimo_mixed.part, \
-    mimo_mixed.stop, mimo_mixed.abort, mimo_mixed.reset, mimo_mixed.clear, mimo_mixed.state, \
+    mimo_mixed.proceed, mimo_mixed.override, mimo_mixed.level, mimo_mixed.mode, \
+    mimo_mixed.hold, mimo_mixed.resume, mimo_mixed.part, mimo_mixed.stop, mimo_mixed.abort, \
+    mimo_mixed.reset, mimo_mixed.clear, mimo_mixed.state, \
     mimo_mixed.log, mimo_mixed.subscribe, mimo_mixed.reference.build_breakpoints, \
     mimo_mixed.reference.build_rigid_body, mimo_mixed.reference.validate, \
     mimo_mixed.reference.import, \
@@ -2371,7 +2374,12 @@ impl Service {
             "mixed.subscribe" => self.mixed_subscribe(conn, params).await,
             "mimo_mixed.arm" => self.mimo_mixed_arm(conn, false).await,
             "mimo_mixed.start" => self.mimo_mixed_arm(conn, true).await,
-            "mimo_mixed.proceed" | "mimo_mixed.level" | "mimo_mixed.hold" | "mimo_mixed.resume"
+            "mimo_mixed.proceed"
+            | "mimo_mixed.override"
+            | "mimo_mixed.level"
+            | "mimo_mixed.mode"
+            | "mimo_mixed.hold"
+            | "mimo_mixed.resume"
             | "mimo_mixed.part" => self.mimo_mixed_running_verb(conn, method, params).await,
             "mimo_mixed.stop" => Ok(self.mimo_mixed_end(conn, false).await),
             "mimo_mixed.abort" => Ok(self.mimo_mixed_end(conn, true).await),

@@ -177,7 +177,7 @@
     "on": true,
     "freq_hz": 300,
     "held": false,
-    "limiting": false,
+    "limiting": true,
     "scale": 1,
     "folded": false,
     "amplitude": "db",
@@ -222,6 +222,7 @@
     "random_peak_v": 2.5,
     "tone_sum_v": 0.75,
     "ceiling_v": 6,
+    "abort_vpk": 4,
     "headroom_v": 3.5,
     "headroom_db": 7.6,
     "scale": 0.875
@@ -233,6 +234,7 @@
     "random_peak_v": 2.75,
     "tone_sum_v": 0.75,
     "ceiling_v": 6,
+    "abort_vpk": 4,
     "headroom_v": 3.25,
     "headroom_db": 6.78,
     "scale": 0.875
@@ -244,6 +246,7 @@
     "random_peak_v": 3,
     "tone_sum_v": 0.75,
     "ceiling_v": 6,
+    "abort_vpk": 4,
     "headroom_v": 3,
     "headroom_db": 6.02,
     "scale": 0.875
@@ -255,6 +258,7 @@
     "random_peak_v": 3.25,
     "tone_sum_v": 0.75,
     "ceiling_v": 6,
+    "abort_vpk": 4,
     "headroom_v": 2.75,
     "headroom_db": 5.33,
     "scale": 0.875
@@ -273,8 +277,16 @@
    "loops": 377,
    "misses": 0,
    "underruns": 0,
+   "dropped": 0,
    "clamped": 0
   },
+  "limits": [
+   {
+    "channel": 9,
+    "over_db": -3.25,
+    "at_hz": 152
+   }
+  ],
   "identification": {
    "level_db": -20,
    "steps": 2,
@@ -295,6 +307,19 @@
     0.01278
    ]
   },
+  "prediction": null,
+  "override": {
+   "by": "bench",
+   "text": "Coherence low at the band edges; accepted.",
+   "reason": "gate_failed"
+  },
+  "overrides": [
+   {
+    "by": "bench",
+    "text": "Coherence low at the band edges; accepted.",
+    "reason": "gate_failed"
+   }
+  ],
   "law": {
    "floor": {
     "id": "pinv_closed",

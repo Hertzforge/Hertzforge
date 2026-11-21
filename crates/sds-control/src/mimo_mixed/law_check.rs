@@ -49,6 +49,7 @@ pub fn case_json(case: MimoMixedCheckCase, role: LawRole, v: &CheckCase) -> Valu
         "role": role_name(role),
         "plant": case.plant(),
         "requirement": case.requirement(),
+        "required": case.required(),
         "passed": v.passed,
         "detail": v.detail,
     })

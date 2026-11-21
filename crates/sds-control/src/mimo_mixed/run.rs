@@ -11,8 +11,8 @@
 use super::config::{round, Derived, WireMimoMixed};
 use super::record::{self as mrec, ArmFacts, LevelPoint, Names};
 use super::view::{
-    self, BandHistory, End, IdentView, MimoMixedView, Spectra, State, StationRef, ToneHistory,
-    HISTORY_POINTS,
+    self, BandHistory, End, IdentView, MimoMixedView, Override, Spectra, State, StationRef,
+    ToneHistory, HISTORY_POINTS,
 };
 use super::{refuse, wrong_state};
 use crate::protocol::{num, MethodError};
@@ -28,9 +28,10 @@ use crate::station::{self, class_name, StationPlan};
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_mimo_mixed::service::records::LawRecord;
 use hertzforge_mimo_mixed::service::{
-    MimoMixedLaws, MimoMixedPhase, MimoMixedService, MimoMixedState, MimoMixedStatus,
+    MimoMixedError, MimoMixedLaws, MimoMixedPhase, MimoMixedService, MimoMixedState,
+    MimoMixedStatus,
 };
-use hertzforge_mimo_mixed::MimoMixedConfig;
+use hertzforge_mimo_mixed::{MimoMixedConfig, MimoMixedConfigError};
 use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -218,6 +219,16 @@ pub enum Cmd {
         target: LevelTarget,
         reply: Reply<f64>,
     },
+    Mode {
+        mode: RunMode,
+        reply: Reply<()>,
+    },
+    Override {
+        ack: String,
+        by: String,
+        reason: Option<&'static str>,
+        reply: Reply<()>,
+    },
     Hold {
         on: bool,
         reply: Reply<()>,
@@ -301,6 +312,43 @@ struct Actor {
     composite: Option<(Vec<Vec<f64>>, f64)>,
     tones: Vec<ToneHistory>,
     bands: Vec<BandHistory>,
+}
+
+/// An engine refusal at the engage or an override, by its own name where it
+/// has one (`budget_cannot_fit` with the misfit, `tone_model_not_finite`
+/// with the tone, `override_not_needed`, `prediction_exceeded`); any other
+/// is `wrong_state`.
+fn engage_refusal(e: &MimoMixedError, v: &MimoMixedView) -> MethodError {
+    match e {
+        MimoMixedError::Config(
+            c @ MimoMixedConfigError::BudgetCannotFit {
+                time_s,
+                drive,
+                need_v,
+                ceiling_v,
+            },
+        ) => refuse(
+            "budget_cannot_fit",
+            format!("The run cannot engage: {c}. No override passes the drive budget."),
+        )
+        .with_detail(json!({"drive": v.drives.get(*drive), "time_s": time_s,
+                            "need_v": need_v, "ceiling_v": ceiling_v})),
+        MimoMixedError::Config(c @ MimoMixedConfigError::ToneModelNotFinite { part, f_hz }) => {
+            refuse(
+                "tone_model_not_finite",
+                format!("The run cannot engage: {c}."),
+            )
+            .with_detail(json!({"part": part, "f_hz": f_hz}))
+        }
+        MimoMixedError::Refused { name, why, .. } => {
+            let mut w = why.clone();
+            if let Some(c) = w.get_mut(0..1) {
+                c.make_ascii_uppercase();
+            }
+            refuse(name, format!("{w}."))
+        }
+        e => refuse("wrong_state", e.to_string()),
+    }
 }
 
 fn arm_refused(words: impl std::fmt::Display) -> MethodError {
@@ -458,6 +506,21 @@ impl Actor {
                 self.publish();
                 let _ = reply.send(r);
             }
+            Cmd::Mode { mode, reply } => {
+                let r = self.mode_cmd(mode);
+                self.publish();
+                let _ = reply.send(r);
+            }
+            Cmd::Override {
+                ack,
+                by,
+                reason,
+                reply,
+            } => {
+                let r = self.override_cmd(&ack, &by, reason);
+                self.publish();
+                let _ = reply.send(r);
+            }
             Cmd::Hold { on, reply } => {
                 let r = self.hold_cmd(on);
                 self.publish();
@@ -591,6 +654,9 @@ impl Actor {
         if !hardware {
             svc = svc.with_block_frames(hertzforge_hal::default_block_frames(wire.fs_hz));
         }
+        // The mode as mimo_mixed.mode last set it before the arm.
+        svc.set_run_mode(self.view.mode)
+            .map_err(|e| arm_refused(&e).with_detail(json!({"reason": e.name()})))?;
         // The laws' calls are kept for the record, taken between chunks.
         svc.keep_law_records(true);
         svc.arm()
@@ -784,23 +850,77 @@ impl Actor {
                     .map(|i| i.band_coherence.clone())
                     .unwrap_or_default();
                 let gate = self.plan.core.gates.coherence_threshold;
-                self.end(
-                    "held",
-                    "coherence_hold",
-                    None,
-                    Some(format!(
-                        "Coherence gate held: band coherence per control {:?} is below the gate \
-                         of {gate:.2}; the run never drove at test level.",
-                        c.iter().map(|x| round(*x, 3)).collect::<Vec<_>>()
-                    )),
-                    None,
+                self.shared.add_log_data(
+                    "identification",
+                    format!(
+                        "coherence gate failed: band coherence per control {:?} is below the \
+                         gate of {}; the run holds for an override or a stop",
+                        c.iter().map(|x| round(*x, 3)).collect::<Vec<_>>(),
+                        num(gate)
+                    ),
+                    Some(json!({"event": "gate_failed", "band_coherence": c, "gate": gate})),
                 );
+                self.set(State::Review, "gate_failed");
+                self.publish();
             }
             Ok(true) => {
-                self.set(State::Review, "awaiting_review");
+                self.review();
                 self.publish();
             }
         }
+    }
+
+    /// The prediction for the review, and the review's phase: a prediction
+    /// over a drive ceiling holds the run (`prediction_exceeded`) for an
+    /// override; one within, or one whose forecast cannot fit (which no
+    /// override passes), waits for `proceed`.
+    fn review(&mut self) {
+        let Some(svc) = self.svc.as_ref() else { return };
+        let drives = self.view.drives.clone();
+        let controls = self.view.controls.clone();
+        let (pred, setup) = (svc.prediction(), svc.predict_setup());
+        let phase = match (&pred, &setup) {
+            (Ok(p), Ok((_, fc))) => {
+                self.view.prediction = Some(view::prediction_json(p, Ok(fc), &drives, &controls));
+                if p.within() {
+                    "awaiting_review"
+                } else {
+                    "prediction_exceeded"
+                }
+            }
+            (Ok(p), Err(MimoMixedError::Config(e))) => {
+                self.view.prediction = Some(view::prediction_json(p, Err(e), &drives, &controls));
+                "awaiting_review"
+            }
+            _ => {
+                self.view.prediction = None;
+                "awaiting_review"
+            }
+        };
+        if let Some(p) = &self.view.prediction {
+            self.shared.add_log_data(
+                "identification",
+                format!(
+                    "prediction {} every drive ceiling{}",
+                    if p["within"] == true {
+                        "within"
+                    } else {
+                        "over"
+                    },
+                    if p["forecast"]["refused"].is_null() {
+                        String::new()
+                    } else {
+                        format!(
+                            "; the forecast refuses ({})",
+                            p["forecast"]["refused"].as_str().unwrap_or("")
+                        )
+                    }
+                ),
+                Some(json!({"event": "prediction", "within": p["within"],
+                            "refused": p["forecast"]["refused"]})),
+            );
+        }
+        self.set(State::Review, phase);
     }
 
     fn ident_facts(&mut self) {
@@ -867,14 +987,36 @@ impl Actor {
     // ---- review and engage --------------------------------------------------------
 
     fn proceed_cmd(&mut self) -> Result<(), MethodError> {
-        if self.view.state != State::Review {
-            return Err(wrong_state(&self.view, "Proceeding"));
+        match (self.view.state, self.view.phase) {
+            (State::Review, "awaiting_review") => {}
+            (State::Review, "gate_failed") => {
+                return Err(refuse(
+                    "gate_failed",
+                    "The identification failed its coherence gate, so the run holds; override \
+                     with your reason to go on to the prediction, or stop and correct the setup.",
+                ))
+            }
+            (State::Review, "prediction_exceeded") => {
+                return Err(refuse(
+                    "prediction_exceeded",
+                    "The prediction puts a drive over its ceiling, so the run holds; change the \
+                     setup, or override with your reason (the ceilings and aborts still hold \
+                     the drive).",
+                ))
+            }
+            _ => return Err(wrong_state(&self.view, "Proceeding")),
         }
         self.shared.add_log_data(
             "note",
             "the operator reviewed the identification and proceeded",
             Some(json!({"action": "proceed"})),
         );
+        self.engage()
+    }
+
+    /// Engage from the review: the engine's refusals by their names (a
+    /// forecast that cannot fit, a tone the model gives no finite drive).
+    fn engage(&mut self) -> Result<(), MethodError> {
         let svc = self
             .svc
             .as_mut()
@@ -897,8 +1039,88 @@ impl Actor {
                 self.finish_from_controller();
                 Ok(())
             }
-            Err(e) => Err(refuse("wrong_state", e.to_string())),
+            Err(e) => Err(engage_refusal(&e, &self.view)),
         }
+    }
+
+    /// `mimo_mixed.override`: the operator's words take the hold that holds
+    /// the run on (MIMO Random's verb). A failed gate goes on to the
+    /// prediction and engages only when the prediction is within every
+    /// ceiling; a prediction over a ceiling engages. No override passes the
+    /// forecast, the ceilings, the aborts or the limits.
+    fn override_cmd(
+        &mut self,
+        ack: &str,
+        by: &str,
+        reason: Option<&'static str>,
+    ) -> Result<(), MethodError> {
+        let holds = match (self.view.state, self.view.phase) {
+            (State::Review, "gate_failed") => "gate_failed",
+            (State::Review, "prediction_exceeded") => "prediction_exceeded",
+            (State::Review, _) => {
+                return Err(refuse(
+                    "override_not_needed",
+                    "The identification passed its gate and the prediction is within every \
+                     ceiling; proceed instead.",
+                ))
+            }
+            _ => return Err(wrong_state(&self.view, "Overriding")),
+        };
+        if let Some(r) = reason {
+            if r != holds {
+                let what = if holds == "gate_failed" {
+                    "a failed coherence gate"
+                } else {
+                    "a prediction over a drive ceiling"
+                };
+                return Err(refuse(
+                    "override_not_needed",
+                    format!(
+                        "The run holds for {what}, not for what this override names; \
+                         acknowledge what holds the run (reason \"{holds}\")."
+                    ),
+                )
+                .with_detail(json!({"holds": holds})));
+            }
+        }
+        let svc = self
+            .svc
+            .as_mut()
+            .ok_or_else(|| wrong_state(&self.view, "Overriding"))?;
+        let taken = if holds == "gate_failed" {
+            svc.override_gate(ack)
+        } else {
+            svc.override_prediction(ack)
+        };
+        self.forward_log_now();
+        if let Err(e) = taken {
+            return Err(engage_refusal(&e, &self.view));
+        }
+        self.view.overrides.push(Override {
+            by: by.to_owned(),
+            text: ack.to_owned(),
+            reason: holds,
+        });
+        self.shared.add_log_data(
+            "override",
+            format!("override ({holds}) by {by}: {ack}"),
+            Some(json!({"action": "override", "reason": holds, "by": by, "text": ack})),
+        );
+        if holds == "gate_failed" {
+            self.review();
+            if self.view.phase != "awaiting_review"
+                || self
+                    .view
+                    .prediction
+                    .as_ref()
+                    .is_some_and(|p| !p["forecast"]["refused"].is_null())
+            {
+                // Held again at the prediction, or a forecast no override
+                // passes: the review shows which.
+                return Ok(());
+            }
+        }
+        self.engage()
     }
 
     // ---- the loop -----------------------------------------------------------------
@@ -1284,21 +1506,30 @@ impl Actor {
         if !self.driving() {
             return Err(wrong_state(&self.view, "A level change"));
         }
-        if self.plan.core.schedule.mode != RunMode::Manual {
-            return Err(refuse(
-                "manual_mode_required",
-                "The level moves by hand only in manual mode; configure the schedule's mode as \
-                 manual.",
-            )
-            .with_detail(json!({"mode": "auto"})));
-        }
+        let levels = self.view.levels_db.clone();
         let svc = self
             .svc
             .as_mut()
             .ok_or_else(|| wrong_state(&self.view, "A level change"))?;
+        if svc.run_mode() != RunMode::Manual {
+            return Err(refuse(
+                "manual_mode_required",
+                "The level moves by hand only in manual mode; switch with mimo_mixed.mode first.",
+            )
+            .with_detail(json!({"mode": "auto"})));
+        }
         let r = match target {
             LevelTarget::Delta(d) => svc.step_level(d),
-            LevelTarget::To(t) => svc.set_level_db(t),
+            LevelTarget::To(t) => {
+                if !levels.iter().any(|l| (l - t).abs() < 1e-9) {
+                    return Err(refuse(
+                        "not_a_rung",
+                        format!("{} dB is not a level of the schedule.", num(t)),
+                    )
+                    .with_detail(json!({"levels_db": levels})));
+                }
+                svc.set_level_db(t)
+            }
         };
         let level = r.map_err(|e| refuse("wrong_state", e.to_string()))?;
         self.shared.add_log_data(
@@ -1307,6 +1538,27 @@ impl Actor {
             Some(json!({"action": "level", "level_db": level})),
         );
         Ok(level)
+    }
+
+    /// `mimo_mixed.mode`: automatic or manual, in any state before the end
+    /// (Mixed Mode's verb). Before the arm it is kept for the arm.
+    fn mode_cmd(&mut self, mode: RunMode) -> Result<(), MethodError> {
+        if self.view.state == State::Finished {
+            return Err(self.finished_refusal());
+        }
+        if let Some(svc) = self.svc.as_mut() {
+            svc.set_run_mode(mode)
+                .map_err(|e| refuse("wrong_state", e.to_string()))?;
+        }
+        if self.view.mode != mode {
+            self.shared.add_log_data(
+                "level",
+                format!("mode {}", crate::random::view::mode_name(mode)),
+                Some(json!({"action": "mode", "mode": crate::random::view::mode_name(mode)})),
+            );
+        }
+        self.view.mode = mode;
+        Ok(())
     }
 
     fn hold_cmd(&mut self, on: bool) -> Result<(), MethodError> {
@@ -1488,6 +1740,13 @@ impl Actor {
                 Some(&e),
                 Some(format!("The run stopped on a law fault: {}.", e.words)),
                 ramp,
+            ),
+            "run_error" | "run_thread_failure" => self.end(
+                "fault",
+                "aborted",
+                Some(&e),
+                Some(format!("The run stopped on a fault: {}.", e.words)),
+                None,
             ),
             _ => self.end(
                 "aborted",
@@ -1698,6 +1957,7 @@ impl Actor {
         let mut end = Map::new();
         end.insert("run_uid".into(), Value::from(k.run_uid.as_str()));
         end.insert("end".into(), state["end"].clone());
+        end.insert("overrides".into(), state["overrides"].clone());
         end.insert("at_unix".into(), Value::from(now_unix()));
         end.insert(
             "station_frames".into(),

@@ -21,12 +21,10 @@ use view::MimoMixedView;
 
 pub use run::Notice;
 
-/// The verbs the controller cannot do, refused by these names (each ends in
-/// `_not_built`).
-pub const NOT_BUILT: [(&str, &str); 6] = [
-    ("mimo_mixed.mode", "mode_not_built"),
+/// The verbs this module does not build, refused by these names (each ends
+/// in `_not_built`).
+pub const NOT_BUILT: [(&str, &str); 4] = [
     ("mimo_mixed.adjust", "adjust_not_built"),
-    ("mimo_mixed.override", "override_not_built"),
     ("mimo_mixed.exclude", "exclude_not_built"),
     (
         "mimo_mixed.identification.save",
@@ -148,19 +146,14 @@ pub fn wrong_state(v: &MimoMixedView, verb: &str) -> MethodError {
 pub fn not_built(method: &str) -> Option<MethodError> {
     let (_, reason) = NOT_BUILT.iter().find(|(m, _)| *m == method)?;
     let words = match *reason {
-        "mode_not_built" => {
-            "The level schedule's mode is fixed by the configuration in MIMO Mixed Mode; \
-             configure the schedule's mode instead."
-        }
         "adjust_not_built" => {
-            "MIMO Mixed Mode's laws take no live parameters; configure the parameters instead."
-        }
-        "override_not_built" => {
-            "MIMO Mixed Mode takes no control override; every control target keeps its \
-             reference, and a part is switched with mimo_mixed.part."
+            "MIMO Mixed Mode's laws take no live parameters (neither a MIMO Random floor law \
+             nor a MIMO Sine tone law declares one); configure the parameters instead."
         }
         "exclude_not_built" => {
-            "MIMO Mixed Mode does not exclude a control mid-run; configure the controls instead."
+            "MIMO Mixed Mode does not take a control out of control at the gate: the floor, \
+             every tone and every band are stated per control; configure the controls instead, \
+             or override the gate."
         }
         "identification_save_not_built" => {
             "MIMO Mixed Mode does not save its identification as an identification set; \

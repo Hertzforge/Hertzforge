@@ -1378,6 +1378,17 @@ impl MimoMixedService {
         self.engage()
     }
 
+    /// The setup prediction alone from the identification's model (the
+    /// review shows it even when the forecast cannot fit).
+    pub fn prediction(&self) -> Result<crate::predict::MimoMixedPrediction, MimoMixedError> {
+        let id = self
+            .ident
+            .as_ref()
+            .ok_or_else(|| MimoMixedError::BadState("identify first".into()))?;
+        let model = rows(&id.h, 0..self.cfg.n());
+        Ok(crate::predict::predict(&self.cfg, &model)?)
+    }
+
     /// The setup prediction and the budget forecast from the
     /// identification's model, as the engage computes them. Refused
     /// `budget_cannot_fit` or `tone_model_not_finite` as the engage would be.

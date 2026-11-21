@@ -13,7 +13,8 @@ mod support;
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_mimo_mixed::service::{
-    BandStatus, DriveStatus, MimoMixedPhase, MimoMixedState, MimoMixedStatus, ToneStatus,
+    BandStatus, DriveStatus, LimitStatus, MimoMixedPhase, MimoMixedState, MimoMixedStatus,
+    ToneStatus,
 };
 use sds_control::codec::{self, Arrays};
 use sds_control::mimo_mixed::config;
@@ -187,8 +188,9 @@ fn spectra() -> Spectra {
     }
 }
 
-/// A run at full level: the floor equalized, both tones and the band in, the
-/// second tone held by the shared ceiling.
+/// A run at full level past an overridden gate: the floor equalized, both
+/// tones and the band in, the second tone held by the shared ceiling and the
+/// band by the drive ceilings, a limit channel 3.25 dB under its ceiling.
 fn running() -> MimoMixedView {
     let mut v = configured("mimo-mixed-0002");
     v.state = State::Running;
@@ -230,7 +232,7 @@ fn running() -> MimoMixedView {
             part_level: 1.0,
             error_db: vec![0.25, -0.5, 0.125, 0.0],
             alarm: vec![false; 4],
-            limiting: false,
+            limiting: true,
         }],
         drives: (0..4)
             .map(|j| DriveStatus {
@@ -243,8 +245,17 @@ fn running() -> MimoMixedView {
         underruns: 0,
         dropped: 0,
         clamped: 0,
-        limits: Vec::new(),
+        limits: vec![LimitStatus {
+            channel_index: 9,
+            over_db: -3.25,
+            at_hz: 152.0,
+        }],
         end: None,
+    });
+    v.overrides.push(view::Override {
+        by: "bench".into(),
+        text: "Coherence low at the band edges; accepted.".into(),
+        reason: "gate_failed",
     });
     v.held_peak_v = vec![2.5, 2.75, 3.0, 3.25];
     v.identification = Some(IdentView {
@@ -467,6 +478,12 @@ fn mimo_mixed_golden_every_payload_validates_against_its_def() {
             "mimoMixedConfigureParams",
         ),
         ("request_mimo_mixed_level", "params", "mimoMixedLevelParams"),
+        ("request_mimo_mixed_mode", "params", "mimoMixedModeParams"),
+        (
+            "request_mimo_mixed_override",
+            "params",
+            "mimoOverrideParams",
+        ),
         ("request_mimo_mixed_part", "params", "mimoMixedPartParams"),
         (
             "request_mimo_mixed_subscribe",
@@ -509,6 +526,8 @@ fn mimo_mixed_golden_every_payload_validates_against_its_def() {
 fn mimo_mixed_golden_the_verbs_parse() {
     for (name, method) in [
         ("request_mimo_mixed_level", "mimo_mixed.level"),
+        ("request_mimo_mixed_mode", "mimo_mixed.mode"),
+        ("request_mimo_mixed_override", "mimo_mixed.override"),
         ("request_mimo_mixed_part", "mimo_mixed.part"),
         ("request_mimo_mixed_subscribe", "mimo_mixed.subscribe"),
         ("request_mimo_mixed_configure", "mimo_mixed.configure"),

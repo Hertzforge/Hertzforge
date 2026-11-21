@@ -717,6 +717,19 @@ pub fn check(
             .channels
             .iter()
             .any(|c| c.index == d.channel_index && c.enabled && c.role == ChannelRole::Drive);
+        if let Some(first) = cfg.drives[..k]
+            .iter()
+            .position(|e| e.channel_index == d.channel_index)
+        {
+            r.errors.push(Item::field(
+                "duplicate_drive",
+                format!("drives[{k}]"),
+                format!(
+                    "Channel {} is already drive {first}; each drive is its own table row.",
+                    d.channel_index
+                ),
+            ));
+        }
         if !ok {
             r.errors.push(Item::field(
                 "channel_unknown",

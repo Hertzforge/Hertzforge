@@ -8,7 +8,10 @@ use super::config::{round, sig, LawFacts};
 use crate::codec::Arrays;
 use crate::protocol::{num, opt_num};
 use crate::views::{self, Axis, Role, Scale, Series};
-use hertzforge_mimo_mixed::service::{MimoMixedPhase, MimoMixedStatus};
+use hertzforge_mimo_mixed::budget::BudgetForecast;
+use hertzforge_mimo_mixed::predict::MimoMixedPrediction;
+use hertzforge_mimo_mixed::service::{MimoMixedPhase, MimoMixedStatus, FORECAST_STEP_S};
+use hertzforge_mimo_mixed::MimoMixedConfigError;
 use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
@@ -39,6 +42,23 @@ pub struct End {
     pub drive: Option<u32>,
     /// The ramp down's length, s, for an end that ramped.
     pub ramp_s: Option<f64>,
+}
+
+/// One operator override of a hold, as the state and the record keep it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Override {
+    /// Who gave it (the connection's client name).
+    pub by: String,
+    /// The operator's words.
+    pub text: String,
+    /// What it overrode: `gate_failed` or `prediction_exceeded`.
+    pub reason: &'static str,
+}
+
+impl Override {
+    pub fn to_json(&self) -> Value {
+        json!({"by": self.by, "text": self.text, "reason": self.reason})
+    }
 }
 
 /// The identification as the state shows it.
@@ -156,6 +176,9 @@ pub struct MimoMixedView {
     pub drives: Vec<u32>,
     /// Each drive's peak ceiling, volts.
     pub peak_v: Vec<f64>,
+    /// Each drive's peak abort as configured, volts (`abort_vpk`, or the peak
+    /// ceiling plus 1 dB).
+    pub abort_vpk: Vec<f64>,
     /// Each control's reference rms at full level.
     pub reference_rms: Vec<f64>,
     pub unit: String,
@@ -163,6 +186,11 @@ pub struct MimoMixedView {
     /// Each drive's peak held over the last second.
     pub held_peak_v: Vec<f64>,
     pub identification: Option<IdentView>,
+    /// The prediction and the budget forecast the review shows, once the
+    /// gate has passed or been overridden.
+    pub prediction: Option<Value>,
+    /// The operator's overrides, in order.
+    pub overrides: Vec<Override>,
     pub law: LawFacts,
     pub end: Option<End>,
     pub record: Option<RecordRef>,
@@ -267,7 +295,7 @@ fn part_rows(v: &MimoMixedView) -> Vec<Value> {
                     (
                         b.is_some_and(|b| b.part_level > 0.0),
                         b.map(|b| b.center_hz),
-                        false,
+                        b.is_some_and(|b| b.limiting),
                         b.map(|b| b.part_level),
                     )
                 }
@@ -310,6 +338,10 @@ fn drive_rows(v: &MimoMixedView) -> Vec<Value> {
             } else {
                 None
             };
+            let abort = d
+                .map(|d| d.abort_vpk)
+                .or_else(|| v.abort_vpk.get(j).copied())
+                .filter(|x| x.is_finite());
             json!({
                 "channel": ch,
                 "random_rms_v": opt_num(d.map(|d| sig(d.random_rms_v, 4))),
@@ -317,6 +349,7 @@ fn drive_rows(v: &MimoMixedView) -> Vec<Value> {
                 "random_peak_v": num(sig(held, 4)),
                 "tone_sum_v": opt_num(d.map(|d| sig(d.tone_sum_v, 4))),
                 "ceiling_v": num(ceiling),
+                "abort_vpk": opt_num(abort.map(|x| sig(x, 4))),
                 "headroom_v": if ceiling.is_finite() { num(sig(ceiling - held, 4)) } else { Value::Null },
                 "headroom_db": opt_num(headroom.map(|h| round(h, 2))),
                 "scale": num(round(scale, 4)),
@@ -372,11 +405,84 @@ pub fn alarm(v: &MimoMixedView) -> bool {
     })
 }
 
-/// Any tone held down by the shared ceiling, or a frame clamped.
+/// Any tone held down by the shared ceiling, or any band held by the drive
+/// ceilings or the change cap.
 pub fn limiting(v: &MimoMixedView) -> bool {
     v.status
         .as_ref()
-        .is_some_and(|s| s.tones.iter().any(|t| t.limiting))
+        .is_some_and(|s| s.tones.iter().any(|t| t.limiting) || s.bands.iter().any(|b| b.limiting))
+}
+
+/// Each limit channel's worst line against its ceiling, from the status.
+fn limit_rows(s: &MimoMixedStatus) -> Vec<Value> {
+    s.limits
+        .iter()
+        .map(|l| {
+            json!({"channel": l.channel_index, "over_db": finite(l.over_db, 2),
+                   "at_hz": finite(l.at_hz, 3)})
+        })
+        .collect()
+}
+
+fn forecast_point(f: &BudgetForecast, drives: &[u32]) -> Value {
+    json!({"drive": drives.get(f.drive).copied().unwrap_or(f.drive as u32),
+           "time_s": num(round(f.time_s, 3)), "need_v": num(sig(f.need_v, 4)),
+           "ceiling_v": num(sig(f.ceiling_v, 4))})
+}
+
+/// The review's prediction and budget forecast: per drive and per control
+/// at full level, and the forecast's worst moment along the schedule
+/// (`cannot_fit` the first moment that does not fit, `refused` the
+/// forecast's refusal by name).
+pub fn prediction_json(
+    p: &MimoMixedPrediction,
+    forecast: Result<&BudgetForecast, &MimoMixedConfigError>,
+    drives: &[u32],
+    controls: &[u32],
+) -> Value {
+    let (worst, cannot_fit, refused) = match forecast {
+        Ok(f) => (forecast_point(f, drives), Value::Null, Value::Null),
+        Err(MimoMixedConfigError::BudgetCannotFit {
+            time_s,
+            drive,
+            need_v,
+            ceiling_v,
+        }) => {
+            let f = BudgetForecast {
+                time_s: *time_s,
+                drive: *drive,
+                need_v: *need_v,
+                ceiling_v: *ceiling_v,
+            };
+            let point = forecast_point(&f, drives);
+            (point.clone(), point, Value::from("budget_cannot_fit"))
+        }
+        Err(e) => (Value::Null, Value::Null, Value::from(e.name())),
+    };
+    json!({
+        "drives": p.drives.iter().enumerate().map(|(j, d)| json!({
+            "drive": drives.get(j).copied().unwrap_or(j as u32),
+            "random_rms_v": num(sig(d.random_rms_v, 4)),
+            "random_peak_v": num(sig(d.random_peak_v, 4)),
+            "random_peak_factor": num(round(d.random_peak_factor, 3)),
+            "tone_peak_sum_v": num(sig(d.tone_peak_sum_v, 4)),
+            "tone_rms_v": num(sig(d.tone_rms_v, 4)),
+            "total_rms_v": num(sig(d.total_rms_v, 4)),
+            "peak_v": num(sig(d.peak_v, 4)),
+            "ceiling_vrms": num(d.ceiling_vrms),
+            "ceiling_peak_v": num(d.ceiling_peak_v),
+            "within": d.within(),
+        })).collect::<Vec<_>>(),
+        "controls": p.controls.iter().enumerate().map(|(i, c)| json!({
+            "control": controls.get(i).copied().unwrap_or(i as u32),
+            "random_rms": num(sig(c.random_rms, 4)),
+            "tone_rms": num(sig(c.tone_rms, 4)),
+            "total_rms": num(sig(c.total_rms, 4)),
+        })).collect::<Vec<_>>(),
+        "forecast": {"step_s": num(FORECAST_STEP_S), "worst": worst, "cannot_fit": cannot_fit,
+                     "refused": refused},
+        "within": p.within(),
+    })
 }
 
 /// The `mimo_mixed.state` object; `None` is the unconfigured service.
@@ -389,7 +495,8 @@ pub fn state_json(v: Option<&MimoMixedView>) -> Value {
             "level_db": null, "t_s": null, "held": false, "alarm": false, "limiting": false,
             "parts": [], "drives": [], "scale": null, "floor_error_db": [],
             "floor_equalized": false, "floor": null,
-            "identification": null, "law": null, "end": null,
+            "limits": [], "identification": null, "prediction": null, "override": null,
+            "overrides": [], "law": null, "end": null,
         });
     };
     let s = v.status.as_ref();
@@ -419,9 +526,14 @@ pub fn state_json(v: Option<&MimoMixedView>) -> Value {
             "loops": s.loops,
             "misses": s.floor_misses,
             "underruns": s.underruns,
+            "dropped": s.dropped,
             "clamped": s.clamped,
         })),
+        "limits": s.map_or(Vec::new(), limit_rows),
         "identification": v.identification.as_ref().map_or(Value::Null, ident_json),
+        "prediction": v.prediction.clone().unwrap_or(Value::Null),
+        "override": v.overrides.last().map_or(Value::Null, Override::to_json),
+        "overrides": v.overrides.iter().map(Override::to_json).collect::<Vec<_>>(),
         "law": {"floor": v.law.floor.to_json(), "tones": v.law.tones.to_json()},
         "end": v.end.as_ref().map_or(Value::Null, end_json),
     });
@@ -451,7 +563,7 @@ pub fn state_key(v: Option<&MimoMixedView>) -> String {
                 })
                 .collect();
             format!(
-                "{}|{}|{}|{:?}|{}|{}|{}|{}",
+                "{}|{}|{}|{:?}|{}|{}|{}|{}|{}|{}",
                 v.run_id,
                 v.state.name(),
                 v.phase,
@@ -460,6 +572,8 @@ pub fn state_key(v: Option<&MimoMixedView>) -> String {
                 v.end.is_some(),
                 rows,
                 v.record.as_ref().map_or(Value::Null, |r| r.to_json()),
+                crate::random::view::mode_name(v.mode),
+                v.overrides.len(),
             )
         }
     }
@@ -806,11 +920,14 @@ pub fn configured_view(
         controls: core.controls.clone(),
         drives: core.drives.iter().map(|d| d.channel_index).collect(),
         peak_v: core.drives.iter().map(|d| d.peak_v).collect(),
+        abort_vpk: core.drives.iter().map(|d| d.abort_level_vpk()).collect(),
         reference_rms: derived.reference_rms.clone(),
         unit,
         status: None,
         held_peak_v: vec![0.0; core.drives.len()],
         identification: None,
+        prediction: None,
+        overrides: Vec::new(),
         law: derived.law.clone(),
         end: None,
         record: None,

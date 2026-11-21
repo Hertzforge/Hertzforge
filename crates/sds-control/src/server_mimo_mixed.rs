@@ -20,6 +20,7 @@ use crate::table;
 use crate::views::{self, Axis, Role, Scale, Series};
 use hertzforge_mimo_mixed::service::LawRole;
 use hertzforge_mimo_mixed::MimoMixedConfig;
+use hertzforge_random::RunMode;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -417,6 +418,38 @@ impl Service {
                     ));
                 }
             }
+            "mimo_mixed.mode" => match protocol::named_str(params, "mode")? {
+                Some("auto") | Some("manual") => {}
+                _ => {
+                    return Err(MethodError::bad_params(
+                        "mode",
+                        "\"mode\" is \"auto\" or \"manual\"",
+                    ))
+                }
+            },
+            "mimo_mixed.override" => {
+                match params.get("ack") {
+                    Some(Value::String(s)) if !s.trim().is_empty() => {}
+                    _ => {
+                        return Err(MethodError::bad_params(
+                            "ack",
+                            "An override is the operator's own words on why the run should go \
+                             on; it cannot be empty.",
+                        ))
+                    }
+                }
+                match params.get("reason") {
+                    None | Some(Value::Null) => {}
+                    Some(Value::String(r)) if r == "gate_failed" || r == "prediction_exceeded" => {}
+                    Some(_) => {
+                        return Err(MethodError::bad_params(
+                            "reason",
+                            "\"reason\" is \"gate_failed\" or \"prediction_exceeded\": what the \
+                             override acknowledges",
+                        ))
+                    }
+                }
+            }
             "mimo_mixed.part" => {
                 protocol::named_str(params, "id")?
                     .filter(|s| !s.is_empty())
@@ -456,6 +489,43 @@ impl Service {
                     .ask(|reply| Cmd::Level { target, reply }, VERB_WAIT)
                     .await?;
                 Ok(json!({"level_db": num(config::round(level, 2))}))
+            }
+            "mimo_mixed.mode" => {
+                let mode = match protocol::named_str(params, "mode")? {
+                    Some("manual") => RunMode::Manual,
+                    _ => RunMode::Auto,
+                };
+                run.ask(|reply| Cmd::Mode { mode, reply }, VERB_WAIT)
+                    .await?;
+                Ok(json!({"mode": crate::random::view::mode_name(mode)}))
+            }
+            "mimo_mixed.override" => {
+                let ack = params
+                    .get("ack")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned();
+                let reason = match params.get("reason").and_then(Value::as_str) {
+                    Some("gate_failed") => Some("gate_failed"),
+                    Some("prediction_exceeded") => Some("prediction_exceeded"),
+                    _ => None,
+                };
+                let by = {
+                    let inner = self.inner.lock().await;
+                    inner.session.client_name(conn.id, &conn.peer)
+                };
+                run.ask(
+                    |reply| Cmd::Override {
+                        ack,
+                        by,
+                        reason,
+                        reply,
+                    },
+                    VERB_WAIT,
+                )
+                .await?;
+                Ok(state())
             }
             "mimo_mixed.hold" | "mimo_mixed.resume" => {
                 let on = method == "mimo_mixed.hold";
@@ -839,7 +909,14 @@ impl Service {
         })
         .await
         .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))??;
-        let passed = !results.is_empty() && results.iter().all(|(_, v)| v.passed);
+        // The verdict is the required cases'; an informational case is run
+        // and recorded beside it.
+        let passed = !results.is_empty()
+            && results.iter().all(|(_, v)| {
+                v.passed
+                    || hertzforge_mimo_mixed_laws::MimoMixedCheckCase::from_name(&v.name)
+                        .is_some_and(|c| !c.required())
+            });
         let cases: Vec<Value> = results.iter().map(|(j, _)| j.clone()).collect();
         let (facts, recorded) = if facts.builtin {
             (facts, false)

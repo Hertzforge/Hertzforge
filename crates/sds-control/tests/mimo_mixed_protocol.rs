@@ -81,10 +81,8 @@ async fn run_to_engaged(c: &mut Client, cfg: &Value) -> Value {
 // ---- refusals by name ----------------------------------------------------------------
 
 /// Every verb this module names but does not build.
-const NOT_BUILT: [(&str, &str); 6] = [
-    ("mimo_mixed.mode", "mode_not_built"),
+const NOT_BUILT: [(&str, &str); 4] = [
     ("mimo_mixed.adjust", "adjust_not_built"),
-    ("mimo_mixed.override", "override_not_built"),
     ("mimo_mixed.exclude", "exclude_not_built"),
     (
         "mimo_mixed.identification.save",
@@ -128,6 +126,20 @@ async fn mimo_mixed_refuses_by_name_before_a_configuration_and_for_what_it_does_
         "not_configured",
     )
     .await;
+    refused_as(
+        &mut c,
+        "mimo_mixed.mode",
+        json!({"mode": "manual"}),
+        "not_configured",
+    )
+    .await;
+    refused_as(
+        &mut c,
+        "mimo_mixed.override",
+        json!({"ack": "Accepted."}),
+        "not_configured",
+    )
+    .await;
     for (m, reason) in NOT_BUILT {
         let e = refused_as(&mut c, m, json!({}), reason).await;
         assert!(
@@ -155,6 +167,22 @@ async fn mimo_mixed_refuses_by_name_before_a_configuration_and_for_what_it_does_
     )
     .await;
     error_golden("response_error_mimo_mixed_config_invalid", 92, &e);
+    // One channel is one drive: a second row for it is refused by name.
+    let mut twice = config();
+    twice["drives"][1]["channel_index"] = twice["drives"][0]["channel_index"].clone();
+    let e = refused_as(
+        &mut c,
+        "mimo_mixed.configure",
+        json!({"config": twice}),
+        "config_invalid",
+    )
+    .await;
+    assert!(
+        e["detail"]["errors"].as_array().is_some_and(|v| v
+            .iter()
+            .any(|i| i["reason"] == "duplicate_drive" && i["field"] == "drives[1]")),
+        "{e}"
+    );
     let e = refused_as(
         &mut c,
         "mimo_mixed.configure",
@@ -680,6 +708,30 @@ async fn long_call(c: &mut Client, method: &str, params: Value) -> Value {
 /// A passed record of MIMO Random's own check for the file `sha`, beside it: the
 /// floor law's own world's check (MIMO Random's to test; written here as the
 /// Mixed Mode records test writes the Sine one).
+/// A passed check of the law's own world for `role`'s law (MIMO Random's for
+/// the floor, MIMO Sine's at the check in force for the tones), beside it.
+fn write_own_record(data_root: &std::path::Path, sha: &str, role: &str) {
+    if role == "floor" {
+        return write_mimo_record(data_root, sha);
+    }
+    use hertzforge_random_laws::{CheckCase, CheckRecord};
+    let cases = (0..4)
+        .map(|k| CheckCase {
+            name: format!("case {k}"),
+            passed: true,
+            detail: String::new(),
+        })
+        .collect();
+    CheckRecord::new(
+        sha,
+        hertzforge_mimo_sine_laws::MIMO_SINE_CHECK_VERSION,
+        "2026-11-21T10:00:00Z",
+        cases,
+    )
+    .write(&data_root.join("laws"))
+    .unwrap();
+}
+
 fn write_mimo_record(data_root: &std::path::Path, sha: &str) {
     use hertzforge_random_laws::{CheckCase, CheckRecord, MIMO_CHECK_VERSION};
     let cases = (0..4)
@@ -694,23 +746,6 @@ fn write_mimo_record(data_root: &std::path::Path, sha: &str) {
         .unwrap();
 }
 
-/// A passed MIMO Mixed check record in `role` for the file `sha`, at the check in
-/// force (its version and its cases by name, in order), beside it.
-fn write_mimo_mixed_record(data_root: &std::path::Path, sha: &str, role: &str) {
-    use hertzforge_random_laws::CheckCase;
-    let cases = hertzforge_mimo_mixed_laws::MimoMixedCheckCase::ALL
-        .iter()
-        .map(|k| CheckCase {
-            name: k.name().into(),
-            passed: true,
-            detail: String::new(),
-        })
-        .collect();
-    hertzforge_mimo_mixed_laws::mimo_mixed_check_record(sha, "2026-11-21T10:00:00Z", cases)
-        .write_named(&data_root.join("laws"), &format!("mimo-mixed-{role}"))
-        .unwrap();
-}
-
 /// On hardware an imported floor law needs its own world's check and the MIMO
 /// Mixed check in the floor role. With the first alone the arm is refused
 /// `law_not_checked`. `laws.check` in the role runs every case of the laws
@@ -718,7 +753,18 @@ fn write_mimo_mixed_record(data_root: &std::path::Path, sha: &str, role: &str) {
 /// file; a record that did not pass clears nothing, and a passing one clears the
 /// floor role alone. A floor law checked in the tones role is refused by name.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn mimo_mixed_the_check_in_a_role_clears_that_role_on_a_hardware_station() {
+async fn mimo_mixed_the_check_in_each_role_clears_that_role_on_a_hardware_station() {
+    // One law check runs at a time in the process: the roles one after the other.
+    the_check_clears_its_role("floor", "hertzforge_law_mimo_pinv").await;
+    the_check_clears_its_role("tones", "hertzforge_law_mimo_sine_matrix").await;
+}
+
+/// The law file `name` imported for `role` ("floor" or "tones"), with its own
+/// world's check passed, is refused on hardware until `laws.check` in that
+/// role runs the MIMO Mixed check; the check's required cases pass, it is
+/// recorded against the file with the informational swept-tone case beside
+/// the verdict, and the law then clears its role and no other.
+async fn the_check_clears_its_role(role: &str, name: &str) {
     let o = options(
         FixedScanner(Ok(test_rig())),
         0.0,
@@ -728,9 +774,10 @@ async fn mimo_mixed_the_check_in_a_role_clears_that_role_on_a_hardware_station()
     let data_root = o.data_root.clone();
     let (svc, _, mut c) = client_with(o).await;
     on_hardware(&mut c).await;
-    let law = import(&mut c, "hertzforge_law_mimo_pinv").await;
-    let floor = law["id"].as_str().unwrap().to_owned();
-    write_mimo_record(&data_root, law["sha256"].as_str().unwrap());
+    let law = import(&mut c, name).await;
+    let id = law["id"].as_str().unwrap().to_owned();
+    let sha = law["sha256"].as_str().unwrap().to_owned();
+    write_own_record(&data_root, &sha, role);
     // The catalog reads a law's own check record as it opens: a fresh service on
     // the same data root sees the record just written.
     drop(c);
@@ -745,55 +792,60 @@ async fn mimo_mixed_the_check_in_a_role_clears_that_role_on_a_hardware_station()
     let (_svc, _, mut c) = client_with(o).await;
     on_hardware(&mut c).await;
     let mut cfg = config();
-    cfg["law"]["floor"] = json!({"id": floor});
+    cfg["law"][role] = json!({"id": id});
     let r = c.ok("mimo_mixed.configure", json!({"config": cfg})).await;
-    assert_eq!(r["derived"]["law"]["floor"]["hardware"], false, "{r}");
+    assert_eq!(r["derived"]["law"][role]["hardware"], false, "{r}");
     let e = c.refused("mimo_mixed.arm", json!({})).await;
     assert_eq!(e["reason"], "law_not_checked", "{e}");
-    assert_eq!(e["detail"]["role"], "floor", "{e}");
+    assert_eq!(e["detail"]["role"], role, "{e}");
     let t0 = std::time::Instant::now();
-    let r = long_call(
-        &mut c,
-        "laws.check",
-        json!({"mimo_mixed": "floor", "id": floor}),
-    )
-    .await;
-    eprintln!("the floor check took {:?}", t0.elapsed());
+    let r = long_call(&mut c, "laws.check", json!({"mimo_mixed": role, "id": id})).await;
+    eprintln!("the {role} check took {:?}", t0.elapsed());
     let report = &r["report"];
     let cases = report["cases"].as_array().unwrap();
     for case in cases {
-        eprintln!("  {} {}", case["case"], case["passed"]);
+        eprintln!(
+            "  {} required {} passed {}: {}",
+            case["case"], case["required"], case["passed"], case["detail"]
+        );
     }
-    assert_eq!(report["role"], "floor", "{report}");
-    assert_eq!(report["tool_version"], "mimo-mixed-check 1", "{report}");
-    assert_eq!(cases.len(), 9, "{report}");
+    assert_eq!(report["role"], role, "{report}");
+    assert_eq!(report["tool_version"], "mimo-mixed-check 2", "{report}");
+    assert_eq!(cases.len(), 10, "{report}");
+    let required: Vec<_> = cases.iter().filter(|k| k["required"] == true).collect();
+    assert_eq!(required.len(), 9, "{report}");
+    let swept = cases
+        .iter()
+        .find(|k| k["case"] == "swept_tone_through_mode")
+        .unwrap();
+    assert_eq!(swept["required"], false, "{swept}");
     assert_eq!(report["recorded"], true, "{report}");
-    let all = cases.iter().all(|k| k["passed"] == true);
-    assert_eq!(report["passed"], all, "{report}");
-    assert_eq!(r["law"]["hardware"], all, "{}", r["law"]);
-    let sha = law["sha256"].as_str().unwrap();
-    let record = data_root
+    assert!(
+        required.iter().all(|k| k["passed"] == true),
+        "a required case failed: {report}"
+    );
+    assert_eq!(report["passed"], true, "{report}");
+    assert_eq!(r["law"]["hardware"], true, "{}", r["law"]);
+    let path = data_root
         .join("laws")
-        .join(format!("{sha}.mimo-mixed-floor.check.json"));
-    assert!(record.is_file(), "no record at {}", record.display());
-    if !all {
-        // The check as it stands fails a case for every floor law (its swept tone
-        // case is a method limit of the controller): the failed record clears
-        // nothing.
-        c.ok("mimo_mixed.configure", json!({"config": cfg})).await;
-        let e = c.refused("mimo_mixed.arm", json!({})).await;
-        assert_eq!(e["reason"], "law_not_checked", "{e}");
-        write_mimo_mixed_record(&data_root, sha, "floor");
-    }
+        .join(format!("{sha}.mimo-mixed-{role}.check.json"));
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(record["passed"], true, "{record}");
+    assert_eq!(record["cases"].as_array().unwrap().len(), 9, "{record}");
+    assert_eq!(
+        record["informational"][0]["name"], "swept_tone_through_mode",
+        "{record}"
+    );
     let r = c.ok("mimo_mixed.configure", json!({"config": cfg})).await;
-    assert_eq!(r["derived"]["law"]["floor"]["hardware"], true, "{r}");
+    assert_eq!(r["derived"]["law"][role]["hardware"], true, "{r}");
     // Past the law gate: the station, with no driver, refuses on its own.
     let e = c.refused("mimo_mixed.arm", json!({})).await;
     assert_ne!(e["reason"], "law_not_checked", "{e}");
-    // The floor's record clears the floor alone: the same file is no tone law.
+    // The record clears its role alone: the same file is no law of the other.
+    let other = if role == "floor" { "tones" } else { "floor" };
     let e = c
-        .refused("laws.check", json!({"mimo_mixed": "tones", "id": floor}))
+        .refused("laws.check", json!({"mimo_mixed": other, "id": id}))
         .await;
     assert_eq!(e["reason"], "law_wrong_world", "{e}");
-    assert_eq!(e["detail"]["role"], "tones", "{e}");
+    assert_eq!(e["detail"]["role"], other, "{e}");
 }

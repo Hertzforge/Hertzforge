@@ -222,6 +222,7 @@
      "random_peak_v": 0,
      "tone_sum_v": null,
      "ceiling_v": 6,
+     "abort_vpk": 6.732,
      "headroom_v": 6,
      "headroom_db": null,
      "scale": 1
@@ -233,6 +234,7 @@
      "random_peak_v": 0,
      "tone_sum_v": null,
      "ceiling_v": 6,
+     "abort_vpk": 6.732,
      "headroom_v": 6,
      "headroom_db": null,
      "scale": 1
@@ -244,6 +246,7 @@
      "random_peak_v": 0,
      "tone_sum_v": null,
      "ceiling_v": 6,
+     "abort_vpk": 6.732,
      "headroom_v": 6,
      "headroom_db": null,
      "scale": 1
@@ -255,6 +258,7 @@
      "random_peak_v": 0,
      "tone_sum_v": null,
      "ceiling_v": 6,
+     "abort_vpk": 6.732,
      "headroom_v": 6,
      "headroom_db": null,
      "scale": 1
@@ -264,7 +268,11 @@
    "floor_error_db": [],
    "floor_equalized": false,
    "floor": null,
+   "limits": [],
    "identification": null,
+   "prediction": null,
+   "override": null,
+   "overrides": [],
    "law": {
     "floor": {
      "id": "pinv_closed",
