@@ -222,4 +222,23 @@ describe('the Modal Test store', () => {
 		await o.request('modal_test.end');
 		await until(() => modal.now?.state === 'finished');
 	});
+	it('modal test roves the hammer over the points in a roving hammer survey, and refuses a roving force row with shakers', async () => {
+		const { modal } = await screen();
+		dofs(modal, [
+			[1, 1, 'Z+', 'reference'],
+			[3, 2, 'Z+', 'response']
+		]);
+		modal.setup.roving = { ...modal.setup.roving, on: true, channels: [1], how: 'fill', fill: { start: 4, step: 2, count: 3 } };
+		expect(await modal.apply()).toBe(true);
+		expect(modal.runCheck?.points.map((p) => [p.references.map((r) => `${r.node}${r.direction}`), p.responses.map((r) => `${r.node}${r.direction}`)])).toEqual([
+			[['4Z+'], ['2Z+']],
+			[['6Z+'], ['2Z+']],
+			[['8Z+'], ['2Z+']]
+		]);
+		modal.setup.mode = 'shaker';
+		modal.setup.shaker.drives = [{ row: 2, level_vrms: 0.05 }];
+		await modal.checkSetup();
+		expect(modal.current?.errors.map((e) => [e.reason, e.field])).toContainEqual(['roving_invalid', 'config.roving.channels']);
+		expect(modal.fieldErrors['roving.channels']?.[0]).toMatch(/force row does not rove/);
+	});
 });

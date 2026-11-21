@@ -1,6 +1,7 @@
 <script lang="ts">
 	/**
-	 * The roving plan: which response rows rove, and the points they take in turn, typed or pasted
+	 * The roving plan: which rows rove (the hammer in a roving hammer survey, or the responses), and
+	 * the points they take in turn, typed or pasted
 	 * (a node a line, or a node and a direction when one row roves), or filled from a start, a step
 	 * and a count. The service makes the plan from them and the table's DOFs, and its check lists
 	 * each measurement's DOFs.
@@ -20,7 +21,11 @@
 	const E = $derived(modal.fieldErrors);
 	const W = $derived(modal.fieldWarnings);
 	const errs = (k: string) => E[k] ?? [];
-	const responses = $derived(modalRows(modal.rows).responses);
+	// In impact mode the hammer row may rove (a roving hammer survey); a shaker's force row does not.
+	const rovable = $derived.by(() => {
+		const m = modalRows(modal.rows);
+		return [...(d.mode === 'impact' ? m.references : []), ...m.responses].sort((a, b) => a.index - b.index);
+	});
 	const parsed = $derived(d.roving.how === 'list' ? parsePoints(d.roving.text) : null);
 	const c = $derived(modal.checkOf);
 	const findings = (k: string) => [...errs(k).map((message) => ({ level: 'error' as const, message })), ...(W[k] ?? []).map((message) => ({ level: 'warning' as const, message }))];
@@ -39,25 +44,25 @@
 		<label class="aq-switch" for="mt-rov-on">
 			<input id="mt-rov-on" type="checkbox" role="switch" checked={d.roving.on} disabled={locked} onchange={(e) => (d.roving.on = e.currentTarget.checked)} data-testid="mt-rov-on" />
 			<span class="track" aria-hidden="true"><span class="thumb"></span></span>
-			<span>Rove responses over points</span>
+			<span>Rove over points</span>
 			<span class="word">{d.roving.on ? 'On' : 'Off'}</span>
 		</label>
-		<p class="help">Off, the test measures one point with every DOF as the table gives it. On, each roving row takes each point's node in turn; the others stay where they are.</p>
+		<p class="help">Off, the test measures one point with every DOF as the table gives it. On, each roving row takes each point's node in turn; the others stay where they are. {d.mode === 'impact' ? 'Rove the hammer row for a roving hammer survey, or the responses for a roving accelerometer survey.' : "Rove the responses: a shaker's force row stays where it is."}</p>
 		<Findings items={findings('roving')} />
 
 		{#if d.roving.on}
 			<div class="aq-group">
 				<h3>Roving Rows</h3>
-				{#if responses.length}
+				{#if rovable.length}
 					<ul class="rows">
-						{#each responses as r (r.index)}
+						{#each rovable as r (r.index)}
 							<li>
-								<label><input type="checkbox" checked={d.roving.channels.includes(r.index)} disabled={locked} onchange={(e) => toggle(r.index, e.currentTarget.checked)} data-testid="mt-rov-row" data-row={r.index} /> Row {r.index}, {r.description} ({r.node ?? '-'}{r.direction ?? ''})</label>
+								<label><input type="checkbox" checked={d.roving.channels.includes(r.index)} disabled={locked} onchange={(e) => toggle(r.index, e.currentTarget.checked)} data-testid="mt-rov-row" data-row={r.index} /> Row {r.index}, {r.description} ({r.node ?? '-'}{r.direction ?? ''}, {r.analysis_role === 'reference' ? 'reference' : 'response'})</label>
 							</li>
 						{/each}
 					</ul>
 				{:else}
-					<p class="aq-small aq-muted">No response row yet: set the responses in DOFs.</p>
+					<p class="aq-small aq-muted">No reference or response row yet: set them in DOFs.</p>
 				{/if}
 				<Findings items={findings('roving.channels')} />
 			</div>
@@ -94,7 +99,7 @@
 					{#each c.points as p (p.index)}
 						<tr>
 							<td class="num">{p.index + 1}</td>
-							<td>{p.references.map((r) => `${r.node ?? '-'}${r.direction ?? ''}`).join(', ')}</td>
+							<td>{p.references.map((r) => `${r.node ?? '-'}${r.direction ?? ''}${r.roves ? ' (roves)' : ''}`).join(', ')}</td>
 							<td>{p.responses.map((r) => `${r.node ?? '-'}${r.direction ?? ''}${r.roves ? ' (roves)' : ''}`).join(', ')}</td>
 						</tr>
 					{/each}

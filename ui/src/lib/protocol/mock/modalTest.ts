@@ -145,15 +145,22 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 		if (!refs.length) errors.push(onRow('no_reference', null, "No enabled input row has the analysis role reference: give the hammer's or each shaker's force row that role."));
 		if (!resps.length) errors.push(onRow('no_response', null, 'No enabled input row has the analysis role response.'));
 		if (mode === 'impact' && refs.length > 1) errors.push(onRow('reference_count', null, 'Impact mode takes one reference, the hammer row.'));
-		for (const r of [...refs, ...resps]) if (r.node === null || r.node === undefined || !r.direction) errors.push(onRow('no_dof', r.index, `Row ${r.index} has no node and direction: give it its DOF.`));
+		for (const r of [...refs, ...resps]) if (r.node === null || r.node === undefined || !r.direction) errors.push(onRow('dof_missing', r.index, `Row ${r.index} has no node and direction: give it its DOF.`));
 		const fs = config.fs_hz;
 		const band = { lo_hz: config.band?.lo_hz ?? 0, hi_hz: config.band?.hi_hz ?? round(fs / 2.56, 3) };
 		if (band.hi_hz > fs / 2) errors.push(ITEM('out_of_range', 'config.band.hi_hz', `The band ends at most at half the sample rate, ${fs / 2} Hz.`));
 		if (band.lo_hz >= band.hi_hz) errors.push(ITEM('out_of_range', 'config.band.lo_hz', 'The band starts below where it ends.'));
 		const df = fs / block;
 		// The plan: one measurement, or one per roving point.
+		// A roving row is an enabled reference or response; in impact mode the hammer may rove (a
+		// roving hammer survey), in shaker mode a force row does not.
 		const rovers = new Set(config.roving?.channels ?? []);
-		for (const c of rovers) if (!resps.some((r) => r.index === c)) errors.push({ ...ITEM('not_a_response', 'config.roving.channels', `Row ${c} is not a response: only a response roves.`), channel: c });
+		if (config.roving && !rovers.size) errors.push(ITEM('roving_invalid', 'config.roving.channels', 'A roving plan names at least one channel that roves.'));
+		for (const c of rovers) {
+			const isRef = refs.some((r) => r.index === c);
+			if (!isRef && !resps.some((r) => r.index === c)) errors.push({ ...ITEM('roving_invalid', 'config.roving.channels', `Row ${c} roves but is not an enabled reference or response row.`), channel: c });
+			else if (isRef && mode === 'shaker') errors.push(ITEM('roving_invalid', 'config.roving.channels', "A shaker's force row does not rove: rove the responses."));
+		}
 		let points: ModalPoint[] = [];
 		const p = config.roving?.points;
 		if (rovers.size && p) {
@@ -163,11 +170,13 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				const step = p.step ?? 1;
 				points = Array.from({ length: Math.max(0, p.count) }, (_, k) => ({ node: start + k * step }));
 			}
-			if (!points.length) errors.push(ITEM('no_points', 'config.roving.points', 'The roving list has no points.'));
+			if (!points.length) errors.push(ITEM('roving_invalid', 'config.roving.points', 'A roving plan names at least one point.'));
+			if (rovers.size > 1 && points.some((q) => q.direction)) errors.push(ITEM('roving_invalid', 'config.roving.points', 'A point gives a direction only when exactly one channel roves; with several, each keeps its own direction.'));
 		} else if (!rovers.size) warnings.push(ITEM('no_roving', 'config.roving', 'No row roves: the test measures one point.'));
+		const at = (r: ChannelRow, pt: ModalPoint | null): ModalRowDof => (pt && rovers.has(r.index) ? { ...dof(r, true), node: pt.node, direction: pt.direction ?? r.direction ?? null } : dof(r));
 		const plan: Run['plan'] = (points.length ? points : [null]).map((pt) => ({
-			references: refs.map((r) => dof(r)),
-			responses: resps.map((r) => (pt && rovers.has(r.index) ? { ...dof(r, true), node: pt.node, direction: pt.direction ?? r.direction ?? null } : dof(r)))
+			references: refs.map((r) => at(r, pt)),
+			responses: resps.map((r) => at(r, pt))
 		}));
 		if (averages === 1) warnings.push(ITEM('one_average', 'config.averages', 'One average gives no coherence: every line reads 1.'));
 		let impact: ModalCheckImpact | undefined;
@@ -248,7 +257,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			band: { ...band, first_line: Math.ceil(band.lo_hz / df), last_line: Math.floor(band.hi_hz / df), lines: Math.floor(band.hi_hz / df) - Math.ceil(band.lo_hz / df) + 1 },
 			estimator: refs.length > 1 ? 'matrix H1' : (config.estimator ?? 'H1'),
 			averages,
-			references: refs.map((r) => dof(r)),
+			references: refs.map((r) => dof(r, rovers.has(r.index))),
 			responses: resps.map((r) => dof(r, rovers.has(r.index))),
 			points: plan.map((x, k) => ({ index: k, ...x })),
 			impact,
