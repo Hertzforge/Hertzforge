@@ -1,0 +1,335 @@
+{
+ "type": "response",
+ "id": 91,
+ "result": {
+  "state": {
+   "run_id": "mimo-mixed-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Four-Shaker Mixed Test",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 16384,
+    "n_pts": 4096,
+    "df_hz": 4,
+    "lines": 2049,
+    "band_hz": [
+     20,
+     1800
+    ],
+    "actual": false
+   },
+   "clock": null,
+   "mode": "manual",
+   "levels_db": [
+    -6,
+    -3,
+    0
+   ],
+   "level_db": null,
+   "t_s": null,
+   "held": false,
+   "alarm": false,
+   "limiting": false,
+   "parts": [
+    {
+     "id": "floor",
+     "kind": "floor",
+     "name": "floor",
+     "enabled": true,
+     "on": false,
+     "freq_hz": null,
+     "held": false,
+     "limiting": false,
+     "scale": null,
+     "folded": null,
+     "amplitude": "rms",
+     "unit": "g",
+     "controls": [
+      {
+       "channel": 1,
+       "target": 1.336,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 2,
+       "target": 1.336,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 3,
+       "target": 1.336,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 4,
+       "target": 1.336,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      }
+     ]
+    },
+    {
+     "id": "t1",
+     "kind": "tone",
+     "name": "t1",
+     "enabled": true,
+     "on": false,
+     "freq_hz": null,
+     "held": false,
+     "limiting": false,
+     "scale": null,
+     "folded": null,
+     "amplitude": "peak",
+     "unit": "g",
+     "controls": [
+      {
+       "channel": 1,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 2,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 3,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 4,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      }
+     ]
+    },
+    {
+     "id": "t2",
+     "kind": "tone",
+     "name": "t2",
+     "enabled": true,
+     "on": false,
+     "freq_hz": null,
+     "held": false,
+     "limiting": false,
+     "scale": null,
+     "folded": null,
+     "amplitude": "peak",
+     "unit": "g",
+     "controls": [
+      {
+       "channel": 1,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 2,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 3,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 4,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      }
+     ]
+    },
+    {
+     "id": "b1",
+     "kind": "narrowband",
+     "name": "b1",
+     "enabled": true,
+     "on": false,
+     "freq_hz": null,
+     "held": false,
+     "limiting": false,
+     "scale": null,
+     "folded": null,
+     "amplitude": "db",
+     "unit": "dB",
+     "controls": [
+      {
+       "channel": 1,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 2,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 3,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      },
+      {
+       "channel": 4,
+       "target": null,
+       "measured": null,
+       "error_db": null,
+       "alarm": false
+      }
+     ]
+    }
+   ],
+   "drives": [
+    {
+     "channel": 5,
+     "random_rms_v": null,
+     "peak_v": null,
+     "random_peak_v": 0,
+     "tone_sum_v": null,
+     "ceiling_v": 6,
+     "headroom_v": 6,
+     "headroom_db": null,
+     "scale": 1
+    },
+    {
+     "channel": 6,
+     "random_rms_v": null,
+     "peak_v": null,
+     "random_peak_v": 0,
+     "tone_sum_v": null,
+     "ceiling_v": 6,
+     "headroom_v": 6,
+     "headroom_db": null,
+     "scale": 1
+    },
+    {
+     "channel": 7,
+     "random_rms_v": null,
+     "peak_v": null,
+     "random_peak_v": 0,
+     "tone_sum_v": null,
+     "ceiling_v": 6,
+     "headroom_v": 6,
+     "headroom_db": null,
+     "scale": 1
+    },
+    {
+     "channel": 8,
+     "random_rms_v": null,
+     "peak_v": null,
+     "random_peak_v": 0,
+     "tone_sum_v": null,
+     "ceiling_v": 6,
+     "headroom_v": 6,
+     "headroom_db": null,
+     "scale": 1
+    }
+   ],
+   "scale": null,
+   "floor_error_db": [],
+   "floor_equalized": false,
+   "floor": null,
+   "identification": null,
+   "law": {
+    "floor": {
+     "id": "pinv_closed",
+     "name": "pseudo-inverse, closed loop",
+     "version": "1.0.0",
+     "sha256": null,
+     "builtin": true,
+     "world": "mimo",
+     "hardware": true,
+     "not_cleared": null
+    },
+    "tones": {
+     "id": "matrix",
+     "name": "matrix",
+     "version": "0.1.0",
+     "sha256": null,
+     "builtin": true,
+     "world": "sine_mimo",
+     "hardware": true,
+     "not_cleared": null
+    }
+   },
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 16384.0,
+    "n_pts": 4096,
+    "df_hz": 4.0,
+    "lines": 2049
+   },
+   "band_hz": [
+    20.0,
+    1800.0
+   ],
+   "reference_rms": [
+    1.33566,
+    1.33566,
+    1.33566,
+    1.33566
+   ],
+   "reference_source": "inline, 2 points from 20 to 1800 Hz, on 446 grid lines",
+   "law": {
+    "floor": {
+     "id": "pinv_closed",
+     "name": "pseudo-inverse, closed loop",
+     "version": "1.0.0",
+     "sha256": null,
+     "builtin": true,
+     "world": "mimo",
+     "hardware": true,
+     "not_cleared": null
+    },
+    "tones": {
+     "id": "matrix",
+     "name": "matrix",
+     "version": "0.1.0",
+     "sha256": null,
+     "builtin": true,
+     "world": "sine_mimo",
+     "hardware": true,
+     "not_cleared": null
+    }
+   }
+  },
+  "warnings": []
+ }
+}

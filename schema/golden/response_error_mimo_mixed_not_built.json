@@ -1,0 +1,9 @@
+{
+ "type": "response",
+ "id": 97,
+ "error": {
+  "code": "refused",
+  "reason": "adjust_not_built",
+  "message": "MIMO Mixed Mode's laws take no live parameters; configure the parameters instead."
+ }
+}

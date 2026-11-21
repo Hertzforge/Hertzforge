@@ -1,0 +1,40 @@
+{
+ "type": "response",
+ "id": 92,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 1 error.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "channel_unknown",
+     "field": "drives[0]",
+     "message": "Channel 12 is not an enabled drive of the table."
+    }
+   ],
+   "warnings": [
+    {
+     "reason": "drive_channel_present",
+     "channel": 5,
+     "message": "channel 5 is a drive output (sensitivity/range are advisory)"
+    },
+    {
+     "reason": "drive_channel_present",
+     "channel": 6,
+     "message": "channel 6 is a drive output (sensitivity/range are advisory)"
+    },
+    {
+     "reason": "drive_channel_present",
+     "channel": 7,
+     "message": "channel 7 is a drive output (sensitivity/range are advisory)"
+    },
+    {
+     "reason": "drive_channel_present",
+     "channel": 8,
+     "message": "channel 8 is a drive output (sensitivity/range are advisory)"
+    }
+   ]
+  }
+ }
+}

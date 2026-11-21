@@ -3,6 +3,8 @@
 #![allow(dead_code)]
 
 pub mod golden_runs;
+pub mod mmix;
+pub mod mmix_golden;
 pub mod modal;
 pub mod msine;
 pub mod msine_golden;

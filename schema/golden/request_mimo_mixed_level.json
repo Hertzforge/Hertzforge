@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 94,
+ "method": "mimo_mixed.level",
+ "params": {
+  "delta_db": -3
+ }
+}

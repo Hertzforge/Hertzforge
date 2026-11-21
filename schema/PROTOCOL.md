@@ -4536,6 +4536,316 @@ in a dwell they are against time, the last 60 s, at most 1200 points.
 A plot is empty (`views` empty) until there is something to draw: `identification` until the
 gate has run, the others until the loop has engaged.
 
+## MIMO Mixed Mode
+
+A MIMO Mixed Mode test plays a random floor and any number of sine tones and narrow random bands
+together on several drives at once, and controls the response at several control channels: the
+floor against a cross-spectral reference (MIMO Random's), each tone against its own amplitude per
+control (MIMO Sine's), each band against its stated added level. The service identifies the
+structure before the run with independent random on every drive at low level, gates on the
+identification's coherence and holds for review; on `mimo_mixed.proceed` the floor comes in alone
+at the soft-start level until it is equalized (`floor_only`), the tones and bands ramp in and the
+level goes to the schedule's start (`engaged`), and in the automatic schedule the level climbs the
+schedule's rungs to full level (`full_level`) and the run completes after its full-level time.
+Every control tick the floor's law (a MIMO Random law, world `mimo`) and the tones' law (a MIMO
+Sine law, world `sine_mimo`) are called; one drive budget per shaker is shared by the floor and
+every tone (the ceiling rule), and every protection and abort is the service's. Drives are in
+volts. The run is one test like any other and excludes every other run (`run_active`). **Any
+connected screen may stop or abort** (`mimo_mixed.stop`, `mimo_mixed.abort`);
+`mimo_mixed.configure` (other than a dry run), `arm`, `start`, `proceed`, `level`, `hold`,
+`resume`, `part`, `reset` and `clear` need control; everything that only reads is open to every
+connection. While the service shuts down, `arm`, `start`, `proceed`, `level`, `resume` and
+`part` are refused `shutting_down`; `hold`, `stop` and `abort` are not. Words mean what they mean
+in "MIMO Random", "MIMO Sine" and "Mixed Mode" unless this section says otherwise.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `mimo_mixed.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
+| `mimo_mixed.config` | `{}` | any | `{"run_id","config","derived","views"}` (each null, `views` empty, before a configuration) |
+| `mimo_mixed.arm` | `{}` | `configured` | state |
+| `mimo_mixed.start` | `{}` | `configured`, `armed` | state |
+| `mimo_mixed.proceed` | `{}` | `review` (phase `awaiting_review`) | state |
+| `mimo_mixed.level` | `{"delta_db"}` or `{"to_db"}`, exactly one | `running`, in `manual` | `{"level_db"}` |
+| `mimo_mixed.hold` | `{}` | `running` | state |
+| `mimo_mixed.resume` | `{}` | `running`, held | state |
+| `mimo_mixed.part` | `{"id","on"}` | `running` | `{"id","on"}` |
+| `mimo_mixed.stop` | `{}` | any | state |
+| `mimo_mixed.abort` | `{}` | any | state |
+| `mimo_mixed.reset` | `{}` | any but live | state |
+| `mimo_mixed.clear` | `{}` | any but live | state |
+| `mimo_mixed.state` | `{}` | any | state |
+| `mimo_mixed.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `mimo_mixed.subscribe` | see "MIMO Mixed Mode Display" | any | as there |
+| `mimo_mixed.reference.build_breakpoints`, `.build_rigid_body`, `.validate`, `.import` | as `mimo_random.reference.*` | any | as there |
+| `mimo_mixed.mode` | any | any | refused `mode_not_built` |
+| `mimo_mixed.adjust` | any | any | refused `adjust_not_built` |
+| `mimo_mixed.override` | any | any | refused `override_not_built` |
+| `mimo_mixed.exclude` | any | any | refused `exclude_not_built` |
+| `mimo_mixed.identification.save` | any | any | refused `identification_save_not_built` |
+| `mimo_mixed.identification.load` | any | any | refused `identification_load_not_built` |
+
+"state" is the `mimo_mixed.state` object below. A run is live while it is armed, running, holding
+for review or stopping. Before a configuration every verb that needs a run is refused
+`not_configured`; a verb in a state it does not apply in is refused `wrong_state` (its `detail`
+the `state` and `phase`); a finished run is refused `run_finished` by `arm` and `start` until it
+is reset or configured again. `mimo_mixed.configure` replaces a run that is not live;
+`mimo_mixed.reset` configures the present run's configuration again on the present table and
+station under a new run id; `mimo_mixed.clear` forgets it (`unconfigured`). A configuration is
+validated with `mimo_mixed.configure` and `dry_run: true`, which checks without replacing anything
+and needs no control. The six verbs refused `*_not_built` are names this module keeps for what it
+does not build: the schedule's mode is the configuration's (configure it instead), the laws take
+no live parameters, a control target cannot be overridden or a control excluded mid-run, and the
+run identifies every time (its record keeps the identification). The reference verbs are MIMO
+Random's own handlers under this module's names, with the same parameters, results and refusals.
+
+### MIMO Mixed Mode Configuration
+
+```
+{"title":"Four-Shaker Mixed Test","operator":"A. Operator","article":"Plate","notes":"",
+ "specification":{"document":"Example procedure","clause":"3.2"},
+ "controls":[1,2,3,4],
+ "drives":[{"channel_index":5,"ceiling_vrms":2,"peak_v":6,"pretest_max_vrms":0.2}, ...],
+ "reference":{"kind":"inline","freqs_hz":[20,1800],"n":4,"re":[...],"im":[...]},
+ "estimation":{"fs_hz":16384,"n_pts":4096,"frames_per_loop":8,"window":"Hann","overlap":0.5,
+               "memory_loops":4},
+ "parts":[{"id":"floor","body":{"kind":"floor","alarm_db":[3,3],"abort_db":[6,6]}},
+          {"id":"t1","body":{"kind":"tone","schedule":{"kind":"fixed","hz":150},
+                             "amplitude":{"kind":"constant","g_pk":1},"phases_stated":false,
+                             "alarm_db":[1.5,1.5],"abort_db":[3,3]}},
+          {"id":"b1","body":{"kind":"narrowband","schedule":{"kind":"fixed","hz":300},
+                             "width":{"kind":"hz","hz":40},
+                             "statement":{"kind":"added","level_g2_hz":0.003,"coherence":0.5},
+                             "alarm_db":[3,3],"abort_db":[6,6]}}],
+ "schedule":{"mode":"manual","start_db":-6,"table_db":[-6,-3,0],"dwell_s":[2]},
+ "full_level_duration_s":15,
+ "law":{"floor":{"id":"pinv_closed","params":{}},"tones":{"id":"matrix","params":{}},
+        "bands":{"id":"auto"},"ceiling_rule":{"id":"common_scale"},"fill_rule":{"id":"no_error"}},
+ "record":{"streams":true},
+ "simulator":{"structure":"sine-linear-4x4"}}
+```
+
+`schema/golden/request_mimo_mixed_configure.json` is a whole configuration. The members are the
+controller's own configuration (`hertzforge-mimo-mixed`'s, in its serialized form) less its
+reference, with these members of the wire's own:
+
+- `title`, `operator`, `article`, `notes` (strings) and `specification` (`{"document","clause"}`,
+  optional) are the run record's words.
+- `reference` is the floor's cross-spectral reference: `{"kind":"inline","freqs_hz","n","re","im"}`
+  (each frequency's packed upper triangle, row by row, `n (n + 1) / 2` values, in the controls'
+  unit squared per hertz; interpolated log-log onto the run's lines), or
+  `{"kind":"file","path","sha256"}` (a reference file as `mimo_random.reference.import` reads it;
+  one that cannot be read, or whose bytes no longer match `sha256`, is a `reference_invalid`
+  item).
+- `estimation.fs_hz` and `estimation.n_pts` set the grid: `fs_hz / n_pts` hertz between lines.
+  The floor's band is the reference's span on that grid.
+- `schedule.mode` is `auto` or `manual`.
+- `record.streams` (default true) keeps the time histories.
+- `simulator.structure` names the simulator's sine structure (`sine-linear-4x4`, ...); without it
+  the simulator takes the standard structure of the table's size, and a size it has none of is
+  refused `arm_refused` at arm.
+
+`derived` is `{"grid":{"fs_hz","n_pts","df_hz","lines"},"band_hz","reference_rms",
+"reference_source","law":{"floor","tones"}}`: `reference_rms` each control's reference rms at full
+level, `reference_source` the reference in words, and each role's law
+`{"id","name","version","sha256","builtin","world","hardware","not_cleared"}` (`hardware` whether
+it may drive hardware in its role now, `not_cleared` why not, in words). Every problem is an item
+of the report: a channel that is not an enabled control or drive of the table
+(`channel_unknown`), a part the controller refuses, a law of the wrong world for its role
+(`law_wrong_world`), an unknown law (`law_unknown`), a parameter the law does not declare
+(`param_unknown`) or outside its range (`param_out_of_range`), a budget the schedule cannot fit
+(`budget_cannot_fit`); with any error the configuration is refused `config_invalid` with the
+report, and a configuration that cannot be read at all `config_unreadable`.
+
+### Running a MIMO Mixed Mode Test
+
+`mimo_mixed.arm` checks the table (`table_invalid`), opens the station and claims the run folder;
+on a hardware station each role's law is looked up again and must clear its role (below), or the
+arm is refused `law_not_checked` with `detail.role` before the station is touched.
+`mimo_mixed.start` arms first when the run is configured, then identifies (`sysid`) and gates on
+the identification's coherence (`coherence_gate`): a pass holds for review (state `review`, phase
+`awaiting_review`), a failure ends the run `held` (phase `coherence_hold`). `mimo_mixed.proceed`
+engages: the floor alone (`floor_only`) until it is equalized, then the parts and the schedule
+(`engaged`) and, in the automatic schedule, full level (`full_level`) until the run completes. In
+the `manual` schedule the level moves only by `mimo_mixed.level` (`delta_db` a step, `to_db` a
+level, each capped at full level; refused `manual_mode_required` in `auto`) and the run never
+completes on its own: it ends on `mimo_mixed.stop`. `mimo_mixed.hold` stops the parts' clock (a
+sweep, a window, the schedule's dwell) while the drive keeps playing; `mimo_mixed.resume` starts
+it again. `mimo_mixed.part` switches a tone or a band
+on or off on its part ramp; the floor cannot be switched off and is refused `part_refused` with
+`detail.why` `floor`, an id the run does not have `unknown_part`, and a band folded into the
+floor's reference `band_folded`.
+
+`mimo_mixed.stop` ramps every part down on the shutdown ramp and ends `operator_stop`; it answers
+at once (state `stopping`, phase `ramping_down`), and a stop asked during identification takes
+effect when the identification returns. `mimo_mixed.abort` takes the drive to zero at once and
+ends `operator_abort` with no ramp. A run left with no controller past the session's orphan time
+ends in the safe stop (`safe_stop`, with the ramp), and so does a run live when the service shuts
+down; one still live twice its stop ramp later (at least ten seconds) is aborted.
+
+### MIMO Mixed Mode Run State
+
+```
+{"run_id":"mimo-mixed-0002","state":"running","phase":"full_level",
+ "title":"Four-Shaker Mixed Test","source":"SIM",
+ "station":{"kind":"sim","class":"sim","devices":[]},
+ "grid":{"fs_hz":16384,"n_pts":4096,"df_hz":4,"lines":2049,"band_hz":[20,1800],"actual":true},
+ "clock":"shared","mode":"manual","levels_db":[-6,-3,0],"level_db":0,"t_s":96.25,
+ "held":false,"alarm":false,"limiting":true,
+ "parts":[{"id":"floor","kind":"floor","name":"floor","enabled":true,"on":true,"freq_hz":null,
+           "held":false,"limiting":false,"scale":null,"folded":null,"amplitude":"rms","unit":"g",
+           "controls":[{"channel":1,"target":1.336,"measured":1.298,"error_db":-0.25,
+                        "alarm":false}, ...]}, ...],
+ "drives":[{"channel":5,"random_rms_v":0.5,"peak_v":2.25,"random_peak_v":2.5,"tone_sum_v":0.75,
+            "ceiling_v":6,"headroom_v":3.5,"headroom_db":7.6,"scale":0.875}, ...],
+ "scale":0.875,"floor_error_db":[-0.25,0.13,0.5,-0.06],"floor_equalized":true,
+ "floor":{"equalized":true,"loops":377,"misses":0,"underruns":0,"clamped":0},
+ "identification":{"level_db":-20,"steps":2,"frames":64,"lag_frames":265,
+                   "band_coherence":[0.9937,0.9943,0.993,0.9923],"gate_coherence":0.5,
+                   "passed":true,"drive_vrms":[0.01278,0.01278,0.01278,0.01278]},
+ "law":{"floor":{...},"tones":{...}},"end":null,
+ "record":{"folder":"...","streams":true,"problem":null}}
+```
+
+- `state` is Random's (`unconfigured`, `configured`, `armed`, `running`, `review`, `stopping`,
+  `finished`); `phase` is one of `idle`, `armed`, `sysid`, `coherence_gate`, `coherence_hold`,
+  `awaiting_review`, `floor_only`, `engaged`, `full_level`, `ramping_down`, `stopped`, `aborted`.
+- `source` is `SIM` or `HW`; `clock` is `shared` once the station has programmed its rate
+  (`grid.actual`).
+- `mode` is the schedule's (`auto`, `manual`); `levels_db` its rungs; `level_db` the level in force
+  and `t_s` the station time since engage (null before).
+- `held` is the operator's hold. `alarm` is true while any control of any part is outside its
+  alarm band. `limiting` is true while the shared ceiling holds a tone down.
+- `parts`: one row per part in configuration order. `enabled` is the switch as configured or as
+  `mimo_mixed.part` last set it, and `on` whether it plays now. `freq_hz` is a tone's frequency
+  or a band's center. `scale` is the ceiling rule's scale on a tone, or a band's ramp. `folded` is
+  true for a band folded into the floor's reference (null for the others). `amplitude` is how the
+  row's numbers read (`rms`, `peak`, `db`). `controls` gives per control its `target` (the
+  floor's rms at the level, a tone's peak amplitude), `measured`, `error_db` and `alarm`; a
+  band's rows give `error_db` alone, its added level against the stated.
+- `drives`: one row per drive. `random_rms_v` is the floor's rms. `peak_v` is the largest
+  magnitude played in the last chunk and `random_peak_v` the peak held over the last second.
+  `tone_sum_v` is the tones' summed amplitude in force. Then come the peak `ceiling_v` and the
+  headroom to it (`headroom_v`, `headroom_db`), and the tones' common `scale`.
+- `floor` is the floor loop's counts: loops run, the law's misses in a row, frames the ring could
+  not supply (`underruns`) and frames clamped at a peak ceiling.
+- `identification` is null until the identification has run. `band_coherence` is each control's
+  mean coherence over the band, `gate_coherence` the gate, and `drive_vrms` the identification's
+  drive.
+- `law` holds the two roles' laws as `derived.law` states them.
+- `end` is null until the run ends, then
+  `{"outcome","name","message","at_s","level_db","part","control","drive","ramp_s"}`. `outcome`
+  is `completed`, `operator_stop`, `operator_abort`, `safe_stop`, `aborted` (a trip),
+  `held` (the coherence gate), `law_fault`, `fault` or `sysid_level_unreachable`. `name` is the
+  controller's own name for the end; `part`, `control` and `drive` are what the end names.
+  `ramp_s` is the ramp down's length, null for an end that did not ramp.
+- `record` appears once a run folder is claimed (Run Folders).
+
+### MIMO Mixed Mode Run Folders
+
+Every MIMO Mixed Mode run that arms leaves a run folder (Run Folders), named
+`<YYYYMMDD-HHMMSS>_mimo_mixed_<run id>`; what it holds is listed in `docs/run-folder.md`, "What a
+MIMO Mixed Mode Run Saves". At arm, before the first sample: `run.json`, `table.json`,
+`setup.json` (`{"config","resolved","derived"}`: the configuration as accepted, what it resolved
+to, part by part with each control's bands, and the controller's own configuration, and the
+derived values) and `law/law.json` (both roles' laws with their choices and parameters, the bands'
+law, the ceiling and fill rules, and `calls`, the law-call record's layout below), or the arm is
+refused `record_unwritable`. Every `mimo_mixed.log` entry is appended as it is made. Every input
+and drive is a stream from the identification on unless `record.streams` is false. The results
+are written as the run goes, off the control thread:
+
+- `reference`: the floor's reference on the run's lines;
+- the identification: `identification_frf`, `identification_coherence`,
+  `identification_response`, `identification_drive` and its summary `identification`;
+- `control_spectra` and `drive_spectra`: the floor's spectra at each level change and at the
+  end;
+- `tone_levels`, `band_levels` and `drive_levels`, as the run went;
+- `control_trace`: every call of both laws.
+
+`end.json` holds `end` as `mimo_mixed.state` reports it. A failure to write the record is a log
+entry of kind `record` and the state's `record.problem`; the run goes on.
+
+**The law-call record, `hertzforge.mimo_mixed.law_ticks.v1`.** Every call of either law is one
+record of 32 bytes, little-endian, in this order: `t_s` (f64, station time since engage),
+`drive_in` (f64, the drive in force before the call) and `drive_out` (f64, the drive the
+controller took from the answer) — for the floor its in-band rms summed over the drives at full
+level, for a tone its drive vector's norm, peak, at the level — `took_us` (f32, the call's wall
+time, microseconds), `role` (u8, 0 the floor's law, once a loop; 1 a tone's, once a tick), `tone` (u8, the tone's index among the tones, 0 for the floor), `miss` (u8, 1
+when the call was unusable) and `flags` (u8, bit 0 a cap bound the answer, bit 1 the engage or
+the law's seed). `law/law.json`'s `calls` states the format, `record_bytes` and the fields. The
+calls are written as the repeating result `control_trace` (kind `mimo_mixed_control`), 64 calls
+to a record, its arrays `time`, `role`, `tone`, `drive_in`, `drive_out`, `call_us`, `miss` and
+`flags` holding those fields.
+
+### MIMO Mixed Mode Display
+
+Event topics:
+
+- `mimo_mixed.state` (text): the state object on every change of `state`, `phase`, `level_db`,
+  `held`, `end`, `record` or a part's `on`, `limiting` or alarm.
+- `mimo_mixed.log` (text): new log entries, Random's form, of the kinds `state`, `station`,
+  `identification`, `engage`, `level`, `hold`, `part`, `alarm`, `limit`, `floor`, `note` and
+  `record`.
+- `mimo_mixed.live` (binary, the **default subscription**, from the start of identification until
+  the run has finished, then once more).
+- `mimo_mixed.data` (binary, to one subscribed connection): the live frame's numbers and `plots`,
+  at most `rate_hz` times a second, and once at once on subscribe.
+
+**The live frame.** `{"run_id","source","class","state","phase","mode","t_s","level_db","held",
+"alarm","limiting","floor_error_db","floor_equalized","scale","parts","drives","loop","views"}`:
+the state's members of those names, `class` the station's class, `loop` the floor loops run, and
+`views` **Control spectra** (per control `Control <index>` (`measured`, the composite with the
+tones in) with its `Reference`, `Alarm high`, `Alarm low`, `Abort high` and `Abort low` lines at
+the level, against `Frequency` Hz on the band's lines) and **Drive spectra** (`Drive <index>`,
+the floor's drive autospectrum). The views are empty until the floor has run a loop.
+
+`mimo_mixed.subscribe` takes `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.2 to 10, default 2; 1
+to 16 plots) or `{"default":true}` (back to `mimo_mixed.live`). A plot is
+`{"id","quantity","channels","parts"}`: `channels` a list of control channels (every control
+without it), `parts` a list of part ids (every part the quantity takes without it). The result is
+`{"default","rate_hz","plots","quantities"}`. In `mimo_mixed.data` each plot is
+`{"id","quantity","channels","parts","views"}`.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `control` | **Control spectra** | As the live frame's |
+| `residual` | **Residual spectra** | The floor alone (the tones taken out), per control, with the reference and its lines |
+| `cross` | **Cross spectra** | `abs(G)` of the residual between each control and the next |
+| `drive` | **Drive spectra** | As the live frame's |
+| `tone_amplitude` | **Tone amplitude** | Each tone's tracked amplitude per control (`<part> control <index>`), against `Time` s |
+| `tone_phase` | **Tone phase** | Each tone's tracked phase per control, deg, against `Time` s |
+| `band_level` | **Band level** | Each band's added level against its statement per control, dB, against `Time` s |
+
+A plot is empty (`views` empty) until there is something to draw. The histories keep their last
+600 points.
+
+### MIMO Mixed Mode Laws
+
+MIMO Mixed Mode has no law world of its own. The floor's law resolves through MIMO Random's
+catalog path: a built-in MIMO Random law or a `mimo` law file, listed with `laws.list` and
+`{"world":"mimo"}`. The tones' law resolves through MIMO Sine's: a built-in MIMO Sine law or a
+`sine_mimo` law file, listed with `{"world":"sine_mimo"}`. Each takes its `params` by the keys its
+entry declares. A law of the other world for a role is refused `law_wrong_world`.
+
+On a hardware station an imported law drives in a role once it has a passed check for its exact
+file in its own world (MIMO Random's check for a floor law, MIMO Sine's at the check in force for
+a tone law) **and** a passed **MIMO Mixed check** in that role. A built-in law of the role's world
+always may. The simulator runs any law. `laws.check` with `{"mimo_mixed":"floor"}` or
+`{"mimo_mixed":"tones"}` (beside `id` or `path`, and `params`) runs the MIMO Mixed check with the
+law in that role and the built-in in the other. Each case is a whole MIMO Mixed Mode run on a
+simulated station: `floor_only`, `fixed_tones_on_floor`, `swept_tone_through_mode`,
+`narrowband_fixed`, `narrowband_swept`, `level_ladder`, `shared_ceiling`,
+`more_drives_than_controls` and `transport_delay`, each with its `plant` and `requirement` in
+words. One `laws.check` event goes out as each case starts and as it ends. The answer is
+`{"law","report":{"passed","recorded","role","tool_version","cases"}}`: `law` is the role's facts,
+read again after the record is written, and `tool_version` is `mimo-mixed-check 1`. A law of the
+wrong world for the role is refused `law_wrong_world` (`detail` its `id` and `role`).
+
+A law file's result is recorded against its SHA-256 for that role, passed or not, beside the file
+as `laws/<sha256>.mimo-mixed-floor.check.json` or `laws/<sha256>.mimo-mixed-tones.check.json`. A
+built-in law is checked and not recorded. A record clears its file in its role only: a passed
+record at the check's present version and its present cases, by name and in order. A record of
+the other role, of an earlier version or case list, or for other bytes clears nothing.
+
 ## Mixed Mode
 
 **Status.** This section is the contract the Mixed Mode service and screen are built against;

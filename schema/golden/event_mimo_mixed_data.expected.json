@@ -1,0 +1,2023 @@
+{
+ "type": "event",
+ "topic": "mimo_mixed.data",
+ "seq": 292,
+ "data": {
+  "run_id": "mimo-mixed-0002",
+  "source": "SIM",
+  "state": "running",
+  "phase": "full_level",
+  "mode": "manual",
+  "t_s": 96.25,
+  "level_db": 0,
+  "held": false,
+  "alarm": false,
+  "limiting": true,
+  "floor_error_db": [
+   -0.25,
+   0.13,
+   0.5,
+   -0.06
+  ],
+  "floor_equalized": true,
+  "scale": 0.875,
+  "parts": [
+   {
+    "id": "floor",
+    "kind": "floor",
+    "name": "floor",
+    "enabled": true,
+    "on": true,
+    "freq_hz": null,
+    "held": false,
+    "limiting": false,
+    "scale": null,
+    "folded": null,
+    "amplitude": "rms",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1.336,
+      "measured": 1.298,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1.336,
+      "measured": 1.355,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1.336,
+      "measured": 1.415,
+      "error_db": 0.5,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1.336,
+      "measured": 1.326,
+      "error_db": -0.06,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "t1",
+    "kind": "tone",
+    "name": "t1",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 150,
+    "held": false,
+    "limiting": false,
+    "scale": 1,
+    "folded": null,
+    "amplitude": "peak",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1,
+      "measured": 1.016,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1,
+      "measured": 0.9688,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1,
+      "measured": 1.008,
+      "error_db": 0.06,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1,
+      "measured": 1.063,
+      "error_db": 0.5,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "t2",
+    "kind": "tone",
+    "name": "t2",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 700,
+    "held": false,
+    "limiting": true,
+    "scale": 0.875,
+    "folded": null,
+    "amplitude": "peak",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1,
+      "measured": 1.016,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1,
+      "measured": 0.9688,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1,
+      "measured": 1.008,
+      "error_db": 0.06,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1,
+      "measured": 1.063,
+      "error_db": 0.5,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "b1",
+    "kind": "narrowband",
+    "name": "b1",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 300,
+    "held": false,
+    "limiting": false,
+    "scale": 1,
+    "folded": false,
+    "amplitude": "db",
+    "unit": "dB",
+    "controls": [
+     {
+      "channel": 1,
+      "target": null,
+      "measured": null,
+      "error_db": 0.25,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": null,
+      "measured": null,
+      "error_db": -0.5,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": null,
+      "measured": null,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": null,
+      "measured": null,
+      "error_db": 0,
+      "alarm": false
+     }
+    ]
+   }
+  ],
+  "drives": [
+   {
+    "channel": 5,
+    "random_rms_v": 0.5,
+    "peak_v": 2.25,
+    "random_peak_v": 2.5,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3.5,
+    "headroom_db": 7.6,
+    "scale": 0.875
+   },
+   {
+    "channel": 6,
+    "random_rms_v": 0.625,
+    "peak_v": 2.5,
+    "random_peak_v": 2.75,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3.25,
+    "headroom_db": 6.78,
+    "scale": 0.875
+   },
+   {
+    "channel": 7,
+    "random_rms_v": 0.75,
+    "peak_v": 2.75,
+    "random_peak_v": 3,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3,
+    "headroom_db": 6.02,
+    "scale": 0.875
+   },
+   {
+    "channel": 8,
+    "random_rms_v": 0.875,
+    "peak_v": 3,
+    "random_peak_v": 3.25,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 2.75,
+    "headroom_db": 5.33,
+    "scale": 0.875
+   }
+  ],
+  "class": "sim",
+  "loop": 377,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Control spectra",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "PSD",
+       "unit": "g^2/Hz",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.5,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 1 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "control 1 alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.001953125,
+          0.001953125,
+          0.001953125,
+          0.001953125
+         ]
+        }
+       },
+       {
+        "name": "control 1 alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.00048828125,
+          0.00048828125,
+          0.00048828125
+         ]
+        }
+       },
+       {
+        "name": "control 1 abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00390625,
+          0.00390625,
+          0.00390625,
+          0.00390625
+         ]
+        }
+       },
+       {
+        "name": "control 1 abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.000244140625,
+          0.000244140625,
+          0.000244140625,
+          0.000244140625
+         ]
+        }
+       },
+       {
+        "name": "control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.5,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 2 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "control 2 alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.001953125,
+          0.001953125,
+          0.001953125,
+          0.001953125
+         ]
+        }
+       },
+       {
+        "name": "control 2 alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.00048828125,
+          0.00048828125,
+          0.00048828125
+         ]
+        }
+       },
+       {
+        "name": "control 2 abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00390625,
+          0.00390625,
+          0.00390625,
+          0.00390625
+         ]
+        }
+       },
+       {
+        "name": "control 2 abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.000244140625,
+          0.000244140625,
+          0.000244140625,
+          0.000244140625
+         ]
+        }
+       },
+       {
+        "name": "control 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.5,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 3 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "control 3 alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.001953125,
+          0.001953125,
+          0.001953125,
+          0.001953125
+         ]
+        }
+       },
+       {
+        "name": "control 3 alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.00048828125,
+          0.00048828125,
+          0.00048828125
+         ]
+        }
+       },
+       {
+        "name": "control 3 abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00390625,
+          0.00390625,
+          0.00390625,
+          0.00390625
+         ]
+        }
+       },
+       {
+        "name": "control 3 abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.000244140625,
+          0.000244140625,
+          0.000244140625,
+          0.000244140625
+         ]
+        }
+       },
+       {
+        "name": "control 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.5,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 4 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "control 4 alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.001953125,
+          0.001953125,
+          0.001953125,
+          0.001953125
+         ]
+        }
+       },
+       {
+        "name": "control 4 alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.00048828125,
+          0.00048828125,
+          0.00048828125
+         ]
+        }
+       },
+       {
+        "name": "control 4 abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00390625,
+          0.00390625,
+          0.00390625,
+          0.00390625
+         ]
+        }
+       },
+       {
+        "name": "control 4 abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.000244140625,
+          0.000244140625,
+          0.000244140625,
+          0.000244140625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "res",
+    "quantity": "residual",
+    "channels": [
+     1,
+     2
+    ],
+    "parts": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Residual spectra",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "PSD",
+       "unit": "g^2/Hz",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 1 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.001953125,
+          0.0009765625
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "control 2 reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.0009765625,
+          0.0009765625,
+          0.0009765625
+         ]
+        }
+       },
+       {
+        "name": "|cross| 1 with 2",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.25,
+          0.0009765625,
+          0.00048828125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "|cross| 2 with 3",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.25,
+          0.0009765625,
+          0.00048828125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "crs",
+    "quantity": "cross",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Cross spectra",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "|CSD|",
+       "unit": "g^2/Hz",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "|cross| 1 with 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.25,
+          0.0009765625,
+          0.00048828125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "|cross| 2 with 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.25,
+          0.0009765625,
+          0.00048828125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "|cross| 3 with 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.25,
+          0.0009765625,
+          0.00048828125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drive spectra",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "PSD",
+       "unit": "V²/Hz",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "drive 5",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0001220703125,
+          0.0625,
+          0.000244140625,
+          0.0001220703125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "drive 6",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0001220703125,
+          0.0625,
+          0.000244140625,
+          0.0001220703125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "drive 7",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0001220703125,
+          0.0625,
+          0.000244140625,
+          0.0001220703125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       },
+       {
+        "name": "drive 8",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          100.0,
+          104.0,
+          108.0,
+          112.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0001220703125,
+          0.0625,
+          0.000244140625,
+          0.0001220703125
+         ]
+        },
+        "shape": "steps",
+        "edges": {
+         "dtype": "f64",
+         "shape": [
+          5
+         ],
+         "values": [
+          98.0,
+          102.0,
+          106.0,
+          110.0,
+          114.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "amp",
+    "quantity": "tone_amplitude",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": [
+     "t2"
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Tone amplitude",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g pk",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "t2 control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.875,
+          0.9375,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.875,
+          0.9375,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.875,
+          0.9375,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.875,
+          0.9375,
+          1.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "phs",
+    "quantity": "tone_phase",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": [
+     "t2"
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Tone phase",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "t2 control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.0,
+          0.0,
+          0.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          45.0,
+          45.0,
+          45.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          90.0,
+          90.0,
+          90.0
+         ]
+        }
+       },
+       {
+        "name": "t2 control 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          135.0,
+          135.0,
+          135.0
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "bnd",
+    "quantity": "band_level",
+    "channels": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "parts": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Band level",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Level against the statement",
+       "unit": "dB",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "b1 control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          0.25,
+          0.125
+         ]
+        }
+       },
+       {
+        "name": "b1 control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          0.25,
+          0.125
+         ]
+        }
+       },
+       {
+        "name": "b1 control 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          0.25,
+          0.125
+         ]
+        }
+       },
+       {
+        "name": "b1 control 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          95.75,
+          96.0,
+          96.25
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          0.25,
+          0.125
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   }
+  ]
+ }
+}

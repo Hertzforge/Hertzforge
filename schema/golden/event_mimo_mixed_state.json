@@ -1,0 +1,327 @@
+{
+ "type": "event",
+ "topic": "mimo_mixed.state",
+ "seq": 290,
+ "data": {
+  "run_id": "mimo-mixed-0002",
+  "state": "running",
+  "phase": "full_level",
+  "title": "Four-Shaker Mixed Test",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 16384,
+   "n_pts": 4096,
+   "df_hz": 4,
+   "lines": 2049,
+   "band_hz": [
+    100,
+    112
+   ],
+   "actual": true
+  },
+  "clock": "shared",
+  "mode": "manual",
+  "levels_db": [
+   -6,
+   -3,
+   0
+  ],
+  "level_db": 0,
+  "t_s": 96.25,
+  "held": false,
+  "alarm": false,
+  "limiting": true,
+  "parts": [
+   {
+    "id": "floor",
+    "kind": "floor",
+    "name": "floor",
+    "enabled": true,
+    "on": true,
+    "freq_hz": null,
+    "held": false,
+    "limiting": false,
+    "scale": null,
+    "folded": null,
+    "amplitude": "rms",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1.336,
+      "measured": 1.298,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1.336,
+      "measured": 1.355,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1.336,
+      "measured": 1.415,
+      "error_db": 0.5,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1.336,
+      "measured": 1.326,
+      "error_db": -0.06,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "t1",
+    "kind": "tone",
+    "name": "t1",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 150,
+    "held": false,
+    "limiting": false,
+    "scale": 1,
+    "folded": null,
+    "amplitude": "peak",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1,
+      "measured": 1.016,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1,
+      "measured": 0.9688,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1,
+      "measured": 1.008,
+      "error_db": 0.06,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1,
+      "measured": 1.063,
+      "error_db": 0.5,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "t2",
+    "kind": "tone",
+    "name": "t2",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 700,
+    "held": false,
+    "limiting": true,
+    "scale": 0.875,
+    "folded": null,
+    "amplitude": "peak",
+    "unit": "g",
+    "controls": [
+     {
+      "channel": 1,
+      "target": 1,
+      "measured": 1.016,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": 1,
+      "measured": 0.9688,
+      "error_db": -0.25,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": 1,
+      "measured": 1.008,
+      "error_db": 0.06,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": 1,
+      "measured": 1.063,
+      "error_db": 0.5,
+      "alarm": false
+     }
+    ]
+   },
+   {
+    "id": "b1",
+    "kind": "narrowband",
+    "name": "b1",
+    "enabled": true,
+    "on": true,
+    "freq_hz": 300,
+    "held": false,
+    "limiting": false,
+    "scale": 1,
+    "folded": false,
+    "amplitude": "db",
+    "unit": "dB",
+    "controls": [
+     {
+      "channel": 1,
+      "target": null,
+      "measured": null,
+      "error_db": 0.25,
+      "alarm": false
+     },
+     {
+      "channel": 2,
+      "target": null,
+      "measured": null,
+      "error_db": -0.5,
+      "alarm": false
+     },
+     {
+      "channel": 3,
+      "target": null,
+      "measured": null,
+      "error_db": 0.13,
+      "alarm": false
+     },
+     {
+      "channel": 4,
+      "target": null,
+      "measured": null,
+      "error_db": 0,
+      "alarm": false
+     }
+    ]
+   }
+  ],
+  "drives": [
+   {
+    "channel": 5,
+    "random_rms_v": 0.5,
+    "peak_v": 2.25,
+    "random_peak_v": 2.5,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3.5,
+    "headroom_db": 7.6,
+    "scale": 0.875
+   },
+   {
+    "channel": 6,
+    "random_rms_v": 0.625,
+    "peak_v": 2.5,
+    "random_peak_v": 2.75,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3.25,
+    "headroom_db": 6.78,
+    "scale": 0.875
+   },
+   {
+    "channel": 7,
+    "random_rms_v": 0.75,
+    "peak_v": 2.75,
+    "random_peak_v": 3,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 3,
+    "headroom_db": 6.02,
+    "scale": 0.875
+   },
+   {
+    "channel": 8,
+    "random_rms_v": 0.875,
+    "peak_v": 3,
+    "random_peak_v": 3.25,
+    "tone_sum_v": 0.75,
+    "ceiling_v": 6,
+    "headroom_v": 2.75,
+    "headroom_db": 5.33,
+    "scale": 0.875
+   }
+  ],
+  "scale": 0.875,
+  "floor_error_db": [
+   -0.25,
+   0.13,
+   0.5,
+   -0.06
+  ],
+  "floor_equalized": true,
+  "floor": {
+   "equalized": true,
+   "loops": 377,
+   "misses": 0,
+   "underruns": 0,
+   "clamped": 0
+  },
+  "identification": {
+   "level_db": -20,
+   "steps": 2,
+   "frames": 64,
+   "lag_frames": 265,
+   "band_coherence": [
+    0.9937,
+    0.9943,
+    0.993,
+    0.9923
+   ],
+   "gate_coherence": 0.5,
+   "passed": true,
+   "drive_vrms": [
+    0.01278,
+    0.01278,
+    0.01278,
+    0.01278
+   ]
+  },
+  "law": {
+   "floor": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null,
+    "builtin": true,
+    "world": "mimo",
+    "hardware": true,
+    "not_cleared": null
+   },
+   "tones": {
+    "id": "matrix",
+    "name": "matrix",
+    "version": "0.1.0",
+    "sha256": null,
+    "builtin": true,
+    "world": "sine_mimo",
+    "hardware": true,
+    "not_cleared": null
+   }
+  },
+  "end": null,
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/20261121-140000_mimo_mixed_mimo-mixed-0002",
+   "streams": "on",
+   "problem": null
+  }
+ }
+}

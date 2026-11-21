@@ -1,0 +1,304 @@
+{
+ "type": "request",
+ "id": 91,
+ "method": "mimo_mixed.configure",
+ "params": {
+  "config": {
+   "estimation": {
+    "frames_per_loop": 8,
+    "memory_loops": 4.0,
+    "window": "Hann",
+    "overlap": 0.5,
+    "fs_hz": 16384.0,
+    "n_pts": 4096
+   },
+   "controls": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "drives": [
+    {
+     "channel_index": 5,
+     "ceiling_vrms": 2.0,
+     "peak_v": 6.0,
+     "pretest_max_vrms": 0.2,
+     "moving_mass": {
+      "armature_lb": 0.0,
+      "slip_table_lb": 0.0,
+      "drive_adapter_lb": 0.0,
+      "fixturing_lb": 0.0,
+      "test_article_lb": 0.0
+     }
+    },
+    {
+     "channel_index": 6,
+     "ceiling_vrms": 2.0,
+     "peak_v": 6.0,
+     "pretest_max_vrms": 0.2,
+     "moving_mass": {
+      "armature_lb": 0.0,
+      "slip_table_lb": 0.0,
+      "drive_adapter_lb": 0.0,
+      "fixturing_lb": 0.0,
+      "test_article_lb": 0.0
+     }
+    },
+    {
+     "channel_index": 7,
+     "ceiling_vrms": 2.0,
+     "peak_v": 6.0,
+     "pretest_max_vrms": 0.2,
+     "moving_mass": {
+      "armature_lb": 0.0,
+      "slip_table_lb": 0.0,
+      "drive_adapter_lb": 0.0,
+      "fixturing_lb": 0.0,
+      "test_article_lb": 0.0
+     }
+    },
+    {
+     "channel_index": 8,
+     "ceiling_vrms": 2.0,
+     "peak_v": 6.0,
+     "pretest_max_vrms": 0.2,
+     "moving_mass": {
+      "armature_lb": 0.0,
+      "slip_table_lb": 0.0,
+      "drive_adapter_lb": 0.0,
+      "fixturing_lb": 0.0,
+      "test_article_lb": 0.0
+     }
+    }
+   ],
+   "limits": [],
+   "seed": 1,
+   "parts": [
+    {
+     "id": "floor",
+     "name": "",
+     "enabled": true,
+     "window": {
+      "on_s": 0.0
+     },
+     "body": {
+      "kind": "floor",
+      "alarm_db": [
+       3.0,
+       3.0
+      ],
+      "abort_db": [
+       6.0,
+       6.0
+      ]
+     }
+    },
+    {
+     "id": "t1",
+     "name": "",
+     "enabled": true,
+     "window": {
+      "on_s": 0.0
+     },
+     "body": {
+      "kind": "tone",
+      "schedule": {
+       "kind": "fixed",
+       "hz": 150.0
+      },
+      "amplitude": {
+       "kind": "constant",
+       "g_pk": 1.0
+      },
+      "phases_stated": false,
+      "alarm_db": [
+       1.5,
+       1.5
+      ],
+      "abort_db": [
+       3.0,
+       3.0
+      ]
+     }
+    },
+    {
+     "id": "t2",
+     "name": "",
+     "enabled": true,
+     "window": {
+      "on_s": 0.0
+     },
+     "body": {
+      "kind": "tone",
+      "schedule": {
+       "kind": "fixed",
+       "hz": 700.0
+      },
+      "amplitude": {
+       "kind": "constant",
+       "g_pk": 1.0
+      },
+      "phases_stated": false,
+      "alarm_db": [
+       1.5,
+       1.5
+      ],
+      "abort_db": [
+       3.0,
+       3.0
+      ]
+     }
+    },
+    {
+     "id": "b1",
+     "name": "",
+     "enabled": true,
+     "window": {
+      "on_s": 0.0
+     },
+     "body": {
+      "kind": "narrowband",
+      "schedule": {
+       "kind": "fixed",
+       "hz": 300.0
+      },
+      "width": {
+       "kind": "hz",
+       "hz": 40.0
+      },
+      "statement": {
+       "kind": "added",
+       "level_g2_hz": 0.003,
+       "coherence": 0.5
+      },
+      "alarm_db": [
+       3.0,
+       3.0
+      ],
+      "abort_db": [
+       6.0,
+       6.0
+      ]
+     }
+    }
+   ],
+   "exclusion_hz": 8.0,
+   "tracking_hz": 0.5,
+   "schedule": {
+    "mode": "manual",
+    "start_db": -6.0,
+    "table_db": [
+     -6.0,
+     -3.0,
+     0.0
+    ],
+    "dwell_s": [
+     2.0
+    ]
+   },
+   "full_level_duration_s": 15.0,
+   "level_ramp_s": 0.5,
+   "shutdown_ramp_s": 0.5,
+   "part_ramp_s": 0.5,
+   "floor_settle_s": 30.0,
+   "soft_start_db": 3.0,
+   "soft_start_relax_db": 6.0,
+   "gates": {
+    "coherence_threshold": 0.5,
+    "condition_threshold": 1000.0
+   },
+   "caps": {
+    "up_db": 3.5,
+    "down_db": 6.0
+   },
+   "protections": {
+    "envelope_abort_lines": 10,
+    "divergence_loops": 5,
+    "divergence_floor_db": 3.0,
+    "overload_fraction": 0.9,
+    "settle_loops": 1
+   },
+   "frf_mode": "Hold",
+   "crest_factor": 3.0,
+   "article_mass_lb": 0.0,
+   "metadata": [],
+   "law": {
+    "floor": {
+     "id": "pinv_closed"
+    },
+    "tones": {
+     "id": "matrix"
+    },
+    "bands": {
+     "id": "auto"
+    },
+    "ceiling_rule": {
+     "id": "common_scale"
+    },
+    "fill_rule": {
+     "id": "no_error"
+    }
+   },
+   "reference": {
+    "kind": "inline",
+    "freqs_hz": [
+     20.0,
+     1800.0
+    ],
+    "n": 4,
+    "re": [
+     0.001,
+     0.0005,
+     0.0005,
+     0.0005,
+     0.001,
+     0.0005,
+     0.0005,
+     0.001,
+     0.0005,
+     0.001,
+     0.001,
+     0.0005,
+     0.0005,
+     0.0005,
+     0.001,
+     0.0005,
+     0.0005,
+     0.001,
+     0.0005,
+     0.001
+    ],
+    "im": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "title": "Four-Shaker Mixed Test",
+   "operator": "A. Operator",
+   "article": "Plate",
+   "notes": "",
+   "simulator": {
+    "structure": "sine-linear-4x4"
+   }
+  }
+ }
+}
