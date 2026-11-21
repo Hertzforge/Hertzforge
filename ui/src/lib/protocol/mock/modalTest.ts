@@ -28,6 +28,7 @@ import type {
 	ModalCounts,
 	ModalHitKind,
 	ModalLatest,
+	ModalLiveFrame,
 	ModalOutcome,
 	ModalPoint,
 	ModalRowDof,
@@ -53,6 +54,8 @@ const ARMING_S = 0.3;
 /** Station seconds per shaker frame. */
 const FRAME_EVERY_S = 0.4;
 const SHOWN = 1024;
+/** The frames the mock station's inputs lag its drives by. */
+const MOCK_INPUT_DELAY = 48;
 const MODES_HZ = [42, 118, 236];
 const ZETA = [0.012, 0.009, 0.015];
 
@@ -612,6 +615,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				force_spectrum: { frequency_hz: f, unit: `${dofs.references[0]?.unit ?? ''}^2/Hz`, values: fsv, tip_drop_db: rep.tip_drop_db }
 			};
 		} else if (impact) out.hit = null;
+		if (!impact) out.frame = frameOf(r, dofs);
 		if (!impact && avg > 0) {
 			out.references = {
 				frequency_hz: f,
@@ -620,6 +624,78 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			};
 		}
 		return out;
+	}
+
+	/**
+	 * The latest shaker frame taken at this point, whole: every channel over the block from the
+	 * frame's start, min/max decimated as the service does above 1024 samples. The frame starts where
+	 * the inputs see the burst begin; the drives, the same station frames, played it
+	 * `MOCK_INPUT_DELAY` frames earlier. The inputs ring down after it, and the first response's level
+	 * at the frame's end is its decay.
+	 */
+	function frameOf(r: Run, dofs: { references: ModalRowDof[]; responses: ModalRowDof[] }): ModalLiveFrame | null {
+		const last = latestHere(r);
+		const sh = r.check.shaker;
+		if (!last || !sh) return null;
+		const fs = r.check.fs_hz;
+		const block = r.check.block;
+		const burst = sh.burst_pct !== null ? Math.round((sh.burst_pct / 100) * block) : null;
+		const delay = MOCK_INPUT_DELAY;
+		const seed = rng(last.seq * 17 + 5);
+		const tau = 0.25 * block / fs;
+		const wave = (i: number, amp: number, freq: number, lead: number) => {
+			const j = i + lead;
+			const s = amp * (Math.sin((2 * Math.PI * freq * j) / fs) * 0.6 + (seed() - 0.5) * 0.8);
+			if (burst === null || (j >= 0 && j < burst)) return s;
+			if (lead || j < 0) return amp * 0.002 * (seed() - 0.5);
+			return s * Math.exp(-(j - burst) / fs / tau);
+		};
+		const k = block <= SHOWN ? 1 : Math.ceil(block / (SHOWN / 2));
+		const decimate = (x: Float32Array): Float32Array => {
+			if (k === 1) return x;
+			const out: number[] = [];
+			for (let c = 0; c < x.length; c += k) {
+				let lo = c;
+				let hi = c;
+				for (let i = c; i < Math.min(x.length, c + k); i++) {
+					if (x[i] < x[lo]) lo = i;
+					if (x[i] > x[hi]) hi = i;
+				}
+				const [a, b] = lo <= hi ? [lo, hi] : [hi, lo];
+				out.push(x[a], x[b]);
+			}
+			return Float32Array.from(out);
+		};
+		const make = (amp: number, freq: number, lead: number) => Float32Array.from({ length: block }, (_, i) => wave(i, amp, freq, lead));
+		const measured = [...dofs.references.map((d) => ({ d, role: 'reference' as const })), ...dofs.responses.map((d) => ({ d, role: 'response' as const }))].sort((a, b) => a.d.index - b.d.index);
+		const channels: ModalTrace[] = [];
+		let decay: ModalLiveFrame['decay'] = null;
+		measured.forEach(({ d, role }, c) => {
+			const x = make(role === 'reference' ? 20 : 2 + c, role === 'reference' ? 61 : 118, 0);
+			if (role === 'response' && !decay && burst !== null) {
+				const peak = x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+				const tail = x.slice(Math.max(0, block - Math.ceil(block / 64))).reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+				const ratio = peak > 0 ? round(tail / peak, 4) : 0;
+				decay = { row: d.index, ratio, warning: ratio * 100 > (r.config.decay_warn_pct ?? 2) };
+			}
+			channels.push({ values: decimate(x), index: d.index, role, unit: d.unit });
+		});
+		for (const d of sh.drives) channels.push({ values: decimate(make(d.level_vrms * 1.4, 61, delay)), index: d.row, role: 'drive', unit: 'V' });
+		return {
+			point: last.point,
+			n: last.n,
+			seq: last.seq,
+			status: last.status === 'rejected' ? 'rejected' : 'accepted',
+			start_frame: last.start_frame,
+			start_s: round(last.start_frame / fs, 6),
+			samples: block,
+			decimation: k,
+			step_s: k === 1 ? 1 / fs : k / (2 * fs),
+			burst_end_frame: burst === null ? null : last.start_frame + burst,
+			input_delay_frames: delay,
+			decay,
+			channels
+		};
 	}
 
 	// ---- the verbs ----------------------------------------------------------------------------

@@ -10,8 +10,8 @@ import { MODAL_KEY_WORDS, modalKeyAction, takesTyping, type KeyLike } from './mo
 import { defaultModalSetup, fromModalConfig, localErrors, setModalMode, modalItemKey, modalRows, modalSectionOf, modalSections, parsePoints, pointsText, toModalConfig } from './modalTestSetup';
 import { loadModalSetup, saveModalSetup } from './modalTestStore.svelte';
 import { modalBarActions, modalMeasureVerbs, modalPrimary, type ModalVerbContext } from './modalTestVerbs';
-import { exponentialWeights, forceNotes, forceSpectrumView, overlayStyles, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
-import { counterWords, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, pct, refusalWords, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
+import { burstNotes, exponentialWeights, forceNotes, shakerTimeViews, forceSpectrumView, overlayStyles, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
+import { counterWords, frameDecayWords, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, pct, refusalWords, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, getAttribute: (k: string) => (extra[k] as string) ?? null, ...extra }) as unknown as EventTarget;
 const key = (k: string, more: Partial<KeyLike> = {}): KeyLike => ({ key: k, target: el('BODY'), ...more });
@@ -369,5 +369,60 @@ describe('modal test after review', () => {
 			expect(n.fx).toBeLessThanOrEqual(0.7);
 			expect(n.fy).toBeLessThan(0.5);
 		}
+	});
+
+	it('modal test shaker frame: the latest whole frame from its start, the burst end where the service puts it, drives earlier', () => {
+		const dofs = { references: [{ index: 1, node: 1, direction: 'Z+', unit: 'lbf' }], responses: [{ index: 2, node: 4, direction: 'Z+', unit: 'g' }] };
+		const frame = {
+			point: 0, n: 3, seq: 9, status: 'accepted', start_frame: 4096, start_s: 4, samples: 2048, decimation: 4, step_s: 4 / (2 * 1024),
+			burst_end_frame: 4096 + 1024, input_delay_frames: 256, decay: { row: 2, ratio: 0.31, warning: true },
+			channels: [
+				{ index: 1, role: 'reference', unit: 'lbf', values: Array.from({ length: 1024 }, () => 0) },
+				{ index: 2, role: 'response', unit: 'g', values: Array.from({ length: 1024 }, () => 0) },
+				{ index: 7, role: 'drive', unit: 'V', values: Array.from({ length: 1024 }, () => 0) }
+			]
+		};
+		const time = { rate_hz: 1024, channels: [{ index: 1, role: 'reference', unit: 'lbf', values: [1, 2] }] };
+		const live = { run_id: 'r', state: 'measuring', point: 0, time, frf: { frequency_hz: [], averages: 0, pairs: [], coherence: [] }, frame } as unknown as ModalTestLive;
+		const v = shakerTimeViews(live, dofs);
+		// the plots span the frame's own length, 2048 samples at 1024 Hz, from its start
+		expect(v.extent).toEqual([0, 2]);
+		expect(v.force?.x.label).toBe('Time from the frame start');
+		const x = v.response!.series[0].x;
+		expect(x).toHaveLength(1024);
+		expect(Number(x[x.length - 1])).toBeCloseTo(2 - 2 / 1024, 12);
+		expect(v.drive?.series[0].name).toBe('Drive row 7');
+		// the burst's end: 1024 samples in on the inputs, input_delay_frames earlier on the drives
+		expect(v.burstInputs).toBeCloseTo(1, 12);
+		expect(v.burstDrives).toBeCloseTo(0.75, 12);
+		expect(v.decay).toEqual({ row: 2, ratio: 0.31, warning: true });
+		expect(v.n).toBe(3);
+		// random: no burst end; no frame yet: the latest samples of time
+		expect(shakerTimeViews({ ...live, frame: { ...frame, burst_end_frame: null } } as unknown as ModalTestLive, dofs).burstInputs).toBeNull();
+		const before = shakerTimeViews({ ...live, frame: undefined } as unknown as ModalTestLive, dofs);
+		expect(before.extent).toBeNull();
+		expect(before.force?.series[0].y.length).toBe(2);
+		expect(before.burstInputs).toBeNull();
+	});
+
+	it('modal test burst label: inside the drawing area beside its marker', () => {
+		expect(burstNotes(null, [0, 2])).toEqual([]);
+		expect(burstNotes(1, null)).toEqual([]);
+		// on the marker's right where it fits, else its left, else as far right as it stays inside
+		expect(burstNotes(0.5, [0, 2])).toEqual([{ id: 'burst-end', text: 'Burst\u00a0End', fx: 0.27, fy: 0.03 }]);
+		expect(burstNotes(1.8, [0, 2])[0].fx).toBeCloseTo(0.63, 12);
+		expect(burstNotes(1, [0, 2], 0.7)[0].fx).toBeCloseTo(0.3, 12);
+		for (const at of [0, 0.3, 1, 1.7, 2]) for (const w of [0.2, 0.5, 0.9]) {
+			const [n] = burstNotes(at, [0, 2], w);
+			expect(n.fx).toBeGreaterThanOrEqual(0);
+			expect(n.fx + w).toBeLessThanOrEqual(1 + 1e-12);
+		}
+	});
+
+	it('modal test frame decay: in the words a hit uses, with the service row and percent', () => {
+		expect(frameDecayWords(null)).toBeNull();
+		expect(frameDecayWords({ row: 2, ratio: 0.31, warning: true })).toEqual({ flag: 'Not Died Away', text: 'Row 2, 31%', full: 'Row 2 has not died away by the end of the frame: it ends at 31% of its loudest.' });
+		expect(frameDecayWords({ row: 2, ratio: 0.004, warning: false })).toEqual({ flag: null, text: 'Row 2, 0.4%', full: 'Row 2 ends the frame at 0.4% of its loudest.' });
+		expect(tileWords(tile({ decay: { row: 2, ratio: 0.31, warning: true } })).flags.map((f) => f.word)).toContain('Not Died Away');
 	});
 });

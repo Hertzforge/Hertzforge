@@ -7,7 +7,7 @@
  * formulas PROTOCOL.md gives, and a second impact is marked at the frame the service found it.
  */
 
-import type { ModalLatest, ModalRowDof, ModalTestLive, ModalTrace, ModalTraceRole } from '$lib/protocol/modal_test';
+import type { ModalDecay, ModalLatest, ModalRowDof, ModalTestLive, ModalTrace, ModalTraceRole } from '$lib/protocol/modal_test';
 import type { NumericArray, Region, SpectrumView } from '$lib/protocol/types';
 import type { PaneNote, SeriesOverride } from '$lib/viz/paneOptions';
 import { TRACE_COLORS } from '$lib/viz/roles';
@@ -187,6 +187,79 @@ export function roleView(live: ModalTestLive | null, role: ModalTraceRole, dofs:
 		y: { label: title, unit: units.length === 1 ? units[0] : '', scale: 'linear' },
 		series: t.map((c, k) => ({ name: role === 'drive' ? (c.index !== undefined ? `Drive row ${c.index}` : `Drive ${k + 1}`) : dofName(names[k], `Channel ${k + 1}`), role: role === 'drive' ? 'drive' : 'measured', x, y: arr(c.values) }))
 	};
+}
+
+export interface ShakerTimeViews {
+	force: SpectrumView | null;
+	response: SpectrumView | null;
+	drive: SpectrumView | null;
+	/** The x range every time plot spans: the whole frame, from its start (null drawing `time`). */
+	extent: [number, number] | null;
+	/** The burst's end on the inputs' plots and on the drives', s from the frame start, or null. */
+	burstInputs: number | null;
+	burstDrives: number | null;
+	/** The frame's decay check, as the service sent it. */
+	decay: ModalDecay | null;
+	/** The frame these traces are: its number, or null drawing `time`. */
+	n: number | null;
+}
+
+/**
+ * The shaker's time plots: the latest whole frame the service sent in `frame`, every channel from
+ * the frame's start over its own samples, with the burst's end where the service put it (the drives
+ * `input_delay_frames` earlier, as the service says they play it). With no frame yet, the latest
+ * samples of `time`.
+ */
+export function shakerTimeViews(live: ModalTestLive | null, dofs: { references: ModalRowDof[]; responses: ModalRowDof[] }): ShakerTimeViews {
+	const f = live?.frame;
+	const rate = live?.time.rate_hz ?? 0;
+	if (!f || !(f.step_s > 0) || !(rate > 0)) {
+		return { force: roleView(live, 'reference', dofs, 'Force'), response: roleView(live, 'response', dofs, 'Response'), drive: roleView(live, 'drive', dofs, 'Drive'), extent: null, burstInputs: null, burstDrives: null, decay: null, n: null };
+	}
+	const make = (role: ModalTraceRole, title: string): SpectrumView | null => {
+		const t = tracesOf(f.channels, role, dofs);
+		if (!t.length || !t[0].values.length) return null;
+		const x = new Float64Array(t[0].values.length);
+		for (let i = 0; i < x.length; i++) x[i] = i * f.step_s;
+		const names = role === 'reference' ? dofs.references : role === 'response' ? dofs.responses : [];
+		const units = [...new Set(t.map((c, k) => c.unit ?? names[k]?.unit ?? (role === 'drive' ? 'V' : '')))];
+		return {
+			view: 'spectrum',
+			title,
+			x: { label: 'Time from the frame start', unit: 's', scale: 'linear' },
+			y: { label: title, unit: units.length === 1 ? units[0] : '', scale: 'linear' },
+			series: t.map((c, k) => ({ name: role === 'drive' ? (c.index !== undefined ? `Drive row ${c.index}` : `Drive ${k + 1}`) : dofName(names[k], `Channel ${k + 1}`), role: role === 'drive' ? 'drive' : 'measured', x, y: arr(c.values) }))
+		};
+	};
+	const length = f.samples / rate;
+	const at = (frame: number) => {
+		const s = (frame - f.start_frame) / rate;
+		return s >= 0 && s <= length ? s : null;
+	};
+	const end = f.burst_end_frame;
+	return {
+		force: make('reference', 'Force'),
+		response: make('response', 'Response'),
+		drive: make('drive', 'Drive'),
+		extent: [0, length],
+		burstInputs: end === null ? null : at(end),
+		burstDrives: end === null ? null : at(end - f.input_delay_frames),
+		decay: f.decay ?? null,
+		n: f.n
+	};
+}
+
+/**
+ * The burst's end labelled inside the drawing area beside its marker: on its right where the label
+ * fits, else on its left, else as far right as it stays inside. `width` is the label's width as a
+ * fraction of the drawing area's.
+ */
+export function burstNotes(at: number | null, extent: [number, number] | null, width = 0.25): PaneNote[] {
+	if (at === null || !extent || !(extent[1] > extent[0])) return [];
+	const m = (at - extent[0]) / (extent[1] - extent[0]);
+	const gap = 0.02;
+	const fx = m + gap + width <= 1 ? m + gap : m - gap - width >= 0 ? m - gap - width : Math.max(0, 1 - width);
+	return [{ id: 'burst-end', text: 'Burst\u00a0End', fx, fy: 0.03 }];
 }
 
 export interface FrfViews {

@@ -207,6 +207,17 @@ describe('the Modal Test store', () => {
 		expect(modal.now?.counts.unit).toBe('frames');
 		await until(() => modal.live?.references?.autospectra.length === 2);
 		expect(modal.live?.references?.autospectra.map((a) => a.index)).toEqual([1, 4]);
+		// the latest frame taken, whole: every channel over the block, the burst's end and the input delay
+		await until(() => !!modal.live?.frame);
+		const f = modal.live!.frame!;
+		expect(f.samples).toBe(modal.runCheck?.block);
+		// the inputs in table order (rows 1, 3, 4), then the drives
+		expect(f.channels.map((c) => c.index)).toEqual([1, 3, 4, 2, 5]);
+		expect(f.channels.map((c) => c.role)).toEqual(['reference', 'response', 'reference', 'drive', 'drive']);
+		expect(f.channels.filter((c) => c.role === 'drive').map((c) => c.index)).toEqual([2, 5]);
+		expect(f.channels.every((c) => c.values.length === (f.decimation === 1 ? f.samples : 2 * Math.ceil(f.samples / f.decimation)))).toBe(true);
+		expect(f.burst_end_frame).toBe(f.start_frame + Math.round(((modal.runCheck?.shaker?.burst_pct ?? 0) / 100) * f.samples));
+		expect(f.input_delay_frames).toBeGreaterThan(0);
 		await until(() => modal.now?.state === 'point_done', 15000);
 		expect(modal.now?.counts.point).toMatchObject({ accepted: 4, asked: 4 });
 		expect(await modal.stop()).toBe(true);

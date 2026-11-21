@@ -16,6 +16,8 @@
 	 */
 	import type { Snippet } from 'svelte';
 	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
+	import type { SpectrumView } from '$lib/protocol/types';
+	import type { PaneNote } from '$lib/viz/paneOptions';
 	import { MODAL_HIT_KINDS, type ModalHitKind } from '$lib/protocol/modal_test';
 	import RunBar from '../RunBar.svelte';
 	import RunOpenActions from '../RunOpenActions.svelte';
@@ -25,8 +27,8 @@
 	import { MODAL_KEY_WORDS } from './modalTestKeys';
 	import type { ModalTestStore } from './modalTestStore.svelte';
 	import type { ModalVerb } from './modalTestVerbs';
-	import { forceNotes, forceSpectrumView, overlayStyles, frfViews, hitViews, referenceSpectraView, roleView, dofName, secondImpactWords } from './modalTestViews';
-	import { counterWords, MODAL_DRIVE_PHASE_WORDS, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, refusalWords, modalStateHint, modalStateWords, num, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
+	import { burstNotes, forceNotes, forceSpectrumView, shakerTimeViews, overlayStyles, frfViews, hitViews, referenceSpectraView, dofName, secondImpactWords } from './modalTestViews';
+	import { counterWords, frameDecayWords, MODAL_DRIVE_PHASE_WORDS, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, refusalWords, modalStateHint, modalStateWords, num, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 	interface Props {
 		modal: ModalTestStore;
@@ -62,9 +64,21 @@
 	const PLOT_MIN = 90;
 	const fnotes = $derived(forceNotes(latest?.double_hit ? (hit?.second ?? null) : null, blockEnd, !!latest?.overload));
 	const refSpectra = $derived(!impact ? referenceSpectraView(live, dofs) : null);
-	const refTraces = $derived(!impact ? roleView(live, 'reference', dofs, 'Force') : null);
-	const respTraces = $derived(!impact ? roleView(live, 'response', dofs, 'Response') : null);
-	const driveTraces = $derived(!impact ? roleView(live, 'drive', dofs, 'Drive') : null);
+	const shaken = $derived(!impact ? shakerTimeViews(live, dofs) : null);
+	const refTraces = $derived(shaken?.force ?? null);
+	const respTraces = $derived(shaken?.response ?? null);
+	const driveTraces = $derived(shaken?.drive ?? null);
+	/** The time plots' width, px: the burst label's share of the drawing area (about 72 px of label, the y axis about 52 px). */
+	let timeWidth = $state(0);
+	const labelShare = $derived(timeWidth > 0 ? Math.min(1, 72 / Math.max(1, timeWidth - 52)) : 0.25);
+	const inputNotes = $derived(burstNotes(shaken?.burstInputs ?? null, shaken?.extent ?? null, labelShare));
+	const driveNotes = $derived(burstNotes(shaken?.burstDrives ?? null, shaken?.extent ?? null, labelShare));
+	const frameDecay = $derived(frameDecayWords(shaken?.decay));
+	/** The last time a trace reaches, s: the browser run checks the trace spans the frame. */
+	const lastX = (v: SpectrumView) => {
+		const x = v.series[0]?.x;
+		return x && x.length ? Number(x[x.length - 1]) : '';
+	};
 
 	/** The target the latest hit was judged against, as the service reports it. */
 	const target = $derived.by(() => {
@@ -261,9 +275,15 @@
 					{#if fspec}<SpectrumPane view={fspec} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once a hit lands.</p>{/if}
 				</div>
 			{:else}
-				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} styles={overlayStyles(refTraces)} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot">{#if respTraces}<SpectrumPane view={respTraces} styles={overlayStyles(respTraces)} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The responses are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot">{#if driveTraces}<SpectrumPane view={driveTraces} styles={overlayStyles(driveTraces)} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The drives are drawn while the shakers drive.</p>{/if}</div>
+				{#snippet timePlot(v: SpectrumView | null, id: string, burst: number | null, notes: PaneNote[], empty: string)}
+					<div class="plot" bind:clientWidth={timeWidth} data-testid={id} data-x-end={shaken?.extent?.[1] ?? ''} data-x-last={v ? lastX(v) : ''} data-burst={burst ?? ''} data-frame={shaken?.n ?? ''} data-step={live?.frame?.step_s ?? ''}>
+						{#if v}<SpectrumPane view={v} styles={overlayStyles(v)} live minHeight={PLOT_MIN} readout={false} copyButton={false} xFixed={shaken?.extent ?? null} marker={burst} {notes} />{:else}<p class="empty">{empty}</p>{/if}
+						{#if id === 'mt-shaker-response-plot' && frameDecay}<p class="framedecay" title={frameDecay.full} data-testid="mt-frame-decay">{#if frameDecay.flag}<span class="flag decay" data-flag="decay">{frameDecay.flag}</span>{/if}{frameDecay.text}</p>{/if}
+					</div>
+				{/snippet}
+				{@render timePlot(refTraces, 'mt-shaker-force-plot', shaken?.burstInputs ?? null, inputNotes, 'The forces are drawn while the shakers drive.')}
+				{@render timePlot(respTraces, 'mt-shaker-response-plot', shaken?.burstInputs ?? null, inputNotes, 'The responses are drawn while the shakers drive.')}
+				{@render timePlot(driveTraces, 'mt-shaker-drive-plot', shaken?.burstDrives ?? null, driveNotes, 'The drives are drawn while the shakers drive.')}
 				<div class="plot" data-testid="mt-refspec-plot">{#if refSpectra}<SpectrumPane view={refSpectra} styles={overlayStyles(refSpectra)} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The reference autospectra are drawn as the average builds.</p>{/if}</div>
 			{/if}
 			<div class="plot" data-testid="mt-frf-plot">{#if frf.magnitude}<SpectrumPane view={frf.magnitude} live minHeight={PLOT_MIN} readout={false} copyButton={false} />{:else}<p class="empty">The FRF is drawn after the first accepted {impact ? 'hit' : 'frame'}.</p>{/if}</div>
@@ -686,6 +706,26 @@
 	}
 
 	/* a plot's title keeps its words: a readout beside it goes to the next line rather than cut it */
+	/* in the Response plot's header line, right of its title: it takes none of the plot's height */
+	.framedecay {
+		position: absolute;
+		top: 3px;
+		right: var(--sp-2);
+		max-width: calc(100% - 72px);
+		margin: 0;
+		font-size: var(--text-2xs);
+		color: var(--text-2);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		pointer-events: auto;
+	}
+
+	.framedecay .flag {
+		margin: 0 4px 0 0;
+		padding: 0 3px;
+	}
+
 	.plot :global(.head .title) {
 		flex: 1 0 auto;
 	}

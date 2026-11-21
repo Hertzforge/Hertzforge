@@ -5,7 +5,7 @@
  * words around them.
  */
 
-import type { ModalCounts, ModalDrivePhase, ModalHitReport, ModalLatest, ModalOutcome, ModalRejectReason, ModalRunState, ModalSource, ModalTargetVerdict, ModalTile } from '$lib/protocol/modal_test';
+import type { ModalCounts, ModalDecay, ModalDrivePhase, ModalHitReport, ModalLatest, ModalOutcome, ModalRejectReason, ModalRunState, ModalSource, ModalTargetVerdict, ModalTile } from '$lib/protocol/modal_test';
 
 /** The state in large words. */
 export function modalStateWords(state: ModalRunState | null | undefined, mode: 'impact' | 'shaker' | null | undefined): string {
@@ -241,6 +241,20 @@ export const HIT_WARNING_WORDS: Record<string, string> = {
 	no_response: 'A response stayed inside its noise: check the sensor and its cable.',
 	response_not_decayed: 'A response has not died away by the end of the block: a longer block or an exponential window helps.'
 };
+
+/**
+ * A shaker frame's decay check in words, with the service's row and percent: short enough for the
+ * Response plot's header line, with Not Died Away when the service warns, as a hit's tile says it,
+ * and the whole sentence a hit's report gives.
+ */
+export function frameDecayWords(d: ModalDecay | null | undefined): { flag: string | null; text: string; full: string } | null {
+	if (!d) return null;
+	const pct = num(d.ratio * 100);
+	const text = `Row ${d.row}, ${pct}%`;
+	return d.warning
+		? { flag: 'Not Died Away', text, full: `Row ${d.row} has not died away by the end of the frame: it ends at ${pct}% of its loudest.` }
+		: { flag: null, text, full: `Row ${d.row} ends the frame at ${pct}% of its loudest.` };
+}
 
 /** A hit report's checks as lines of words with the service's numbers. */
 export function reportLines(r: ModalHitReport | null | undefined, unit: string): string[] {
