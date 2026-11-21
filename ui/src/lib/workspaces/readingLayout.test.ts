@@ -6,6 +6,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { View } from '$lib/protocol/types';
+import { lonePlot } from './readingLayout';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./Analyze.svelte', import.meta.url)), 'utf-8');
 const STYLE = SOURCE.slice(SOURCE.indexOf('<style>'), SOURCE.indexOf('</style>'));
@@ -45,5 +47,23 @@ describe("the reading's views", () => {
 
 	it('give the 3-D view a height of its own when the rows size to their content', () => {
 		expect(topLevel('.svviews.several:not(.panes) .view.shape3d')['min-height']).toBe('440px');
+	});
+});
+
+describe("a reading's one plot", () => {
+	const of = (...kinds: string[]) => kinds.map((view) => ({ view }) as View);
+
+	it('fills the frame: one row of the whole height, and the view at no fixed height', () => {
+		expect(topLevel('.svviews.lone:not(.panes)')['grid-template-rows']).toBe('minmax(0, 1fr)');
+		expect(topLevel('.svviews.lone:not(.panes) .view')['height']).toBe('auto');
+	});
+
+	it('is a plot alone: a table, a reading or a plot among others keeps its own height', () => {
+		expect(lonePlot(of('spectrum'))).toBe(true);
+		expect(lonePlot(of('waterfall'))).toBe(true);
+		expect(lonePlot(of('table'))).toBe(false);
+		expect(lonePlot(of('reading'))).toBe(false);
+		expect(lonePlot(of('spectrum', 'reading'))).toBe(false);
+		expect(SOURCE).toContain('class:lone={lonePlot(a.reading.views)}');
 	});
 });
