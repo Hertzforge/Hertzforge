@@ -4,7 +4,7 @@
 //
 //   npm --prefix tools/e2e-sim ci
 //   node tools/e2e-sim/modal_test_sim.mjs [--mock] [--exe <sds-control>] [--python <python with hertzforge installed>]
-//                                         [--data <dir>] [--shots <dir>] [--headed]
+//                                         [--data <dir>] [--shots <dir>] [--only impact|shaker] [--headed]
 //
 // With `--mock` it starts only the shell's dev server against the shell's own mock control service:
 // the mock's numbers are made up so that every panel can be seen, and nothing it shows is a
@@ -14,20 +14,29 @@
 //
 // 1. The chooser's Specialized section offers the Modal Test; it opens on Setup and takes control
 //    on the simulator.
-// 2. Station & Channels and DOFs: a hammer row (N, row 1) and two accelerometer rows (g, rows 3 and 4); in DOFs the
-//    hammer is the reference at 1Z+, the accelerometers responses at 2Z+ and 3Z+. A setup with no
-//    reference is refused in DOFs, in the service's words.
-// 3. Roving: row 4 roves over four points typed in; the plan comes from the service's check.
-// 4. Impact: automatic accept, no auto-advance, a force target with a tight tolerance.
-// 5. Measure (impact): Proceed to Run, Start; Space arms; a simulated double hit is rejected in
-//    words with its flag; hits come in; the counter and the tiles read the service's counts; a High
-//    flag shows its percent and the hit is still accepted; R and Enter override the verdict; U
-//    undoes; Right moves to the next point; End Test ends the test (screenshots, light and dark).
-// 6. Measure (shaker): one shaker on the drive row, burst random; Start Driving; the frames count
-//    up mid-average (screenshots, light and dark); Stop on the run bar ends it.
-// 7. Against the real services only: the run folder holds the test's setup and outcome, and Open in
-//    Analysis lands in the Modal workspace.
+// 2. Station & Channels and DOFs: a hammer row (N, row 1) and two accelerometer rows (g, rows 3 and
+//    4); in DOFs the hammer is the reference at 1Z+, the accelerometers responses at 2Z+ and 3Z+. A
+//    setup with no reference is refused in DOFs, in the service's words.
+// 3. Roving: row 4 roves over three points typed in; the plan comes from the service's check.
+// 4. Impact: Positive polarity with the service's watches sentence, automatic accept, no
+//    auto-advance, a force target the simulated hammer passes by a little.
+// 5. Measure (impact): Space arms through Arming to Waiting for Hit; a simulated double hit is
+//    rejected and flagged, its second impact marked on the force and worded with its ratio; an
+//    overload is rejected; clean hits are accepted with a High flag; R rejects, A and Enter accept
+//    again, U undoes; the point fills; the arrows change points; Clear Point asks, then clears; the
+//    counter and tiles read the service after each. Every line of the Keys card is on screen at
+//    1,440 by 900 (and what 1,280 by 800 shows is printed); End Test ends it.
+// 6. Against the real services: the run folder holds its setup and outcome; Open in Analysis opens
+//    the run with its channel table, FRFs, coherence and frames; the modal fit opens on the FRFs and
+//    one mode is found and confirmed; Estimate Again is offered on the frames with its glyph and
+//    adds its FRFs and coherence.
+// 7. Measure (shaker): two shakers on rows 2 and 6, their force gauges on rows 1 and 5. A level over
+//    the drive ceiling and pseudo random on two drives are each refused on screen in the service's
+//    words; burst random checks clean; Start Driving; the averages build; Stop Driving; End Test;
+//    Open in Analysis brings the FRFs.
 //
+// `--only impact` or `--only shaker` runs one half. With MT_DEBUG set, a failure to find Estimate
+// Again prints the page's errors and the analysis service's log.
 // Screenshots (1,440 by 900): `modal_test_<name>.png`.
 
 import { chromium } from 'playwright-core';
@@ -131,6 +140,13 @@ async function fill(locator, value) {
 	await locator.blur();
 }
 
+/** A switch or box set by its own click, wherever its panel has scrolled it. */
+async function toggle(locator, on) {
+	await locator.evaluate((el, want) => {
+		if (el.checked !== want) el.click();
+	}, on);
+}
+
 async function section(page, id) {
 	if ((await attr(page, 'flow-setup', 'aria-current')) !== 'step' || !(await tid(page, `tab-${id}`).isVisible())) await tid(page, 'flow-setup').click();
 	await tid(page, `tab-${id}`).click();
@@ -150,6 +166,24 @@ const tiles = (page) => page.locator('[data-testid="mt-tile"]').evaluateAll((els
 
 // ---- the services -------------------------------------------------------------------------------
 const shellPort = await freePort();
+let analysisLog = null;
+/** With MT_DEBUG set: the analysis requests and replies after the fit, for a failure's report. */
+const wire = [];
+function listen(a) {
+	if (!process.env.MT_DEBUG) return;
+	a.on('pageerror', (e) => wire.push(`pageerror ${e.message}\n${(e.stack ?? '').slice(0, 1200)}`));
+	a.on('console', (m) => m.type() === 'error' && wire.push(`console ${m.text().slice(0, 600)}`));
+	a.on('websocket', (ws) => {
+		if (!/analysis|:\d+\/$/.test(ws.url())) return;
+		const keep = (dir) => (f) => {
+			const t = typeof f.payload === 'string' ? f.payload : '';
+			if (t.startsWith('{')) wire.push(`${dir} ${t.slice(0, 300)}`);
+			if (wire.length > 400) wire.shift();
+		};
+		ws.on('framesent', keep('>'));
+		ws.on('framereceived', keep('<'));
+	});
+}
 let QUERY;
 if (MOCK) {
 	QUERY = '?mock=1&mock_speed=4&mock_sim=8x2';
@@ -165,7 +199,7 @@ if (MOCK) {
 	const env = { ...process.env, HERTZFORGE_DATA_ROOT: DATA_ROOT };
 	const control = start('sds-control', exe, ['--port', String(controlPort)], { env });
 	await waitFor('the control service', () => control.log.join('').includes('listening on ws://127.0.0.1:'), 30_000);
-	start('analysis', PYTHON, ['-m', 'hertzforge', 'serve', '--port', String(analysisPort)], { env });
+	analysisLog = start('analysis', PYTHON, ['-m', 'hertzforge', 'serve', '--port', String(analysisPort)], { env });
 	await waitFor('the analysis service', () => new Promise((resolve) => {
 		const s = net.connect(analysisPort, '127.0.0.1', () => {
 			s.end();
@@ -188,11 +222,21 @@ let page = null;
 /** The chooser, the Modal Test screen, control, and the simulator in use. */
 async function open(theme) {
 	const a = (page = await ctx.newPage());
+	listen(a);
 	await a.goto(URL_(theme));
 	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()), 60_000);
 	await tid(a, 'test-type-modal_test').click();
 	await until(a, 'the Modal Test screen', async (p) => tid(p, 'modal-test-screen').isVisible());
-	await tid(a, 'claim').click();
+	// control taken here, or (after a page that released it) taken already
+	const mine = async (p) => (await attr(p, 'session-role', 'data-role').catch(() => null)) === 'controller';
+	await until(a, 'control free to take', async (p) => (await mine(p)) || tid(p, 'claim').isEnabled(), 30_000);
+	if (!(await mine(a))) await tid(a, 'claim').click();
+	// the last page's test ended: a new run from the same setup first
+	if ((await attr(a, 'run-state', 'data-state').catch(() => null)) === 'finished') {
+		await tid(a, 'flow-run').click();
+		await tid(a, 'act-reset').click();
+		await until(a, 'a new run', async (p) => (await attr(p, 'run-state', 'data-state')) !== 'finished', 20_000);
+	}
 	await until(a, 'control', async (p) => (await attr(p, 'session-role', 'data-role')) === 'controller');
 	await section(a, 'station');
 	if ((await attr(a, 'station-sim', 'aria-checked')) !== 'true') await tid(a, 'station-sim').click();
@@ -210,18 +254,28 @@ async function table(a, shaker) {
 	await until(a, 'the channel table', async (p) => (await p.locator('[data-testid^="channel-on-"]').count()) >= 4);
 	const states = await a.locator('[data-testid^="channel-on-"]').evaluateAll((els) => els.map((e) => [Number(e.dataset.testid.replace('channel-on-', '')), e.checked]));
 	for (const [i, checked] of states) {
-		const on = i <= 3;
-		if (checked !== on) await a.locator(`[data-testid="channel-on-${i}"]`).setChecked(on, { force: true });
+		const on = i <= 3 || (shaker && i <= 5);
+		if (checked !== on) await toggle(a.locator(`[data-testid="channel-on-${i}"]`), on);
 	}
 	for (const i of [2, 3]) await tid(a, `channel-role-${i}`).selectOption('monitor');
-	await fill(a.getByLabel('Channel 1 description', { exact: true }), shaker ? 'Force gauge' : 'Hammer');
+	await fill(a.getByLabel('Channel 1 description', { exact: true }), shaker ? 'Force gauge A' : 'Hammer');
 	await fill(a.getByLabel('Channel 1 units', { exact: true }), 'N');
 	for (const [i, d] of [[3, 'Accel A'], [4, 'Accel B']]) {
 		await fill(a.getByLabel(`Channel ${i} description`, { exact: true }), d);
 		await fill(a.getByLabel(`Channel ${i} units`, { exact: true }), 'g');
 	}
+	if (shaker) {
+		// a second shaker: its force gauge on row 5, its drive on row 6
+		await tid(a, 'channel-role-4').selectOption('monitor');
+		await fill(a.getByLabel('Channel 5 description', { exact: true }), 'Force gauge B');
+		await fill(a.getByLabel('Channel 5 units', { exact: true }), 'N');
+		await tid(a, 'channel-role-5').selectOption('drive');
+		await fill(a.getByLabel('Channel 6 description', { exact: true }), 'Drive B');
+		await fill(a.getByLabel('Channel 6 units', { exact: true }), 'V');
+	}
 	await a.waitForTimeout(300);
-	if (await tid(a, 'table-apply').isEnabled()) await tid(a, 'table-apply').click();
+	// the button is there only while the table has edits
+	if ((await a.locator('[data-testid="table-apply"]').count()) && (await tid(a, 'table-apply').isEnabled())) await tid(a, 'table-apply').click();
 }
 
 async function dof(a, row, node, role) {
@@ -237,6 +291,48 @@ async function toRun(a) {
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(a, 'act-start').click();
 	await until(a, 'the test at its first point', async (p) => ['idle', 'point_done'].includes(await measureState(p)), 30_000);
+}
+
+/** Every line of the Keys card on screen, unclipped, with the page not scrolled. */
+async function keysOnScreen(a) {
+	return a.evaluate(() => {
+		const lines = [...document.querySelectorAll('.keys dl > div')];
+		const out = lines.map((el) => {
+			const r = el.getBoundingClientRect();
+			const at = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2);
+			return { text: el.textContent.replace(/\s+/g, ' ').trim(), bottom: Math.round(r.bottom), seen: r.top >= 0 && r.bottom <= innerHeight && !!at && el.contains(at) };
+		});
+		return { lines: out, height: innerHeight, scrolled: (document.scrollingElement?.scrollTop ?? 0) > 0 };
+	});
+}
+
+/** Record every wording of the state line from now on, so a short state is not missed. */
+async function watchStateWords(a) {
+	await a.evaluate(() => {
+		const w = (window.__stateWords = []);
+		const el = document.querySelector('[data-testid="mt-state-words"]');
+		const keep = () => {
+			const t = (el?.textContent ?? '').trim();
+			if (w[w.length - 1] !== t) w.push(t);
+		};
+		keep();
+		if (el) new MutationObserver(keep).observe(el, { subtree: true, childList: true, characterData: true });
+		window.__stateTimer = setInterval(keep, 10);
+	});
+}
+const stateWordsSeen = (a) => a.evaluate(() => (clearInterval(window.__stateTimer), window.__stateWords));
+
+const count = async (a) => Number(/^(\d+) of/.exec(await text(a, 'mt-count'))?.[1] ?? NaN);
+const accepted = async (a) => (await tiles(a)).filter((t) => t.status === 'accepted').length;
+const treeNames = (a) => a.locator('[data-testid="project-tree"] [data-testid^="object-"]').evaluateAll((els) => els.map((e) => e.dataset.testid.slice('object-'.length)));
+
+/** Arm, wait for `n` more tiles, disarm. */
+async function hits(a, n, what) {
+	const before = (await tiles(a)).length;
+	await press(a, 'Space');
+	await until(a, what, async (p) => (await tiles(p)).length >= before + n, 30_000);
+	await press(a, 'Space');
+	await until(a, 'disarmed', async (p) => !['armed', 'arming'].includes(await measureState(p)), 10_000);
 }
 
 /** The impact test up to its shots; `full` runs every check, otherwise only what the shots need. */
@@ -258,15 +354,17 @@ async function impact(theme, full) {
 	if (full) await shot(a, 'setup_dofs');
 
 	await section(a, 'roving');
-	await tid(a, 'mt-rov-on').setChecked(true, { force: true });
+	await toggle(tid(a, 'mt-rov-on'), true);
 	await a.locator('[data-testid="mt-rov-row"][data-row="4"]').setChecked(true);
-	await fill(tid(a, 'mt-rov-text'), '3 Z+\n4 Z+\n5 Z+\n6 Z+');
-	check('the typed points are read', (await text(a, 'mt-rov-count')) === '4 points read.', await text(a, 'mt-rov-count'));
+	await fill(tid(a, 'mt-rov-text'), '3 Z+\n4 Z+\n5 Z+');
+	check('the typed points are read', (await text(a, 'mt-rov-count')) === '3 points read.', await text(a, 'mt-rov-count'));
 
 	await section(a, 'excitation');
-	await tid(a, 'mt-advance').setChecked(false, { force: true });
-	await tid(a, 'mt-target-on').setChecked(true, { force: true });
-	await fill(field(a, 'mt-target-peak'), 150);
+	await tid(a, 'mt-polarity-positive').click();
+	await toggle(tid(a, 'mt-advance'), false);
+	await toggle(tid(a, 'mt-target-on'), true);
+	// the simulated hammer peaks at 20 in the row's unit: a target of 18 flags each clean hit High
+	await fill(field(a, 'mt-target-peak'), 18);
 	await fill(field(a, 'mt-target-tol'), 5);
 
 	// Apply sends the table with its DOFs first, then the setup: the plan comes from the service.
@@ -276,115 +374,286 @@ async function impact(theme, full) {
 	if (full) {
 		await section(a, 'roving');
 		await until(a, 'the plan', async (p) => tid(p, 'mt-plan').isVisible(), 20_000);
-		check('the plan has the four points from the service', (await a.locator('[data-testid="mt-plan"] tbody tr').count()) === 4);
+		check('the plan has the three points from the service', (await a.locator('[data-testid="mt-plan"] tbody tr').count()) === 3);
 		await shot(a, 'setup_roving_plan');
 		await section(a, 'excitation');
 		await until(a, 'the service windows', async (p) => tid(p, 'mt-fw-derived').isVisible(), 20_000);
+		check("the polarity shows the service's watches sentence", /^The trigger watches .+\.$/.test(await text(a, 'mt-watches')), await text(a, 'mt-watches'));
 		await shot(a, 'setup_impact');
 		await tid(a, 'flow-run').click();
 	}
 	await tid(a, 'act-start').click();
 	await until(a, 'the test at its first point', async (p) => (await measureState(p)) === 'idle', 30_000);
-	check('the counter reads the service: 0 of 5 at point 1 of 4', (await text(a, 'mt-count')) === '0 of 5' && (await text(a, 'run-point')) === '1 of 4', `${await text(a, 'mt-count')}; ${await text(a, 'run-point')}`);
+	check('the counter reads the service: 0 of 5 at point 1 of 3', (await text(a, 'mt-count')) === '0 of 5' && (await text(a, 'run-point')) === '1 of 3', `${await text(a, 'mt-count')}; ${await text(a, 'run-point')}`);
 
+	// A double hit: rejected by the service, flagged, its second impact marked and worded.
 	await tid(a, 'mt-sim-double').click();
-	await press(a, 'Space');
-	await until(a, 'armed', async (p) => (await measureState(p)) === 'armed', 10_000);
-	await until(a, 'the first hit', async (p) => (await tiles(p)).length >= 1, 20_000);
+	if (full) await watchStateWords(a);
+	await hits(a, 1, 'the double hit');
+	if (full) {
+		const seen = await stateWordsSeen(a);
+		const i = seen.indexOf('Arming');
+		check('arming reads Arming, then Waiting for Hit', i >= 0 && seen.indexOf('Waiting for Hit') > i, seen.join(' > '));
+	}
 	const first = (await tiles(a))[0];
 	check('the double hit is rejected, its flag in words', first.status === 'rejected' && /Double Hit/.test(first.text), first.text);
-	check('the rejected count is the service count', (await text(a, 'mt-rejected')) === '1 rejected');
 	check('the verdict says why in words', /Hit 1 Rejected: Double Hit/.test(await text(a, 'mt-verdict')), await text(a, 'mt-verdict'));
+	if (full) {
+		await until(a, 'the hit drawn', async (p) => (await p.locator('[data-testid="mt-force-plot"] .marker').count()) > 0, 10_000).catch(() => {});
+		check('the second impact is marked on the force', (await a.locator('[data-testid="mt-force-plot"] .marker').count()) > 0);
+		check('the second impact is worded with its ratio', /^Second impact at .+ s into the block, .+: \d+% of the peak\.$/.test(await text(a, 'mt-second-words')), await text(a, 'mt-second-words').catch(() => 'none'));
+		check('the double-hit flag is on the force, the words in its title', (await text(a, 'mt-double-flag')) === 'Double Hit' && /^Second impact at/.test((await attr(a, 'mt-double-flag', 'title')) ?? ''), await text(a, 'mt-double-flag').catch(() => 'none'));
+		check('the force window is drawn from the service', /window/i.test(await a.locator('[data-testid="mt-force-plot"]').innerText()), (await a.locator('[data-testid="mt-force-plot"]').innerText()).replace(/\s+/g, ' ').slice(0, 160));
+		check('the force spectrum gives its tip roll-off', /Tip roll-off/.test(await a.locator('[data-testid="mt-fspec-plot"]').innerText()), (await a.locator('[data-testid="mt-fspec-plot"]').innerText()).replace(/\s+/g, ' ').slice(0, 160));
+		await shot(a, 'measure_impact');
 
-	// Hits come on; a High flag shows its percent and never rejects.
-	await until(a, 'a High flag on an accepted hit', async (p) => (await tiles(p)).some((t) => t.status === 'accepted' && /High \+\d+%/.test(t.text)), 60_000);
-	await until(a, 'three hits', async (p) => (await tiles(p)).length >= 3, 30_000);
-	await press(a, 'Space');
-	await until(a, 'disarmed', async (p) => (await measureState(p)) !== 'armed', 10_000);
-	const ts = await tiles(a);
-	const acc = ts.filter((t) => t.status === 'accepted').length;
-	check('the counter is the service count of accepted hits', (await text(a, 'mt-count')) === `${acc} of 5`, `${await text(a, 'mt-count')} with ${acc} accepted tiles`);
+		// An overload: rejected, flagged.
+		await tid(a, 'mt-sim-overload').click();
+		await hits(a, 1, 'the overload');
+		const second = (await tiles(a))[1];
+		check('the overload is rejected, flagged in words', second.status === 'rejected' && /Overload/.test(second.text) && (await tid(a, 'mt-overload-flag').count()) === 1, second.text);
+		check('the rejected count is the service count', (await text(a, 'mt-rejected')) === '2 rejected', await text(a, 'mt-rejected'));
+	}
+
+	// Clean hits: accepted, a High flag with its percent.
+	await hits(a, 2, 'two clean hits');
+	check('clean hits are accepted with a High flag and its percent', (await tiles(a)).filter((t) => t.status === 'accepted' && /High \+\d+%/.test(t.text)).length >= 2, (await tiles(a)).map((t) => t.text).join(' | '));
+	check('the counter is the service count of accepted hits', (await count(a)) === (await accepted(a)), `${await text(a, 'mt-count')} with ${await accepted(a)} accepted tiles`);
 	check('the target flag is shown with its percent', /High|Low|On Target/.test(await text(a, 'mt-target-flag').catch(() => '')), await text(a, 'mt-target-flag').catch(() => 'none'));
-	await shot(a, theme === 'dark' ? 'dark_measure_impact' : 'measure_impact');
-	if (!full) return a;
+	if (!full) {
+		await shot(a, 'dark_measure_impact');
+		await tid(a, 'mt-end').click();
+		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
+		return a;
+	}
 
-	// The keys override the service's verdict on the latest hit, and U undoes.
-	const before = await text(a, 'mt-count');
+	// The keys override the service's verdict on the latest hit; U undoes.
+	const n = await count(a);
+	const verdict = (s) => until(a, `the latest hit ${s}`, async (p) => (await attr(p, 'mt-verdict', 'data-status')) === s, 10_000);
 	await press(a, 'r');
-	await until(a, 'the latest hit rejected', async (p) => (await attr(p, 'mt-verdict', 'data-status')) === 'rejected', 10_000);
-	check('R rejects the latest hit', (await text(a, 'mt-count')) !== before, `${before} to ${await text(a, 'mt-count')}`);
+	await verdict('rejected');
+	check('R rejects the latest hit', (await count(a)) === n - 1, await text(a, 'mt-count'));
+	await press(a, 'a');
+	await verdict('accepted');
+	check('A accepts it again', (await count(a)) === n, await text(a, 'mt-count'));
+	await press(a, 'r');
+	await verdict('rejected');
 	await press(a, 'Enter');
-	await until(a, 'the latest hit accepted', async (p) => (await attr(p, 'mt-verdict', 'data-status')) === 'accepted', 10_000);
-	check('Enter accepts it again', (await text(a, 'mt-count')) === before, await text(a, 'mt-count'));
+	await verdict('accepted');
+	check('Enter accepts it again', (await count(a)) === n, await text(a, 'mt-count'));
+	await hits(a, 1, 'one more clean hit');
+	await press(a, 'r');
+	await verdict('rejected');
+	check('R rejects the next one, and it stays out', (await count(a)) === n && (await tiles(a)).at(-1).status === 'rejected', `${await text(a, 'mt-count')}; ${(await tiles(a)).at(-1).text}`);
 	await press(a, 'u');
-	await until(a, 'the undo', async (p) => (await text(p, 'mt-count')) !== before, 10_000);
-	check('U undoes the last accepted hit', true, `${before} to ${await text(a, 'mt-count')}`);
-	await tid(a, 'mt-rov-text').count(); // the setup's fields are not on this screen, so typing cannot reach them
-	await press(a, 'ArrowRight');
-	await until(a, 'the next point', async (p) => (await text(p, 'run-point')) === '2 of 4', 10_000);
-	check('Right moves to the next point', true);
-	await press(a, 'ArrowLeft');
-	await until(a, 'the previous point', async (p) => (await text(p, 'run-point')) === '1 of 4', 10_000);
-	check('Left moves back', true);
+	await until(a, 'the undo', async (p) => (await count(p)) === n - 1, 10_000);
+	check('U undoes the last accepted hit, its tile marked undone', (await tiles(a)).some((t) => t.status === 'undone'), (await tiles(a)).map((t) => t.status).join(', '));
+	check('the counter matches the accepted tiles after each', (await count(a)) === (await accepted(a)), `${await text(a, 'mt-count')} with ${await accepted(a)}`);
 
-	await tid(a, 'mt-end').count();
-	await a.getByRole('button', { name: 'End Test' }).first().click();
+	// The point fills with clean hits; the arrows change points; Clear Point asks first.
+	await press(a, 'Space');
+	await until(a, 'point 1 measured', async (p) => (await text(p, 'mt-count')) === '5 of 5', 60_000);
+	await until(a, 'point 1 done', async (p) => (await measureState(p)) === 'point_done', 10_000);
+	check('point 1 is measured at 5 of 5', /Measured/.test(await a.locator('[data-testid="mt-points-list"] li').first().innerText()));
+	await press(a, 'ArrowRight');
+	await until(a, 'the next point', async (p) => (await text(p, 'run-point')) === '2 of 3', 10_000);
+	check('Right moves to the next point', (await text(a, 'mt-count')) === '0 of 5', await text(a, 'mt-count'));
+	await hits(a, 2, 'two hits at point 2');
+	const at2 = await count(a);
+	await tid(a, 'mt-clear').click();
+	check('Clear Point asks first, in words', /Take all \d+ accepted hits at point 2 out\?/.test(await text(a, 'mt-clear-ask')), await text(a, 'mt-clear-ask').catch(() => 'none'));
+	await tid(a, 'mt-clear-no').click();
+	check('Keep Them keeps them', (await count(a)) === at2 && (await tid(a, 'mt-clear-ask').count()) === 0, await text(a, 'mt-count'));
+	await tid(a, 'mt-clear').click();
+	await tid(a, 'mt-clear-yes').click();
+	await until(a, 'the point cleared', async (p) => (await count(p)) === 0, 10_000);
+	check('Clear Point takes every accepted hit out and keeps the tiles, undone', (await tiles(a)).length >= 2 && (await accepted(a)) === 0, (await tiles(a)).map((t) => t.status).join(', '));
+	await press(a, 'ArrowLeft');
+	await until(a, 'the previous point', async (p) => (await text(p, 'run-point')) === '1 of 3', 10_000);
+	check('Left moves back to the measured point', (await text(a, 'mt-count')) === '5 of 5', await text(a, 'mt-count'));
+
+	// Every key line on screen without scrolling at 1440 by 900; then at 1280 by 800, as it is.
+	const k900 = await keysOnScreen(a);
+	check('every line of the Keys card is on screen at 1440 by 900', k900.lines.length >= 5 && k900.lines.every((l) => l.seen) && !k900.scrolled, k900.lines.map((l) => `${l.text}@${l.bottom}${l.seen ? '' : ' (cut)'}`).join('; '));
+	await a.setViewportSize({ width: 1280, height: 800 });
+	await a.waitForTimeout(400);
+	const k800 = await keysOnScreen(a);
+	console.log(`      at 1280 by 800: ${k800.lines.map((l) => `${l.text}@${l.bottom}${l.seen ? '' : ' (cut)'}`).join('; ')}`);
+	await a.screenshot({ path: path.join(SHOTS, 'modal_test_keys_1280x800.png') });
+	await a.setViewportSize({ width: 1440, height: 900 });
+
+	await tid(a, 'mt-end').click();
 	await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
-	check('End Test ends the test in words', (await tid(a, 'mt-end').count()) === 1, await text(a, 'mt-end').catch(() => ''));
+	check('End Test ends the test in words', (await tid(a, 'mt-ended').count()) === 1 && /\w/.test(await text(a, 'mt-ended')), await text(a, 'mt-ended').catch(() => ''));
 	await neverLive(a, 'after the test');
 	await shot(a, 'measure_ended');
-	if (!MOCK) {
-		const runs = fs.readdirSync(DATA_ROOT).filter((f) => /^modal_test/.test(f));
-		check('the test left its folder under the data folder', runs.length === 1, runs.join(', '));
-		const run = path.join(DATA_ROOT, runs[0]);
-		check("the run's setup holds the test's configuration", JSON.parse(fs.readFileSync(path.join(run, 'setup.json'), 'utf8')).config?.mode === 'impact');
-		await tid(a, 'act-open-analysis').click();
-		await until(a, 'the Modal workspace', async (p) => (await attr(p, 'rail-modal', 'aria-current')) === 'page', 180_000);
-		check('Open in Analysis lands in the Modal workspace', true);
-		await shot(a, 'in_analysis');
-	}
+	if (MOCK) return a;
+
+	const run = latestRun('impact');
+	check("the run's folder holds the test's setup and outcome", !!run && fs.existsSync(path.join(run, 'end.json')), run ?? 'none');
+	await analysis(a, 'impact');
+	await shot(a, 'in_analysis');
+
+	// The modal fit on the run's FRFs: fit.start accepted, one mode found and confirmed.
+	const frf = (await treeNames(a)).find((x) => /frf/i.test(x));
+	await tid(a, `object-${frf}`).click();
+	await until(a, 'the fit row', async (p) => tid(p, 'action-self.fit').isVisible(), 20_000);
+	await tid(a, 'action-self.fit').click();
+	await until(a, 'the fit panel', async (p) => tid(p, 'fit-panel').isVisible(), 60_000);
+	check('the fit opens on the FRFs (fit.start accepted)', (await tid(a, 'fit-error').count()) === 0, frf);
+	await tid(a, 'fit-find').click();
+	await until(a, 'the cursor on a mode', async (p) => (await tid(p, 'fit-find').isEnabled()) && !(await p.locator('.fit .status [role="status"]').count()), 60_000);
+	await tid(a, 'fit-confirm').click();
+	await until(a, 'a confirmed mode', async (p) => (await tid(p, 'fit-mode-0').count()) === 1 || (await tid(p, 'fit-error').count()) === 1, 60_000);
+	check('one mode is found', (await tid(a, 'fit-mode-0').count()) === 1, (await tid(a, 'fit-mode-0').count()) ? await text(a, 'fit-mode-0') : await text(a, 'fit-error'));
+	await shot(a, 'fit_open');
+
+	// Estimate Again on the first measurement's frames: its row with its glyph, then a new pair.
+	const frames = (await treeNames(a)).find((x) => /frames/.test(x));
+	const before = await treeNames(a);
+	const objects = before.length;
+	// a click in the tree leaves the fit; then the frames are picked on their own
+	const row = a.locator('[data-testid="action-project.reprocess_modal_test"]').first();
+	await tid(a, `object-${frames}`).click();
+	await until(a, 'the fit left', async (p) => (await tid(p, 'fit-panel').count()) === 0, 20_000);
+	const picks = [];
+	await until(a, 'the Estimate Again row', async (p) => {
+		if (await row.isVisible()) return true;
+		await p.waitForTimeout(3000);
+		if (await row.isVisible()) return true;
+		await tid(p, 'object-Channel Table').click();
+		await p.waitForTimeout(1500);
+		await tid(p, `object-${frames}`).click();
+		await p.waitForTimeout(2500);
+		picks.push(await p.locator('[data-testid="action-column"]').first().innerText().catch(() => '').then((t) => t.replace(/\s+/g, ' ').slice(0, 80)));
+		return row.isVisible();
+	}, 45_000).catch((e) => {
+		console.log(`      the action table after each pick: ${picks.join(' | ')}`);
+		if (process.env.MT_DEBUG) {
+			console.log(wire.filter((w) => /^(pageerror|console)/.test(w)).join('\n'));
+			console.log((analysisLog?.log ?? []).join('').slice(-3000));
+		}
+		throw e;
+	});
+	if (picks.length) console.log(`      the Estimate Again row came after ${picks.length} more picks: ${picks.join(' | ')}`);
+	check('Estimate Again is offered on the frames, with its glyph', /Estimate Again/.test(await row.innerText()) && (await row.locator('svg').count()) > 0, `${frames}: ${await row.innerText()}`);
+	await row.click();
+	await until(a, 'its form', async (p) => tid(p, 'run-op').isVisible(), 20_000);
+	await tid(a, 'run-op').click();
+	await until(a, 'the estimate', async (p) => (await treeNames(p)).length > objects, 120_000);
+	const added = (await treeNames(a)).filter((x) => !before.includes(x));
+	check('Estimate Again adds its FRFs and coherence beside the frames', added.length === 2, added.join(', '));
 	return a;
 }
 
-async function shaker(theme) {
+/** Release control, so the next page can take it, and close the page. */
+async function done(a) {
+	if ((await a.locator('[data-testid="rail-acquire"][aria-current="page"]').count()) === 0) await tid(a, 'rail-acquire').click();
+	const release = a.locator('[data-testid="release"]:visible').first();
+	await until(a, 'the Release button', async () => (await release.count()) > 0 && release.isEnabled(), 20_000);
+	await release.click();
+	await until(a, 'control released', async (p) => (await attr(p, 'session-role', 'data-role')) !== 'controller', 20_000);
+	await a.close();
+}
+
+/** The newest run folder of this mode under the data folder. */
+function latestRun(mode) {
+	const runs = fs.readdirSync(DATA_ROOT).filter((f) => /^modal_test/.test(f)).map((f) => path.join(DATA_ROOT, f))
+		.filter((d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'setup.json'), 'utf8')).config?.mode === mode; } catch { return false; } });
+	return runs.sort((x, y) => fs.statSync(y).mtimeMs - fs.statSync(x).mtimeMs)[0] ?? null;
+}
+
+/** Open in Analysis: the Analysis workspace, and the run's objects in the tree. */
+async function analysis(a, mode) {
+	await tid(a, 'act-open-analysis').click();
+	const current = (p) => p.locator('[data-testid^="rail-"][aria-current="page"]').first().innerText().catch(() => '');
+	await until(a, 'the Analysis workspace', async (p) => /Analysis/.test(await current(p)), 180_000);
+	check(`Open in Analysis opens the run in the Analysis workspace (${mode})`, true);
+	await until(a, 'the project tree', async (p) => (await treeNames(p)).length > 0, 30_000);
+	const names = await treeNames(a);
+	const has = (re) => names.some((x) => re.test(x));
+	check(`the run arrives with its channel table, FRFs, coherence and time data (${mode})`, has(/channel table/i) && has(/frf/i) && has(/coherence/i) && has(/frames/), names.join(', '));
+}
+
+async function shaker(theme, full) {
 	const a = await open(theme);
 	await table(a, true);
 	await section(a, 'acquisition');
 	await tid(a, 'mt-mode-shaker').click();
-	await fill(field(a, 'mt-averages'), 40);
+	await fill(field(a, 'mt-averages'), 12);
 	await section(a, 'dofs');
 	await dof(a, 1, 1, 'reference');
 	await dof(a, 3, 2, 'response');
 	await dof(a, 4, 3, 'response');
+	await dof(a, 5, 4, 'reference');
 	await section(a, 'excitation');
-	await a.locator('[data-testid="mt-drive-row"][data-row="2"]').setChecked(true);
+	for (const r of [2, 6]) await a.locator(`[data-testid="mt-drive-row"][data-row="${r}"]`).setChecked(true);
+	const said = (p) => p.locator('[data-testid="mt-said"]').innerText().catch(() => '');
+	if (full) {
+		// A level over the ceiling, then pseudo random on two drives: each refused in the service's words.
+		await tid(a, 'mt-source').selectOption('burst_random');
+		await fill(a.locator('[data-testid="mt-drive-level"] input, input[data-testid="mt-drive-level"]').first(), 0.9);
+		// the DOFs are table edits: Apply Setup sends the table, then the service checks the setup
+		await tid(a, 'act-apply').click();
+		await until(a, 'the ceiling refusal', async (p) => /not inside the drive ceiling/.test(await said(p)), 30_000).catch(() => {});
+		check('a level over the ceiling is refused on screen', /not inside the drive ceiling/.test(await said(a)), (await said(a)).replace(/\s+/g, ' ').slice(0, 300));
+		check('Proceed to Run waits while it is refused', (await attr(a, 'mt-ready', 'data-ready')) !== 'true');
+		await fill(a.locator('[data-testid="mt-drive-level"] input, input[data-testid="mt-drive-level"]').first(), 0.05);
+		await tid(a, 'mt-source').selectOption('pseudo_random');
+		await tid(a, 'act-apply').click();
+		await until(a, 'the pseudo random refusal', async (p) => /drives one shaker only/.test(await said(p)), 30_000).catch(() => {});
+		check('pseudo random on two drives is refused on screen', /drives one shaker only/.test(await said(a)), (await said(a)).replace(/\s+/g, ' ').slice(0, 300));
+	}
 	await tid(a, 'mt-source').selectOption('burst_random');
-	await until(a, 'the setup to check', async (p) => (await attr(p, 'mt-ready', 'data-ready')) === 'true' || (await tid(p, 'mt-summary-table').count()) === 1, 30_000);
-	if (theme === 'light') await shot(a, 'setup_shaker');
+	await until(a, 'the setup to check', async (p) => (await attr(p, 'mt-ready', 'data-ready')) === 'true', 30_000).catch(() => {});
+	if (full) check('two shakers on burst random check clean', (await attr(a, 'mt-ready', 'data-ready')) === 'true', (await said(a)).replace(/\s+/g, ' ').slice(0, 300));
+	if (full) {
+		// the refusal of the last Apply Setup stays until dismissed, though the setup now checks clean
+		const refusal = a.locator('[data-testid="refusal-message"]');
+		if (await refusal.count()) await refusal.locator('xpath=../..').locator('button[aria-label="Dismiss"]').first().click();
+		await shot(a, 'setup_shaker');
+	}
 	await tid(a, 'proceed-to-run').click();
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(a, 'act-start').click();
 	await until(a, 'the test at its first point', async (p) => (await measureState(p)) === 'idle', 30_000);
 	await tid(a, 'mt-drive_start').click();
-	await until(a, 'frames mid-average', async (p) => {
-		const m = /^(\d+) of (\d+)/.exec(await text(p, 'mt-count'));
-		return !!m && Number(m[1]) >= 6;
-	}, 60_000);
-	check('the frames count up from the service, mid-average', /^\d+ of 40$/.test(await text(a, 'mt-count')), await text(a, 'mt-count'));
+	await until(a, 'frames mid-average', async (p) => (await count(p)) >= 6, 90_000);
+	check('the averages build from the service, mid-average', /^\d+ of 12$/.test(await text(a, 'mt-count')), await text(a, 'mt-count'));
 	check('the drive phase is in words', /Drive:/.test(await text(a, 'mt-drive-phase')), await text(a, 'mt-drive-phase'));
 	await shot(a, theme === 'dark' ? 'dark_measure_shaker' : 'measure_shaker');
-	await tid(a, 'act-stop').click();
-	await until(a, 'the stop', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
-	check('Stop on the run bar ends the shaker test', true, await text(a, 'mt-end').catch(() => ''));
+	if (!full) {
+		await tid(a, 'mt-end').click();
+		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
+		return a;
+	}
+	const n = await count(a);
+	await tid(a, 'mt-drive_stop').click();
+	await until(a, 'the drive stopped', async (p) => (await measureState(p)) !== 'measuring', 30_000);
+	check('Stop Driving stops the drive and keeps the averages', (await count(a)) >= n, `${n} to ${await text(a, 'mt-count')}`);
+	// a point's FRFs are saved once it has its averages: drive on to 12 of 12
+	await tid(a, 'mt-drive_start').click();
+	await until(a, 'the point measured', async (p) => (await text(p, 'mt-count')) === '12 of 12' && (await measureState(p)) !== 'measuring', 120_000);
+	check('Start Driving again finishes the point at 12 of 12', true, await text(a, 'mt-count'));
+	await tid(a, 'mt-end').click();
+	await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
+	check('End Test ends the shaker test in words', (await tid(a, 'mt-ended').count()) === 1, await text(a, 'mt-ended').catch(() => ''));
 	await neverLive(a, 'after the shaker test');
+	if (MOCK) return a;
+	await analysis(a, 'shaker');
 	return a;
 }
 
 try {
-	await impact('light', true);
-	await impact('dark', false);
-	await shaker('light');
-	await shaker('dark');
+	const only = flag('--only');
+	if (only !== 'shaker') {
+		await done(await impact('light', true));
+		await done(await impact('dark', false));
+	}
+	if (only !== 'impact') {
+		await done(await shaker('light', true));
+		await done(await shaker('dark', false));
+	}
 } catch (err) {
 	failed = err;
 	console.error(err);
