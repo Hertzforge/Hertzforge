@@ -75,6 +75,14 @@ way.
 - **F. J. Harris**, "On the Use of Windows for Harmonic Analysis with the Discrete Fourier
   Transform", Proceedings of the IEEE, 1978: how far a tone leaks into the lines beside it, which
   sets the width Mixed Mode leaves out of the floor's average around each tone.
+- **Zhang Buyun, Wang Ruochen and Zeng Falin**, "MIMO random plus sine vibration test J-impedance
+  composite control algorithm" (in Chinese), Journal of Vibration, Measurement and Diagnosis
+  37(6), 2017, pages 1089 to 1094: the one published control scheme with equations found for sine
+  tones on random with several shakers, for two shakers and dwelling tones. MIMO Mixed Mode does
+  not implement it; it is the published point the module's own composition was read against. That
+  composition runs a multiple-shaker random law on the floor and a multiple-shaker sine law on
+  each tone, with one drive budget per shaker shared between them, and is offered as a place to
+  try laws on an open problem, each piece held to a closed-form case in its tests.
 - **D. O. Smallwood**, the multiple-shaker random control papers: "Multiple Shaker Random Vibration
   Control: An Update", Proceedings of the IEST, 1999, the source of the default law's closed-loop
   correction of a factor of the reference and its per-loop limits; "Random Vibration Testing of
