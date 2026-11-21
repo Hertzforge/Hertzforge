@@ -724,6 +724,17 @@ async function shaker(theme, full) {
 	check(`every reference, response and drive has its trace and legend entry (${theme})`, entries(/^Force$/).length === 2 && entries(/^Drive$/).length === 2 && entries(/^Reference Autospectra$/).length === 2, legendWords(ls));
 	check(`every legend is whole at 1440 by 900 (shaker, ${theme})`, ls.every((l) => !l.cut), legendWords(ls));
 	await shot(a, theme === 'dark' ? 'dark_measure_shaker' : 'measure_shaker');
+	// Stop Driving first, before the frames run out: the small window is checked with the drive stopped
+	let stopped = false;
+	const n = await count(a);
+	if (full && (await measureState(a)) === 'measuring') {
+		await tid(a, 'mt-drive_stop').click();
+		await until(a, 'the drive stopped', async (p) => (await measureState(p)) !== 'measuring', 30_000);
+		check('Stop Driving stops the drive and keeps the averages', (await count(a)) >= n, `${n} to ${await text(a, 'mt-count')}`);
+		stopped = true;
+	} else if (full && !MOCK) {
+		check('Stop Driving is reached while the shakers drive', false, await measureState(a));
+	}
 	await a.setViewportSize({ width: 1280, height: 800 });
 	await a.waitForTimeout(600);
 	const tcs = await titlesCut(a);
@@ -735,21 +746,12 @@ async function shaker(theme, full) {
 	await a.screenshot({ path: path.join(SHOTS, `modal_test_${theme === 'dark' ? 'dark_' : ''}measure_shaker_1280x800.png`) });
 	await a.setViewportSize({ width: 1440, height: 900 });
 	await a.waitForTimeout(400);
-	if (!full) {
+	if (!full || !stopped) {
+		// the dark run, and the mock, whose frames can fill the point before Stop Driving is reached
 		await tid(a, 'mt-end').click();
 		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
 		return a;
 	}
-	const n = await count(a);
-	if (MOCK && (await measureState(a)) !== 'measuring') {
-		// the mock's frames come fast: the point can have its averages before Stop Driving is reached
-		await tid(a, 'mt-end').click();
-		await until(a, 'the end', async (p) => (await attr(p, 'run-state', 'data-state')) === 'finished', 30_000);
-		return a;
-	}
-	await tid(a, 'mt-drive_stop').click();
-	await until(a, 'the drive stopped', async (p) => (await measureState(p)) !== 'measuring', 30_000);
-	check('Stop Driving stops the drive and keeps the averages', (await count(a)) >= n, `${n} to ${await text(a, 'mt-count')}`);
 	// a point's FRFs are saved once it has its averages: drive on to 12 of 12
 	await tid(a, 'mt-drive_start').click();
 	await until(a, 'the point measured', async (p) => (await text(p, 'mt-count')) === '12 of 12' && (await measureState(p)) !== 'measuring', 120_000);
