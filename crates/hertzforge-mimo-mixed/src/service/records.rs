@@ -139,27 +139,51 @@ pub(crate) struct RecordWriter {
 impl RecordWriter {
     /// Start the writer for the run folder `dir`, `law.json` holding `json`.
     pub(crate) fn start(dir: std::path::PathBuf, json: serde_json::Value) -> Self {
+        Self::start_on(dir, json, |f| {
+            std::thread::Builder::new()
+                .name("mimo-mixed-law-record".into())
+                .spawn(f)
+        })
+    }
+
+    /// [`Self::start`] with the thread started by `spawn`. A writer that
+    /// could not start says so among the writer's failures (the run's
+    /// events), and no records are written.
+    pub(crate) fn start_on<S>(dir: std::path::PathBuf, json: serde_json::Value, spawn: S) -> Self
+    where
+        S: FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>>,
+    {
         let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
         let (etx, errors) = std::sync::mpsc::channel::<String>();
-        let handle = std::thread::Builder::new()
-            .name("mimo-mixed-law-record".into())
-            .spawn(move || {
-                let mut failed = false;
-                for bytes in rx {
-                    if failed {
-                        continue;
-                    }
-                    if let Err(e) = append(&dir, &json, &bytes) {
-                        failed = true;
-                        let _ = etx.send(format!("law record: {e}; no more records are written"));
-                    }
+        let said = etx.clone();
+        let run: Box<dyn FnOnce() + Send> = Box::new(move || {
+            let mut failed = false;
+            for bytes in rx {
+                if failed {
+                    continue;
                 }
-            })
-            .ok();
-        RecordWriter {
-            tx: Some(tx),
-            errors,
-            handle,
+                if let Err(e) = append(&dir, &json, &bytes) {
+                    failed = true;
+                    let _ = etx.send(format!("law record: {e}; no more records are written"));
+                }
+            }
+        });
+        match spawn(run) {
+            Ok(h) => RecordWriter {
+                tx: Some(tx),
+                errors,
+                handle: Some(h),
+            },
+            Err(e) => {
+                let _ = said.send(format!(
+                    "law record: the writer could not start ({e}); no records are written"
+                ));
+                RecordWriter {
+                    tx: None,
+                    errors,
+                    handle: None,
+                }
+            }
         }
     }
 
@@ -219,5 +243,22 @@ mod tests {
             .sum();
         assert_eq!(sizes, LawRecord::BYTES);
         assert_eq!(LawRecord::read_from(&b), Some(r));
+    }
+
+    /// Requirement: a record writer whose thread could not start says so
+    /// among its failures (the run's events) and takes records without
+    /// effect; it used to lose them with no word.
+    #[test]
+    fn mimo_mixed_a_record_writer_that_cannot_start_says_so() {
+        let dir = std::env::temp_dir().join("mimo-mixed-no-writer-never-made");
+        let w = RecordWriter::start_on(dir.clone(), serde_json::json!({}), |_| {
+            Err(std::io::Error::other("no thread"))
+        });
+        w.send(vec![0u8; LawRecord::BYTES]);
+        let f = w.failures();
+        println!("failures: {f:?}");
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert!(f[0].contains("could not start") && f[0].contains("no thread"));
+        assert!(!dir.exists());
     }
 }

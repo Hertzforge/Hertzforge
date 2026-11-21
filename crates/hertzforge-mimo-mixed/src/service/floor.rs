@@ -67,13 +67,24 @@ impl MimoMixedService {
     }
 
     /// The synthesized drive spectral matrix: the floor's plus every servoed
-    /// band's placed drive under its ramp, full level.
+    /// band's placed drive under its ramp, full level, each drive under its
+    /// rms ceiling. The floor's drive is already under its ceilings
+    /// ([`Self::accept_floor`]); where the bands take a drive over, the
+    /// bands' share of that drive is cut by a diagonal congruence (the
+    /// floor's drive and every coherence left as they are) to what the
+    /// ceiling leaves, and each band on a cut drive is marked limiting, so
+    /// its servo's gain does not rise against the cut (anti-windup).
     fn total_drive(&mut self) -> Option<HermitianStack> {
-        let mut s = self.drive_full.clone()?;
+        let floor = self.drive_full.clone()?;
         let m = self.cfg.m();
         let lines = self.lines;
         let df = self.df;
+        let mut s = HermitianStack::zeros(lines, m);
+        let mut uses: Vec<Vec<bool>> = Vec::with_capacity(self.bands.len());
+        let mut unplaced: Vec<(String, String)> = Vec::new();
         for b in &mut self.bands {
+            uses.push(vec![false; m]);
+            let used = uses.last_mut().expect("pushed");
             let (Some(d), Some(mfe)) = (b.drive.as_ref(), b.mfe.as_ref()) else {
                 continue;
             };
@@ -91,15 +102,22 @@ impl MimoMixedService {
                 declared: crate::band::DriveDeclared::Increment,
                 capped: false,
             };
-            let Ok(placed) = place_band_drive(&out, &wo) else {
-                continue;
+            let placed = match place_band_drive(&out, &wo) {
+                Ok(p) => p,
+                Err(e) => {
+                    unplaced.push((b.id.clone(), e.0));
+                    continue;
+                }
             };
             let r2 = b.ramp * b.ramp;
             for o in 0..mfe.offsets() {
                 let Some(l) = mfe.line_of(o, center, df, lines) else {
                     continue;
                 };
-                for r in 0..m {
+                for (r, u) in used.iter_mut().enumerate() {
+                    if placed.get(o, r, r).re > 0.0 {
+                        *u = true;
+                    }
                     for c in r..m {
                         let v = s.get(l, r, c) + placed.get(o, r, c) * r2;
                         s.set(l, r, c, v);
@@ -107,6 +125,45 @@ impl MimoMixedService {
                 }
             }
             b.drawn_hz = center;
+        }
+        // Each drive under its ceiling: the bands' power cut to what the
+        // floor's leaves.
+        let f_rms = guards::drive_rms(&floor, self.band, df);
+        let b_rms = guards::drive_rms(&s, self.band, df);
+        let mut cut = vec![1.0; m];
+        for j in 0..m {
+            let c = self.cfg.drives[j].ceiling_vrms;
+            let (fp, bp) = (f_rms[j] * f_rms[j], b_rms[j] * b_rms[j]);
+            if bp > 0.0 && fp + bp > c * c {
+                cut[j] = ((c * c - fp).max(0.0) / bp).min(1.0);
+            }
+        }
+        if cut.iter().any(|&f| f < 1.0) {
+            let factors: Vec<f64> = (0..lines).flat_map(|_| cut.iter().copied()).collect();
+            let _ = s.diagonal_congruence(&factors);
+        }
+        for (b, used) in self.bands.iter_mut().zip(&uses) {
+            let ceiling = used.iter().zip(&cut).any(|(u, f)| *u && *f < 1.0);
+            b.limiting = ceiling || b.cap_bound;
+        }
+        // A band that could not be placed plays nothing: the run ends on it,
+        // named.
+        for (id, why) in unplaced {
+            self.abort_with(RunEnd {
+                name: "law_fault",
+                aborted: true,
+                part: Some(id.clone()),
+                control: None,
+                drive: None,
+                words: format!("band {id}'s drive could not be placed: {why}"),
+            });
+        }
+        for l in 0..lines {
+            for r in 0..m {
+                for c in r..m {
+                    s.set(l, r, c, s.get(l, r, c) + floor.get(l, r, c));
+                }
+            }
         }
         Some(s)
     }
@@ -201,21 +258,25 @@ impl MimoMixedService {
         let frames = step.records.frames();
         let q = self.cfg.n() + self.cfg.p();
         let m = self.cfg.m();
-        // Each drive's rms and peak over the batch.
-        let mut rms = vec![0.0; m];
+        // Each drive's random part's rms and summed peak over the batch;
+        // the random part's squares into the rms abort's window.
         let mut peak = vec![0.0f64; m];
         for f in 0..frames {
             for j in 0..m {
-                let d = step.records.drive[f * m + j];
-                rms[j] += d * d;
-                peak[j] = peak[j].max(d.abs());
+                peak[j] = peak[j].max(step.records.drive[f * m + j].abs());
             }
         }
-        self.chunk_rms = rms
+        self.chunk_rms = step
+            .records
+            .rand_sq
             .iter()
             .map(|s| (s / frames.max(1) as f64).sqrt())
             .collect();
         self.chunk_peak = peak;
+        for (w, s) in step.rms_window.0.iter_mut().zip(&step.records.rand_sq) {
+            *w += s;
+        }
+        step.rms_window.1 += frames;
         if let Some(rec) = self.ident_rec.as_mut() {
             for f in 0..frames {
                 for c in 0..q {
@@ -292,6 +353,43 @@ impl MimoMixedService {
             self.floor_frames();
         }
         frames
+    }
+
+    /// Each drive's random part against its rms abort (MIMO Random's
+    /// `drive_vrms`: the abort, or the ceiling plus 1 dB), judged on the
+    /// realized rms of every whole window of `nfft` frames, MIMO Random's
+    /// segment. The random part is judged, not the summed drive: the rms
+    /// ceiling is the random part's (the tones are held by the peak
+    /// ceiling). `Some` with the end when a drive reached its abort.
+    pub(crate) fn judge_drive_rms(&mut self) -> Option<RunEnd> {
+        let nfft = self.nfft.max(1);
+        let s = self.step.as_mut()?;
+        if s.rms_window.1 < nfft {
+            return None;
+        }
+        let frames = s.rms_window.1 as f64;
+        let rms: Vec<f64> = s.rms_window.0.iter().map(|x| (x / frames).sqrt()).collect();
+        s.rms_window.0.fill(0.0);
+        s.rms_window.1 = 0;
+        for (j, r) in rms.iter().enumerate() {
+            let d = &self.cfg.drives[j];
+            let at = d.to_spec().abort_level_vrms();
+            if *r >= at {
+                return Some(RunEnd {
+                    name: "drive_vrms",
+                    aborted: true,
+                    part: None,
+                    control: None,
+                    drive: Some(j),
+                    words: format!(
+                        "drive {j} (channel {}) played its random part at {r:.3} V rms over \
+                         {nfft} frames, at or over its {at:.3} V rms abort",
+                        d.channel_index
+                    ),
+                });
+            }
+        }
+        None
     }
 
     /// Analyse every whole frame the buffers hold.
@@ -425,7 +523,7 @@ impl MimoMixedService {
     /// One floor loop: the estimate, the fill, the judging, the law, the
     /// bands.
     fn floor_loop(&mut self) {
-        let (n, p) = (self.cfg.n(), self.cfg.p());
+        let n = self.cfg.n();
         let band = self.band;
         let lines = self.lines;
         let Some(est) = self.est.as_mut() else { return };
@@ -440,15 +538,11 @@ impl MimoMixedService {
             .map(|l| clean[l] && est.dof(l) >= MIN_ENVELOPE_DOF)
             .collect();
         let mut meas = HermitianStack::zeros(lines, n);
-        let mut lim = vec![0.0; lines * p];
         for l in 0..lines {
             for r in 0..n {
                 for c in r..n {
                     meas.set(l, r, c, est.get(l, r, c));
                 }
-            }
-            for i in 0..p {
-                lim[l * p + i] = est.get(l, n + i, n + i).re;
             }
         }
         let Some(floor_ref) = self.floor_ref.clone() else {
@@ -489,7 +583,7 @@ impl MimoMixedService {
         self.floor_err_db = err.clone();
         let judged = (band.0..band.1).any(|l| ripe[l]);
         self.equalized = judged && err.iter().all(|e| e.abs() <= FLOOR_EQUALIZED_DB);
-        if judged && !self.judge_floor(&meas, &ripe, &lim) {
+        if judged && !self.judge_floor(&meas, &ripe) {
             return;
         }
         if !self.judge_folded_bands(&meas, &floor_ref, &ripe) {
@@ -615,11 +709,10 @@ impl MimoMixedService {
     }
 
     /// The floor's envelope per control on clean lines (relaxed while the
-    /// floor plays alone at the soft start) and each limit's abort. `false`
-    /// when the run is ending.
-    fn judge_floor(&mut self, meas: &HermitianStack, clean: &[bool], lim: &[f64]) -> bool {
+    /// floor plays alone at the soft start). `false` when the run is ending.
+    /// The limits are judged every batch ([`Self::judge_limits`]).
+    fn judge_floor(&mut self, meas: &HermitianStack, clean: &[bool]) -> bool {
         let n = self.cfg.n();
-        let p = self.cfg.p();
         let tol = self.floor_tolerances();
         let relax_db = if self.phase == MimoMixedPhase::FloorAlone {
             self.cfg.soft_start_relax_db
@@ -653,35 +746,83 @@ impl MimoMixedService {
                 return false;
             }
         }
-        // The limits, at the level in force.
-        let lam = self.step.as_ref().map_or(0.0, |s| s.level.value());
+        true
+    }
+
+    /// Each limit channel against its ceiling plus its abort margin on what
+    /// the channel carries, every batch (MIMO Random's rule: one line over
+    /// aborts `limit_abort`). What it carries on a line is the residual's
+    /// estimate there (the random part, normalized by the random gain) at
+    /// the random gain in force, read once the line's estimate holds
+    /// [`MIN_ENVELOPE_DOF`], plus every sounding tone's tracked power on
+    /// that channel, `A^2 / 2` over the line width, on the tone's line.
+    /// The tones are subtracted from the residual, so the floor law's limit
+    /// machinery holds only the random part (design D15); this check is
+    /// what catches a tone that drives a limit channel too hard. Judged
+    /// while the run ends too: an abort replaces a stop.
+    pub(crate) fn judge_limits(&mut self) {
+        let (n, p) = (self.cfg.n(), self.cfg.p());
+        if p == 0 || self.state != MimoMixedState::Running {
+            return;
+        }
+        let Some(s) = self.step.as_ref() else { return };
+        let g = s.level.value() * s.rand_ramp.value() * s.stop.value();
+        let (lines, df) = (self.lines, self.df);
+        let mut carried = vec![0.0; lines];
+        let mut trip = None;
         for i in 0..p {
-            let spec = &self.cfg.limits[i];
-            let over = 10f64.powf(spec.abort_margin_db / 10.0);
-            let mut worst = 0usize;
-            for l in self.band.0..self.band.1 {
-                let c = spec.ceiling(l);
-                if c > 0.0 && lim[l * p + i] * lam * lam > c * over {
-                    worst += 1;
+            carried.fill(0.0);
+            if let Some(est) = self.est.as_ref() {
+                for (l, c) in carried.iter_mut().enumerate() {
+                    if est.dof(l) >= MIN_ENVELOPE_DOF {
+                        *c = est.get(l, n + i, n + i).re.max(0.0) * g * g;
+                    }
                 }
             }
-            if worst >= self.cfg.protections.envelope_abort_lines {
-                let words = format!(
-                    "limit channel {} was over its ceiling plus {:.1} dB on {worst} lines",
-                    spec.channel_index, spec.abort_margin_db
-                );
-                self.abort_with(RunEnd {
+            for k in 0..s.tones.len() {
+                if s.bank.part_level(k) <= 0.0 {
+                    continue;
+                }
+                let l = (s.bank.frequency(k) / df).round();
+                if !(l >= 0.0 && (l as usize) < lines) {
+                    continue;
+                }
+                let a = s.bank.tracked(k, n + i).norm();
+                carried[l as usize] += a * a / 2.0 / df;
+            }
+            let spec = &self.cfg.limits[i];
+            let (mut worst_db, mut worst_line) = (f64::NEG_INFINITY, 0usize);
+            let (lo, hi) = (self.band.0, self.band.1.min(lines));
+            for (l, &v) in carried.iter().enumerate().take(hi).skip(lo) {
+                let c = spec.ceiling(l);
+                if c > 0.0 && v > 0.0 {
+                    let db = 10.0 * (v / c).log10();
+                    if db > worst_db {
+                        (worst_db, worst_line) = (db, l);
+                    }
+                }
+            }
+            self.limit_over_db[i] = (worst_db, worst_line);
+            if worst_db > spec.abort_margin_db && trip.is_none() {
+                trip = Some(RunEnd {
                     name: "limit_abort",
                     aborted: true,
-                    part: self.floor_id(),
+                    part: None,
                     control: None,
                     drive: None,
-                    words,
+                    words: format!(
+                        "limit channel {} carried {worst_db:.1} dB over its ceiling at {:.1} Hz, \
+                         past its {:.1} dB abort margin",
+                        spec.channel_index,
+                        worst_line as f64 * df,
+                        spec.abort_margin_db
+                    ),
                 });
-                return false;
             }
         }
-        true
+        if let Some(t) = trip {
+            self.abort_with(t);
+        }
     }
 
     /// One call of the floor law (the seed at loop 0), under MIMO Random's
@@ -777,6 +918,22 @@ impl MimoMixedService {
         let mut trip: Option<RunEnd> = None;
         let mut any = false;
         for b in &mut self.bands {
+            // The law is held while the band ramps in, and for the loop
+            // after: its estimate reads the band at a fraction of its level
+            // against the whole statement, and a servo iterating on that
+            // winds up. The ring plays ahead of the factor, so the loop the
+            // ramp ends still holds frames from under it: its estimate is
+            // restarted there, and the first loop the law runs reads the
+            // band at its level.
+            let hold = b.ramp < 1.0 || b.ramp_held;
+            if b.law.is_some() && b.ramp > 0.0 {
+                if b.ramp >= 1.0 && b.ramp_held {
+                    if let Some(mfe) = b.mfe.as_mut() {
+                        mfe.reset();
+                    }
+                }
+                b.ramp_held = b.ramp < 1.0;
+            }
             let (Some(law), Some(setup), Some(mfe)) =
                 (b.law.as_mut(), b.setup.as_ref(), b.mfe.as_ref())
             else {
@@ -828,13 +985,44 @@ impl MimoMixedService {
                 limiting: b.limiting,
             };
             let id = b.id.clone();
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| law.iterate(&inputs))) {
-                Ok(Ok(out)) => {
-                    if out.drive.lines() == offs && out.drive.n() == m {
-                        b.drive = Some(out.drive);
+            let called = (!hold).then(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| law.iterate(&inputs)))
+            });
+            match called {
+                None => {}
+                Some(Ok(Ok(out))) => {
+                    if let Some(why) = band_output_fault(&out.drive, offs, m) {
+                        trip.get_or_insert(RunEnd {
+                            name: "law_fault",
+                            aborted: true,
+                            part: Some(id.clone()),
+                            control: None,
+                            drive: None,
+                            words: format!(
+                                "the band law of {id} gave a drive it cannot play: {why}"
+                            ),
+                        });
+                    } else {
+                        // MIMO Random's change cap, in the band's frame
+                        // against its drive in force; a cut rise marks the
+                        // band limiting (the ceilings mark it too, at
+                        // `total_drive`).
+                        let mut d = out.drive;
+                        b.cap_bound = false;
+                        if let Some(old) = b.drive.as_ref() {
+                            let f = guards::cap_change(
+                                &mut d,
+                                old,
+                                (0, offs),
+                                self.cfg.caps.up_db,
+                                self.cfg.caps.down_db,
+                            );
+                            b.cap_bound = f.factors.iter().any(|&x| x < 1.0);
+                        }
+                        b.drive = Some(d);
                     }
                 }
-                Ok(Err(e)) => {
+                Some(Ok(Err(e))) => {
                     trip.get_or_insert(RunEnd {
                         name: "law_fault",
                         aborted: true,
@@ -844,7 +1032,7 @@ impl MimoMixedService {
                         words: format!("the band law of {id} failed: {}", e.0),
                     });
                 }
-                Err(_) => {
+                Some(Err(_)) => {
                     trip.get_or_insert(RunEnd {
                         name: "law_fault",
                         aborted: true,
@@ -897,4 +1085,23 @@ impl MimoMixedService {
             self.abort_with(t);
         }
     }
+}
+
+/// Why a band law's drive cannot be played, if it cannot: its shape not the
+/// band's (`offs` offsets of `m` drives), or an offset not finite or not
+/// positive semi-definite (the checks [`place_band_drive`] makes).
+pub(crate) fn band_output_fault(d: &HermitianStack, offs: usize, m: usize) -> Option<String> {
+    if d.lines() != offs || d.n() != m {
+        return Some(format!(
+            "{} offsets of {} drives, not {offs} of {m}",
+            d.lines(),
+            d.n()
+        ));
+    }
+    let out = crate::band::BandLoopOutput {
+        drive: d.clone(),
+        declared: crate::band::DriveDeclared::Increment,
+        capped: false,
+    };
+    place_band_drive(&out, &vec![1.0; offs]).err().map(|e| e.0)
 }

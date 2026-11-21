@@ -1,6 +1,6 @@
-//! The MIMO Mixed check: the built-in pair passes each of the nine cases, each on
+//! The MIMO Mixed check: the built-in pair passes each of the ten cases, each on
 //! the simulator's existing structure its own facts name, and a tone law
-//! that misses its level fails.
+//! that misses its level and a floor law that overdrives fail.
 
 use hertzforge_hal_sim::plants::SineStructure;
 use hertzforge_hal_sim::SimConfig;
@@ -78,12 +78,13 @@ built_in_passes! {
     mimo_mixed_check_shared_ceiling => SharedCeiling;
     mimo_mixed_check_more_drives_than_controls => MoreDrivesThanControls;
     mimo_mixed_check_transport_delay => TransportDelay;
+    mimo_mixed_check_limit_channel => LimitChannel;
 }
 
 /// Every case has a test above.
 #[test]
 fn mimo_mixed_check_every_case_is_tested() {
-    assert_eq!(MimoMixedCheckCase::ALL.len(), 9);
+    assert_eq!(MimoMixedCheckCase::ALL.len(), 10);
 }
 
 /// A tone law that answers as the built-in, then sends half its drive (6 dB
@@ -139,5 +140,86 @@ fn mimo_mixed_a_tone_law_that_misses_its_level_fails_the_check() {
     laws.tones = Arc::new(HalfDrive(laws.tones.clone()));
     let r = run_mimo_mixed_check_case(case, &laws, station(case)).expect("run");
     eprintln!("half-drive law: {}", r.detail);
+    assert!(!r.passed);
+}
+
+/// A floor law that seeds as the built-in, then stops adapting: every call
+/// after its seed answers with its seed at twice the drive power (3 dB over
+/// it). A law that only scaled each answer of the built-in would be
+/// corrected by the loop itself, its next answer asking less.
+struct DoubleFloor(Arc<dyn hertzforge_random_laws::MimoLawFactory>);
+
+struct DoubleFloorLaw(
+    Box<dyn hertzforge_sdm::law::MimoControlLaw + Send>,
+    Option<hertzforge_sdm::law::MimoLoopOutputs>,
+);
+
+fn doubled(
+    r: Result<hertzforge_sdm::law::MimoLoopOutputs, hertzforge_sdm::law::LawError>,
+) -> Result<hertzforge_sdm::law::MimoLoopOutputs, hertzforge_sdm::law::LawError> {
+    r.map(|mut o| {
+        let twice = vec![2.0; o.drive.lines()];
+        o.drive.scale_lines(&twice).expect("one factor a line");
+        o
+    })
+}
+
+impl hertzforge_sdm::law::MimoControlLaw for DoubleFloorLaw {
+    fn needs(&self) -> &[hertzforge_sdm::law::MimoInput] {
+        self.0.needs()
+    }
+    fn shapes(&self) -> &[hertzforge_sdm::law::MimoShape] {
+        self.0.shapes()
+    }
+    fn seed(
+        &mut self,
+        x: &hertzforge_sdm::law::MimoLoopInputs<'_>,
+    ) -> Result<hertzforge_sdm::law::MimoLoopOutputs, hertzforge_sdm::law::LawError> {
+        let o = self.0.seed(x)?;
+        self.1 = Some(o.clone());
+        Ok(o)
+    }
+    fn iterate(
+        &mut self,
+        x: &hertzforge_sdm::law::MimoLoopInputs<'_>,
+    ) -> Result<hertzforge_sdm::law::MimoLoopOutputs, hertzforge_sdm::law::LawError> {
+        self.0.iterate(x)?;
+        doubled(
+            self.1
+                .clone()
+                .ok_or_else(|| hertzforge_sdm::law::LawError("iterated before its seed".into())),
+        )
+    }
+}
+
+impl hertzforge_random_laws::MimoLawFactory for DoubleFloor {
+    fn identity(&self) -> hertzforge_law_host::LawIdentity {
+        self.0.identity()
+    }
+    fn params(&self) -> &[hertzforge_law_host::Param] {
+        self.0.params()
+    }
+    fn build(
+        &self,
+        setup: &hertzforge_sdm::law::MimoSetup,
+        budget: std::time::Duration,
+    ) -> Result<
+        Box<dyn hertzforge_sdm::law::MimoControlLaw + Send>,
+        hertzforge_random_laws::ChoiceError,
+    > {
+        Ok(Box::new(DoubleFloorLaw(self.0.build(setup, budget)?, None)))
+    }
+}
+
+/// Requirement: a floor law that stops adapting at twice the drive power it
+/// should ask fails the floor-only case (its floor sits over its 1 dB band,
+/// or aborts).
+#[test]
+fn mimo_mixed_a_floor_law_that_overdrives_fails_the_check() {
+    let case = MimoMixedCheckCase::FloorOnly;
+    let mut laws = builtin(case);
+    laws.floor = Arc::new(DoubleFloor(laws.floor.clone()));
+    let r = run_mimo_mixed_check_case(case, &laws, station(case)).expect("run");
+    eprintln!("double-drive floor law: {}", r.detail);
     assert!(!r.passed);
 }

@@ -14,7 +14,7 @@
 
 use super::records::{LawRecord, RecordRole};
 use crate::budget::{headroom, CeilingRule};
-use crate::tone::{tone_readable, Ramp, ToneBank, ToneJudging};
+use crate::tone::{tone_judging, tone_readable, Ramp, ToneBank, ToneJudging};
 use hertzforge_engine::ProcessStep;
 use hertzforge_mimo_sine::guards::{cap_drives, first_drive_scale, DivergenceWatch};
 use hertzforge_mimo_sine::law::{LawValues, MimoSineLaw};
@@ -29,11 +29,33 @@ use std::sync::Arc;
 /// The abort ramp, seconds (single-output Mixed Mode's).
 pub const ABORT_RAMP_S: f64 = 0.02;
 /// The random part's held peak decays with this time constant, seconds
-/// (single-output Mixed Mode's).
-pub const RANDOM_PEAK_RELEASE_S: f64 = 1.0;
+/// (single-output Mixed Mode's); the setup forecast's random peak is taken
+/// from the same constant.
+pub use crate::predict::RANDOM_PEAK_RELEASE_S;
 /// A tone's reading must stay outside its abort band this long, seconds
 /// (single-output Mixed Mode's).
 pub const TONE_ABORT_DEBOUNCE_S: f64 = 0.5;
+/// An engaged tone with no usable reading once the ramps are done is told
+/// on target (its law carries its drive on its model, correcting nothing)
+/// for at most this many tracker delays (`TRACKER_DELAY_FACTOR / B_n`),
+/// then holds its last ask. Its trackers settle in `SETTLE_WIDTHS / B_n`,
+/// 2.1 tracker delays, so 4 leaves about two more for a reading that is
+/// coming to arrive.
+pub const SHOWN_MAX_DELAYS: f64 = 4.0;
+/// A tone with no usable reading for this many tracker delays once the
+/// ramps are done ends the run `tone_unreadable`: 20 s at the default 0.5 Hz
+/// tracking bandwidth. Long enough for a swept tone to pass the dip of an
+/// antiresonance (a third of an octave at 1 octave a minute) and for a
+/// dwell's reading to clear a passing burst of noise; a tone unread for
+/// longer is played open loop on a stale model, with nothing to say its
+/// level is right.
+pub const UNREADABLE_ABORT_DELAYS: f64 = 16.0;
+/// While the shared ceiling holds a tone its caps binding is not counted
+/// by the divergence watch (a held tone's law asks for the level the rule
+/// will not give); they are counted by a second watch at this many times
+/// the divergence time, so a law that runs away behind the ceiling still
+/// ends the run `divergence`.
+pub const LIMITED_DIVERGENCE_FACTOR: f64 = 4.0;
 
 /// Why the step tripped (latched; the service reads it between batches).
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +66,18 @@ pub enum StepTrip {
         drive: usize,
         /// The demanded value, volts.
         volts: f64,
+    },
+    /// A drive's demanded sum was not a number (or infinite); the frame
+    /// played 0.
+    DriveNotFinite {
+        /// The drive's index.
+        drive: usize,
+    },
+    /// The random part's ring ran dry for a control tick of frames in all
+    /// (each dry frame played no random part and was recorded at gain 0).
+    RandomUnderrun {
+        /// Dry frames so far.
+        frames: u64,
     },
     /// A control or limit channel's input reached its overload level.
     Overload {
@@ -83,6 +117,14 @@ pub enum StepTrip {
     ToneDivergence {
         /// The tone's index among the tones.
         tone: usize,
+    },
+    /// A tone had no usable reading for [`UNREADABLE_ABORT_DELAYS`] tracker
+    /// delays once the ramps were done.
+    ToneUnreadable {
+        /// The tone's index among the tones.
+        tone: usize,
+        /// How long, seconds.
+        seconds: f64,
     },
 }
 
@@ -169,6 +211,9 @@ pub(crate) struct StepRecords {
     /// The random part's gain at drive time (level, random ramp and stop
     /// ramp together).
     pub(crate) gain: Vec<f64>,
+    /// Per drive: the random part's sum of squares over the frames held,
+    /// volts squared (the drive's rms abort reads it).
+    pub(crate) rand_sq: Vec<f64>,
     pub(crate) dropped: u64,
     /// The tone laws' call records since the loop side last took them.
     pub(crate) law: Vec<LawRecord>,
@@ -181,6 +226,7 @@ impl StepRecords {
             raw: Vec::with_capacity(q * frames),
             drive: Vec::with_capacity(m * frames),
             gain: Vec::with_capacity(frames),
+            rand_sq: vec![0.0; m],
             dropped: 0,
             law: Vec::with_capacity(4096),
         }
@@ -196,6 +242,7 @@ impl StepRecords {
         self.raw.clear();
         self.drive.clear();
         self.gain.clear();
+        self.rand_sq.fill(0.0);
     }
 }
 
@@ -221,8 +268,14 @@ pub(crate) struct ToneCtl {
     /// the tracker's delay and the judging average, so a tone stays marked
     /// that long after the ceiling last held it.
     pub(crate) limited_s: f64,
-    /// Per control.
+    /// Per control, worked out at the tone's line (again whenever the
+    /// tone moves to another line).
     pub(crate) judging: Vec<ToneJudging>,
+    /// Per control: its alarm and abort bands as stated, dB, before the
+    /// judging widens them to the reading's scatter.
+    pub(crate) tol_db: Vec<((f64, f64), (f64, f64))>,
+    /// The line the judging was worked out at.
+    pub(crate) judged_line: usize,
     pub(crate) ms: Vec<f64>,
     pub(crate) err_db: Vec<f64>,
     pub(crate) alarm: Vec<bool>,
@@ -248,6 +301,10 @@ pub struct MimoMixedStep {
     n_in: usize,
     /// Input slots of the controls then the limits.
     slots: Vec<usize>,
+    /// The station's output frame width (every enabled drive row) and each
+    /// drive's column in it.
+    n_out: usize,
+    out_slots: Vec<usize>,
     /// Overload watch on control and limit slots: (slot, level, channel).
     pub(crate) overload: Vec<(usize, f64, u32)>,
     pub(crate) kin: Option<KinematicMonitor>,
@@ -271,9 +328,17 @@ pub struct MimoMixedStep {
     /// Each drive's peak ceiling (the abort as demanded) and clamp, volts.
     pub(crate) peak_v: Vec<f64>,
     pub(crate) abort_v: Vec<f64>,
+    /// A level ramp asked for between ticks, `(target, frames)`: started at
+    /// the next tick, so the tick's look-ahead sees it.
+    level_next: Option<(f64, f64)>,
+    /// The same for the random part's ramp.
+    rand_next: Option<(f64, f64)>,
     pub(crate) trip: Option<StepTrip>,
     pub(crate) clamped: u64,
     pub(crate) records: StepRecords,
+    /// The loop side's rms window: per drive the random part's sum of
+    /// squares, and the frames in it (judged every `nfft` frames).
+    pub(crate) rms_window: (Vec<f64>, usize),
     /// Frames since the step was built.
     pub(crate) frame: u64,
     pub(crate) tick_frames: u64,
@@ -284,7 +349,7 @@ pub struct MimoMixedStep {
     /// Whether the tone laws run (false during the identification).
     pub(crate) tones_run: bool,
     /// The floor's autospectra at full level, line-major (`l * n + i`).
-    floor_diag: Vec<f64>,
+    pub(crate) floor_diag: Vec<f64>,
     df: f64,
     lines: usize,
     held_peak: Vec<f64>,
@@ -296,12 +361,22 @@ pub struct MimoMixedStep {
     y: Vec<C64>,
     refv: Vec<C64>,
     dif: Vec<C64>,
+    /// What each drive of a law's answer is capped against: the drive in
+    /// force, or the tone's last ask where the ceiling rule holds that
+    /// drive at zero.
+    cap_base: Vec<C64>,
     prop: Vec<C64>,
     req: Vec<C64>,
     inf: Vec<f64>,
     room: Vec<f64>,
     scales: Vec<f64>,
     limiting: Vec<bool>,
+    /// Per tone: seconds told on target, and seconds with no usable
+    /// reading, since the ramps were last done (reset by a usable reading).
+    shown_s: Vec<f64>,
+    unread_s: Vec<f64>,
+    /// Per tone: the divergence watch over the ticks the ceiling holds it.
+    watch_limited: Vec<DivergenceWatch>,
     rpk: Vec<f64>,
     rpk_full: Vec<f64>,
     bounds: Vec<Option<f64>>,
@@ -317,7 +392,11 @@ pub(crate) struct StepShape {
     pub(crate) p: usize,
     pub(crate) n_in: usize,
     pub(crate) slots: Vec<usize>,
+    pub(crate) n_out: usize,
+    pub(crate) out_slots: Vec<usize>,
     pub(crate) peak_v: Vec<f64>,
+    /// Each drive's peak abort, above its `peak_v`.
+    pub(crate) abort_v: Vec<f64>,
     pub(crate) tick_s: f64,
     pub(crate) ring_frames: usize,
     pub(crate) record_frames: usize,
@@ -345,6 +424,7 @@ impl MimoMixedStep {
         let tick_frames = ((s.tick_s * s.fs).round() as u64).max(1);
         let tick_s = tick_frames as f64 / s.fs;
         let parts = clock.now().len();
+        let limited_watch = DivergenceWatch::new(LIMITED_DIVERGENCE_FACTOR * guards.divergence_s);
         MimoMixedStep {
             fs: s.fs,
             n,
@@ -352,6 +432,8 @@ impl MimoMixedStep {
             p,
             n_in: s.n_in,
             slots: s.slots,
+            n_out: s.n_out.max(1),
+            out_slots: s.out_slots,
             overload: Vec::new(),
             kin: None,
             kin_scratch: Vec::with_capacity(s.n_in * s.max_block),
@@ -367,11 +449,14 @@ impl MimoMixedStep {
             level: Ramp::at(0.0),
             rand_ramp: Ramp::at(0.0),
             stop: Ramp::at(1.0),
-            abort_v: s.peak_v.clone(),
+            abort_v: s.abort_v,
             peak_v: s.peak_v,
+            level_next: None,
+            rand_next: None,
             trip: None,
             clamped: 0,
             records: StepRecords::new(q, m, s.record_frames),
+            rms_window: (vec![0.0; m], 0),
             frame: 0,
             tick_frames,
             tick_s,
@@ -389,12 +474,16 @@ impl MimoMixedStep {
             y: vec![C64::new(0.0, 0.0); q],
             refv: vec![C64::new(0.0, 0.0); n],
             dif: vec![C64::new(0.0, 0.0); m],
+            cap_base: vec![C64::new(0.0, 0.0); m],
             prop: vec![C64::new(0.0, 0.0); m],
             req: vec![C64::new(0.0, 0.0); k * m],
             inf: vec![0.0; k * m],
             room: vec![0.0; m],
             scales: vec![1.0; k],
             limiting: vec![false; k],
+            shown_s: vec![0.0; k],
+            unread_s: vec![0.0; k],
+            watch_limited: vec![limited_watch; k],
             rpk: vec![0.0; m],
             rpk_full: vec![0.0; m],
             bounds: vec![None; p],
@@ -413,10 +502,13 @@ impl MimoMixedStep {
         self.stop.value() <= 0.0 && self.stop.settled()
     }
 
-    /// Start the stop ramp over `seconds`.
+    /// Start the stop ramp over `seconds`. A ramp to zero already running
+    /// is shortened if this one would end sooner, never lengthened, so an
+    /// abort during a stop ramps at the abort ramp.
     pub(crate) fn ramp_down(&mut self, seconds: f64) {
-        if self.stop.target() > 0.0 {
-            self.stop.go(0.0, (seconds * self.fs).max(1.0));
+        let frames = (seconds * self.fs).max(1.0);
+        if self.stop.target() > 0.0 || self.stop.ahead(frames) > 0.0 {
+            self.stop.go(0.0, frames);
         }
     }
 
@@ -442,7 +534,7 @@ impl MimoMixedStep {
                         channel_index: idx,
                         value: v,
                     });
-                    self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
+                    self.ramp_down(ABORT_RAMP_S);
                     break;
                 }
             }
@@ -450,9 +542,15 @@ impl MimoMixedStep {
         let lev = self.level.next();
         let rg = self.rand_ramp.next();
         let stop = self.stop.next();
-        if !self.ring.pop(&mut self.rnd) {
+        let dry = !self.ring.pop(&mut self.rnd);
+        if dry {
             self.underruns += 1;
             self.rnd.fill(0.0);
+            if self.underruns >= self.tick_frames {
+                self.latch(StepTrip::RandomUnderrun {
+                    frames: self.underruns,
+                });
+            }
         }
         let g = lev * rg;
         for j in 0..m {
@@ -460,10 +558,18 @@ impl MimoMixedStep {
         }
         self.bank.drive_frame(lev, &mut self.d);
         for j in 0..m {
-            let x = self.d[j] * stop;
-            if x.abs() >= self.abort_v[j] && self.trip.is_none() {
-                self.trip = Some(StepTrip::DriveVpk { drive: j, volts: x });
-                self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
+            let mut x = self.d[j] * stop;
+            // A NaN trips too (every comparison with one is false).
+            if (x.is_nan() || x.abs() >= self.abort_v[j]) && self.trip.is_none() {
+                self.trip = Some(if x.is_finite() {
+                    StepTrip::DriveVpk { drive: j, volts: x }
+                } else {
+                    StepTrip::DriveNotFinite { drive: j }
+                });
+                self.ramp_down(ABORT_RAMP_S);
+            }
+            if !x.is_finite() {
+                x = 0.0;
             }
             let pk = self.peak_v[j];
             let y = if x.abs() > pk {
@@ -473,7 +579,7 @@ impl MimoMixedStep {
                 x
             };
             self.d[j] = y;
-            drive_out[j] = y as f32;
+            drive_out[self.out_slots[j]] = y as f32;
         }
         self.bank.track_frame(&self.ch, &mut self.res);
         let r = &mut self.records;
@@ -481,7 +587,13 @@ impl MimoMixedStep {
             r.residual.extend_from_slice(&self.res[..q]);
             r.raw.extend_from_slice(&self.ch[..q]);
             r.drive.extend_from_slice(&self.d[..m]);
-            r.gain.push(g * stop);
+            // A dry frame carried no random part: gain 0, so the floor's
+            // estimate never reads it as steady.
+            r.gain.push(if dry { 0.0 } else { g * stop });
+            for j in 0..m {
+                let x = g * stop * self.rnd[j];
+                r.rand_sq[j] += x * x;
+            }
         } else {
             r.dropped += 1;
         }
@@ -491,10 +603,28 @@ impl MimoMixedStep {
         }
     }
 
+    /// Ramp the level to `target` over `frames`, from the next control
+    /// tick: a ramp started between ticks would play up to a tick of frames
+    /// the ceiling rule's look-ahead never saw.
+    pub(crate) fn go_level(&mut self, target: f64, frames: f64) {
+        self.level_next = Some((target, frames));
+    }
+
+    /// Ramp the random part to `target` over `frames`, from the next tick.
+    pub(crate) fn go_random(&mut self, target: f64, frames: f64) {
+        self.rand_next = Some((target, frames));
+    }
+
     /// One control tick: the part clock, each tone's law, the ceiling rule.
     fn tick(&mut self) {
         let dt = self.tick_s;
         let (n, m) = (self.n, self.m);
+        if let Some((t, f)) = self.level_next.take() {
+            self.level.go(t, f);
+        }
+        if let Some((t, f)) = self.rand_next.take() {
+            self.rand_ramp.go(t, f);
+        }
         {
             let now = self.clock.tick(dt);
             for (i, pn) in now.iter().enumerate() {
@@ -533,8 +663,14 @@ impl MimoMixedStep {
                 self.tones[k].target = want;
                 self.bank.set_part_level(k, want, self.part_ramp_frames);
                 if want > 0.0 && !self.tones[k].engaged {
-                    let ff = &self.tones[k].ff[line * m..(line + 1) * m];
-                    self.bank.set_drive(k, ff, 0);
+                    // Switched on from no drive: the ceiling rule below
+                    // decides this tick's drive (the feed-forward, scaled)
+                    // and the tone ramps to it over the tick, so every frame
+                    // is a mix of drives inside the budget. The feed-forward
+                    // set in force at once, scaled or not by the last scale,
+                    // was not: that scale was decided without this tone.
+                    self.prop.fill(C64::new(0.0, 0.0));
+                    self.bank.set_drive(k, &self.prop, 0);
                 }
             }
             // A tracker reads a tone whose amplitude is still ramping (its
@@ -569,6 +705,26 @@ impl MimoMixedStep {
             let was_engaged = tc.engaged;
             self.tones[k].f_prev = f;
             self.tones[k].usable = usable;
+            // The time unread, once the ramps are done (a ramp's carry is
+            // bounded by the ramp).
+            let delay = hertzforge_dsp::tone::TRACKER_DELAY_FACTOR / self.bank.bn_hz();
+            let ramps_done = self.bank.part_level(k) >= 1.0 - 1e-9 && quiet;
+            let watched = !usable && was_engaged && want > 0.0 && self.tones_run && lam > 0.0;
+            if watched && ramps_done {
+                self.unread_s[k] += dt;
+            } else {
+                self.unread_s[k] = 0.0;
+            }
+            if usable {
+                self.shown_s[k] = 0.0;
+            }
+            if self.unread_s[k] >= UNREADABLE_ABORT_DELAYS * delay && self.trip.is_none() {
+                self.latch(StepTrip::ToneUnreadable {
+                    tone: k,
+                    seconds: self.unread_s[k],
+                });
+            }
+            let held = self.shown_s[k] >= SHOWN_MAX_DELAYS * delay;
             // An engaged tone with no usable reading (its tracker settling
             // after a ramp, the level moving) is still handed to its law
             // every tick, told it is on target, so the law carries its drive
@@ -576,12 +732,21 @@ impl MimoMixedStep {
             // Mixed's rule). Found: a swept tone held at its drive in force
             // through 20 Hz of a mode read 2 dB off the moment it was usable
             // again, and aborted at -3.2 dB a second later.
+            //
+            // The carry is open loop, so it is bounded: once the ramps are
+            // done it lasts `SHOWN_MAX_DELAYS` tracker delays, then the tone
+            // holds its last ask (its law no longer called) until a reading
+            // is usable, and ends the run past `UNREADABLE_ABORT_DELAYS`.
             let shown = !usable
                 && was_engaged
                 && want > 0.0
                 && self.tones_run
                 && lam > 0.0
-                && self.trip.is_none();
+                && self.trip.is_none()
+                && !held;
+            if shown && ramps_done {
+                self.shown_s[k] += dt;
+            }
             if !usable {
                 let tc = &mut self.tones[k];
                 tc.avg_s.fill(0.0);
@@ -589,7 +754,10 @@ impl MimoMixedStep {
             }
             if !usable && !shown {
                 let tc = &mut self.tones[k];
-                if tc.engaged || want <= 0.0 {
+                if held && tc.engaged && want > 0.0 {
+                    // Held: its last ask stands (rebased on a drive the
+                    // rule scaled, each tick's cut would stay).
+                } else if tc.engaged || want <= 0.0 {
                     tc.ask.copy_from_slice(&self.dif);
                 } else {
                     let (ask, ff) = (&mut tc.ask, &tc.ff);
@@ -681,6 +849,11 @@ impl MimoMixedStep {
                     continue;
                 }
                 Ok(()) => {
+                    // Of the law's outputs the drive is played and `faulted`
+                    // is not relied on (as MIMO Sine's core). Its request to
+                    // hold or slow the sweep and its notched reference are
+                    // not acted on: the part clock never slows for a tone,
+                    // and every tone is judged against its own reference.
                     let tc = &mut self.tones[k];
                     tc.misses = 0;
                     for (pv, o) in self.prop.iter_mut().zip(&tc.out.drive) {
@@ -704,10 +877,20 @@ impl MimoMixedStep {
                             bound = true;
                         }
                     } else {
-                        let cap = cap_drives(&self.dif, &mut self.prop, &self.guards, dt);
+                        // MIMO Sine's caps skip a drive in force of zero
+                        // (the first drive is bounded at the engage). Here a
+                        // zero is the ceiling rule's cut, not a first drive:
+                        // capped against the tone's last ask instead, so an
+                        // ask cannot grow unchecked while the rule holds the
+                        // tone at zero and play at once when room returns.
+                        for ((b, d), a) in self.cap_base.iter_mut().zip(&self.dif).zip(&tc.ask) {
+                            *b = if d.norm() > 0.0 { *d } else { *a };
+                        }
+                        let cap = cap_drives(&self.cap_base, &mut self.prop, &self.guards, dt);
                         bound = cap.magnitude_bound || cap.rotation_bound;
                     }
-                    let diverged = tc.watch.update(bound && !tc.limiting, dt);
+                    let diverged = tc.watch.update(bound && !tc.limiting, dt)
+                        | self.watch_limited[k].update(bound && tc.limiting, dt);
                     tc.ask.copy_from_slice(&self.prop);
                     let out_norm: f64 = self.prop.iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
                     self.record(k, in_norm, out_norm * lam, took, 0, engage, bound);
@@ -770,6 +953,22 @@ impl MimoMixedStep {
         let n = self.n;
         let lines = self.lines;
         let bn = self.bank.bn_hz();
+        // The judging follows the tone: the reference and the floor under
+        // it differ line to line, and with them the reading's scatter.
+        if self.tones[k].judged_line != line {
+            let tc = &mut self.tones[k];
+            for i in 0..n.min(tc.judging.len()).min(tc.tol_db.len()) {
+                let (alarm, abort) = tc.tol_db[i];
+                tc.judging[i] = tone_judging(
+                    tc.reference[i * lines + line].norm(),
+                    self.floor_diag[line * n + i],
+                    alarm,
+                    abort,
+                    bn,
+                );
+            }
+            tc.judged_line = line;
+        }
         for i in 0..n {
             let target = self.tones[k].reference[i * lines + line].norm() * lam;
             if target <= 0.0 {
@@ -848,32 +1047,36 @@ impl MimoMixedStep {
 
 impl ProcessStep for MimoMixedStep {
     fn process(&mut self, input: &[f32], n_frames: usize, drive_out: &mut Vec<f32>) {
-        let m = self.m;
+        let w = self.n_out;
         drive_out.clear();
-        drive_out.resize(n_frames * m, 0.0);
+        drive_out.resize(n_frames * w, 0.0);
         let n_in = self.n_in.max(1);
         for f in 0..n_frames {
             let inp = input.get(f * n_in..(f + 1) * n_in).unwrap_or(&[]);
-            let out = &mut drive_out[f * m..(f + 1) * m];
+            let out = &mut drive_out[f * w..(f + 1) * w];
             self.frame_step(inp, out);
         }
+        let mut kin_trip = None;
         if let Some(kin) = self.kin.as_mut() {
-            self.kin_scratch.clear();
+            // Every frame judged: a block past the scratch is fed in pieces
+            // of whole frames (the monitor's state runs frame to frame).
             let take = (n_frames * n_in).min(input.len());
-            if self.kin_scratch.capacity() >= take {
-                self.kin_scratch
-                    .extend(input[..take].iter().map(|&v| v as f64));
+            let piece = (self.kin_scratch.capacity() / n_in).max(1) * n_in;
+            for chunk in input[..take].chunks(piece) {
+                self.kin_scratch.clear();
+                self.kin_scratch.extend(chunk.iter().map(|&v| v as f64));
                 if let Some(t) = kin.feed(&self.kin_scratch) {
-                    if self.trip.is_none() {
-                        self.trip = Some(StepTrip::Kinematic {
-                            channel_index: t.channel_index,
-                            value: t.value,
-                            limit: t.limit,
-                        });
-                        self.stop.go(0.0, (ABORT_RAMP_S * self.fs).max(1.0));
-                    }
+                    kin_trip = Some(StepTrip::Kinematic {
+                        channel_index: t.channel_index,
+                        value: t.value,
+                        limit: t.limit,
+                    });
+                    break;
                 }
             }
+        }
+        if let Some(t) = kin_trip {
+            self.latch(t);
         }
     }
 }

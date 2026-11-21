@@ -85,11 +85,16 @@ pub fn run_config(
 }
 
 pub fn service(s: SineStructure, cfg: MimoMixedConfig) -> MimoMixedService {
+    service_seeded(s, cfg, 7)
+}
+
+/// As `service`, with the simulator's noise seeded by `seed`.
+pub fn service_seeded(s: SineStructure, cfg: MimoMixedConfig, seed: u64) -> MimoMixedService {
     let laws = MimoMixedLaws::builtin(&cfg).expect("built-in laws");
     MimoMixedService::new(
         cfg,
         table(s),
-        backend(s, 7),
+        backend(s, seed),
         StationClass::HertzforgeSim,
         laws,
     )

@@ -56,8 +56,11 @@ impl MimoMixedService {
             }
             let got = self.take_records();
             self.t_s += got as f64 / self.fs;
-            if let Some(t) = self.step.as_ref().and_then(|s| s.trip.clone()) {
-                let end = self.step_end(&t);
+            let trip = self.step.as_ref().and_then(|s| s.trip.clone());
+            if let Some(end) = trip
+                .map(|t| self.step_end(&t))
+                .or_else(|| self.judge_drive_rms())
+            {
                 self.ident_rec = None;
                 self.wind_down(end);
                 return Err(self.ended_error());
@@ -70,6 +73,39 @@ impl MimoMixedService {
                 return Ok(self.ident_rec.take().expect("record"));
             }
         }
+    }
+
+    /// Each limit channel of an identification estimate against its
+    /// ceiling plus its abort margin at full level (MIMO Random's
+    /// identification rule, the level at 0 dB: one line over aborts
+    /// `limit_abort`). `Some` with the end when one is over.
+    fn ident_limit_trip(&self, e: &hertzforge_mimo_random::estimate::Estimate) -> Option<RunEnd> {
+        let (n, q) = (self.cfg.n(), self.cfg.n() + self.cfg.p());
+        for (i, l) in self.cfg.limits.iter().enumerate() {
+            let margin = 10f64.powf(l.abort_margin_db / 10.0);
+            for line in self.band.0..self.band.1 {
+                let c = l.ceiling(line);
+                let v = e.auto[line * q + n + i];
+                if c > 0.0 && v > c * margin {
+                    let over_db = 10.0 * (v / c).log10();
+                    return Some(RunEnd {
+                        name: "limit_abort",
+                        aborted: true,
+                        part: None,
+                        control: None,
+                        drive: None,
+                        words: format!(
+                            "limit channel {} read {over_db:.1} dB over its ceiling at {:.1} Hz \
+                             while identifying, past its {:.1} dB abort margin",
+                            l.channel_index,
+                            line as f64 * self.df,
+                            l.abort_margin_db
+                        ),
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// The error a run that ended reports.
@@ -107,6 +143,61 @@ impl MimoMixedService {
         if let Some(end) = self.ending.take() {
             self.finish(end);
         }
+    }
+
+    /// An error inside the run's loop or the identification's play: the
+    /// station stopped at once and the run ended `run_error`, as a step that
+    /// panicked ends it. A run already ended keeps its end. Returns `e`.
+    pub(crate) fn fail_run(&mut self, e: MimoMixedError) -> MimoMixedError {
+        if self.state == MimoMixedState::Ended {
+            return e;
+        }
+        let _ = self.backend.emergency_stop();
+        self.engine = None;
+        self.ident_rec = None;
+        self.ending = None;
+        if let Some(s) = self.step.as_mut() {
+            s.stop = Ramp::at(0.0);
+        }
+        self.finish(RunEnd {
+            name: "run_error",
+            aborted: true,
+            part: None,
+            control: None,
+            drive: None,
+            words: format!("the run failed ({e}); the station was stopped at once"),
+        });
+        e
+    }
+
+    /// Ramp the identification's drive out over the random part's ramp and
+    /// play until it is out (the frames played are not recorded). `Err`
+    /// when the run had to end (it has).
+    fn ident_fade_out(&mut self) -> Result<(), MimoMixedError> {
+        let ramp = RANDOM_RAMP_S * self.fs;
+        let tick = match self.step.as_mut() {
+            Some(s) => {
+                s.go_random(0.0, ramp);
+                s.tick_frames as usize
+            }
+            None => return Ok(()),
+        };
+        let mut frames = ramp as usize + 2 * tick;
+        for _ in 0..16 {
+            self.ident_play(frames).map_err(|e| self.fail_run(e))?;
+            if self
+                .step
+                .as_ref()
+                .is_none_or(|s| s.rand_ramp.value() <= 0.0 && s.rand_ramp.settled())
+            {
+                self.ident_rec = None;
+                return Ok(());
+            }
+            frames = tick;
+        }
+        Err(self.fail_run(MimoMixedError::BadState(
+            "the identification's drive did not ramp out for its level step".into(),
+        )))
     }
 
     /// Ramp out and park the station (the identification's end).
@@ -218,7 +309,9 @@ impl MimoMixedService {
         let mut lag = 0usize;
         let mut level;
         loop {
-            let rec = self.ident_play(settle + seg(search_frames) + max_lag)?;
+            let rec = self
+                .ident_play(settle + seg(search_frames) + max_lag)
+                .map_err(|e| self.fail_run(e))?;
             if steps == 0 {
                 // `best_lag` pairs each control window with the drive that
                 // ends with it and starts `max_lag` frames earlier.
@@ -230,6 +323,10 @@ impl MimoMixedService {
                 lag = best_lag(&ctl, &rec.drive[0][settle..settle + w + max_lag], max_lag);
             }
             let e = self.ident_estimate(&rec, settle, lag);
+            if let Some(end) = self.ident_limit_trip(&e) {
+                self.wind_down(end);
+                return Err(self.ended_error());
+            }
             level = self.level_vs_reference(&e.g_cc);
             steps += 1;
             if (level - target).abs() <= idc.tolerance_db {
@@ -261,18 +358,30 @@ impl MimoMixedService {
             for (v, d) in vrms.iter_mut().zip(&self.cfg.drives) {
                 *v = (*v * gain).min(d.pretest_max_vrms);
             }
+            // The level step: the drive in force ramps out, the ring is
+            // cleared, the new level ramps in (the next record's settle
+            // covers the ramp in). Clearing the ring under a playing drive
+            // would splice the stream at up to ten times the rms.
+            self.ident_fade_out()?;
             self.drive_full = Some(self.ident_drive(&vrms));
             self.refactor = true;
             if let Some(s) = self.step.as_mut() {
                 s.ring.clear();
+                s.go_random(1.0, RANDOM_RAMP_S * self.fs);
             }
         }
         // The record.
-        let rec = self.ident_play(self.nfft + seg(idc.frames) + max_lag)?;
+        let rec = self
+            .ident_play(self.nfft + seg(idc.frames) + max_lag)
+            .map_err(|e| self.fail_run(e))?;
         let e = self.ident_estimate(&rec, self.nfft, lag);
+        if let Some(end) = self.ident_limit_trip(&e) {
+            self.wind_down(end);
+            return Err(self.ended_error());
+        }
         level = self.level_vs_reference(&e.g_cc);
         drop(rec);
-        self.ident_park()?;
+        self.ident_park().map_err(|e| self.fail_run(e))?;
         let band = self.band;
         fn la<T>(r: Result<T, hertzforge_sdm::linalg::LinalgError>) -> Result<T, MimoMixedError> {
             r.map_err(|e| MimoMixedError::Law(format!("the identification: {e}")))

@@ -356,6 +356,9 @@ pub struct BandStatus {
     pub error_db: Vec<f64>,
     /// Per control: outside its alarm band.
     pub alarm: Vec<bool>,
+    /// A drive's rms ceiling or the change cap holds its drive (its servo's
+    /// gain does not rise meanwhile).
+    pub limiting: bool,
 }
 
 /// One drive's line in the status.
@@ -367,6 +370,10 @@ pub struct DriveStatus {
     pub peak_v: f64,
     /// The tones' summed amplitude in force, volts at the level.
     pub tone_sum_v: f64,
+    /// The peak abort the run's step holds this drive to, volts (above the
+    /// clamp at the drive's `peak_v`); the configured one before the step
+    /// is built.
+    pub abort_vpk: f64,
 }
 
 /// The run's status.
@@ -403,6 +410,21 @@ pub struct MimoMixedStatus {
     pub clamped: u64,
     /// How it ended.
     pub end: Option<RunEnd>,
+    /// Each limit channel, in the setup's order.
+    pub limits: Vec<LimitStatus>,
+}
+
+/// One limit channel's reading.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct LimitStatus {
+    /// The channel's index in the channel table.
+    pub channel_index: u32,
+    /// What the channel carries on its worst line (the random part and
+    /// every tone on it) over its ceiling, dB; negative infinity before
+    /// anything is read. It aborts `limit_abort` past its abort margin.
+    pub over_db: f64,
+    /// That line's frequency, Hz.
+    pub at_hz: f64,
 }
 
 /// One band's control state.
@@ -420,6 +442,10 @@ pub(crate) struct BandCtl {
     pub(crate) center_hz: f64,
     pub(crate) error_db: Vec<f64>,
     pub(crate) limiting: bool,
+    /// The change cap cut the band law's last rise.
+    pub(crate) cap_bound: bool,
+    /// Its law was held at its last loop (it was ramping in).
+    pub(crate) ramp_held: bool,
     pub(crate) alarm_db: Vec<(f64, f64)>,
     pub(crate) abort_db: Vec<(f64, f64)>,
     /// Its center's rate, Hz per second.
@@ -460,6 +486,11 @@ pub struct MimoMixedService {
     pub(crate) band: (usize, usize),
     pub(crate) n_in: usize,
     pub(crate) slots: Vec<usize>,
+    /// The station's output frame: one column per enabled drive row of the
+    /// table, in table order; drive `j` of the test plays in column
+    /// `drive_slots[j]` and every other column plays zero (MIMO Sine's map).
+    pub(crate) n_out: usize,
+    pub(crate) drive_slots: Vec<usize>,
     pub(crate) engine: Option<Engine>,
     pub(crate) step: Option<MimoMixedStep>,
     pub(crate) uncounted: Option<StationStart>,
@@ -486,6 +517,8 @@ pub struct MimoMixedService {
     pub(crate) floor_ref: Option<HermitianStack>,
     pub(crate) bands: Vec<BandCtl>,
     pub(crate) floor_err_db: Vec<f64>,
+    /// Each limit's worst line over its ceiling, dB, and the line.
+    pub(crate) limit_over_db: Vec<(f64, usize)>,
     pub(crate) equalized: bool,
     pub(crate) clean_lines: usize,
     pub(crate) fill_report: Option<crate::fill::FillReport>,
@@ -577,17 +610,35 @@ impl MimoMixedService {
                 )));
             }
         }
+        // The station's output columns are the table's enabled drive rows in
+        // table order; each drive of the test is mapped to its own row's
+        // column, so a test may list its drives in any order or use some of
+        // the rows (the others play zero).
+        let drive_rows: Vec<u32> = table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .map(|c| c.index)
+            .collect();
+        let mut drive_slots = Vec::with_capacity(cfg.m());
         for d in &cfg.drives {
-            if !table
-                .channels
-                .iter()
-                .any(|c| c.index == d.channel_index && c.enabled && c.role == ChannelRole::Drive)
-            {
+            let Some(slot) = drive_rows.iter().position(|&r| r == d.channel_index) else {
                 return Err(MimoMixedError::BadState(format!(
                     "drive {} is not an enabled drive of the table",
                     d.channel_index
                 )));
+            };
+            if drive_slots.contains(&slot) {
+                return Err(MimoMixedError::Refused {
+                    name: "duplicate_drive",
+                    part: String::new(),
+                    why: format!(
+                        "drive {} is listed more than once; each shaker is one drive of the test",
+                        d.channel_index
+                    ),
+                });
             }
+            drive_slots.push(slot);
         }
         let manifest = laws.tones.manifest();
         let shape = MimoShape::of(cfg.n(), cfg.m());
@@ -606,6 +657,7 @@ impl MimoMixedService {
         let real_time = station.is_hardware();
         Ok(MimoMixedService {
             floor_err_db: vec![f64::NAN; n],
+            limit_over_db: vec![(f64::NEG_INFINITY, 0); cfg.p()],
             cfg,
             table,
             backend,
@@ -631,6 +683,8 @@ impl MimoMixedService {
             band: (0, 0),
             n_in: 0,
             slots: Vec::new(),
+            n_out: drive_rows.len(),
+            drive_slots,
             engine: None,
             step: None,
             uncounted: None,
@@ -985,7 +1039,7 @@ impl MimoMixedService {
         let actual = self
             .actual
             .ok_or_else(|| MimoMixedError::BadState("the station is not armed".into()))?;
-        let mut ecfg = EngineConfig::with_block(self.n_in, self.cfg.m(), &actual);
+        let mut ecfg = EngineConfig::with_block(self.n_in, self.n_out, &actual);
         if !self.station.is_hardware() {
             ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
             ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
@@ -1021,7 +1075,8 @@ impl MimoMixedService {
     /// station the lead-in of zeros, its count checked, the engine told it
     /// was prefilled; otherwise the start is counted after the first batch.
     pub(crate) fn start_station(&mut self, phase: &'static str) -> Result<(), MimoMixedError> {
-        let m = self.cfg.m();
+        // The lead-in is written in the station's own output frame.
+        let m = self.n_out;
         let block = self.actual.map_or(1, |a| a.block_frames.max(1));
         let engine = self
             .engine
@@ -1213,10 +1268,17 @@ impl MimoMixedService {
         self.phase = MimoMixedPhase::Stopping;
     }
 
-    /// Ramp the drive to zero on the way to `end`.
+    /// Ramp the drive to zero on the way to `end`. An abort replaces an
+    /// ending that is not one (a stop ramping down) and shortens its ramp
+    /// to the abort ramp; anything else keeps the ending already set.
     pub(crate) fn begin_end(&mut self, end: RunEnd, ramp_s: f64) {
-        if self.ending.is_some() || self.state == MimoMixedState::Ended {
+        if self.state == MimoMixedState::Ended {
             return;
+        }
+        if let Some(e) = self.ending.as_ref() {
+            if e.aborted || !end.aborted {
+                return;
+            }
         }
         if let Some(s) = self.step.as_mut() {
             s.ramp_down(ramp_s.max(ABORT_RAMP_S));
@@ -1339,7 +1401,7 @@ impl MimoMixedService {
         if matches!(self.cfg.parts[i].body, MimoPartBody::Floor(_)) {
             if let Some(s) = self.step.as_mut() {
                 let frames = (self.cfg.part_ramp_s * self.fs).max(1.0);
-                s.rand_ramp.go(if on { 1.0 } else { 0.0 }, frames);
+                s.go_random(if on { 1.0 } else { 0.0 }, frames);
             }
         } else if let Some(s) = self.step.as_mut() {
             s.clock.set_enabled(i, on);
@@ -1369,9 +1431,10 @@ impl MimoMixedService {
         Ok(())
     }
 
-    /// The operator's abort: the abort ramp.
+    /// The operator's abort: the abort ramp. Taken while a stop ramps down
+    /// too: the abort replaces the stop and shortens its ramp.
     pub fn abort(&mut self, reason: &str) -> Result<(), MimoMixedError> {
-        self.running()?;
+        self.running_or_ending()?;
         self.abort_with(RunEnd {
             name: "operator_abort",
             aborted: true,
@@ -1396,8 +1459,10 @@ impl MimoMixedService {
         let batch = TICKS_PER_BATCH as usize * block;
         let batches = ((CHUNK_S * self.fs / batch as f64).ceil() as u32).max(1);
         for _ in 0..batches {
-            if !self.run_one()? {
-                return Ok(false);
+            match self.run_one() {
+                Ok(true) => {}
+                Ok(false) => return Ok(false),
+                Err(e) => return Err(self.fail_run(e)),
             }
         }
         Ok(self.state != MimoMixedState::Ended)
@@ -1433,12 +1498,16 @@ impl MimoMixedService {
         self.t_s += frames as f64 / self.fs;
         if let Some(t) = self.step.as_ref().and_then(|s| s.trip.clone()) {
             let end = self.step_end(&t);
-            if self.ending.is_none() {
+            if self.ending.as_ref().is_none_or(|e| !e.aborted) {
                 self.note(format!("Trip: {} ({})", end.name, end.words));
                 self.ending = Some(end);
                 self.phase = MimoMixedPhase::Stopping;
             }
         }
+        if let Some(t) = self.judge_drive_rms() {
+            self.abort_with(t);
+        }
+        self.judge_limits();
         if self.ending.is_none() {
             self.advance();
         }
@@ -1472,6 +1541,22 @@ impl MimoMixedService {
                     "drive {drive}'s demanded sum reached {volts:.3} V against its {:.3} V peak",
                     self.cfg.drives[*drive].peak_v
                 ),
+            },
+            StepTrip::DriveNotFinite { drive } => RunEnd {
+                name: "drive_not_finite",
+                aborted: true,
+                part: None,
+                control: None,
+                drive: Some(*drive),
+                words: format!("drive {drive}'s demanded sum was not a number; it played 0"),
+            },
+            StepTrip::RandomUnderrun { frames } => RunEnd {
+                name: "random_underrun",
+                aborted: true,
+                part: None,
+                control: None,
+                drive: None,
+                words: format!("the random drive ran dry for {frames} frames in all"),
             },
             StepTrip::Overload {
                 channel_index,
@@ -1551,6 +1636,21 @@ impl MimoMixedService {
                     drive: None,
                     words: format!(
                         "the tone law of {} kept asking past the change caps",
+                        id.clone().unwrap_or_default()
+                    ),
+                    part: id,
+                }
+            }
+            StepTrip::ToneUnreadable { tone, seconds } => {
+                let id = tone_id(*tone);
+                RunEnd {
+                    name: "tone_unreadable",
+                    aborted: true,
+                    control: None,
+                    drive: None,
+                    words: format!(
+                        "tone {} had no usable reading for {seconds:.1} s with its ramps done: \
+                         its drive was played open loop",
                         id.clone().unwrap_or_default()
                     ),
                     part: id,
@@ -1654,7 +1754,7 @@ impl MimoMixedService {
         self.level_db = db;
         let frames = (self.cfg.level_ramp_s * self.fs).max(1.0);
         if let Some(s) = self.step.as_mut() {
-            s.level.go(10f64.powf(db / 20.0), frames);
+            s.go_level(10f64.powf(db / 20.0), frames);
         }
         self.note(format!("Level {db:.2} dB."));
     }
@@ -1700,6 +1800,11 @@ impl MimoMixedService {
                     random_rms_v: self.chunk_rms.get(j).copied().unwrap_or(0.0),
                     peak_v: self.chunk_peak.get(j).copied().unwrap_or(0.0),
                     tone_sum_v,
+                    abort_vpk: self
+                        .step
+                        .as_ref()
+                        .and_then(|s| s.abort_v.get(j).copied())
+                        .unwrap_or_else(|| self.cfg.drives[j].abort_level_vpk()),
                 }
             })
             .collect();
@@ -1728,6 +1833,7 @@ impl MimoMixedService {
                         .zip(&b.alarm_db)
                         .map(|(e, (lo, hi))| e.is_finite() && (*e < -lo || *e > *hi))
                         .collect(),
+                    limiting: b.limiting,
                 })
                 .collect(),
             drives,
@@ -1735,6 +1841,17 @@ impl MimoMixedService {
             dropped: self.step.as_ref().map_or(0, |s| s.records.dropped),
             clamped: self.step.as_ref().map_or(0, |s| s.clamped),
             end: self.end.clone(),
+            limits: self
+                .cfg
+                .limits
+                .iter()
+                .zip(&self.limit_over_db)
+                .map(|(l, &(db, line))| LimitStatus {
+                    channel_index: l.channel_index,
+                    over_db: db,
+                    at_hz: line as f64 * self.df,
+                })
+                .collect(),
         }
     }
 
@@ -1882,7 +1999,15 @@ impl MimoMixedService {
             p,
             n_in: self.n_in,
             slots: self.slots.clone(),
+            n_out: self.n_out,
+            out_slots: self.drive_slots.clone(),
             peak_v: self.cfg.drives.iter().map(|d| d.peak_v).collect(),
+            abort_v: self
+                .cfg
+                .drives
+                .iter()
+                .map(|d| d.abort_level_vpk())
+                .collect(),
             tick_s: self.cfg.control_tick_s(),
             ring_frames: 4 * chunk + 4 * self.nfft,
             record_frames: 2 * TICKS_PER_BATCH as usize * block + 4096,
@@ -2057,7 +2182,7 @@ impl MimoMixedService {
                 .build(&setup)
                 .map_err(|e| MimoMixedError::Law(format!("tone {pid}: {}", e.reason())))?;
             let desc = self.laws.tones.describe();
-            // D17: how each control's reading is judged, at full level.
+            // How each control's reading is judged, at full level.
             let f0 = {
                 let proj = self.cfg.projection(0);
                 let mut clock = PartClock::new(&proj)?;
@@ -2089,6 +2214,8 @@ impl MimoMixedService {
                 limiting: false,
                 limited_s: 0.0,
                 judging,
+                tol_db: alarm.iter().copied().zip(abort.iter().copied()).collect(),
+                judged_line: l0,
                 ms: vec![0.0; n],
                 err_db: vec![f64::NAN; n],
                 alarm: vec![false; n],
@@ -2174,6 +2301,8 @@ impl MimoMixedService {
                 center_hz: center,
                 error_db: vec![f64::NAN; n],
                 limiting: false,
+                cap_bound: false,
+                ramp_held: false,
                 alarm_db: alarm,
                 abort_db: abort,
                 rate_hz_s: 0.0,
@@ -2355,6 +2484,8 @@ impl StepCostProbe {
                 limiting: false,
                 limited_s: 0.0,
                 judging: vec![tone_judging(0.1, 1e-6, (3.0, 3.0), (60.0, 60.0), 0.5); n],
+                tol_db: vec![((3.0, 3.0), (60.0, 60.0)); n],
+                judged_line: ((f / df).round() as usize).min(lines - 1),
                 ms: vec![0.0; n],
                 err_db: vec![0.0; n],
                 alarm: vec![false; n],
@@ -2378,7 +2509,10 @@ impl StepCostProbe {
             p,
             n_in: q,
             slots: (0..q).collect(),
+            n_out: m,
+            out_slots: (0..m).collect(),
             peak_v: vec![1e9; m],
+            abort_v: vec![1e9; m],
             tick_s: 0.01,
             ring_frames: 1 << 16,
             record_frames: 1 << 16,
