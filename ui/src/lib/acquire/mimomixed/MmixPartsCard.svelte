@@ -2,9 +2,12 @@
 	/**
 	 * The parts during a run, one row each in the parts' order: its id and kind, a switch for a tone
 	 * or a narrowband once the parts have come in, its frequency now, whether its clock is held and
-	 * whether the ceiling rule is limiting it; under it, a line per control with the target, the
-	 * measured value, the error in dB and the alarm. An alarm is a triangle and the word, a limiting
-	 * tone a bar and the word: never color alone. A refused switch is said under its row.
+	 * whether the ceiling rule is limiting it (a tone at its scale, a narrowband held back while its
+	 * drive is out of room) or a narrowband is folded into the floor; under it, a line per control (by
+	 * its channel's name) with the target, the measured value, the error in dB and the alarm. A
+	 * narrowband is stated in dB against the floor, so it has an error and no target. An alarm is a
+	 * triangle and the word, a limiting part a bar and the word: never color alone. A refused switch
+	 * is said under its row, with the service's reason.
 	 */
 	import type { MimoMixedPartRow } from '$lib/protocol/mimoMixed';
 	import { errDb, hz, partValue, PART_KIND_WORDS, pct } from './mmixWords';
@@ -17,7 +20,6 @@
 	let { mm, compact = false }: Props = $props();
 
 	const parts = $derived(mm.now?.parts ?? []);
-	const labels = $derived(mm.runControlLabels);
 	const refused = $derived(mm.refusal && (mm.refusal.verb === 'Part On' || mm.refusal.verb === 'Part Off') ? mm.refusal.message : null);
 	let last = $state<string | null>(null);
 
@@ -65,21 +67,21 @@
 										{/if}
 									</td>
 									<td rowspan={cells.length}><span class="kind">{PART_KIND_WORDS[p.kind]}</span> {p.name}<br /><span class="id mono">{p.id}</span></td>
-									<td rowspan={cells.length} class="num">{p.kind === 'floor' ? '-' : hz(p.freq_hz)}{#if p.width_hz}<br /><span class="sub">{hz(p.width_hz)} wide</span>{/if}</td>
+									<td rowspan={cells.length} class="num">{p.kind === 'floor' ? '-' : hz(p.freq_hz)}</td>
 									<td rowspan={cells.length} class="state" data-testid="mmix-part-{p.id}-state">
 										{#if p.limiting}
-											<span class="mark warn" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><rect x="1.5" y="5" width="9" height="2" fill="currentColor" /></svg></span>Limiting{p.scale !== null ? `, ${pct(p.scale)}` : ''}
+											<span class="mark warn" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><rect x="1.5" y="5" width="9" height="2" fill="currentColor" /></svg></span>Limiting{p.kind === 'tone' && p.scale !== null ? `, ${pct(p.scale)}` : ''}
 										{:else if p.held}
 											<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><rect x="2.5" y="2" width="2.4" height="8" fill="currentColor" /><rect x="7" y="2" width="2.4" height="8" fill="currentColor" /></svg></span>Held
 										{:else if p.on}
-											<span class="mark ok" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="currentColor" /></svg></span>{p.ramp < 0.999 ? 'Ramping' : 'Playing'}
+											<span class="mark ok" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="currentColor" /></svg></span>{p.kind === 'narrowband' && p.scale !== null && p.scale < 0.999 ? 'Ramping' : 'Playing'}
 										{:else}
 											<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.2" /></svg></span>{mm.now?.state === 'finished' ? 'Ended' : p.enabled ? 'Waiting' : 'Off'}
 										{/if}
-										{#if p.follows}<br /><span class="sub">Follows {mm.partName(p.follows.of)} × {p.follows.ratio}</span>{/if}
+										{#if p.folded}<br /><span class="sub" data-testid="mmix-part-{p.id}-folded">Folded into the floor</span>{/if}
 									</td>
 								{/if}
-								<td class="ctl">{labels[k] ?? `Control ${k + 1}`}</td>
+								<td class="ctl">{mm.channelLabel(c.channel) || `Control ${c.channel}`}</td>
 								<td class="num">{partValue(c.target, p.unit)}</td>
 								<td class="num">{partValue(c.measured, p.unit)}</td>
 								<td class="num" class:warn={c.alarm}>{errDb(c.error_db)}</td>

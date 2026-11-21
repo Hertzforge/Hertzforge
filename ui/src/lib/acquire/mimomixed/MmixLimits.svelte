@@ -31,11 +31,10 @@
 		{ key: 'level_ramp_s', label: 'Level ramp', unit: 's', step: 0.5 },
 		{ key: 'shutdown_ramp_s', label: 'Shutdown ramp', unit: 's', step: 0.5 },
 		{ key: 'soft_start_db', label: 'Soft start below', unit: 'dB', step: 1 },
+		{ key: 'soft_start_relax_db', label: 'Soft start relaxed by', unit: 'dB', step: 1 },
 		{ key: 'crest_factor', label: "Floor's crest factor", step: 0.5 },
 		{ key: 'cap_up_db', label: 'Step up, at most', unit: 'dB', step: 0.5 },
-		{ key: 'cap_down_db', label: 'Step down, at most', unit: 'dB', step: 0.5 },
-		{ key: 'law_budget', label: 'Law call budget', unit: 's', step: 0.05 },
-		{ key: 'law_misses', label: 'Law misses before a stop', integer: true }
+		{ key: 'cap_down_db', label: 'Step down, at most', unit: 'dB', step: 0.5 }
 	];
 </script>
 
@@ -48,7 +47,7 @@
 				<tbody>
 					{#each d.limits as l, i (l.channel)}
 						<tr data-testid="mmix-limit-{i}">
-							<td>Channel {l.channel}</td>
+							<td>{mm.channelLabel(l.channel) || `Channel ${l.channel}`}</td>
 							<td><NumberField compact id="mmix-lim-c-{i}" label="Limit {l.channel} ceiling" unit="g²/Hz" min={0} bind:value={l.ceiling} errors={E[`limits.${i}.ceiling`]} disabled={locked} /></td>
 							<td><NumberField compact id="mmix-lim-a-{i}" label="Limit {l.channel} abort margin" unit="dB" min={0} bind:value={l.abort_margin_db} errors={E[`limits.${i}.abort_margin_db`]} disabled={locked} /></td>
 							<td><button class="btn ghost sm" disabled={locked} onclick={() => mm.removeLimit(l.channel)}>Remove</button></td>
@@ -74,6 +73,8 @@
 		<div class="aq-fields">
 			<NumberField id="mmix-p-env" label="Lines over abort before a stop" integer min={1} bind:value={d.protections.envelope_abort_lines} errors={E['protections.envelope_abort_lines']} disabled={locked} testid="mmix-p-env" />
 			<NumberField id="mmix-p-div" label="Diverging loops before a stop" integer min={1} bind:value={d.protections.divergence_loops} errors={E['protections.divergence_loops']} disabled={locked} testid="mmix-p-div" />
+			<NumberField id="mmix-p-divdb" label="Divergence counted from" unit="dB" min={0} step={0.5} bind:value={d.protections.divergence_floor_db} errors={E['protections.divergence_floor_db']} disabled={locked} testid="mmix-p-divdb" help="A loop diverges when its error grows past this many dB." />
+			<NumberField id="mmix-p-settle" label="Loops to settle before the checks" integer min={0} bind:value={d.protections.settle_loops} errors={E['protections.settle_loops']} disabled={locked} testid="mmix-p-settle" />
 			<NumberField id="mmix-p-ovl" label="Input overload at" min={0.1} max={1} step={0.05} bind:value={d.protections.overload_fraction} errors={E['protections.overload_fraction']} disabled={locked} testid="mmix-p-ovl" help="As a share of each input's range." />
 		</div>
 	</section>
@@ -88,7 +89,7 @@
 		<Findings items={errs('control.frf')} />
 	</section>
 
-	<RunRecordEditor acq={mm} kept="The setup, the channel table, the log, the identification, the spectra, every part's levels and the laws' calls are still kept." />
+	<RunRecordEditor acq={mm} kept="The setup, the channel table, the log, the identification, the spectra, every part's levels and the identification are still kept." />
 </div>
 
 <style>

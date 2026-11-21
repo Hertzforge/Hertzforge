@@ -45,7 +45,7 @@
 		onimport={(path) => mm.importLaw('floor', path)}
 	>
 		{#snippet facts()}
-			{#if dry}<div><dt>On hardware</dt><dd data-testid="mmix-floor-law-hw">{dry.law.floor.hardware ? 'May drive hardware in this role' : 'Runs on the simulator only in this role'}</dd></div>{/if}
+			{#if dry}<div><dt>On hardware</dt><dd data-testid="mmix-floor-law-hw">{dry.law.floor.hardware ? 'May drive hardware in this role' : `Runs on the simulator only in this role${dry.law.floor.not_cleared ? `: ${dry.law.floor.not_cleared}` : ''}`}</dd></div>{/if}
 		{/snippet}
 	</LawPanel>
 
@@ -64,10 +64,9 @@
 		channelLabels={mm.controlLabels}
 		onchoose={(id) => mm.chooseLaw('tones', id)}
 		onimport={(path) => mm.importLaw('tones', path)}
-		live={dry?.law.tones.live}
 	>
 		{#snippet facts()}
-			{#if dry}<div><dt>On hardware</dt><dd data-testid="mmix-tone-law-hw">{dry.law.tones.hardware ? 'May drive hardware in this role' : 'Runs on the simulator only in this role'}</dd></div>{/if}
+			{#if dry}<div><dt>On hardware</dt><dd data-testid="mmix-tone-law-hw">{dry.law.tones.hardware ? 'May drive hardware in this role' : `Runs on the simulator only in this role${dry.law.tones.not_cleared ? `: ${dry.law.tones.not_cleared}` : ''}`}</dd></div>{/if}
 		{/snippet}
 	</LawPanel>
 

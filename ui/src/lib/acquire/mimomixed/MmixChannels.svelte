@@ -3,16 +3,18 @@
 	 * The station and the test's channels. The channel table (shared by every test type) holds the
 	 * rows; here each enabled row has its role in the run: a control row is a control, or is taken out
 	 * of the controls (it may then be a limit channel); a drive row is a drive, in the table's order,
-	 * with its two ceilings. The rms ceiling bounds the random part; the peak ceiling is the budget the
-	 * floor's peaks and every tone's peak share. There is no default for either: they are the
-	 * amplifier's inputs.
+	 * with its two ceilings, its aborts and the most identification may put on it. The rms ceiling
+	 * bounds the random part; the peak ceiling is the budget the floor's peaks and every tone's peak
+	 * share. There is no default for either: they are the amplifier's inputs. The peak abort, left
+	 * empty, is the peak ceiling plus 1 dB, and the field shows that value.
 	 */
 	import ChannelTable from '../ChannelTable.svelte';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import { MIMO_MIXED_MAX_CONTROLS, MIMO_MIXED_MAX_DRIVES } from '$lib/protocol/mimoMixed';
-	import { setControl } from './mmixSetup';
+	import { abortVpkOf, setControl } from './mmixSetup';
+	import { volts } from './mmixWords';
 	import type { MimoMixedStore } from './mmixStore.svelte';
 
 	interface Props {
@@ -64,20 +66,25 @@
 			<p class="aq-lead aq-small">Every enabled drive row drives the run, in the table's order. The floor's random and every tone add on each drive, so the peak ceiling is a budget they share; when the tones would take a drive past it, the ceiling rule under Laws scales them down and they show as limiting. A drive at its abort ends the run.</p>
 			{#if d.drives.length}
 				<table class="aq-table" data-testid="mmix-drives">
-					<thead><tr><th>Drive</th><th class="num">RMS ceiling</th><th class="num">Peak ceiling</th><th class="num">RMS abort</th></tr></thead>
+					<thead><tr><th>Drive</th><th class="num">RMS ceiling</th><th class="num">Peak ceiling</th><th class="num" title="The peak at which the run aborts; empty, the peak ceiling plus 1 dB.">Peak abort</th><th class="num">RMS abort</th><th class="num" title="The most identification may put on this drive.">Identification at most</th></tr></thead>
 					<tbody>
 						{#each d.drives as x, i (x.channel)}
 							<tr data-testid="mmix-drive-{i}">
 								<td>Channel {name(x.channel)}</td>
 								<td><NumberField compact id="mmix-drive-rms-{i}" label="Drive {x.channel} rms ceiling" unit="V rms" step={0.1} min={0} max={10} bind:value={x.ceiling_vrms} errors={errs(`drives.${i}.ceiling_vrms`)} disabled={locked} testid="mmix-drive-rms-{i}" /></td>
 								<td><NumberField compact id="mmix-drive-peak-{i}" label="Drive {x.channel} peak ceiling" unit="V pk" step={0.5} min={0} max={10} bind:value={x.peak_v} errors={errs(`drives.${i}.peak_v`)} disabled={locked} testid="mmix-drive-peak-{i}" /></td>
+								<td>
+									<NumberField compact id="mmix-drive-vpk-{i}" label="Drive {x.channel} peak abort" unit="V pk" step={0.5} min={0} max={10} nullable={Number.isFinite(x.peak_v) ? `${volts(abortVpkOf(x))}, +1 dB` : 'Ceiling +1 dB'} fallback={Number.isFinite(x.peak_v) ? Number(abortVpkOf(x).toFixed(3)) : 1} bind:value={x.abort_vpk} errors={errs(`drives.${i}.abort_vpk`)} disabled={locked} testid="mmix-drive-vpk-{i}" />
+									{#if x.abort_vpk === null && Number.isFinite(x.peak_v)}<span class="sub" data-testid="mmix-drive-vpk-default-{i}">Default: {volts(abortVpkOf(x))}, the peak ceiling plus 1 dB</span>{/if}
+								</td>
 								<td><NumberField compact id="mmix-drive-abort-{i}" label="Drive {x.channel} rms abort" unit="V rms" step={0.1} min={0} max={10} nullable="None" fallback={Number.isFinite(x.ceiling_vrms) ? x.ceiling_vrms * 1.2 : 1} bind:value={x.abort_vrms} errors={errs(`drives.${i}.abort_vrms`)} disabled={locked} testid="mmix-drive-abort-{i}" /></td>
+								<td><NumberField compact id="mmix-drive-pre-{i}" label="Drive {x.channel} identification at most" unit="V rms" step={0.05} min={0} max={10} bind:value={x.pretest_max_vrms} errors={errs(`drives.${i}.pretest_max_vrms`)} disabled={locked} testid="mmix-drive-pre-{i}" /></td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 				{#each d.drives as x, i (x.channel)}
-					<Findings items={[...errs(`drives.${i}.ceiling_vrms`), ...errs(`drives.${i}.peak_v`), ...errs(`drives.${i}.abort_vrms`), ...errs(`drives.${i}`)].map((message) => ({ level: 'error' as const, message: `Drive ${x.channel}: ${message}` }))} />
+					<Findings items={[...errs(`drives.${i}.ceiling_vrms`), ...errs(`drives.${i}.peak_v`), ...errs(`drives.${i}.abort_vpk`), ...errs(`drives.${i}.abort_vrms`), ...errs(`drives.${i}.pretest_max_vrms`), ...errs(`drives.${i}`)].map((message) => ({ level: 'error' as const, message: `Drive ${x.channel}: ${message}` }))} />
 				{/each}
 			{/if}
 			<Findings items={errs('channels.drives').map((message) => ({ level: 'error' as const, message }))} />
@@ -86,6 +93,12 @@
 </div>
 
 <style>
+	.sub {
+		display: block;
+		color: var(--text-3);
+		font-size: var(--text-xs);
+	}
+
 	.stack {
 		display: flex;
 		flex-direction: column;

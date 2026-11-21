@@ -2,45 +2,53 @@
 	/**
 	 * The prediction and the budget forecast, once the structure is identified: per drive, the
 	 * floor's random (rms and its peak at the crest factor) and the tones' peak sum, against the drive's
-	 * ceilings; then the forecast's worst moment per drive, its need drawn against its ceiling as a
-	 * bar with the share written beside it. A drive that cannot fit is said in words with its time.
-	 * Shapes and words carry every state; the color only repeats them.
+	 * ceilings; then the forecast's moment nearest a ceiling, its need drawn against its ceiling as a
+	 * bar with the share written beside it. A drive that cannot fit is said in words with its time,
+	 * and a forecast the service refuses is said by its name. The service names each drive and control
+	 * by its channel. Shapes and words carry every state; the color only repeats them.
 	 */
 	import type { MimoMixedPrediction } from '$lib/protocol/mimoMixed';
-	import { needWords, volts } from './mmixWords';
+	import { MMIX_REFUSAL_WORDS, needWords, volts } from './mmixWords';
 
 	interface Props {
 		prediction: MimoMixedPrediction;
-		drives: string[];
-		controls: string[];
+		/** A channel's name. */
+		names: (channel: number) => string;
 		testid?: string;
 	}
-	let { prediction, drives, controls, testid = 'mmix-prediction' }: Props = $props();
+	let { prediction, names, testid = 'mmix-prediction' }: Props = $props();
 
-	const name = (j: number) => drives[j] ?? `Drive ${j + 1}`;
+	const name = (c: number) => names(c) || `Channel ${c}`;
 	const share = (need: number, ceiling: number) => (ceiling > 0 ? Math.min(1.25, need / ceiling) : 0);
 	const fit = $derived(prediction.forecast.cannot_fit);
+	const worst = $derived(prediction.forecast.worst);
+	const refused = $derived(prediction.forecast.refused);
+	const num = (v: number | null, unit = 'g') => (v === null || !Number.isFinite(v) ? '-' : `${v.toFixed(3)} ${unit}`);
 </script>
 
-<div class="pred" data-testid={testid} data-within={prediction.within}>
-	{#if fit}
-		<p class="aq-notice warn aq-small" role="alert" data-testid="{testid}-cannot-fit">The budget cannot fit: {name(fit.drive)} needs {volts(fit.need_v)} against its {volts(fit.ceiling_v)} peak ceiling at {fit.time_s} s into the schedule.</p>
+<div class="pred" data-testid={testid} data-within={prediction.within} data-refused={refused ?? ''}>
+	{#if refused}
+		<p class="aq-notice warn aq-small" role="alert" data-testid="{testid}-refused">{MMIX_REFUSAL_WORDS[refused as keyof typeof MMIX_REFUSAL_WORDS] ?? refused}: the run cannot engage on this setup, and no override passes it.</p>
 	{/if}
-	<h3>Each Drive's Need Against Its Ceiling</h3>
-	<ul class="bars" data-testid="{testid}-forecast">
-		{#each prediction.forecast.drives as f (f.drive)}
-			{@const s = share(f.need_v, f.ceiling_v)}
-			{@const over = f.need_v > f.ceiling_v}
-			<li data-testid="{testid}-drive-{f.drive}" data-over={over}>
-				<span class="nm">{name(f.drive)}</span>
+	{#if fit}
+		<p class="aq-notice warn aq-small" data-testid="{testid}-cannot-fit">The budget cannot fit: drive {name(fit.drive)} needs {volts(fit.need_v)} against its {volts(fit.ceiling_v)} peak ceiling at {fit.time_s ?? '-'} s into the schedule.</p>
+	{/if}
+	{#if worst && worst.need_v !== null && worst.ceiling_v !== null}
+		{@const s = share(worst.need_v, worst.ceiling_v)}
+		{@const over = worst.need_v > worst.ceiling_v}
+		<h3>The Forecast's Nearest Approach to a Ceiling</h3>
+		<ul class="bars" data-testid="{testid}-forecast">
+			<li data-testid="{testid}-drive-{worst.drive}" data-over={over}>
+				<span class="nm">Drive {name(worst.drive)}</span>
 				<span class="bar" aria-hidden="true"><span class="fill" class:over style:width="{(s * 80).toFixed(1)}%"></span><span class="ceil" style:left="80%"></span></span>
-				<span class="words aq-small">{over ? 'Over: ' : ''}{needWords(f.need_v, f.ceiling_v)}{f.time_s ? ` at ${f.time_s} s` : ''}</span>
+				<span class="words aq-small">{over ? 'Over: ' : ''}{needWords(worst.need_v, worst.ceiling_v)}{worst.time_s ? ` at ${worst.time_s} s` : ''}</span>
 			</li>
-		{/each}
-	</ul>
+		</ul>
+		<p class="aq-small step">Forecast in steps of {prediction.forecast.step_s} s along the schedule.</p>
+	{/if}
 	<div class="aq-scroll">
 		<table class="aq-table" data-testid="{testid}-drives">
-			<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Random peak</th><th class="num">Tones' peak sum</th><th class="num">Total peak</th><th class="num">Peak ceiling</th><th class="num">RMS ceiling</th><th>Fits</th></tr></thead>
+			<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Random peak</th><th class="num">Tones' peak sum</th><th class="num">Total rms</th><th class="num">Total peak</th><th class="num">Peak ceiling</th><th class="num">RMS ceiling</th><th>Fits</th></tr></thead>
 			<tbody>
 				{#each prediction.drives as x (x.drive)}
 					<tr>
@@ -48,6 +56,7 @@
 						<td class="num">{volts(x.random_rms_v)}</td>
 						<td class="num">{volts(x.random_peak_v)}</td>
 						<td class="num">{volts(x.tone_peak_sum_v)}</td>
+						<td class="num">{volts(x.total_rms_v)}</td>
 						<td class="num">{volts(x.peak_v)}</td>
 						<td class="num">{volts(x.ceiling_peak_v)}</td>
 						<td class="num">{volts(x.ceiling_vrms)}</td>
@@ -63,7 +72,7 @@
 				<thead><tr><th>Control</th><th class="num">Random rms</th><th class="num">Tones rms</th><th class="num">Total rms</th></tr></thead>
 				<tbody>
 					{#each prediction.controls as c (c.control)}
-						<tr><td>{controls[c.control] ?? `Control ${c.control + 1}`}</td><td class="num">{c.random_rms.toFixed(3)} g</td><td class="num">{c.tone_rms.toFixed(3)} g</td><td class="num">{c.total_rms.toFixed(3)} g</td></tr>
+						<tr><td>{name(c.control)}</td><td class="num">{num(c.random_rms)}</td><td class="num">{num(c.tone_rms)}</td><td class="num">{num(c.total_rms)}</td></tr>
 					{/each}
 				</tbody>
 			</table>
@@ -128,5 +137,10 @@
 
 	.words {
 		white-space: nowrap;
+	}
+
+	.step {
+		margin: 0;
+		color: var(--text-2);
 	}
 </style>

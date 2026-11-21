@@ -1,7 +1,8 @@
 <script lang="ts">
 	/**
-	 * The drives' shared budget now: per drive, the floor's random (its rms and its held peak), the
-	 * tones' summed peak, the headroom left to the tones against the peak ceiling, and a bar of the
+	 * The drives' shared budget now: per drive (by its channel's name), the floor's random (its rms
+	 * and its held peak), the tones' summed peak, the largest value played, the headroom left to the
+	 * tones against the peak ceiling (in volts and dB), the peak the run aborts at, and a bar of the
 	 * whole against the ceiling. Under it, the ceiling rule's common scale on the tones, in words.
 	 */
 	import { needWords, scaleWords, volts } from './mmixWords';
@@ -14,9 +15,9 @@
 
 	const s = $derived(mm.now);
 	const drives = $derived(s?.drives ?? []);
-	const labels = $derived(mm.runDriveLabels);
-	const rule = $derived(s?.law?.ceiling_rule ?? null);
+	const rule = $derived(mm.runConfig?.law?.ceiling_rule?.id ?? null);
 	const tonesOn = $derived(!!s?.parts.some((p) => p.kind === 'tone' && p.on));
+	const dB = (v: number | null) => (v === null || !Number.isFinite(v) ? '-' : `${v.toFixed(1)} dB`);
 </script>
 
 <section aria-label="Drives" data-testid="mmix-drives-card">
@@ -25,20 +26,24 @@
 	{:else}
 		<div class="aq-scroll">
 			<table class="aq-table" data-testid="mmix-drives-table">
-				<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Held peak</th><th class="num">Tone sum</th><th class="num" title="The peak ceiling less the random part's held peak: the room left to the tones.">Headroom</th><th>Need against ceiling</th></tr></thead>
+				<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Held peak</th><th class="num">Tone sum</th><th class="num">Played peak</th><th class="num" title="The peak ceiling less the random part's held peak: the room left to the tones.">Headroom</th><th class="num" title="The peak the run aborts at: the drive's own, or its peak ceiling plus 1 dB.">Peak abort</th><th>Need against ceiling</th></tr></thead>
 				<tbody>
 					{#each drives as d, j (d.channel)}
-						{@const need = d.random_peak_v + d.tone_sum_v}
-						{@const share = d.ceiling_v > 0 ? Math.min(1.2, need / d.ceiling_v) : 0}
-						<tr data-testid="mmix-drive-live-{j}" data-short={need >= d.ceiling_v * 0.98}>
-							<td>{labels[j] ?? `Drive ${j + 1}`}</td>
+						{@const need = (d.random_peak_v ?? 0) + (d.tone_sum_v ?? 0)}
+						{@const ceiling = d.ceiling_v ?? 0}
+						{@const short = ceiling > 0 && need >= ceiling * 0.98}
+						{@const share = ceiling > 0 ? Math.min(1.2, need / ceiling) : 0}
+						<tr data-testid="mmix-drive-live-{j}" data-short={short}>
+							<td>{mm.channelLabel(d.channel) || `Drive ${d.channel}`}</td>
 							<td class="num">{volts(d.random_rms_v)}</td>
 							<td class="num">{volts(d.random_peak_v)}</td>
 							<td class="num">{volts(d.tone_sum_v)}</td>
-							<td class="num">{volts(d.headroom_v)}</td>
+							<td class="num">{volts(d.peak_v)}</td>
+							<td class="num">{volts(d.headroom_v)}{d.headroom_db !== null ? ` (${dB(d.headroom_db)})` : ''}</td>
+							<td class="num" data-testid="mmix-drive-abort-{j}">{volts(d.abort_vpk)}</td>
 							<td class="need">
-								<span class="bar" aria-hidden="true"><span class="fill" class:short={need >= d.ceiling_v * 0.98} style:width="{(share * 80).toFixed(1)}%"></span><span class="ceil"></span></span>
-								<span class="aq-small">{needWords(need, d.ceiling_v)}{need >= d.ceiling_v * 0.98 ? ', out of room' : ''}</span>
+								<span class="bar" aria-hidden="true"><span class="fill" class:short style:width="{(share * 80).toFixed(1)}%"></span><span class="ceil"></span></span>
+								<span class="aq-small">{ceiling > 0 ? needWords(need, ceiling) : '-'}{short ? ', out of room' : ''}</span>
 							</td>
 						</tr>
 					{/each}

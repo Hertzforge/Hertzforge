@@ -1,7 +1,9 @@
 <script lang="ts">
 	/**
-	 * The run in numbers: the level and its time, parts time, whether the floor has equalized and its
-	 * worst error now, and how the run ended, by the part, control or drive the end names.
+	 * The run in numbers: the level and the schedule's mode, the run's time, whether the floor has
+	 * equalized, its worst error now and its loops, and how the run ended, by the part, control or
+	 * drive the end names (the service names controls and drives by channel). The service reports no
+	 * time at a level nor what is left of it, so neither is shown.
 	 */
 	import { clock, db } from '../words';
 	import { endWords, errDb } from './mmixWords';
@@ -13,19 +15,22 @@
 	let { mm }: Props = $props();
 
 	const s = $derived(mm.now);
-	const worst = $derived(s?.floor_error_db.length ? s.floor_error_db.reduce((w, e) => (Math.abs(e) > Math.abs(w) ? e : w), 0) : null);
-	const t = (v: number | null | undefined) => (v === null || v === undefined ? '-' : clock(v));
+	const worst = $derived(s?.floor_error_db.length ? s.floor_error_db.reduce<number>((w, e) => (e !== null && Math.abs(e) > Math.abs(w) ? e : w), 0) : null);
+	const floor = $derived(mm.status?.floor ?? null);
 </script>
 
 <section aria-label="Level" data-testid="mmix-level-card">
 	<dl>
 		<div><dt>Level</dt><dd class="num" data-testid="mmix-level">{s?.level_db === null || s?.level_db === undefined ? '-' : db(s.level_db)}</dd></div>
-		<div><dt>At level</dt><dd class="num">{t(s?.at_level_s)}{s?.remaining_at_level_s !== null && s?.remaining_at_level_s !== undefined ? `, ${clock(s.remaining_at_level_s)} left` : ''}</dd></div>
-		<div><dt>Parts time</dt><dd class="num">{t(s?.parts_s)}</dd></div>
+		<div><dt>Schedule</dt><dd data-testid="mmix-mode">{s?.mode === 'manual' ? 'Manual' : s?.mode === 'auto' ? 'Automatic' : '-'}</dd></div>
+		<div><dt>Run time</dt><dd class="num" data-testid="mmix-t">{s?.t_s === null || s?.t_s === undefined ? '-' : clock(s.t_s)}</dd></div>
 		<div><dt>Floor</dt><dd data-testid="mmix-floor-state">{s?.floor_equalized ? 'Equalized' : s?.phase === 'floor_only' ? 'Equalizing alone' : '-'}{worst !== null ? `, worst error ${errDb(worst)}` : ''}</dd></div>
+		{#if floor}
+			<div><dt>Floor loops</dt><dd class="num" data-testid="mmix-floor-loops" title="Missed loops, underruns, dropped and clamped frames">{floor.loops}{floor.misses || floor.underruns || floor.dropped || floor.clamped ? `, ${floor.misses} missed, ${floor.underruns} short, ${floor.dropped} dropped, ${floor.clamped} clamped` : ''}</dd></div>
+		{/if}
 	</dl>
 	{#if s?.end}
-		<p class="aq-small end" data-testid="mmix-end">{endWords(s.end, { part: (id) => mm.partName(id), control: (i) => mm.runControlLabels[i] ?? `Control ${i + 1}`, drive: (i) => mm.runDriveLabels[i] ?? `Drive ${i + 1}` })}</p>
+		<p class="aq-small end" data-testid="mmix-end">{endWords(s.end, { part: (id) => mm.partName(id), channel: (c) => mm.channelLabel(c) || String(c) })}</p>
 	{/if}
 </section>
 

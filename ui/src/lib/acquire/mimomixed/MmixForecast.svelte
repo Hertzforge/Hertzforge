@@ -15,7 +15,8 @@
 	let { mm }: Props = $props();
 
 	const f = $derived(mm.findings);
-	const names = $derived({ parts: Object.fromEntries([...mm.setup.tones, ...mm.setup.bands].map((p) => [p.id, p.name])), controls: mm.controlLabels, drives: mm.driveLabels });
+	// in the configuration's order: the floor, the tones, the narrowbands
+	const names = $derived({ parts: ['the floor', ...mm.setup.tones.map((t) => t.name || t.id), ...mm.setup.bands.map((b) => b.name || b.id)], controls: mm.controlLabels, drives: mm.driveLabels, limits: mm.setup.limits.map((l) => mm.channelLabel(l.channel)) });
 	const prediction = $derived(mm.status?.prediction ?? null);
 	const dry = $derived(mm.check && mm.checkedKey === mm.key ? mm.check.derived : null);
 </script>
@@ -27,21 +28,21 @@
 			<ul class="items">
 				{#each f.errors as e, i (i)}
 					{@const where = refusalWhere(e, names)}
-					<li class="err" data-testid="mmix-refusal-{e.reason}" data-part={e.part ?? ''} data-control={e.control ?? ''} data-drive={e.drive ?? ''}>
+					<li class="err" data-testid="mmix-refusal-{e.reason}" data-field={e.field ?? ''} data-channel={e.channel ?? ''}>
 						<span class="mark" aria-hidden="true">✕</span>
 						<span><strong>{REFUSAL_WORDS[e.reason] ?? e.reason}</strong>{where ? ` (${where})` : ''}: {e.message}</span>
 					</li>
 				{/each}
 				{#each f.warnings as w, i (i)}
 					{@const where = refusalWhere(w, names)}
-					<li class="warn" data-testid="mmix-warning-{w.reason}" data-part={w.part ?? ''}>
+					<li class="warn" data-testid="mmix-warning-{w.reason}" data-field={w.field ?? ''}>
 						<span class="mark" aria-hidden="true">!</span>
 						<span><strong>{REFUSAL_WORDS[w.reason] ?? w.reason}</strong>{where ? ` (${where})` : ''}: {w.message}</span>
 					</li>
 				{/each}
 			</ul>
 		{:else if dry}
-			<p class="aq-small" data-testid="mmix-no-refusals">The service accepts the setup. The test's band is {dry.band_hz[0]} to {dry.band_hz[1]} Hz; identification takes about {dry.identification_s} s; the tracker's delay is about {dry.tracker_delay_s} s.</p>
+			<p class="aq-small" data-testid="mmix-no-refusals">The service accepts the setup. The test's band is {dry.band_hz[0]} to {dry.band_hz[1]} Hz, {dry.grid.df_hz} Hz a line; the reference is {dry.reference_source}.</p>
 		{:else}
 			<p class="aq-small aq-muted">{mm.pending ?? 'Checked once the fields are complete.'}</p>
 		{/if}
@@ -50,9 +51,9 @@
 	<section class="aq-panel" aria-labelledby="mmix-pred" data-testid="mmix-forecast">
 		<div class="aq-head"><h2 id="mmix-pred">Prediction and Budget</h2><span class="aq-sub">Each drive's peak need, the floor's and the tones' together, against its ceiling.</span></div>
 		{#if prediction}
-			<MmixPrediction {prediction} drives={mm.runDriveLabels} controls={mm.runControlLabels} />
+			<MmixPrediction {prediction} names={(c) => mm.channelLabel(c)} />
 		{:else}
-			<p class="aq-small aq-muted" data-testid="mmix-forecast-later">The prediction needs the model of the structure, so it comes after identification: the run holds for review with it, before anything drives at level. A forecast that cannot fit holds the run until you proceed with your words or abort.</p>
+			<p class="aq-small aq-muted" data-testid="mmix-forecast-later">The prediction needs the model of the structure, so it comes after identification: the run holds for review with it, before anything drives at level. A prediction over a drive ceiling holds the run until you override it with your words or stop; a forecast that finds no drive budget that fits refuses the run, and no override passes it.</p>
 		{/if}
 	</section>
 </div>

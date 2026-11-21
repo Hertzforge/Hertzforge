@@ -3,10 +3,10 @@
 	 * The operator's screen for MIMO Mixed Mode, on the test screen's frame: Setup in sections with
 	 * its summary beside every one (the station and channels, the floor's reference, the parts, the
 	 * schedule and identification, the five laws, limits and protections, the prediction and the
-	 * refusals), then Run with its pages of plots and the control dock. The header carries parts
+	 * refusals), then Run with its pages of plots and the control dock. The header carries the run's
 	 * time, the parts playing and, while a drive is out of room, the word Limiting. The review hold
-	 * after identification brings the identification page forward, once per hold, and proceeding
-	 * from it brings the controls page back.
+	 * after identification brings the run forward, once per hold, with the identification and the
+	 * prediction in the Run card, and proceeding from it brings the controls page back.
 	 */
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
@@ -52,8 +52,8 @@
 
 {#snippet nums()}
 	<div>
-		<dt>Parts time</dt>
-		<dd class="num" data-testid="run-parts-s">{now?.parts_s === null || now?.parts_s === undefined ? '-' : clock(now.parts_s)}</dd>
+		<dt>Run time</dt>
+		<dd class="num" data-testid="run-t">{now?.t_s === null || now?.t_s === undefined ? '-' : clock(now.t_s)}</dd>
 	</div>
 	<div>
 		<dt>Parts on</dt>
@@ -62,7 +62,7 @@
 	{#if now?.state === 'running' && now.limiting}
 		<div>
 			<dt>Limiting</dt>
-			<dd class="limiting" data-testid="run-limiting"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.5" y="5" width="9" height="2" fill="currentColor" /></svg> {now.scale !== null ? `Tones at ${Math.round(now.scale * 100)} %` : 'A tone is scaled down'}</dd>
+			<dd class="limiting" data-testid="run-limiting"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.5" y="5" width="9" height="2" fill="currentColor" /></svg> {now.scale !== null && now.scale < 0.9995 ? `Tones at ${Math.round(now.scale * 100)} %` : 'A part is held back'}</dd>
 		</div>
 	{/if}
 {/snippet}

@@ -2,8 +2,8 @@
 	/**
 	 * The MIMO Mixed Mode setup in a few lines, beside every section: the shape, the parts, the
 	 * schedule, the five choices under Laws, and what the service derived from the draft (the band,
-	 * the grid, the identification time and the tracker's delay); then what is left to fix, each a
-	 * click from its section.
+	 * the grid, each control's reference rms and where the reference came from, and whether each
+	 * law may drive hardware); then what is left to fix, each a click from its section.
 	 */
 	import { db } from '../words';
 	import { BAND_LAW_WORDS, CEILING_RULE_WORDS, FILL_RULE_WORDS, MMIX_SECTIONS, type MmixSection } from './mmixSetup';
@@ -35,9 +35,9 @@
 		<h3>From the Control Service</h3>
 		<dl data-testid="mmix-summary-derived">
 			<div><dt>Band</dt><dd class="num">{dry.band_hz[0]} to {dry.band_hz[1]} Hz, {dry.grid.lines} lines every {dry.grid.df_hz} Hz</dd></div>
-			<div><dt>Identification</dt><dd class="num">About {dry.identification_s} s</dd></div>
-			<div><dt>Test</dt><dd class="num">{dry.test_s === null ? 'Until stopped (manual)' : `About ${Math.round(dry.test_s)} s at level`}</dd></div>
-			<div><dt>Tracker delay</dt><dd class="num" data-testid="mmix-summary-tracker">About {dry.tracker_delay_s} s</dd></div>
+			<div><dt>Reference rms</dt><dd class="num" data-testid="mmix-summary-rms">{dry.reference_rms.map((r) => `${r} g`).join(', ')}</dd></div>
+			<div><dt>Reference</dt><dd>{dry.reference_source}</dd></div>
+			<div><dt>On hardware</dt><dd data-testid="mmix-summary-hw">{dry.law.floor.hardware && dry.law.tones.hardware ? 'Both laws may drive hardware' : 'A law runs on the simulator only'}</dd></div>
 		</dl>
 	{/if}
 

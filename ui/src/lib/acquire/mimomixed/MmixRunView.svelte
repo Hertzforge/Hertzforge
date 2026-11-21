@@ -1,11 +1,11 @@
 <script lang="ts">
 	/**
 	 * The MIMO Mixed Mode run as it happens, on the test screen's frame: the pages of plots, and the
-	 * dock with the Run card (the shared verbs, Hold and Resume, and past a failed gate or a forecast
-	 * that cannot fit, Proceed With Your Words), the parts, the drives' shared budget, the run in
-	 * numbers, the log and the station. While the run holds for review, the Run card gives the gate
-	 * in a line, the prediction with each drive's need against its ceiling, and a place for the
-	 * operator's words. The window on another monitor shows the same, compact.
+	 * dock with the Run card (the shared verbs, Hold and Resume, and past a failed gate or a
+	 * prediction over a ceiling, Override with your words), the parts, the drives' shared budget, the
+	 * limit channels, the run in numbers, the log and the station. While the run holds for review,
+	 * the Run card gives the identification and its gate in a line, the prediction with each drive's
+	 * need against its ceiling and the forecast, and for a hold a place for the operator's words. The window on another monitor shows the same, compact.
 	 */
 	import { untrack, type Snippet } from 'svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
@@ -16,6 +16,7 @@
 	import type { MixedLogEntry } from '$lib/protocol/mixed';
 	import MmixDrivesCard from './MmixDrivesCard.svelte';
 	import MmixLevelCard from './MmixLevelCard.svelte';
+	import MmixLimitsCard from './MmixLimitsCard.svelte';
 	import MmixPartsCard from './MmixPartsCard.svelte';
 	import MmixPrediction from './MmixPrediction.svelte';
 	import MmixRunVerbs from './MmixRunVerbs.svelte';
@@ -37,9 +38,13 @@
 	const live = $derived(mm.frameOfRun);
 	const state = $derived(mm.run?.state ?? null);
 	const streaming = $derived(state === 'running' || state === 'review' || state === 'stopping' || state === 'finished');
-	const channels = $derived(mm.runConfig ? mm.runConfig.channels.controls.map((c, i) => ({ index: c.channel, name: mm.runControlLabels[i] ?? `Control ${c.channel}` })) : mm.setup.controls.map((c, i) => ({ index: c.channel, name: mm.controlLabels[i] })));
-	const gates = $derived(status?.gates ?? null);
-	const gateHold = $derived(status?.phase === 'gate_failed' || status?.phase === 'prediction_exceeded');
+	const channels = $derived(mm.runConfig ? mm.runConfig.controls.map((c) => ({ index: c, name: mm.channelLabel(c) || `Control ${c}` })) : mm.setup.controls.map((c, i) => ({ index: c.channel, name: mm.controlLabels[i] })));
+	const ident = $derived(status?.identification ?? null);
+	const hold = $derived(mm.holdInForce);
+	const worstCoherence = $derived.by(() => {
+		const c = (ident?.band_coherence ?? []).filter((x): x is number => x !== null);
+		return c.length ? Math.min(...c).toFixed(2) : '-';
+	});
 
 	// The plots' part choice offers the run's tones and narrowbands (the setup's before a run).
 	$effect(() => {
@@ -63,11 +68,6 @@
 				return 'Each tone is drawn from when it first comes in.';
 			case 'band_level':
 				return 'Each narrowband is drawn from when it first comes in.';
-			case 'identification':
-			case 'coherence':
-				return 'Drawn once identification is done.';
-			case 'law':
-				return "The laws' values are shown after their first calls.";
 			default:
 				return 'Appears with the first frame.';
 		}
@@ -79,14 +79,19 @@
 {#snippet notes()}
 	{#if status?.state === 'review' && !compact}
 		<div class="review" data-testid="mmix-review-notes" data-phase={status.phase}>
-			{#if gates}
-				<p class="aq-small" data-testid="mmix-gate-words">
-					{gates.passed ? 'The gate passed' : 'The gate did not pass'}: the worst multiple coherence is {gates.coherence_min.toFixed(2)} against {gates.coherence_floor}; the model's condition is {Math.round(gates.condition_max)} against {gates.condition_limit}.
+			{#if ident}
+				<p class="aq-small" data-testid="mmix-gate-words" data-passed={ident.passed ? 'true' : 'false'}>
+					{ident.passed ? 'The coherence gate passed' : 'The coherence gate did not pass'}: the worst band coherence is {worstCoherence} against the gate's {ident.gate_coherence}, identified at {ident.level_db} dB in {ident.steps} {ident.steps === 1 ? 'step' : 'steps'} of {ident.frames} frames.
 				</p>
 			{/if}
-			{#if status.prediction}<MmixPrediction prediction={status.prediction} drives={mm.runDriveLabels} controls={mm.runControlLabels} testid="mmix-review-prediction" />{/if}
-			<label class="lbl" for="mmix-ack">{gateHold ? 'Your words for the log (needed to proceed)' : 'Your words for the log (optional)'}</label>
-			<textarea id="mmix-ack" class="field" rows="2" bind:value={mm.acknowledgement} disabled={!mm.isController} data-testid="mmix-ack"></textarea>
+			{#if status.prediction}<MmixPrediction prediction={status.prediction} names={(c) => mm.channelLabel(c)} testid="mmix-review-prediction" />{/if}
+			{#if hold}
+				<p class="aq-small hold" data-testid="mmix-hold" data-hold={hold}>
+					{hold === 'gate_failed' ? 'The run holds for the failed coherence gate. An override with your words goes on to the prediction, which may hold again.' : 'The run holds for the prediction over a drive ceiling. An override with your words engages the run; the ceilings and the aborts still hold every drive.'}
+				</p>
+				<label class="lbl" for="mmix-ack">Your words for the log (needed to override)</label>
+				<textarea id="mmix-ack" class="field" rows="2" bind:value={mm.acknowledgement} disabled={!mm.isController} data-testid="mmix-ack"></textarea>
+			{/if}
 		</div>
 	{/if}
 {/snippet}
@@ -98,6 +103,8 @@
 		<MmixPartsCard {mm} {compact} />
 	{:else if kind === 'drives'}
 		<MmixDrivesCard {mm} />
+	{:else if kind === 'limits'}
+		<MmixLimitsCard {mm} />
 	{:else if kind === 'log'}
 		<MixedLogCard log={mm.log as unknown as MixedLogEntry[]} />
 	{:else if kind === 'station' && station}
@@ -118,7 +125,7 @@
 		'data-level': live?.level_db ?? ''
 	}}
 	{verbs}
-	review={status?.phase === 'gate_failed' ? 'The identification gate did not pass: proceed with your words, or abort.' : status?.phase === 'prediction_exceeded' ? 'The prediction is over a ceiling: proceed with your words, or abort.' :'The identification, the gate and the prediction are drawn; nothing drives at level until you proceed.'}
+		review={hold === 'gate_failed' ? 'The coherence gate did not pass: override with your words, or stop.' : hold === 'prediction_exceeded' ? 'The prediction is over a drive ceiling: override with your words, or stop.' : status?.prediction?.forecast.refused ? 'The forecast refuses: no override passes it. Change the setup, or stop.' : 'The identification, the gate and the prediction are in; nothing drives at level until you proceed.'}
 	{notes}
 	{cards}
 	{channels}

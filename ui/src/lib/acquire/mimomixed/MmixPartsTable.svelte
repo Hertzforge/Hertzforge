@@ -196,6 +196,27 @@
 													<button type="button" role="radio" aria-checked={s.direction === 'down'} disabled={locked} onclick={() => (s.direction = 'down')}>Down</button>
 												</div>
 											</div>
+											<div class="sel">
+												<span class="lbl">Ends after</span>
+												<div class="aq-seg sm" role="radiogroup" aria-label="The sweep ends after" data-testid="mmix-{table}-{i}-end">
+													{#each [['sweeps', 'A count'], ['duration', 'A time'], ['both', 'Whichever first']] as [v, w] (v)}
+														<button type="button" role="radio" aria-checked={s.end_by === v || (v === 'sweeps' && s.end_by === 'none')} disabled={locked} onclick={() => (s.end_by = v as typeof s.end_by)} data-testid="mmix-{table}-{i}-end-{v}">{w}</button>
+													{/each}
+												</div>
+											</div>
+											{#if s.end_by !== 'duration'}<NumberField id="mmix-{table}-{i}-sw" label="One-way sweeps" integer min={1} bind:value={s.sweeps} errors={E[`${key(i)}.schedule.sweeps`]} disabled={locked} testid="mmix-{table}-{i}-sweeps" />{/if}
+											{#if s.end_by === 'duration' || s.end_by === 'both'}<NumberField id="mmix-{table}-{i}-du" label="Seconds of parts time" unit="s" min={0} bind:value={s.duration_s} errors={E[`${key(i)}.schedule.duration_s`]} disabled={locked} testid="mmix-{table}-{i}-duration" />{/if}
+										{:else if s.kind === 'fixed'}
+											<div class="sel">
+												<span class="lbl">Plays for</span>
+												<div class="aq-seg sm" role="radiogroup" aria-label="The tone plays for" data-testid="mmix-{table}-{i}-dwell">
+													{#each [['none', 'Its whole window'], ['seconds', 'Seconds'], ['cycles', 'Cycles']] as [v, w] (v)}
+														<button type="button" role="radio" aria-checked={s.dwell.by === v} disabled={locked} onclick={() => (s.dwell.by = v as typeof s.dwell.by)}>{w}</button>
+													{/each}
+												</div>
+											</div>
+											{#if s.dwell.by === 'seconds'}<NumberField id="mmix-{table}-{i}-ds" label="Seconds" unit="s" min={0} bind:value={s.dwell.seconds} disabled={locked} />{/if}
+											{#if s.dwell.by === 'cycles'}<NumberField id="mmix-{table}-{i}-dc" label="Cycles" integer min={1} bind:value={s.dwell.cycles} disabled={locked} />{/if}
 										{/if}
 										<NumberField id="mmix-{table}-{i}-on" label="Comes in at, parts time" unit="s" min={0} bind:value={r.window.on_s} disabled={locked} testid="mmix-{table}-{i}-on" />
 										<NumberField id="mmix-{table}-{i}-off" label="Goes out at, parts time" unit="s" nullable="The end" fallback={300} min={0} bind:value={r.window.off_s} disabled={locked} testid="mmix-{table}-{i}-off" />

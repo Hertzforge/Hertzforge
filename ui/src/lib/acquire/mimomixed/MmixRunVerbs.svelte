@@ -2,8 +2,8 @@
 	/**
 	 * MIMO Mixed Mode's own verbs, beside the shared ones: Hold, which stops every part's clock with
 	 * every part still under control, and Resume; and, while the run holds on a failed gate or a
-	 * prediction over a ceiling, Proceed With Your Words. A verb that cannot run says why when it is
-	 * focused or hovered.
+	 * prediction over a ceiling, Override With Your Words (it names the hold). A verb that cannot run
+	 * says why when it is focused or hovered.
 	 */
 	import type { MimoMixedStore } from './mmixStore.svelte';
 	import type { MmixVerbId } from './mmixVerbs';
@@ -31,7 +31,7 @@
 {#if v.hold.visible || v.resume.visible || v.override.visible}
 	<div class="verbs" role="group" aria-label="Test progress" data-testid="mmix-verbs">
 		{#if v.override.visible}
-			<button class="btn primary" data-testid="act-override-words" aria-disabled={!v.override.enabled} class:off={!v.override.enabled} onclick={() => go('override', () => mm.override())} {...tip('override')}>Proceed With Your Words</button>
+			<button class="btn primary" data-testid="act-override-words" aria-disabled={!v.override.enabled} class:off={!v.override.enabled} onclick={() => go('override', () => mm.override())} {...tip('override')}>Override With Your Words</button>
 		{/if}
 		{#if v.hold.visible}
 			<button class="btn" data-testid="act-hold" aria-disabled={!v.hold.enabled} class:off={!v.hold.enabled} onclick={() => go('hold', () => mm.hold())} {...tip('hold')}>
