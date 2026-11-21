@@ -212,7 +212,8 @@ def _open_app() -> int:
     port = APP_PORT if _free(APP_PORT) else 0
     try:
         asyncio.run(_serve("127.0.0.1", port, ready=lambda host, bound: _announce(
-            _app_url(host, bound), webbrowser.open), quit_when_closed=CLOSED_S))
+            _app_url(host, bound), webbrowser.open), quit_when_closed=CLOSED_S,
+            dialogs=True))
     except KeyboardInterrupt:
         return 0
     print("The browser tab was closed; Hertzforge stopped.", flush=True)
