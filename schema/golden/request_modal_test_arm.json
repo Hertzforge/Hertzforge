@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 212,
+ "method": "modal_test.arm",
+ "params": {}
+}

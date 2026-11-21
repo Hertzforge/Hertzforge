@@ -48,6 +48,7 @@ pub mod mimo;
 pub mod mimo_shock;
 pub mod mimo_sine;
 pub mod mixed;
+pub mod modal_test;
 pub mod playback;
 pub mod profiles;
 pub mod protocol;

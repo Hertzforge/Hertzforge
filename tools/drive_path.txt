@@ -46,6 +46,7 @@ crates/hertzforge-srs               SRS shock: synthesized pulse, its ceiling an
 crates/hertzforge-twr               time waveform replication: drive ceiling, envelope and divergence aborts
 crates/hertzforge-explorer-host     Explorer: stepped drive, its ceiling, watchdog and stop ramp
 crates/hertzforge-playback          Playback: a drive file played out, its checks, ceiling, underrun abort and stop ramp
+crates/hertzforge-modal-test        Modal Test: shaker sources played open loop, the ceiling, underrun and source-failure aborts, stop ramp; impact mode drives nothing
 
 # Control laws: they compute the next drive
 crates/hertzforge-law-host          the sandbox law files run in, with their budgets and output checks

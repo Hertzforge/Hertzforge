@@ -31,6 +31,8 @@ export function workspaceForRun(test: string): Workspace {
 	if (test === 'classical_shock' || test === 'srs' || test === 'mimo_shock') return 'shock';
 	// A TWR run's plays against the target it was controlled to: Transient Analysis.
 	if (test === 'twr') return 'transient';
+	// A Modal Test's FRFs go to the modal fit.
+	if (test === 'modal_test') return 'modal';
 	return 'signals';
 }
 

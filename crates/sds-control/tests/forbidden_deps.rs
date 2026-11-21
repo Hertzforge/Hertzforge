@@ -126,6 +126,15 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // run host is handed a finished `Box<dyn Backend>` by the station factory, and the
     // Sim is a dev-dependency only. It runs no control law.
     "hertzforge-playback",
+    // The Modal Test behind the wire's `modal_test.*` methods, reviewed 2026-11-20: the
+    // setup, plan, windows, hit checks, averages and run host of impact and shaker FRF
+    // measurement (`hertzforge-modal-test`, MIT, written here). Its `[dependencies]`
+    // are `hertzforge-channel-table`, `hertzforge-dsp`, `hertzforge-engine`,
+    // `hertzforge-hal`, `hertzforge-module-abi`, `hertzforge-sdm` and `serde_json`, the
+    // controller crates all already on this list, and it names no backend: the run host
+    // is handed a finished `Box<dyn Backend>` by the station factory, and the Sim is a
+    // dev-dependency only. It runs no control law.
+    "hertzforge-modal-test",
     // The Recorder behind the wire's `recorder.*` methods: the acquisition and recording
     // core (`hertzforge-recorder`, MIT, imported): its trigger, recording writer and
     // reader, analysis pass and run service. Its `[dependencies]` are
@@ -209,6 +218,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// `hertzforge-playback` was written here as well (2026-11-15): the drive file, its
 /// checks before arming and the run host that plays it. It names no backend; the run
 /// service hands it a finished station, and the Sim is a dev-dependency only.
+///
+/// `hertzforge-modal-test` was written here as well (2026-11-20): the Modal Test's
+/// setup, plan, windows, hit checks, averages and run host. It names no backend; the
+/// run service hands it a finished station, and the Sim is a dev-dependency only.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-automation",
     "hertzforge-backendd",
@@ -232,6 +245,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-mimo-shock",
     "hertzforge-mimo-sine",
     "hertzforge-mixed",
+    "hertzforge-modal-test",
     "hertzforge-module-abi",
     "hertzforge-playback",
     "hertzforge-protocol",

@@ -1,0 +1,20 @@
+{
+ "type": "response",
+ "id": 214,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 1 error: The force window runs past the block: the trigger at sample 26, 507 samples at one and a fall of 51 end at 584, after the block's 512 samples.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "out_of_range",
+     "field": "config.impact.force_window",
+     "message": "The force window runs past the block: the trigger at sample 26, 507 samples at one and a fall of 51 end at 584, after the block's 512 samples."
+    }
+   ],
+   "warnings": [],
+   "check": null
+  }
+ }
+}

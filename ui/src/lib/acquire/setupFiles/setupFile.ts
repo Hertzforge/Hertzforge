@@ -19,9 +19,9 @@
 import type { ChannelRow } from '$lib/protocol/types';
 
 /** The test modules, by the name a run's manifest gives its test. */
-export type SetupModule = 'random' | 'sine' | 'mixed' | 'classical_shock' | 'srs' | 'twr' | 'explorer' | 'recorder' | 'mimo_random' | 'mimo_shock' | 'mimo_sine' | 'playback';
+export type SetupModule = 'random' | 'sine' | 'mixed' | 'classical_shock' | 'srs' | 'twr' | 'explorer' | 'recorder' | 'mimo_random' | 'mimo_shock' | 'mimo_sine' | 'playback' | 'modal_test';
 
-export const SETUP_MODULES: readonly SetupModule[] = ['random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer', 'recorder', 'mimo_random', 'mimo_shock', 'mimo_sine', 'playback'];
+export const SETUP_MODULES: readonly SetupModule[] = ['random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer', 'recorder', 'mimo_random', 'mimo_shock', 'mimo_sine', 'playback', 'modal_test'];
 
 /** Each module's name on its screen. */
 export const MODULE_TITLES: Record<SetupModule, string> = {
@@ -36,7 +36,8 @@ export const MODULE_TITLES: Record<SetupModule, string> = {
 	mimo_random: 'MIMO Random',
 	mimo_shock: 'MIMO Shock',
 	mimo_sine: 'MIMO Sine',
-	playback: 'Playback'
+	playback: 'Playback',
+	modal_test: 'Modal Test'
 };
 
 /**

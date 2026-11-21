@@ -82,6 +82,7 @@ deny = [
     "hertzforge-engine",
     "hertzforge-explorer-host",
     "hertzforge-playback",
+    "hertzforge-modal-test",
     "hertzforge-random",
     "hertzforge-random-laws",
     "hertzforge-shock-laws",

@@ -509,3 +509,350 @@ def playback_run(folder: str, pre: int = 512, play: int = 2048, post: int = 1024
              'end': {'outcome': 'completed', 'message': 'The drive played to its end.',
                      'at_s': frames / FS},
              'at_unix': START['unix'] + 6, 'station_frames': frames})
+
+
+#: the structure a Modal Test run measures: three modes over six points, mostly on Z, a
+#: little on X and Y
+MODAL_FREQUENCIES = (20.0, 45.0, 80.0)
+MODAL_DAMPING = (0.03, 0.02, 0.015)
+MODAL_SHAPES = np.array([[1.0, 0.9, 0.6, 0.2, -0.3, -0.8],
+                         [0.8, 0.2, -0.7, -1.0, -0.2, 0.6],
+                         [0.5, -0.6, -0.4, 0.7, 0.3, -0.9]])
+#: each axis's shapes, by the axis's letter
+MODAL_AXES = {'Z': MODAL_SHAPES, 'X': 0.4 * np.roll(MODAL_SHAPES, 1, axis=1),
+              'Y': 0.25 * np.roll(MODAL_SHAPES, 2, axis=1)}
+#: its spectral lines (Hz) and its frames' samples
+MODAL_STEP, MODAL_LINES, MODAL_BLOCK = 0.25, 601, 4096
+
+
+def _modes(modes):
+    return modes if modes is not None else (MODAL_FREQUENCIES, MODAL_DAMPING)
+
+
+def modal_poles(shift: float = 0.0, modes=None) -> list[tuple[float, float]]:
+    """Each mode's (natural frequency in Hz, damping ratio), its pole moved
+    left by `shift` 1/s, as an exponential window of time constant 1/shift
+    moves it (the damped frequency kept); of `modes` (frequencies, damping)
+    in place of the structure's when given."""
+    out = []
+    for fn, zeta in zip(*_modes(modes), strict=True):
+        wn = 2 * np.pi * fn
+        decay, damped = zeta * wn + shift, wn * np.sqrt(1 - zeta ** 2)
+        out.append((float(np.hypot(decay, damped) / (2 * np.pi)),
+                    float(decay / np.hypot(decay, damped))))
+    return out
+
+
+def _dof(at) -> tuple[int, str, float]:
+    """(point, axis, sign) of a point number (on Z+) or a (point, 'Z-') pair."""
+    if isinstance(at, (int, np.integer)):
+        return int(at), 'Z', 1.0
+    point, direction = at
+    return int(point), direction[0], -1.0 if direction.endswith('-') else 1.0
+
+
+def modal_receptance(f: np.ndarray, j, k, shift: float = 0.0, modes=None) -> np.ndarray:
+    """The structure's displacement at `j` per force at `k`, m/N, at `f` Hz,
+    each a point from 0 (on Z+) or a (point, direction) pair ('X+', 'Z-'):
+    symmetric in j and k; with its poles moved left by `shift` 1/s when
+    given (`modal_poles`)."""
+    w = 2 * np.pi * np.asarray(f, dtype=np.float64)
+    (pj, aj, sj), (pk, ak, sk) = _dof(j), _dof(k)
+    out = np.zeros(w.shape, dtype=np.complex128)
+    for r, (fn, zeta) in enumerate(modal_poles(shift, modes)):
+        wn = 2 * np.pi * fn
+        out += (sj * MODAL_AXES[aj][r, pj] * sk * MODAL_AXES[ak][r, pk]
+                / (wn ** 2 - w ** 2 + 2j * zeta * wn * w))
+    return out
+
+
+def modal_accelerance(f: np.ndarray, j, k, shift: float = 0.0, modes=None) -> np.ndarray:
+    """The structure's acceleration at `j` per force at `k`, (m/s^2)/N
+    (`modal_receptance`)."""
+    w = 2 * np.pi * np.asarray(f, dtype=np.float64)
+    return -(w ** 2) * modal_receptance(f, j, k, shift, modes)
+
+
+def _modal_channel(index: int, at, unit: str) -> dict[str, Any]:
+    point, axis, sign = _dof(at)
+    return {'index': index, 'node': point + 1, 'direction': f'{axis}{"-" if sign < 0 else "+"}',
+            'unit': unit}
+
+
+def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
+                   measured: Sequence[int] | None = None, again: Sequence[int] = (),
+                   frames: bool = True, complete: bool = True,
+                   tau_s: float | None = None, torn: Sequence[int] = (),
+                   unfinished: Sequence[int] = (), directions: Mapping[int, str] = {},
+                   modes=None, noise_db: float | None = None,
+                   target: bool = False, undecayed: Sequence[int] = (),
+                   checks: bool = True, outcome: str = 'ended',
+                   emergency_stop: bool = False) -> str:
+    """A Modal Test run of the structure above, in the control service's
+    shapes, every name from the converter's one table
+    (`hertzforge.io.modal_run.WIRE`), so the two cannot drift; the golden
+    run folders (`schema/golden/runs/modal_test/`) hold the shapes to the
+    control service's own.
+
+    `layout` is 'roving_hammer' (an accelerometer fixed at point 1, the
+    hammer at every point), 'triaxial_roving_hammer' (triaxial
+    accelerometers fixed at points 1 to 3, nine responses, the hammer at
+    every point), 'fixed_hammer' (six accelerometers, the hammer at point
+    1, one measurement) or 'two_shakers' (six accelerometers, shakers at
+    points 1 and 4, one measurement, matrix H1 and multiple coherence).
+    A fixed layout is one point of the plan. `measured` picks the roving
+    hammer's points (from 0; every point when omitted); `again` names
+    points measured a second time, after the rest (with nothing roving,
+    the layout measured again once per entry), with their values doubled
+    so the later set is told apart, each record's `replaces` naming the
+    earlier. `unfinished` names points selected again after that, with
+    only an undone and a rejected hit in the frame lines and no records.
+    `torn` names measurements, by their place in the order measured from
+    0, whose coherence and reference spectra lines were never written, as
+    a run cut off between them leaves it. `directions` gives a roving
+    hammer's direction at a point ('Z-' to hit it from below). Each impact
+    measurement has a hit taken and undone, a rejected double hit and
+    `hits` accepted hits in its frame lines, each line with its span in
+    the input stream. `target` gives every hit a force target's distance
+    and verdict. `complete` False leaves the run cut off: no end, the
+    outcome not written. `tau_s` puts the exponential window in the FRFs'
+    windows, and the FRFs are written with the structure's poles moved
+    left by 1 / tau_s, as the window moves them (`modal_poles`). `modes`
+    puts (frequencies, damping) in place of the structure's; `noise_db`
+    adds complex noise that many dB below each FRF's own RMS, seeded.
+    Every frame line and measurement line has the decay check, its first
+    response's last RMS a fraction of its largest: 3.1 % and over the
+    warning at the points in `undecayed`, 0.03 % elsewhere; a measurement
+    line's is the largest of its hits'. The double hit's report gives its
+    second peak and ratio, and the check the hammer's polarity. `checks`
+    False writes the folder as one made before the decay check and the
+    polarity were (none of them). `outcome` and `emergency_stop` are how
+    the run ended."""
+    from hertzforge.io.modal_run import WIRE as W
+
+    lines = np.arange(MODAL_LINES) * MODAL_STEP
+    pre = 64
+    rng = np.random.default_rng(11)
+    if layout in ('roving_hammer', 'triaxial_roving_hammer'):
+        if layout == 'roving_hammer':
+            fixed = [(1, (0, 'Z+'))]
+        else:
+            fixed = [(1 + 3 * p + a, (p, axis)) for p in range(3)
+                     for a, axis in enumerate(('X+', 'Y+', 'Z+'))]
+        hammer = len(fixed) + 1
+        rows = [row(i, 'monitor', description=f'Fixed accelerometer {i}', node=at[0] + 1,
+                    direction=at[1], analysis_role='response') for i, at in fixed]
+        rows.append(row(hammer, 'monitor', 'N', description='Hammer', node=1,
+                        direction='Z+', analysis_role='reference'))
+        planned = [(p, fixed, [(hammer, (p, directions.get(p, 'Z+')))]) for p in range(6)]
+        points = list(range(6)) if measured is None else list(measured)
+        plan = [planned[p] for p in [*points, *again, *unfinished]]
+        roving = {W['roving_channels']: [hammer],
+                  W['points']: [{W['node']: p + 1, W['direction']: directions.get(p, 'Z+')}
+                                for p in range(6)]}
+        mode = 'impact'
+    else:
+        refs = [0] if layout == 'fixed_hammer' else [0, 3]
+        rows = [row(k + 1, 'monitor', description=f'Accelerometer {k + 1}', node=k + 1,
+                    direction='Z+', analysis_role='response') for k in range(6)]
+        rows += [row(7 + n, 'monitor', 'N', description=f'Force {n + 1}', node=p + 1,
+                     direction='Z+', analysis_role='reference') for n, p in enumerate(refs)]
+        planned = [(0, [(k + 1, k) for k in range(6)], [(7 + n, p) for n, p in enumerate(refs)])]
+        plan = planned * (1 + len(again))
+        roving = None
+        mode = 'impact' if layout == 'fixed_hammer' else 'shaker'
+    selected_again = set(range(len(plan) - len(unfinished), len(plan))) if unfinished else set()
+    unit = {r['index']: r['units'] for r in rows}
+
+    def channel(index, at):
+        return _modal_channel(index, at, unit[index])
+
+    windows = {W['analysis']: 'uniform' if mode == 'impact' else 'hann', W['force']: None,
+               W['exponential']: None}
+    if mode == 'impact':
+        width = int(np.floor(0.05 * MODAL_BLOCK + 0.5))
+        windows[W['force']] = {W['pre_frames']: pre, W['width_frames']: width,
+                               W['fall_frames']: max(1, int(np.floor(0.1 * width + 0.5)))}
+    if tau_s is not None:
+        windows[W['exponential']] = {
+            W['tau_s']: tau_s, 'inv_tau_per_s': 1.0 / tau_s,
+            W['end']: float(np.exp(-MODAL_BLOCK / (tau_s * FS))),
+            'added_damping': '1/(2*pi*f_n*tau_s)'}
+    averages = hits if mode == 'impact' else 40
+
+    def decay(point, a, responses):
+        ratio = (0.031 if point in undecayed else 0.0003) + 1e-5 * a
+        return {W['decay_row']: responses[0][0], W['decay_ratio']: ratio,
+                W['decay_warning']: ratio > 0.02}
+    estimator = 'H1' if len(planned[0][2]) == 1 else 'matrix H1'
+    frf_records, coherence_records, spectra_records = [], [], []
+    frf_values, coherence_values, spectra_values, condition = [], [], [], []
+    frame_lines, spans, stream_frames = [], [], []
+    first_frame = START['station_frame']
+    seq = 0
+    seen: dict[Any, int] = {}
+    measurement = W['first_measurement'] - 1
+    for k, (point, responses, references) in enumerate(plan):
+        later = 2.0 if point in seen else 1.0
+        if k in selected_again:
+            later = 0.0
+        else:
+            measurement += 1
+        shift = 0.0 if tau_s is None else 1.0 / tau_s
+        values = np.array([[modal_accelerance(lines, j, r, shift, modes) / G * later
+                            for _rk, r in references] for _ri, j in responses])
+        if noise_db is not None:
+            level = np.sqrt(np.mean(np.abs(values) ** 2, axis=-1, keepdims=True))
+            values = values + level * 10 ** (noise_db / 20) / np.sqrt(2) * (
+                rng.standard_normal(values.shape) + 1j * rng.standard_normal(values.shape))
+        line = {W['measurement']: measurement, W['point']: point,
+                W['replaces']: seen.get(point), W['averages']: averages,
+                W['estimator']: estimator,
+                W['rows']: {W['references']: [channel(i, p) for i, p in references],
+                            W['responses']: [channel(i, p) for i, p in responses]}}
+        if checks:
+            line[W['decay']] = decay(point, 1 + hits if mode == 'impact' else 0, responses)
+        if k not in selected_again:
+            frf_records.append(line)
+            frf_values.append(values)
+            if k not in torn:
+                coherence = np.full((len(responses), MODAL_LINES), 0.99)
+                coherence[:, 0] = 0.0
+                coherence_records.append(line)
+                coherence_values.append(coherence)
+                spectra_records.append(line)
+                spectra_values.append(np.ones((len(references), MODAL_LINES)) * 1e-3)
+                condition.append(np.full(MODAL_LINES, 3.0))
+            seen[point] = measurement
+        if mode != 'impact' or not frames:
+            continue
+        # the hits: a half-sine at the trigger, the response by the receptance
+        n = np.arange(MODAL_BLOCK)
+        f = np.fft.rfftfreq(MODAL_BLOCK, 1 / FS)
+        _ri, r = references[0]
+        kinds = (('undone', 'double') if k in selected_again
+                 else ('undone', 'double', *(['accepted'] * hits)))
+        for a, kind in enumerate(kinds):
+            pulse = np.where((n >= pre) & (n < pre + 5), np.sin(np.pi * (n - pre) / 5), 0.0)
+            peak = 100.0 + 10 * a
+            pulse = pulse * peak
+            if kind == 'double':
+                pulse = pulse + np.roll(pulse, 40)
+            spectrum = np.fft.rfft(pulse)
+            columns = [np.fft.irfft(spectrum * modal_accelerance(f, j, r, 0.0, modes) / G
+                                    * (later or 1.0), MODAL_BLOCK) for _ri, j in responses]
+            columns.append(pulse)
+            at = first_frame + sum(len(v) for v in stream_frames)
+            stream_frames.append(np.stack(columns, axis=1))
+            seq += 1
+            tile = {W['n']: a + 1, W['seq']: seq,
+                    W['status']: 'rejected' if kind == 'double' else W['accepted'],
+                    W['reason']: 'double_hit' if kind == 'double' else None,
+                    W['overload']: False, W['double_hit']: kind == 'double',
+                    'start_frame': at, W['peak']: peak, W['tip_warning']: a == 2,
+                    W['force_window_cut']: False}
+            report: dict[str, Any] = {W['peak']: peak, 'warnings': []}
+            if checks:
+                tile[W['decay']] = report[W['decay']] = decay(point, a, responses)
+                report[W['double_hit']] = ({W['double_hit_frame']: pre + 40,
+                                            W['double_hit_peak']: peak,
+                                            W['double_hit_ratio']: 1.0}
+                                           if kind == 'double' else None)
+            if target:
+                diff = (peak - 120.0) / 120.0 * 100.0
+                tile[W['target_verdict']] = ('on_target' if abs(diff) <= 10 else
+                                             'high' if diff > 0 else 'low')
+                tile[W['target_diff_pct']] = diff
+            frame_lines.append({**tile, W['event']: W['taken'], W['point']: point,
+                                W['report']: report})
+            spans.append([at, MODAL_BLOCK])
+            if kind == 'undone':
+                frame_lines.append({**tile, W['status']: 'undone', W['event']: W['changed'],
+                                    W['point']: point})
+                spans.append([at, MODAL_BLOCK])
+    axis = {'kind': 'frequency', 'unit': 'Hz', 'start': 0.0, 'step': MODAL_STEP}
+    channels = {W['references']: [channel(i, p) for i, p in planned[0][2]],
+                W['responses']: [channel(i, p) for i, p in planned[0][1]]}
+    common = {'abscissa': axis, 'channels': channels,
+              'records': {W['measurement']: 'the measurement\'s number in the test'}}
+    results: dict[str, Any] = {}
+    if frf_records:
+        results[W['frf']] = ({'kind': W['frf_kind'], **common, W['layout']: W['frf_layout'],
+                              W['windows']: windows},
+                             {W['frf_values']: np.array(frf_values)}, frf_records)
+    if coherence_records:
+        name = W['multiple'] if len(planned[0][2]) > 1 else W['ordinary']
+        results[W['coherence']] = ({'kind': W['coherence_kind'], **common,
+                                    W['layout']: W['coherence_layout']},
+                                   {name: np.array(coherence_values)}, coherence_records)
+        spectra = {W['autospectra']: np.array(spectra_values)}
+        if len(planned[0][2]) > 1:
+            spectra[W['condition']] = np.array(condition)
+        results[W['reference_spectra']] = (
+            {'kind': W['reference_spectra_kind'], **common,
+             W['layout']: W['reference_spectra_layout']}, spectra, spectra_records)
+    if frame_lines:
+        results[W['frames']] = ({'kind': W['frames_kind'], 'abscissa': None,
+                                 'channels': channels,
+                                 'unit': 'hits' if mode == 'impact' else 'frames',
+                                 'records': {W['event']: 'taken or status'}},
+                                {W['span']: np.array(spans, dtype=np.float64)}, frame_lines)
+    last = {line[W['seq']]: line[W['status']] for line in frame_lines}
+    accepted = sum(1 for status in last.values() if status == W['accepted'])
+    taken_count = sum(1 for line in frame_lines if line[W['event']] == W['taken'])
+    totals = {W['accepted_total']: accepted, W['taken_total']: taken_count,
+              W['points_measured']: len({p for p in seen}),
+              W['points_planned']: len(planned)}
+    if complete:
+        results[W['outcome']] = ({'kind': W['outcome_kind'], 'abscissa': None, 'channels': [],
+                                  W['mode']: mode, 'outcome': outcome,
+                                  'reason': 'the test was ended',
+                                  'emergency_stop': emergency_stop,
+                                  W['totals']: totals, 'counts': {'totals': totals}},
+                                 {key: np.array([float(v)]) for key, v in totals.items()},
+                                 None)
+
+    def dofs_of(entries):
+        return [channel(i, p) for i, p in entries]
+
+    check = {W['mode']: mode, 'fs_hz': FS, W['block']: MODAL_BLOCK,
+             'band': {'lo_hz': 0.0, 'hi_hz': float(lines[-1])}, 'estimator': estimator,
+             W['averages']: averages,
+             W['references']: [{**channel(i, p), 'roves': roving is not None}
+                               for i, p in planned[0][2]],
+             W['responses']: [{**channel(i, p), 'roves': False} for i, p in planned[0][1]],
+             W['points']: [{W['index']: p, W['references']: dofs_of(refs),
+                            W['responses']: dofs_of(resp)}
+                           for p, resp, refs in planned]}
+    if mode == 'impact':
+        check[W['impact']] = {W['trigger']: {'level': 10, 'unit': 'N',
+                                             W['pretrigger_frames']: pre}}
+        if checks:
+            check[W['impact']][W['trigger']][W['polarity']] = 'positive'
+    else:
+        check[W['shaker']] = {W['shaker_window']: 'hann', W['overlap_pct']: 50}
+    config = {W['mode']: mode, 'fs_hz': FS, W['block']: MODAL_BLOCK,
+              'band': {'hi_hz': float(lines[-1])}, W['averages']: averages}
+    if roving is not None:
+        config[W['roving']] = roving
+    order = [i for i, _p in planned[0][1]] + [i for i, _p in planned[0][2]]
+    streams: dict[str, Any] = {}
+    if stream_frames:
+        values = np.concatenate(stream_frames)
+        streams['inputs'] = ({'kind': 'inputs', 'channels': [
+            {'index': i, 'unit': unit[i]} for i in order], 'fs_hz': FS,
+            W['first_station_frame']: first_frame, 'frames': len(values),
+            'gaps': [], 'complete': complete, 'fault': None}, values)
+    assert sorted(r['index'] for r in rows) == [r['index'] for r in rows]
+    return write_run(
+        folder, _manifest('modal_test', complete=complete),
+        {'revision': 3, 'sha256': 'a' * 64, 'rows': rows},
+        {W['config']: config, 'resolved': {W['windows']: windows}, W['check']: check},
+        streams=streams, results=results,
+        log=[{'seq': 0, 'at_unix': START['unix'], 'frame': first_frame, 'kind': 'state',
+              'text': 'measuring'}],
+        end=None if not complete else {
+            'run_uid': 'uid-modal_test-0001',
+            'end': {'outcome': outcome, 'message': 'the test was ended',
+                    'emergency_stop': emergency_stop, 'at_s': 60.0},
+            'at_unix': START['unix'] + 60, 'station_frames': 61440, W['totals']: totals})

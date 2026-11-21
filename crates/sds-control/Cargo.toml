@@ -86,6 +86,11 @@ hertzforge-playback.workspace = true
 # station backend and names none, and holds the Sim only as a dev-dependency
 # (tests/forbidden_deps.rs).
 hertzforge-recorder.workspace = true
+# Modal Test (src/modal_test/): the setup, plan, windows, hit checks, averages and
+# run host of impact and shaker FRF measurement. Reviewed 2026-11-20: it is handed a
+# finished station backend and names none, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-modal-test.workspace = true
 # MIMO Shock: the engine the run thread drives, and the law choice (built-ins,
 # law files, the catalog's entries) and the law check's cases.
 hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }

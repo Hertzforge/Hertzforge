@@ -1,0 +1,14 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Two Shakers\" (shaker mode) on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"records in golden-shaker_burst_random"}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"state","text":"started on HERTZFORGE-SIM: shaker mode, 1024 Hz, block 1024, 1 point","data":{"event":"started","mode":"shaker","fs_hz":1024,"block":1024}}
+{"seq":3,"at_unix":1794240003.25,"frame":16384,"kind":"state","text":"drive start: the ramp begins on the next frame","data":{"event":"drive_start","point":0}}
+{"seq":4,"at_unix":1794240004.25,"frame":16384,"kind":"state","text":"state measuring","data":{"event":"state","state":"measuring"}}
+{"seq":5,"at_unix":1794240005.25,"frame":16384,"kind":"hit","text":"frame 1 at point 0: accepted","data":{"point":0,"seq":1,"status":"accepted","reason":null}}
+{"seq":6,"at_unix":1794240006.25,"frame":16384,"kind":"hit","text":"frame 2 at point 0: accepted","data":{"point":0,"seq":2,"status":"accepted","reason":null}}
+{"seq":7,"at_unix":1794240007.25,"frame":16384,"kind":"hit","text":"frame 3 at point 0: accepted","data":{"point":0,"seq":3,"status":"accepted","reason":null}}
+{"seq":8,"at_unix":1794240008.25,"frame":16384,"kind":"hit","text":"frame 4 at point 0: accepted","data":{"point":0,"seq":4,"status":"accepted","reason":null}}
+{"seq":9,"at_unix":1794240009.25,"frame":16384,"kind":"result","text":"point 0 measured: 4 averages (measurement 1)","data":{"point":0,"measurement":1,"replaces":null}}
+{"seq":10,"at_unix":1794240010.25,"frame":16384,"kind":"state","text":"state point_done","data":{"event":"state","state":"point_done"}}
+{"seq":11,"at_unix":1794240011.25,"frame":16384,"kind":"operator","text":"end of test asked","data":{"action":"end"}}
+{"seq":12,"at_unix":1794240012.25,"frame":16384,"kind":"state","text":"state ended","data":{"event":"state","state":"ended"}}
+{"seq":13,"at_unix":1794240013.25,"frame":16384,"kind":"outcome","text":"ended (ended): the test was ended with the drive at zero (by Shell (controller))","data":{"outcome":"ended","emergency_stop":false}}

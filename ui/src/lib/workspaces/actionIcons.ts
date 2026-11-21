@@ -157,6 +157,7 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.comparison_scale': 'ratio',
 	'project.compute_cpsds': 'psd',
 	'project.compute_frfs': 'frf',
+	'project.reprocess_modal_test': 'frf',
 	'project.compute_modal_responses': 'modal_response',
 	'project.synthesize_modal_frfs': 'frf',
 	'project.compute_multiple_coherence': 'multiple_coherence',

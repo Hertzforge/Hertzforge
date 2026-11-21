@@ -126,8 +126,10 @@ PRELOAD = (
     # forming its octave and coherence products
     'hertzforge.core.detect',
     'hertzforge.core.octave',
-    # fitting a modal survey's FRFs
+    # fitting a modal survey's FRFs, and noting an exponential window's
+    # damping on each published mode
     'hertzforge.core.modal_fit',
+    'hertzforge.core.modal_test',
     'hertzforge.core.partial_coherence',
     # solving a model's modes
     'hertzforge.core.sparse_solve',

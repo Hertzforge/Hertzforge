@@ -1,0 +1,57 @@
+{
+  "name": "modal_frames",
+  "kind": "modal_frames",
+  "abscissa": null,
+  "channels": {
+    "references": [
+      {
+        "index": 1,
+        "node": 1,
+        "direction": "Z+",
+        "unit": "lbf"
+      },
+      {
+        "index": 4,
+        "node": 8,
+        "direction": "Z+",
+        "unit": "lbf"
+      }
+    ],
+    "responses": [
+      {
+        "index": 2,
+        "node": 4,
+        "direction": "Z+",
+        "unit": "g"
+      },
+      {
+        "index": 3,
+        "node": 7,
+        "direction": "Z+",
+        "unit": "g"
+      }
+    ]
+  },
+  "unit": "frames",
+  "records": {
+    "event": "taken (the hit or frame as it came) or status (its status changed)",
+    "point": "the point",
+    "n": "its number at the point",
+    "seq": "its number in the test",
+    "status": "pending, accepted, rejected or undone",
+    "reason": "why it was rejected: overload, double_hit or operator",
+    "report": "impact mode: the hit's checks",
+    "decay": "a hit or a burst frame: the response row whose last 5 percent of the block, after the windows, has the largest RMS as a fraction of its loudest 5 percent window; that ratio; and whether it is over decay_warn_pct (a warning, never a rejection)"
+  },
+  "arrays": [
+    {
+      "name": "span",
+      "dtype": "f8",
+      "shape": [
+        2
+      ],
+      "unit": "frame",
+      "offset": 0
+    }
+  ]
+}
