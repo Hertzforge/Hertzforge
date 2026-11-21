@@ -22,7 +22,7 @@ hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
 # The level schedule of a case and the floor's estimation settings.
 hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
 hertzforge-random.workspace = true
-hertzforge-reference.workspace = true
+hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-sdm.workspace = true
 # The check's runs: the station it is handed, the channel table and the run's
 # station class.

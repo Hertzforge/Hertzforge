@@ -34,7 +34,7 @@ hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
 hertzforge-random.workspace = true
 hertzforge-sdm.workspace = true
 hertzforge-dsp.workspace = true
-hertzforge-reference.workspace = true
+hertzforge-reference = { path = "../hertzforge-reference" }
 hertzforge-breakpoints.workspace = true
 hertzforge-shaker-db.workspace = true
 serde = { version = "1", features = ["derive"] }
