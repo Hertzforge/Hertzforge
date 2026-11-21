@@ -684,6 +684,15 @@ pub enum MimoMixedConfigError {
         /// Its ceiling at the level, volts.
         ceiling_v: f64,
     },
+    /// `tone_model_not_finite`: the model gives no finite drive for a tone
+    /// where its schedule plays it (raised by [`crate::budget::forecast`]),
+    /// so neither its feed-forward nor its budget can be stated.
+    ToneModelNotFinite {
+        /// The tone's id.
+        part: String,
+        /// The frequency, Hz.
+        f_hz: f64,
+    },
     /// `frf_update_not_built`: a model update during the run.
     FrfUpdateNotBuilt,
     /// `unknown_band_law`.
@@ -733,6 +742,7 @@ impl MimoMixedConfigError {
             MimoMixedConfigError::BandMatrixNotBuilt { .. } => "band_matrix_not_built",
             MimoMixedConfigError::LawRefusesTone { .. } => "law_refuses_tone",
             MimoMixedConfigError::BudgetCannotFit { .. } => "budget_cannot_fit",
+            MimoMixedConfigError::ToneModelNotFinite { .. } => "tone_model_not_finite",
             MimoMixedConfigError::FrfUpdateNotBuilt => "frf_update_not_built",
             MimoMixedConfigError::UnknownBandLaw { .. } => "unknown_band_law",
             MimoMixedConfigError::UnknownCeilingRule { .. } => "unknown_ceiling_rule",
@@ -749,7 +759,8 @@ impl MimoMixedConfigError {
             MimoMixedConfigError::WrongControlCount { part, .. } if !part.is_empty() => Some(part),
             MimoMixedConfigError::BandNotAdditive { part, .. }
             | MimoMixedConfigError::BandMatrixNotBuilt { part }
-            | MimoMixedConfigError::LawRefusesTone { part, .. } => Some(part),
+            | MimoMixedConfigError::LawRefusesTone { part, .. }
+            | MimoMixedConfigError::ToneModelNotFinite { part, .. } => Some(part),
             _ => None,
         }
     }
@@ -795,6 +806,11 @@ impl fmt::Display for MimoMixedConfigError {
                 f,
                 "drive {drive} cannot fit at {time_s:.1} s: it would need {need_v:.2} V peak against \
                  {ceiling_v:.2} V"
+            ),
+            MimoMixedConfigError::ToneModelNotFinite { part, f_hz } => write!(
+                f,
+                "tone {part}: the model gives no finite drive at {f_hz:.1} Hz, so its feed-forward \
+                 and its budget cannot be stated; identify again"
             ),
             MimoMixedConfigError::FrfUpdateNotBuilt => {
                 f.write_str("updating the model during the run is not built yet")

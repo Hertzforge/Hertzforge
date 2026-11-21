@@ -1501,6 +1501,14 @@ impl MimoMixedService {
                     self.cfg.drives[*drive].peak_v
                 ),
             },
+            StepTrip::DriveNotFinite { drive } => RunEnd {
+                name: "drive_not_finite",
+                aborted: true,
+                part: None,
+                control: None,
+                drive: Some(*drive),
+                words: format!("drive {drive}'s demanded sum was not a number; it played 0"),
+            },
             StepTrip::Overload {
                 channel_index,
                 value,

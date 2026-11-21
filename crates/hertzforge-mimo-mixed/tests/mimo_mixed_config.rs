@@ -341,6 +341,31 @@ fn mimo_mixed_forecast_refuses_a_budget_that_cannot_fit() {
     }
 }
 
+/// Requirement: a model that gives no finite drive where a tone plays (a
+/// not-a-number in it at the tone's line) is refused
+/// `tone_model_not_finite`, naming the tone: the forecast neither skips the
+/// tone nor compares a not-a-number need against the ceiling (false, so it
+/// fitted).
+#[test]
+fn mimo_mixed_forecast_refuses_a_tone_the_model_cannot_drive() {
+    let h = vec![
+        vec![c(1.0, 0.0), c(0.0, 0.0)],
+        vec![c(0.0, 0.0), c(1.0, 0.0)],
+    ];
+    let mut model = static_model(2048, &h);
+    let cfg = base(vec![floor("f"), tone("t", fixed(100.0), 1.0)]);
+    let line = (100.0 / cfg.df_hz()).round() as usize;
+    for l in line.saturating_sub(1)..=line + 1 {
+        model.set(l, 0, 0, c(f64::NAN, 0.0));
+    }
+    let r = budget::forecast(&cfg, &model, &[1.5, 1.5], 1.0, 10.0);
+    println!("forecast: {r:?}");
+    let e = r.expect_err("a tone with no finite drive was forecast to fit");
+    assert_eq!(e.name(), "tone_model_not_finite");
+    assert_eq!(e.part(), Some("t"));
+    println!("{e}");
+}
+
 /// Requirement: a drive's peak abort at or under its peak ceiling is
 /// refused `abort_below_ceiling` (the clamp at the ceiling must sit under the
 /// abort), and a level or part ramp under two control ticks is refused

@@ -516,3 +516,39 @@ fn mimo_mixed_a_law_running_away_behind_the_ceiling_ends_in_divergence() {
     assert!(t >= want_s - 2.0 * pr.step.tick_s, "{t} s");
     assert!(t <= want_s + 0.5, "{t} s");
 }
+
+/// Requirement: a drive frame that is not a number (here one random frame
+/// on drive 1) is never played: the frame plays 0, the step trips naming
+/// the drive, and the drive is at zero within the abort ramp. Both of the
+/// old comparisons were false for a NaN, so it was played and never seen.
+#[test]
+fn mimo_mixed_a_drive_frame_not_finite_trips_and_plays_zero() {
+    let mut pr = probe();
+    let m = pr.step.m;
+    let _ = play(&mut pr, 4);
+    assert!(pr.step.trip.is_none(), "{:?}", pr.step.trip);
+    pr.step.ring.clear();
+    let mut bad = vec![0.01; BLOCK * m];
+    bad[100 * m + 1] = f64::NAN;
+    pr.step.ring.push(&bad);
+    let input = vec![0.0f32; BLOCK * pr.n_in];
+    let mut out = Vec::new();
+    pr.step.process(&input, BLOCK, &mut out);
+    let mut all = out.clone();
+    all.extend(play(&mut pr, 8));
+    let not_finite = all.iter().filter(|v| !v.is_finite()).count();
+    let trip = pr.step.trip.clone();
+    println!("trip: {trip:?}; frames not finite played: {not_finite}");
+    assert_eq!(not_finite, 0, "a frame not finite was played");
+    assert!(
+        matches!(trip, Some(StepTrip::DriveNotFinite { drive: 1 })),
+        "{trip:?}"
+    );
+    let ramp = (ABORT_RAMP_S * FS).ceil() as usize + 1;
+    let worst = all[(100 + ramp) * m..]
+        .iter()
+        .fold(0.0f32, |a, v| a.max(v.abs()));
+    println!("largest frame after the abort ramp {worst:e}");
+    assert_eq!(worst, 0.0);
+    assert!(pr.step.stopped());
+}

@@ -67,6 +67,12 @@ pub enum StepTrip {
         /// The demanded value, volts.
         volts: f64,
     },
+    /// A drive's demanded sum was not a number (or infinite); the frame
+    /// played 0.
+    DriveNotFinite {
+        /// The drive's index.
+        drive: usize,
+    },
     /// A control or limit channel's input reached its overload level.
     Overload {
         /// The channel's index in the table.
@@ -534,10 +540,18 @@ impl MimoMixedStep {
         }
         self.bank.drive_frame(lev, &mut self.d);
         for j in 0..m {
-            let x = self.d[j] * stop;
-            if x.abs() >= self.abort_v[j] && self.trip.is_none() {
-                self.trip = Some(StepTrip::DriveVpk { drive: j, volts: x });
+            let mut x = self.d[j] * stop;
+            // A NaN trips too (every comparison with one is false).
+            if (x.is_nan() || x.abs() >= self.abort_v[j]) && self.trip.is_none() {
+                self.trip = Some(if x.is_finite() {
+                    StepTrip::DriveVpk { drive: j, volts: x }
+                } else {
+                    StepTrip::DriveNotFinite { drive: j }
+                });
                 self.ramp_down(ABORT_RAMP_S);
+            }
+            if !x.is_finite() {
+                x = 0.0;
             }
             let pk = self.peak_v[j];
             let y = if x.abs() > pk {

@@ -189,9 +189,13 @@ pub fn ceiling_rule(pick: &LawPick) -> Result<Box<dyn CeilingRule>, MimoMixedCon
 
 /// The tone drive the model asks for a reference `r` at the controls:
 /// `D = Z(f) r`, `Z` the regularized inverse of the model at `f_hz`.
+/// `None` when the inverse fails or the drive is not finite.
 pub fn model_drive(model: &MatrixStack, df_hz: f64, f_hz: f64, r: &[C64]) -> Option<Vec<C64>> {
     let z = model_at(model, df_hz, f_hz).pinv(Z_REGULARIZATION).ok()?;
-    Some(z.mul_vec(r))
+    let d = z.mul_vec(r);
+    d.iter()
+        .all(|v| v.re.is_finite() && v.im.is_finite())
+        .then_some(d)
 }
 
 /// The worst moment of a forecast.
@@ -264,7 +268,10 @@ pub fn forecast(
                 continue;
             };
             let Some(d) = model_drive(model, df, f, &r) else {
-                continue;
+                return Err(MimoMixedConfigError::ToneModelNotFinite {
+                    part: cfg.parts[i].id.clone(),
+                    f_hz: f,
+                });
             };
             for (s, v) in sums.iter_mut().zip(&d) {
                 *s += v.norm();
@@ -278,7 +285,7 @@ pub fn forecast(
                 need_v: need,
                 ceiling_v: drive.peak_v,
             };
-            if need > drive.peak_v {
+            if need.is_nan() || need > drive.peak_v {
                 return Err(MimoMixedConfigError::BudgetCannotFit {
                     time_s: t,
                     drive: j,
