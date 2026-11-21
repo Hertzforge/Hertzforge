@@ -98,6 +98,9 @@ LIVE = frozenset({'project.set_averaging'})
 #: in the tree and left off the form.
 PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
 PICKED_ONE = frozenset({'record', 'drawn'})
+#: the actions whose `modes` are the modes picked under their shape set, named by the param
+#: that holds the set: every mode when the set is selected whole
+PICKED_MODES = {'project.synthesize_modal_frfs': 'source'}
 
 #: the rows that read a geometry's nodes, off until it has some
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
@@ -544,7 +547,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picked = next((r for r in picks if r), [])
         unasked = []
         for param in op.params:
-            if param.name in PICKED_LISTS and param.type == 'string':
+            if param.name == 'modes' and op.id in PICKED_MODES:
+                modes = records.get(fill[PICKED_MODES[op.id]], [])
+                fill['modes'] = _runs(modes) if modes else ''
+                unasked.append('modes')
+            elif param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
                 unasked.append(param.name)
             elif param.name in PICKED_ONE and param.type == 'integer':
