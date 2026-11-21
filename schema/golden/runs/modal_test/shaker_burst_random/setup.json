@@ -63,7 +63,11 @@
         "judged": "every sample, after the ramp"
       },
       "underrun": "the source running empty takes the drive to zero at once",
-      "input_overload": "an overload on a row with abort limits takes the drive to zero at once"
+      "input_overload": "an overload on a row with abort limits takes the drive to zero at once",
+      "latency": {
+        "bound_s": null,
+        "from": "no characterized bound on this station: the drive's step writes zero from the next engine block after the abort, and the loop issues the emergency stop once its current batch of 2 blocks is done"
+      }
     },
     "structure": {
       "modes": [

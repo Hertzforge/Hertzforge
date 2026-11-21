@@ -7007,6 +7007,10 @@ the tile's `start_frame` in station frames.
   the same way.
 - **`modal_test.end`** ends the test (`ended`), in shaker mode through the stop ramp;
   **`modal_test.abort`** takes the drive to zero at once with the emergency stop (`aborted`).
+  The time it works to is in `setup.json` `resolved.aborts.latency`: the station's characterized
+  bound (`bound_s`; the arm gate refuses a driving hardware station without one), or, on a
+  station with none, the loop's own: the drive's step writes zero from the next engine block,
+  and the emergency stop is issued once the loop's current batch of two blocks is done.
   The run also ends with the emergency stop on a response abort (`response_abort`), a drive
   sample over the ceiling (`drive_ceiling`), an underrun (`drive_underrun`), the source thread's
   failure (`source_failed`), an input overload on a limited row (`input_overload`), a loop fault
@@ -7046,7 +7050,10 @@ the tile's `start_frame` in station frames.
 `starting`, `idle`, `arming` (impact: armed, the pre-trigger filling), `armed`, `captured` (a
 hit waits for accept or reject), `measuring`
 (shaker: averaging), `stopping` (shaker: the stop ramp), `point_done` or `finished`.
-`drive_phase`: `idle`, `waiting`, `ramping`, `driving`, `stopping`, `zeroed`. `counts` is kept
+`drive_phase`: `idle`, `waiting`, `ramping`, `driving`, `stopping`, `zeroed`. After any
+emergency stop (an abort, a ceiling trip, an underrun, a source failure, a response abort, an
+input overload, a loop fault or a panic) it is `zeroed`, set before the end is reported, so the
+finished state and `end.json` never carry the phase the drive had before the stop. `counts` is kept
 current after every take, accept, reject and undo; its `unit` is `hits` in impact mode and
 `frames` in shaker mode, counted in the same fields; `point.accepted` of `point.asked` reads
 as the averages taken of the averages asked; `point.decay` is the largest decay check over the

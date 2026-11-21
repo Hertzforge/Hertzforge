@@ -146,6 +146,19 @@ pub fn sim_structure(mode: Mode) -> Value {
     })
 }
 
+/// The time from an abort to the drive at zero the service works to: the station's own
+/// characterized bound (the arm gate refuses a driving hardware station without one), or,
+/// with none, what bounds it in the loop.
+pub fn abort_latency(caps: &Caps) -> Value {
+    let ticks = hertzforge_modal_test::host::TICKS_PER_BATCH;
+    match caps.abort_latency_bound {
+        Some(b) => json!({"bound_s": num(b.as_secs_f64()),
+                          "from": "the station's characterized abort latency bound, which the arm gate requires of a driving hardware station"}),
+        None => json!({"bound_s": null,
+                       "from": format!("no characterized bound on this station: the drive's step writes zero from the next engine block after the abort, and the loop issues the emergency stop once its current batch of {ticks} blocks is done")}),
+    }
+}
+
 fn setup(f: &StartFacts<'_>) -> Value {
     let w = &f.run.wire;
     let s = &w.setup;
@@ -170,6 +183,7 @@ fn setup(f: &StartFacts<'_>) -> Value {
             "drive": {"ceiling_v": num(s.shaker.ceiling_v), "judged": "every sample, after the ramp"},
             "underrun": "the source running empty takes the drive to zero at once",
             "input_overload": "an overload on a row with abort limits takes the drive to zero at once",
+            "latency": abort_latency(f.caps),
         });
     }
     if !f.class.is_hardware() {

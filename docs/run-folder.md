@@ -878,7 +878,10 @@ rows and the drive rows (none in impact mode), `windows` (the analysis window,
 the force window's `pre_frames`, `width_frames` and `fall_frames`, and the
 exponential window's `tau_s`, `inv_tau_per_s`, `end` and `added_damping`, each
 null when off), `capture`, in shaker mode the `stop` (40 dB over 3 s, then
-zero) and the `aborts` in force, and on the simulator the simulated `structure`
+zero) and the `aborts` in force (with `latency`: `bound_s`, the station's
+characterized time from an abort to the drive at zero, and `from`, where it comes
+from; null on a station with none, the words then saying what bounds it in the
+loop), and on the simulator the simulated `structure`
 (its modes, scale, shapes, the hammer's force and the impulse responses'
 length); `check`, the check report the run was configured with (the rate, the
 block, the band and its lines, the estimator, the averages, the references, the

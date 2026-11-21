@@ -341,8 +341,19 @@ async fn modal_test_shaker_stop_ramps_down_and_abort_zeroes_at_once() {
     .await;
     assert_eq!(fin["end"]["outcome"], "aborted", "{fin}");
     assert_eq!(fin["end"]["emergency_stop"], true, "{fin}");
+    // The finished state and the record say the drive is zeroed, never its last phase.
+    assert_eq!(fin["drive_phase"], "zeroed", "{fin}");
     let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
     record_done(&mut c, &folder).await;
+    let end = read(&folder.join("end.json"));
+    assert_eq!(end["state"]["drive_phase"], "zeroed", "{end}");
+    // The record states what bounds the time from the abort to zero.
+    let lat = &read(&folder.join("setup.json"))["resolved"]["aborts"]["latency"];
+    assert_eq!(lat["bound_s"], Value::Null, "{lat}");
+    assert!(
+        lat["from"].as_str().unwrap().contains("next engine block"),
+        "{lat}"
+    );
     let p = drive_peaks(&folder);
     let last = p.iter().rposition(|x| *x != 0.0).unwrap();
     let top = p.iter().fold(0f32, |m, x| m.max(*x));
