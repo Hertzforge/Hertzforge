@@ -25,7 +25,7 @@
   ],
   "first_station_frame": 0,
   "name": "inputs",
-  "frames": 1024,
+  "frames": 512,
   "gaps": [],
   "complete": true,
   "fault": null,

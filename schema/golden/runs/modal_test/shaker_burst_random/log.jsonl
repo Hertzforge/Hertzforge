@@ -1,6 +1,6 @@
 {"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Two Shakers\" (shaker mode) on sim"}
 {"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"records in golden-shaker_burst_random"}
-{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"state","text":"started on HERTZFORGE-SIM: shaker mode, 1024 Hz, block 512, 1 point","data":{"event":"started","mode":"shaker","fs_hz":1024,"block":512}}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"state","text":"started on HERTZFORGE-SIM: shaker mode, 1024 Hz, block 1024, 1 point","data":{"event":"started","mode":"shaker","fs_hz":1024,"block":1024}}
 {"seq":3,"at_unix":1794240003.25,"frame":16384,"kind":"state","text":"drive start: the ramp begins on the next frame","data":{"event":"drive_start","point":0}}
 {"seq":4,"at_unix":1794240004.25,"frame":16384,"kind":"state","text":"state measuring","data":{"event":"state","state":"measuring"}}
 {"seq":5,"at_unix":1794240005.25,"frame":16384,"kind":"hit","text":"frame 1 at point 0: accepted","data":{"point":0,"seq":1,"status":"accepted","reason":null}}

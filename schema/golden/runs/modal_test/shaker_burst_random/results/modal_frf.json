@@ -5,7 +5,7 @@
     "kind": "frequency",
     "unit": "Hz",
     "start": 0,
-    "step": 2
+    "step": 1
   },
   "channels": {
     "references": [
@@ -63,7 +63,7 @@
       "shape": [
         2,
         2,
-        101
+        201
       ],
       "unit": "g/lbf",
       "offset": 0

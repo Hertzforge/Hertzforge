@@ -1,19 +1,20 @@
 //! The golden Modal Test run folders, `schema/golden/runs/modal_test/`: on the
-//! simulator, at 1024 Hz with a 512-frame block,
+//! simulator, at 1024 Hz,
 //!
-//! - `impact_roving`: a roving hammer over three points, two hits a point, the force
-//!   and exponential windows on; and
-//! - `shaker_burst_random`: two shakers driven with burst random at one point, matrix
-//!   H1 over four frames.
+//! - `impact_roving`: a roving hammer over three points, two hits a point, a 512-frame
+//!   block, the force and exponential windows on; and
+//! - `shaker_burst_random`: two shakers driven with burst random at one point, a
+//!   1024-frame block (long enough for the response to decay), matrix H1 over four
+//!   frames.
 //!
 //! The simulator's hits fall on a fixed grid of its frames and its noise is a fixed
 //! function of the frame, so each folder repeats. The shaker run is at real time, so
-//! its drive start lands within the first block's half second and the ramp begins on
+//! its drive start lands within the first block's second and the ramp begins on
 //! the second block every time. What follows the wall clock is
 //! normalized: the wall times, the run's unique identity, the build fields, the
 //! folders' paths, and the frames the station had delivered when the run ended. Each
-//! stream is kept whole to [`CUT_FRAMES`] frames (`cut_from_frames` gives the frames
-//! it held).
+//! stream is kept whole to [`CUT_FRAMES`] frames, [`CUT_FRAMES_SHAKER`] in the shaker
+//! run (`cut_from_frames` gives the frames it held).
 //!
 //! `scripts/make_golden_runs.sh` rewrites the folders (these tests with
 //! `HERTZFORGE_WRITE_GOLDEN_RUNS=1`); otherwise the tests only compare.
@@ -30,8 +31,10 @@ use support::Client;
 
 /// The most a golden folder may hold, bytes.
 const MOST_BYTES: usize = 64 * 1024;
-/// The frames of each stream a golden folder keeps.
+/// The frames of each stream a golden folder keeps: the shaker run's block is longer
+/// and its streams wider, so it keeps fewer to stay under [`MOST_BYTES`].
 const CUT_FRAMES: u64 = 1024;
+const CUT_FRAMES_SHAKER: u64 = 512;
 const START_UNIX: f64 = 1_794_240_000.25;
 const UTC_OFFSET_S: i64 = -25_200;
 const STATION_FRAMES: u64 = 16384;
@@ -60,7 +63,7 @@ fn shaker_config() -> Value {
         "title": "Golden Two Shakers", "operator": "A. Operator",
         "article": "Beam, SN 0007",
         "specification": {"document": "Test procedure", "clause": "5.2"},
-        "mode": "shaker", "fs_hz": 1024, "block": 512, "band": {"hi_hz": 200},
+        "mode": "shaker", "fs_hz": 1024, "block": 1024, "band": {"hi_hz": 200},
         "averages": 4,
         "shaker": {"drives": [{"row": 5, "level_vrms": 0.05}, {"row": 6, "level_vrms": 0.05}],
                    "source": "burst_random", "burst_pct": 40, "ramp_s": 0.5,
@@ -107,7 +110,7 @@ async fn shaker_run() -> PathBuf {
     finish(&mut c).await
 }
 
-fn normalized(folder: &Path, uid: &str, golden: bool) -> BTreeMap<String, Vec<u8>> {
+fn normalized(folder: &Path, uid: &str, golden: bool, cut: u64) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
     let mut widths = BTreeMap::new();
     for name in ["inputs", "drives"] {
@@ -141,7 +144,7 @@ fn normalized(folder: &Path, uid: &str, golden: bool) -> BTreeMap<String, Vec<u8
                 set(&mut v, &["at_unix"], json!(START_UNIX + 60.0));
                 set(&mut v, &["station_frames"], json!(STATION_FRAMES));
                 for s in ["inputs", "drives"] {
-                    set(&mut v, &["streams", s, "frames"], json!(CUT_FRAMES));
+                    set(&mut v, &["streams", s, "frames"], json!(cut));
                 }
                 set(
                     &mut v,
@@ -177,7 +180,7 @@ fn normalized(folder: &Path, uid: &str, golden: bool) -> BTreeMap<String, Vec<u8
             }
             n if n.ends_with("/stream.json") => {
                 let mut v: Value = serde_json::from_slice(&bytes).unwrap();
-                v["frames"] = json!(CUT_FRAMES);
+                v["frames"] = json!(cut);
                 v["cut_from_frames"] = json!(STATION_FRAMES);
                 pretty(&v)
             }
@@ -185,7 +188,7 @@ fn normalized(folder: &Path, uid: &str, golden: bool) -> BTreeMap<String, Vec<u8
                 let stream = n
                     .trim_start_matches("streams/")
                     .trim_end_matches("/telemetry.f32");
-                let keep = CUT_FRAMES as usize * widths[stream] * 4;
+                let keep = cut as usize * widths[stream] * 4;
                 assert!(bytes.len() >= keep, "{n} holds {} bytes", bytes.len());
                 bytes[..keep].to_vec()
             }
@@ -196,7 +199,7 @@ fn normalized(folder: &Path, uid: &str, golden: bool) -> BTreeMap<String, Vec<u8
     out
 }
 
-fn check(name: &str, got: &BTreeMap<String, Vec<u8>>) {
+fn check(name: &str, cut: u64, got: &BTreeMap<String, Vec<u8>>) {
     let total: usize = got.values().map(Vec::len).sum();
     assert!(
         total <= MOST_BYTES,
@@ -207,7 +210,7 @@ fn check(name: &str, got: &BTreeMap<String, Vec<u8>>) {
         println!("wrote {} ({total} bytes)", golden_dir(name).display());
         return;
     }
-    let want = normalized(&golden_dir(name), &format!("golden-{name}"), true);
+    let want = normalized(&golden_dir(name), &format!("golden-{name}"), true, cut);
     compare(got, &want);
 }
 
@@ -218,17 +221,22 @@ fn done(folder: &Path) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn modal_test_todays_code_writes_the_golden_impact_run_folder() {
     let folder = impact_run().await;
-    let got = normalized(&folder, "golden-impact_roving", false);
+    let got = normalized(&folder, "golden-impact_roving", false, CUT_FRAMES);
     done(&folder);
-    check("impact_roving", &got);
+    check("impact_roving", CUT_FRAMES, &got);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn modal_test_todays_code_writes_the_golden_shaker_run_folder() {
     let folder = shaker_run().await;
-    let got = normalized(&folder, "golden-shaker_burst_random", false);
+    let got = normalized(
+        &folder,
+        "golden-shaker_burst_random",
+        false,
+        CUT_FRAMES_SHAKER,
+    );
     done(&folder);
-    check("shaker_burst_random", &got);
+    check("shaker_burst_random", CUT_FRAMES_SHAKER, &got);
 }
 
 /// Two runs of each golden setup give the same folder.
@@ -242,7 +250,12 @@ async fn modal_test_the_golden_runs_repeat_exactly() {
             } else {
                 impact_run().await
             };
-            runs.push(normalized(&f, "golden", false));
+            let cut = if shaker {
+                CUT_FRAMES_SHAKER
+            } else {
+                CUT_FRAMES
+            };
+            runs.push(normalized(&f, "golden", false, cut));
             done(&f);
         }
         for (name, bytes) in &runs[0] {

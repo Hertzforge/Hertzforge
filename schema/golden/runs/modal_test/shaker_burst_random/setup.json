@@ -9,7 +9,7 @@
     },
     "mode": "shaker",
     "fs_hz": 1024,
-    "block": 512,
+    "block": 1024,
     "band": {
       "hi_hz": 200
     },
@@ -93,15 +93,15 @@
     "source": "SIM",
     "mode": "shaker",
     "fs_hz": 1024,
-    "block": 512,
-    "frame_s": 0.5,
-    "df_hz": 2,
+    "block": 1024,
+    "frame_s": 1,
+    "df_hz": 1,
     "band": {
       "lo_hz": 0,
       "hi_hz": 200,
       "first_line": 0,
-      "last_line": 100,
-      "lines": 101
+      "last_line": 200,
+      "lines": 201
     },
     "estimator": "matrix H1",
     "averages": 4,
@@ -193,7 +193,7 @@
       ],
       "ceiling_v": 1,
       "burst_pct": 40,
-      "ramp_s": 0.5,
+      "ramp_s": 1,
       "delay_frames": 2,
       "overlap_pct": null,
       "seed": 7,
@@ -203,7 +203,7 @@
         "ramp_s": 3,
         "then": "zero"
       },
-      "seconds_per_point": 3.5
+      "seconds_per_point": 7
     }
   }
 }

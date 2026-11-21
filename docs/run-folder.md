@@ -919,14 +919,15 @@ the outcome (`outcome`). With `record.streams` false there is no `streams/`
 folder. The Modal Test has no law.
 
 The golden folders are written by `cargo test -p sds-control --test
-modal_test_golden_run` on the simulator, at 1024 Hz with a 512-frame block and
-a band to 200 Hz: `impact_roving`, a roving hammer over three points, two hits
-a point, the force and exponential windows on; and `shaker_burst_random`, two
-shakers playing burst random (seed 7) at one point, matrix H1 over four frames.
+modal_test_golden_run` on the simulator, at 1024 Hz with a band to 200 Hz:
+`impact_roving`, a roving hammer over three points, two hits a point, a
+512-frame block, the force and exponential windows on; and
+`shaker_burst_random`, two shakers playing burst random (seed 7, 40 percent of
+the frame) at one point, a 1024-frame block, matrix H1 over four frames.
 What follows the wall clock is normalized: the wall times, the run's unique
 identity, the build fields, the folders' paths and the station frames when
-the run ended. Each stream is cut to its first 1024 frames
-(`cut_from_frames`); `scripts/make_golden_runs.sh` rewrites them.
+the run ended. Each stream is cut to its first 1024 frames, 512 in the shaker
+folder (`cut_from_frames`); `scripts/make_golden_runs.sh` rewrites them.
 
 ## Reports and the Run Log
 

@@ -46,8 +46,8 @@
     "requested_fs_hz": 1024,
     "fs_hz": 1024,
     "block_frames": 64,
-    "analysis_block": 512,
-    "df_hz": 2,
+    "analysis_block": 1024,
+    "df_hz": 1,
     "rule": "the setup's own rate: a station that programs another is refused"
   },
   "build": {
