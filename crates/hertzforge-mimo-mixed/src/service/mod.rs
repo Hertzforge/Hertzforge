@@ -499,6 +499,10 @@ pub struct MimoMixedService {
     pub(crate) synth: Option<DriveSynth>,
     pub(crate) ident: Option<MimoMixedIdent>,
     pub(crate) gate_passed: Option<bool>,
+    /// The operator's words that took a failed gate to the review.
+    pub(crate) gate_override: Option<String>,
+    /// The operator's words that let a prediction over a ceiling engage.
+    pub(crate) prediction_override: Option<String>,
     // The floor loop.
     pub(crate) spectra: Option<FrameSpectra>,
     pub(crate) est: Option<MatrixFloorEstimator>,
@@ -532,6 +536,7 @@ pub struct MimoMixedService {
     pub(crate) forecast: Option<crate::budget::BudgetForecast>,
     // The level.
     pub(crate) level_db: f64,
+    pub(crate) run_mode: hertzforge_random::RunMode,
     pub(crate) rung: usize,
     pub(crate) phase_at_s: f64,
     pub(crate) t_s: f64,
@@ -557,6 +562,29 @@ impl std::fmt::Debug for MimoMixedService {
 
 /// The words for the engine's stop `reason` (MIMO Sine's wording: an
 /// output that takes no drive is said to have run dry).
+/// How close to a rung, dB, a level counts as on it.
+const LEVEL_EPS_DB: f64 = 1e-6;
+
+/// The prediction's breaches, in words.
+fn prediction_words(p: &crate::predict::MimoMixedPrediction) -> String {
+    let over: Vec<String> = p
+        .drives
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| !d.within())
+        .map(|(j, d)| {
+            format!(
+                "drive {j}: random {:.3} V rms against {:.3} V, peak {:.3} V against {:.3} V",
+                d.random_rms_v, d.ceiling_vrms, d.peak_v, d.ceiling_peak_v
+            )
+        })
+        .collect();
+    format!(
+        "the prediction puts a drive over its ceiling ({})",
+        over.join("; ")
+    )
+}
+
 pub fn station_stop_words(reason: &StopReason) -> String {
     match reason {
         StopReason::BackendError(m) if m.starts_with("drive output stalled") => format!(
@@ -654,6 +682,7 @@ impl MimoMixedService {
             }
         }
         let n = cfg.n();
+        let run_mode = cfg.schedule.mode;
         let real_time = station.is_hardware();
         Ok(MimoMixedService {
             floor_err_db: vec![f64::NAN; n],
@@ -693,6 +722,8 @@ impl MimoMixedService {
             synth: None,
             ident: None,
             gate_passed: None,
+            gate_override: None,
+            prediction_override: None,
             spectra: None,
             est: None,
             bufs: Vec::new(),
@@ -721,6 +752,7 @@ impl MimoMixedService {
             ident_rec: None,
             forecast: None,
             level_db: f64::NEG_INFINITY,
+            run_mode,
             rung: 0,
             phase_at_s: 0.0,
             t_s: 0.0,
@@ -1320,13 +1352,159 @@ impl MimoMixedService {
     /// Proceed after the review: the setup forecast, the laws built and
     /// seeded, the step built, the station restarted; the floor plays alone
     /// at the soft-start level.
+    ///
+    /// A prediction that puts a drive's random part over its rms ceiling, or
+    /// its summed peak over its peak ceiling, holds the run
+    /// (`prediction_exceeded`) until the operator overrides it
+    /// ([`Self::override_prediction`]). A forecast that cannot fit
+    /// (`budget_cannot_fit`) or a tone the model gives no finite drive for
+    /// (`tone_model_not_finite`) is refused whatever was overridden.
     pub fn proceed(&mut self) -> Result<(), MimoMixedError> {
         if self.state != MimoMixedState::Review {
             return Err(MimoMixedError::BadState(
                 "proceed after the identification and a passed gate".into(),
             ));
         }
+        if self.prediction_override.is_none() {
+            let (pred, _) = self.predict_setup()?;
+            if !pred.within() {
+                return Err(MimoMixedError::Refused {
+                    name: "prediction_exceeded",
+                    part: String::new(),
+                    why: prediction_words(&pred),
+                });
+            }
+        }
         self.engage()
+    }
+
+    /// The setup prediction and the budget forecast from the
+    /// identification's model, as the engage computes them. Refused
+    /// `budget_cannot_fit` or `tone_model_not_finite` as the engage would be.
+    pub fn predict_setup(
+        &self,
+    ) -> Result<
+        (
+            crate::predict::MimoMixedPrediction,
+            crate::budget::BudgetForecast,
+        ),
+        MimoMixedError,
+    > {
+        let id = self
+            .ident
+            .as_ref()
+            .ok_or_else(|| MimoMixedError::BadState("identify first".into()))?;
+        let model = rows(&id.h, 0..self.cfg.n());
+        let pred = crate::predict::predict(&self.cfg, &model)?;
+        let fc = crate::budget::forecast(
+            &self.cfg,
+            &model,
+            &pred.random_peaks_v(),
+            FORECAST_STEP_S,
+            self.schedule_horizon_s(),
+        )?;
+        Ok((pred, fc))
+    }
+
+    /// The operator's override of a failed coherence gate, in their words:
+    /// the run goes to the review as a passed gate would take it. Refused
+    /// `override_not_needed` when no failed gate holds the run.
+    pub fn override_gate(&mut self, words: &str) -> Result<(), MimoMixedError> {
+        if self.state != MimoMixedState::Identified || self.gate_passed != Some(false) {
+            return Err(MimoMixedError::Refused {
+                name: "override_not_needed",
+                part: String::new(),
+                why: "no failed coherence gate holds the run".into(),
+            });
+        }
+        self.gate_override = Some(words.to_string());
+        self.state = MimoMixedState::Review;
+        self.note(format!("Coherence gate overridden: {words}"));
+        Ok(())
+    }
+
+    /// The operator's override of a prediction over a drive ceiling, in
+    /// their words; the next [`Self::proceed`] engages. The ceilings, the
+    /// aborts and the forecast still hold. Refused `override_not_needed` when
+    /// the run is not in the review or the prediction is within every
+    /// ceiling.
+    pub fn override_prediction(&mut self, words: &str) -> Result<(), MimoMixedError> {
+        if self.state != MimoMixedState::Review {
+            return Err(MimoMixedError::Refused {
+                name: "override_not_needed",
+                part: String::new(),
+                why: "the run is not in the review".into(),
+            });
+        }
+        let (pred, _) = self.predict_setup()?;
+        if pred.within() {
+            return Err(MimoMixedError::Refused {
+                name: "override_not_needed",
+                part: String::new(),
+                why: "the prediction is within every ceiling".into(),
+            });
+        }
+        self.prediction_override = Some(words.to_string());
+        self.note(format!("Prediction overridden: {words}"));
+        Ok(())
+    }
+
+    /// The operator's words that took a failed gate on, if any.
+    pub fn gate_override(&self) -> Option<&str> {
+        self.gate_override.as_deref()
+    }
+
+    /// The operator's words that let a prediction over a ceiling engage.
+    pub fn prediction_override(&self) -> Option<&str> {
+        self.prediction_override.as_deref()
+    }
+
+    /// Whether the level schedule climbs on its own or is the operator's.
+    pub fn run_mode(&self) -> hertzforge_random::RunMode {
+        self.run_mode
+    }
+
+    /// Switch the level schedule between automatic and manual, in any state
+    /// before the end. Manual holds the present level for the level verb;
+    /// automatic restarts the dwell at the present level and climbs to the
+    /// rung above it.
+    pub fn set_run_mode(&mut self, mode: hertzforge_random::RunMode) -> Result<(), MimoMixedError> {
+        if self.state == MimoMixedState::Ended || self.ending.is_some() {
+            return Err(MimoMixedError::BadState("the run has ended".into()));
+        }
+        if mode == self.run_mode {
+            return Ok(());
+        }
+        self.run_mode = mode;
+        if self.phase == MimoMixedPhase::Schedule {
+            self.rung = self.rungs_at_or_below(self.level_db);
+            self.phase_at_s = self.t_s;
+        }
+        self.note(if mode == hertzforge_random::RunMode::Auto {
+            "Mode automatic."
+        } else {
+            "Mode manual."
+        });
+        Ok(())
+    }
+
+    /// The schedule's rungs between the start and full level.
+    fn rungs(&self) -> Vec<f64> {
+        self.cfg
+            .schedule
+            .table_db
+            .iter()
+            .copied()
+            .filter(|&d| d > self.cfg.schedule.start_db && d < 0.0)
+            .collect()
+    }
+
+    /// How many of those rungs are at or below `db`.
+    fn rungs_at_or_below(&self, db: f64) -> usize {
+        self.rungs()
+            .iter()
+            .filter(|&&d| d <= db + LEVEL_EPS_DB)
+            .count()
     }
 
     // ---- the verbs ------------------------------------------------------------
@@ -1345,8 +1523,17 @@ impl MimoMixedService {
         if !db.is_finite() {
             return Err(MimoMixedError::BadState("a level in dB".into()));
         }
-        let db = db.min(crate::budget::max_level(&self.cfg).log10() * 20.0);
+        let s = &self.cfg.schedule;
+        let low = s.table_db.iter().copied().fold(s.start_db, f64::min);
+        let db = db
+            .min(crate::budget::max_level(&self.cfg).log10() * 20.0)
+            .max(low);
         self.go_level(db);
+        if self.phase == MimoMixedPhase::Schedule {
+            // A step in the schedule dwells afresh at the new level.
+            self.rung = self.rungs_at_or_below(db);
+            self.phase_at_s = self.t_s;
+        }
         Ok(db)
     }
 
@@ -1495,7 +1682,16 @@ impl MimoMixedService {
             return Ok(false);
         }
         let frames = self.take_records();
-        self.t_s += frames as f64 / self.fs;
+        let dt = frames as f64 / self.fs;
+        self.t_s += dt;
+        if matches!(
+            self.phase,
+            MimoMixedPhase::Schedule | MimoMixedPhase::FullLevel
+        ) && self.step.as_ref().is_some_and(|s| s.clock.held())
+        {
+            // A hold stops the dwell and the time at full level too.
+            self.phase_at_s += dt;
+        }
         if let Some(t) = self.step.as_ref().and_then(|s| s.trip.clone()) {
             let end = self.step_end(&t);
             if self.ending.as_ref().is_none_or(|e| !e.aborted) {
@@ -1691,21 +1887,22 @@ impl MimoMixedService {
                 if since >= self.cfg.part_ramp_s + self.cfg.level_ramp_s {
                     self.phase = MimoMixedPhase::Schedule;
                     self.phase_at_s = self.t_s;
-                    self.rung = 0;
+                    self.rung = self.rungs_at_or_below(self.level_db);
                 }
             }
             MimoMixedPhase::Schedule => {
-                if self.cfg.schedule.mode != hertzforge_random::RunMode::Auto {
+                if self.level_db >= -LEVEL_EPS_DB {
+                    // Full level reached by the level verb, in either mode:
+                    // its time counts from here.
+                    self.phase = MimoMixedPhase::FullLevel;
+                    self.phase_at_s = self.t_s;
+                    self.note("Full level.");
                     return;
                 }
-                let rungs: Vec<f64> = self
-                    .cfg
-                    .schedule
-                    .table_db
-                    .iter()
-                    .copied()
-                    .filter(|&d| d > self.cfg.schedule.start_db && d < 0.0)
-                    .collect();
+                if self.run_mode != hertzforge_random::RunMode::Auto {
+                    return;
+                }
+                let rungs = self.rungs();
                 let dwell = self.cfg.schedule.dwell_for(self.rung);
                 if since >= dwell + self.cfg.level_ramp_s {
                     if self.rung < rungs.len() {
@@ -1720,6 +1917,14 @@ impl MimoMixedService {
                 }
             }
             MimoMixedPhase::FullLevel => {
+                if self.level_db < -LEVEL_EPS_DB {
+                    // The operator stepped down from full level: the
+                    // schedule again, its time at full level started over.
+                    self.phase = MimoMixedPhase::Schedule;
+                    self.phase_at_s = self.t_s;
+                    self.rung = self.rungs_at_or_below(self.level_db);
+                    return;
+                }
                 if let Some(d) = self.cfg.full_level_duration_s {
                     if since >= d + self.cfg.level_ramp_s {
                         let ramp = self.cfg.shutdown_ramp_s.max(ABORT_RAMP_S);

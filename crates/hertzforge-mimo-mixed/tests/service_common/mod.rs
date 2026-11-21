@@ -101,6 +101,32 @@ pub fn service_seeded(s: SineStructure, cfg: MimoMixedConfig, seed: u64) -> Mimo
     .expect("service")
 }
 
+/// The clock a simulated run's law calls are timed on. The simulator's time
+/// stands still while a law computes, so a call's time budget has nothing
+/// to judge there; a debug build's first solve can take longer than a
+/// hardware budget allows without the run being late.
+pub struct StoppedClock;
+
+impl hertzforge_random::service::law::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+impl hertzforge_sine::law::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+/// As `service`, the law calls timed on the [`StoppedClock`].
+pub fn service_unhurried(s: SineStructure, cfg: MimoMixedConfig) -> MimoMixedService {
+    service(s, cfg).with_law_clocks(
+        std::sync::Arc::new(StoppedClock),
+        std::sync::Arc::new(StoppedClock),
+    )
+}
+
 /// Arm, identify, pass the gate, proceed.
 pub fn engage(svc: &mut MimoMixedService) {
     svc.arm().expect("arm");
@@ -110,6 +136,21 @@ pub fn engage(svc: &mut MimoMixedService) {
         id.level_db, id.steps, id.lag_frames, id.band_coherence
     );
     assert!(svc.coherence_gate().expect("gate"), "the coherence gate");
+    svc.proceed().expect("proceed");
+}
+
+/// As `engage`, for a test that sets a drive's ceiling under what the
+/// prediction asks: the operator's override of the prediction is given
+/// (the ceilings and the aborts still hold the drive).
+pub fn engage_past_the_prediction(svc: &mut MimoMixedService) {
+    svc.arm().expect("arm");
+    svc.identify().expect("identify");
+    assert!(svc.coherence_gate().expect("gate"), "the coherence gate");
+    let (pred, _) = svc.predict_setup().expect("prediction");
+    if !pred.within() {
+        svc.override_prediction("the test sets the ceilings under the prediction")
+            .expect("override");
+    }
     svc.proceed().expect("proceed");
 }
 

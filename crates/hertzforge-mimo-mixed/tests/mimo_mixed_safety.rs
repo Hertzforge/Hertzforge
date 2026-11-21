@@ -459,7 +459,7 @@ fn rms_run(ceiling_v: f64, abort_at_ceiling: bool) -> (RunEnd, bool) {
         d.abort_vrms = abort_at_ceiling.then_some(ceiling_v);
     }
     let mut svc = service(s, cfg);
-    engage(&mut svc);
+    engage_past_the_prediction(&mut svc);
     run_out(&mut svc, 80.0);
     (ended(&svc), svc.drive_is_zero())
 }
@@ -504,7 +504,7 @@ fn band_run(level: f64, ceiling_v: f64, up_db: f64) -> (RunEnd, bool, f64) {
     }
     cfg.caps.up_db = up_db;
     let mut svc = service(s, cfg);
-    engage(&mut svc);
+    engage_past_the_prediction(&mut svc);
     let mut limiting = false;
     let mut err = f64::NAN;
     while svc.status().t_s < 80.0 {
