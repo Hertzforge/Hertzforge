@@ -230,17 +230,20 @@ fn running() -> MimoMixedView {
             part_level: 1.0,
             error_db: vec![0.25, -0.5, 0.125, 0.0],
             alarm: vec![false; 4],
+            limiting: false,
         }],
         drives: (0..4)
             .map(|j| DriveStatus {
                 random_rms_v: 0.5 + 0.125 * j as f64,
                 peak_v: 2.25 + 0.25 * j as f64,
                 tone_sum_v: 0.75,
+                abort_vpk: 4.0,
             })
             .collect(),
         underruns: 0,
         dropped: 0,
         clamped: 0,
+        limits: Vec::new(),
         end: None,
     });
     v.held_peak_v = vec![2.5, 2.75, 3.0, 3.25];
