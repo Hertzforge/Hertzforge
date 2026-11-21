@@ -168,6 +168,7 @@ fn modal_test_the_live_frame_is_the_golden_frame_byte_for_byte() {
         ],
         coherence: vec![vec![0.5, 0.75, 0.875, 1.0], vec![0.25, 0.5, 0.75, 1.0]],
         averages: 2,
+        frame: None,
         hit: Some(HitShow {
             point: 1,
             n: 2,

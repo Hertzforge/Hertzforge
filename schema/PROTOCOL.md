@@ -7111,12 +7111,27 @@ when off: `tau_s` and its value at the block's `end`); and the force autospectru
 analysis lines with `tip_drop_db`, the tip's roll-off: the drop from the spectrum's largest
 value up to the band's top to its value at the top.
 
+`frame` (shaker mode; absent in impact mode; null until a frame is taken) is the latest frame
+taken, whole, as `hit` is a hit's block: `{"point","n","seq","status","start_frame","start_s",
+"samples","decimation","step_s","burst_end_frame","input_delay_frames","decay","channels"}`.
+`channels` are every channel `time` names (the inputs in table order, then the drives), each with
+`index`, `role`, `unit` and `values`, over exactly the frame's `samples` from `start_frame`: the
+frame's boundaries are the trace's ends. The values are min/max decimated as the hit's block is
+(`decimation`, `step_s`). The frame is the averaged frame itself; with `random` it is the latest
+analysis frame, overlapped with the one before. `burst_end_frame` (the burst sources; null
+otherwise) is the input frame one past the burst's last sample as the inputs see it, the drive's
+burst `input_delay_frames` earlier; the drive channels are the same station frames as the inputs,
+so a drive's burst shows `input_delay_frames` before the inputs'. `decay` is the frame's decay
+check, as its tile carries it. `status` is the tile's status when taken (`accepted`, or `rejected`
+for an overload).
+
 `references` (shaker mode; absent in impact mode) is
 `{"frequency_hz","averages","autospectra":[{"index","unit","values"}]}`: each reference's
 autospectrum in the present average, `unit` the row's unit squared per Hz.
 
 The bound: every array is float32 and at most 1024 points. Time channels hold the latest 1024
-frames or fewer; the hit's block is decimated by its min/max intervals to 1024 values or fewer;
+frames or fewer; the hit's block and the shaker `frame` are decimated by their min/max intervals
+to 1024 values or fewer;
 frequency arrays
 (the FRF, coherence, force and reference spectra) take every k-th line, k the smallest whole
 step that leaves 1024 or fewer.

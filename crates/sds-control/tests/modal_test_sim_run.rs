@@ -660,3 +660,103 @@ async fn modal_test_shaker_live_frame_names_the_drives_and_shows_the_reference_s
     record_done(&mut c, &folder).await;
     let _ = std::fs::remove_dir_all(folder.parent().unwrap());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn modal_test_shaker_live_frame_spans_the_whole_frame_and_the_burst_ends_where_the_source_says(
+) {
+    use hertzforge_modal_test::setup::SourceKind;
+    use hertzforge_modal_test::source::{Source, SourceBuild};
+    let mut c = rig(true, 8.0).await;
+    let mut cfg = shaker_config("burst_random");
+    cfg["block"] = json!(2048);
+    c.ok("modal_test.configure", json!({"config": cfg})).await;
+    c.ok("modal_test.start", json!({})).await;
+    c.ok("modal_test.drive_start", json!({})).await;
+    let s = until(&mut c, Duration::from_secs(60), "two frames", |s| {
+        point_accepted(s) >= 2
+    })
+    .await;
+    c.pump(Duration::from_millis(1500)).await;
+    let (live, traces) = {
+        let (live, ev) = last_live(&c);
+        let d = ev.decoded.as_ref().unwrap();
+        let traces: Vec<Vec<f64>> = live["frame"]["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|ch| d.array(&ch["values"]).unwrap().to_f64())
+            .collect();
+        (live, traces)
+    };
+    let f = &live["frame"];
+    assert_eq!(f["samples"], 2048, "{f}");
+    assert_eq!(f["status"], "accepted", "{f}");
+    // Named as `time` names every channel: inputs, then the drives.
+    assert_eq!(named(&f["channels"]), named(&live["time"]["channels"]));
+    // The frame's tile: its decay check beside the trace.
+    let start = f["start_frame"].as_u64().unwrap();
+    let st = state(&mut c).await;
+    let tile = st["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["seq"] == f["seq"])
+        .cloned()
+        .unwrap_or_else(|| panic!("{f} not in {}", s["hits"]));
+    assert_eq!(tile["start_frame"], start);
+    assert_eq!(f["decay"], tile["decay"], "{f}");
+    // The burst ends where the source says, the input delay after the drive played it.
+    let n = 2048usize;
+    let src = Source::new(SourceBuild {
+        kind: SourceKind::BurstRandom,
+        fs_hz: 1024.0,
+        block: n,
+        lo_line: 0,
+        hi_line: 500,
+        levels: vec![0.05],
+        burst_pct: 40.0,
+        delay_frames: 2,
+        seed: 1,
+    });
+    let m = src.burst_len() as u64;
+    assert_eq!(f["burst_end_frame"].as_u64().unwrap(), start + m, "{f}");
+    let k = f["decimation"].as_u64().unwrap() as usize;
+    assert_eq!(k, 4);
+    assert_eq!(f["step_s"].as_f64().unwrap(), 4.0 / 2048.0);
+    c.ok("modal_test.abort", json!({})).await;
+    let fin = until(&mut c, Duration::from_secs(20), "the end", |s| {
+        s["state"] == "finished"
+    })
+    .await;
+    let folder = PathBuf::from(fin["record"]["folder"].as_str().unwrap());
+    record_done(&mut c, &folder).await;
+    // Each trace is the min/max of the recorded channel over the whole frame, no more.
+    let side = read(&folder.join("streams/inputs/stream.json"));
+    let w = side["channels"].as_array().unwrap().len();
+    let first = side["first_station_frame"].as_u64().unwrap_or(0);
+    let data = f32s(&folder.join("streams/inputs/telemetry.f32"));
+    let a = (start - first) as usize;
+    for ch in 0..w {
+        let x: Vec<f64> = (a..a + n).map(|i| f64::from(data[i * w + ch])).collect();
+        let want = sds_control::modal_test::run::min_max(&x, k);
+        let got = &traces[ch];
+        assert_eq!(got.len(), 2 * n / k, "channel {ch}");
+        let want32: Vec<f64> = want.iter().map(|v| f64::from(*v as f32)).collect();
+        assert_eq!(*got, want32, "channel {ch}");
+    }
+    // The reference (row 1, its drive times 100) is on until the burst's end and quiet
+    // after it, inside the frame.
+    let r: Vec<f64> = (a..a + n).map(|i| f64::from(data[i * w]).abs()).collect();
+    let top = r.iter().fold(0.0f64, |p, v| p.max(*v));
+    let m = m as usize;
+    let after = r[m..].iter().fold(0.0f64, |p, v| p.max(*v));
+    let before = r[m - m / 10..m - m / 20]
+        .iter()
+        .fold(0.0f64, |p, v| p.max(*v));
+    assert!(after < 1e-3 * top, "after the burst {after} of {top}");
+    assert!(
+        before > 1e-2 * top,
+        "the taper before the end {before} of {top}"
+    );
+    let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+}

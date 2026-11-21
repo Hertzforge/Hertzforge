@@ -212,6 +212,35 @@ pub struct HitShow {
     pub tip_drop_db: f64,
 }
 
+/// The latest shaker frame taken, whole (shaker), for the display to draw and compute
+/// nothing: every channel of the station's frame over the frame's own samples.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FrameShow {
+    pub point: usize,
+    pub n: u32,
+    pub seq: u64,
+    pub status: &'static str,
+    /// The input frame the frame starts at, and that frame's time, s.
+    pub start_frame: u64,
+    pub start_s: f64,
+    /// The frame's samples.
+    pub samples: usize,
+    /// Samples per interval of the min/max decimation (`1`: every sample sent).
+    pub decimation: usize,
+    /// The time between the values sent, s.
+    pub step_s: f64,
+    /// Every input in table order, then the drives, as `time` names them.
+    pub names: Vec<Named>,
+    pub channels: Vec<Vec<f64>>,
+    /// The burst sources: the input frame the burst ends at (one past its last sample), as
+    /// the inputs see it, `input_delay_frames` after the drive played it.
+    pub burst_end_frame: Option<u64>,
+    /// The frames the inputs lag the drives by.
+    pub input_delay_frames: u64,
+    /// The frame's decay check, as its tile carries it.
+    pub decay: Option<hertzforge_modal_test::hits::Decay>,
+}
+
 /// The display: the latest frames of every channel, the selected point's current
 /// estimate, and the latest hit (impact) or the references' autospectra (shaker).
 #[derive(Debug, Clone, Default)]
@@ -228,6 +257,8 @@ pub struct Display {
     pub coherence: Vec<Vec<f64>>,
     pub averages: usize,
     pub hit: Option<HitShow>,
+    /// Shaker: the latest frame taken, whole.
+    pub frame: Option<FrameShow>,
     /// Shaker: the references (as the plan orders them) and their autospectra so far.
     pub ref_names: Vec<Named>,
     pub ref_auto: Vec<Vec<f64>>,
@@ -274,6 +305,55 @@ pub fn block_decimation(samples: usize) -> usize {
     } else {
         samples.div_ceil(LIVE_POINTS / 2)
     }
+}
+
+/// The live `frame` of the shaker frame taken at `point`, `at`, from `whole`, the latest
+/// samples of every channel of the station's frame (the last fed now). None when the
+/// frame is no longer wholly held.
+pub fn frame_show(
+    s: &Session,
+    point: usize,
+    at: usize,
+    whole: &[std::collections::VecDeque<f64>],
+    burst_len: Option<usize>,
+    input_delay: u64,
+) -> Option<FrameShow> {
+    let t = s.points.get(point)?.taken.get(at)?;
+    let held = whole.first().map_or(0, std::collections::VecDeque::len) as u64;
+    let first = s.frames_seen().checked_sub(held)?;
+    let off = usize::try_from(t.start_frame.checked_sub(first)?).ok()?;
+    let n = t.frames;
+    if off + n > held as usize {
+        return None;
+    }
+    let fs = s.setup.fs_hz;
+    let k = block_decimation(n);
+    Some(FrameShow {
+        point,
+        n: t.n,
+        seq: t.seq,
+        status: t.status,
+        start_frame: t.start_frame,
+        start_s: t.start_frame as f64 / fs,
+        samples: n,
+        decimation: k,
+        step_s: if k == 1 {
+            1.0 / fs
+        } else {
+            k as f64 / (2.0 * fs)
+        },
+        names: frame_names(&s.plan, true),
+        channels: whole
+            .iter()
+            .map(|h| {
+                let x: Vec<f64> = h.range(off..off + n).copied().collect();
+                min_max(&x, k)
+            })
+            .collect(),
+        burst_end_frame: burst_len.map(|m| t.start_frame + m as u64),
+        input_delay_frames: input_delay,
+        decay: t.decay,
+    })
 }
 
 /// The names of the station frame's channels: inputs by slot, then drives.
@@ -396,6 +476,30 @@ pub fn live_json(v: &ModalView, d: &Display, arrays: &mut crate::codec::Arrays) 
         });
         o.insert("hit".into(), hit.unwrap_or(Value::Null));
     } else {
+        let frame = d.frame.as_ref().map(|f| {
+            let chans: Vec<Value> = f
+                .channels
+                .iter()
+                .enumerate()
+                .map(|(c, x)| {
+                    let values = put(format!("w{c}"), x);
+                    match f.names.get(c) {
+                        Some(n) => n.json(values),
+                        None => json!({"values": values}),
+                    }
+                })
+                .collect();
+            json!({
+                "point": f.point, "n": f.n, "seq": f.seq, "status": f.status,
+                "start_frame": f.start_frame, "start_s": num(f.start_s),
+                "samples": f.samples, "decimation": f.decimation, "step_s": num(f.step_s),
+                "burst_end_frame": f.burst_end_frame,
+                "input_delay_frames": f.input_delay_frames,
+                "decay": f.decay.as_ref().map(hertzforge_modal_test::hits::Decay::to_json),
+                "channels": chans,
+            })
+        });
+        o.insert("frame".into(), frame.unwrap_or(Value::Null));
         let spectra: Vec<Value> = d
             .ref_auto
             .iter()
@@ -959,6 +1063,30 @@ impl ModalRun {
         let keep = TIME_POINTS.min(session.setup.block);
         let mut time: Vec<std::collections::VecDeque<f64>> =
             vec![std::collections::VecDeque::with_capacity(keep + 1); width];
+        // Shaker: the latest whole frame of every channel, for the live `frame`.
+        let whole_keep = if shaker {
+            session.setup.block + session.setup.block / 2 + 1
+        } else {
+            0
+        };
+        let mut whole: Vec<std::collections::VecDeque<f64>> =
+            vec![std::collections::VecDeque::with_capacity(whole_keep + 1); width];
+        let burst_len = (shaker && session.setup.shaker.source.is_burst()).then(|| {
+            let lines = session.setup.lines();
+            let b = &session.setup;
+            hertzforge_modal_test::source::Source::new(SourceBuild {
+                kind: b.shaker.source,
+                fs_hz: b.fs_hz,
+                block: b.block,
+                lo_line: *lines.start(),
+                hi_line: *lines.end(),
+                levels: vec![0.0],
+                burst_pct: b.shaker.burst_pct,
+                delay_frames: b.shaker.delay_frames,
+                seed: b.shaker.seed,
+            })
+            .burst_len()
+        });
         self.publish(session, host, None);
         loop {
             // The operator's calls.
@@ -970,7 +1098,31 @@ impl ModalRun {
             let mut events = Vec::new();
             if let Some(c) = capture.as_mut() {
                 while c.pop(&mut frame) {
-                    events.extend(session.feed(&frame[..host.inputs]));
+                    let ev = session.feed(&frame[..host.inputs]);
+                    if shaker {
+                        for (h, v) in whole.iter_mut().zip(&frame) {
+                            if h.len() == whole_keep {
+                                h.pop_front();
+                            }
+                            h.push_back(f64::from(*v));
+                        }
+                        for e in &ev {
+                            if let Event::Taken { point, at } = e {
+                                let f = frame_show(
+                                    session,
+                                    *point,
+                                    *at,
+                                    &whole,
+                                    burst_len,
+                                    input_delay,
+                                );
+                                if f.is_some() {
+                                    lock(&self.display).frame = f;
+                                }
+                            }
+                        }
+                    }
+                    events.extend(ev);
                     for (h, v) in time.iter_mut().zip(&frame) {
                         if h.len() == keep {
                             h.pop_front();
