@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ChannelRow } from '$lib/protocol/types';
-import type { MimoMixedBandPart, MimoMixedReportItem, MimoMixedTonePart } from '$lib/protocol/mimoMixed';
-import { breakpointParamsOf, defaultMmixSetup, fitChannels, freeId, localErrors, mergeMmixSetup, mmixItemKey, mmixSectionOf, mmixTitle, newBand, refusalWhere, setControl, toMmixConfig } from './mmixSetup';
+import type { MimoMixedBandBody, MimoMixedReportItem, MimoMixedToneBody } from '$lib/protocol/mimoMixed';
+import { abortVpkOf, breakpointParamsOf, defaultMmixSetup, fitChannels, freeId, localErrors, mergeMmixSetup, mmixItemKey, mmixScheduleOf, mmixSectionOf, mmixTitle, newBand, refusalWhere, setControl, toMmixConfig } from './mmixSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -91,58 +91,106 @@ describe('to the protocol', () => {
 		d.laws.ceiling_rule = 'in_turn';
 		d.laws.fill_rule = 'model_fill';
 		const c = toMmixConfig(d, null, { floor: null, tones: null });
-		expect(c.parts.map((p) => p.kind)).toEqual(['floor', 'tone', 'narrowband']);
-		const tone = c.parts[1] as MimoMixedTonePart;
+		expect(c.parts.map((p) => p.body.kind)).toEqual(['floor', 'tone', 'narrowband']);
+		expect(c.parts.map((p) => p.id)).toEqual(['floor', 't1', 'b1']);
+		const tone = c.parts[1].body as MimoMixedToneBody;
 		expect(tone.amplitude).toEqual([
 			{ kind: 'constant', g_pk: 1 },
 			{ kind: 'constant', g_pk: 2 },
 			{ kind: 'constant', g_pk: 1 }
 		]);
 		expect(tone.phase_deg).toEqual([0, 90, 180]);
-		const band = c.parts[2] as MimoMixedBandPart;
+		expect(tone.schedule).toEqual({ kind: 'fixed', hz: 120 });
+		const band = c.parts[2].body as MimoMixedBandBody;
 		expect(band.statement).toEqual({ kind: 'added', level_g2_hz: 0.02, coherence: 0.3 });
+		// no bands of its own: the members are left out (the wire refuses null), the service's 3 and 6 dB hold
+		expect('alarm_db' in band || 'abort_db' in band).toBe(false);
 		expect(c.law).toMatchObject({ bands: { id: 'per_control' }, ceiling_rule: { id: 'in_turn' }, fill_rule: { id: 'model_fill' } });
-		expect(c.control?.frf).toBe('hold');
-		expect(c.channels.drives[0]).toEqual({ channel: 4, ceiling_vrms: 2, peak_v: 6, abort_vrms: null });
+		expect(c.frf_mode).toBe('Hold');
+		expect(c.controls).toEqual([1, 2, 3]);
+		// no aborts of its own: the members are left out, and the service takes each ceiling plus 1 dB
+		expect(c.drives[0]).toEqual({ channel_index: 4, ceiling_vrms: 2, peak_v: 6, pretest_max_vrms: 0.2 });
+		expect(c.parts[0].window).toEqual({ on_s: 0 });
+		expect('specification' in c).toBe(false);
+	});
+
+	it("gives each drive's own aborts, the limits' ceilings and the level schedule as the controller has them", () => {
+		const d = filled();
+		d.drives[1].abort_vrms = 2.4;
+		d.drives[1].abort_vpk = 7;
+		d.limits = [{ channel: 6, ceiling: 0.04, abort_margin_db: 3 }];
+		d.record.document = 'Spec';
+		const c = toMmixConfig(d, null, { floor: null, tones: null });
+		expect(c.drives[1]).toEqual({ channel_index: 5, ceiling_vrms: 2, peak_v: 6, abort_vrms: 2.4, abort_vpk: 7, pretest_max_vrms: 0.2 });
+		expect(c.limits).toEqual([{ channel_index: 6, ceiling_psd: [0.04], abort_margin_db: 3 }]);
+		expect(c.schedule).toEqual({ mode: 'auto', start_db: -12, table_db: [-12, -6, 0], dwell_s: [10, 10] });
+		expect(c.full_level_duration_s).toBe(120);
+		expect(c.caps).toEqual({ up_db: 3.5, down_db: 6 });
+		expect(c.identification).toEqual({ below_reference_db: 20, frames: 64, start_vrms: 0.01, tolerance_db: 1, max_steps: 8, noise_frames: 32 });
+		expect(c.gates).toEqual({ coherence_threshold: 0.5, condition_threshold: 1000 });
+		expect(c.specification).toEqual({ document: 'Spec', clause: '' });
+		// the peak abort the run takes: its own, or the peak ceiling plus 1 dB
+		expect(abortVpkOf(d.drives[1])).toBe(7);
+		expect(abortVpkOf(d.drives[0])).toBeCloseTo(6.732, 3);
+	});
+
+	it('ends every sweep: by its sweeps, its duration or whichever comes first', () => {
+		const d = filled();
+		const s = { ...d.tones[0].schedule, kind: 'sweep' as const, band_hz: [50, 400] as [number, number], law: 'log' as const, oct_per_min: 2 };
+		expect(mmixScheduleOf(s)).toEqual({ kind: 'sweep', lo_hz: 50, hi_hz: 400, start_hz: 50, direction: 'up', law: 'log_oct_per_min', rate: 2, target: { kind: 'sweeps', n: 4 } });
+		expect(mmixScheduleOf({ ...s, end_by: 'duration' })).toMatchObject({ target: { kind: 'duration', s: 300 } });
+		expect(mmixScheduleOf({ ...s, end_by: 'both' })).toMatchObject({ target: { kind: 'whichever_first', sweeps: 4, duration_s: 300 } });
+		expect(mmixScheduleOf({ ...s, kind: 'fixed', dwell: { by: 'cycles', seconds: 1, cycles: 50 } })).toEqual({ kind: 'fixed', hz: 120, for_cycles: 50 });
+		// a draft saved with a sweep that never ends reads back ending after its sweeps
+		const back = mergeMmixSetup({ tones: [{ ...d.tones[0], schedule: { ...s, end_by: 'none' } }] } as never);
+		expect(back.tones[0].schedule.end_by).toBe('sweeps');
 	});
 
 	it('leaves the phases to the tone law when none are stated', () => {
 		const d = filled();
 		d.tones[0].amp_g = [1, 1, 1];
 		d.tones[0].phases_stated = false;
-		const tone = toMmixConfig(d, null, { floor: null, tones: null }).parts[1] as MimoMixedTonePart;
+		const tone = toMmixConfig(d, null, { floor: null, tones: null }).parts[1].body as MimoMixedToneBody;
 		expect(tone.amplitude).toEqual({ kind: 'constant', g_pk: 1 });
 		expect(tone.phases_stated).toBe(false);
-		expect(tone.phase_deg).toEqual([]);
+		expect('phase_deg' in tone).toBe(false);
 	});
 });
 
 describe('where a finding goes', () => {
-	it('puts a refusal by its part, drive, law or field, and each key in its section', () => {
+	it('puts a refusal by its field path or its name, and each key in its section', () => {
 		const d = filled();
 		d.bands.push(newBand('b1', 1, 3));
 		const cases: [Partial<MimoMixedReportItem>, string, string][] = [
-			[{ reason: 'band_not_additive', part: 'b1', control: 2 }, 'bands.0', 'parts'],
-			[{ reason: 'part_out_of_band', part: 't1' }, 'tones.0', 'parts'],
-			[{ reason: 'budget_cannot_fit', drive: 1 }, 'forecast', 'forecast'],
-			[{ reason: 'frf_update_not_built' }, 'control.frf', 'limits'],
-			[{ reason: 'unknown_fill_rule' }, 'laws.fill_rule', 'laws'],
-			[{ reason: 'bad_config', drive: 1 }, 'drives.1', 'channels'],
-			[{ reason: 'law_unknown', field: 'config.law.tones.id' }, 'laws.tones.id', 'laws'],
-			[{ reason: 'bad_config', field: 'config.law.floor.params.step' }, 'laws.floor.params.step', 'laws'],
-			[{ reason: 'out_of_range', field: 'config.schedule.levels[1].db' }, 'schedule.levels.1.db', 'schedule'],
-			[{ reason: 'reference_invalid' }, 'reference', 'reference']
+			[{ reason: 'law_refuses_tone', field: 'parts[1]' }, 'tones.0', 'parts'],
+			[{ reason: 'law_refuses_tone', field: 'parts[2]' }, 'bands.0', 'parts'],
+			[{ reason: 'band_not_additive', field: 'config' }, 'parts', 'parts'],
+			[{ reason: 'budget_cannot_fit', field: 'config' }, 'forecast', 'forecast'],
+			[{ reason: 'frf_update_not_built', field: 'config' }, 'control.frf', 'limits'],
+			[{ reason: 'unknown_fill_rule', field: 'config' }, 'laws.fill_rule', 'laws'],
+			[{ reason: 'ramp_too_short', field: 'config' }, 'control.part_ramp_s', 'limits'],
+			[{ reason: 'channel_unknown', field: 'drives[1]' }, 'drives.1', 'channels'],
+			[{ reason: 'duplicate_drive', field: 'drives[1]' }, 'drives.1', 'channels'],
+			[{ reason: 'channel_unknown', field: 'limits[0]' }, 'limits.0', 'limits'],
+			[{ reason: 'channel_unknown', field: 'controls[2]' }, 'channels.controls', 'channels'],
+			[{ reason: 'law_unknown', field: 'law.tones.id' }, 'laws.tones.id', 'laws'],
+			[{ reason: 'param_out_of_range', field: 'law.floor.params.step' }, 'laws.floor.params.step', 'laws'],
+			[{ reason: 'out_of_range', field: 'estimation.n_pts' }, 'estimation.n_pts', 'schedule'],
+			[{ reason: 'reference_invalid', field: 'reference' }, 'reference', 'reference'],
+			[{ reason: 'drive_channel_present', channel: 9 }, 'channels', 'channels']
 		];
 		for (const [over, key, section] of cases) {
-			expect(mmixItemKey(d, item(over))).toBe(key);
+			expect(mmixItemKey(d, item(over)), over.reason).toBe(key);
 			expect(mmixSectionOf(key)).toBe(section);
 		}
 	});
 
 	it('names where a refusal is in words', () => {
-		const names = { parts: { b1: 'Band 1' }, controls: ['A', 'B', 'C'], drives: ['X', 'Y'] };
-		expect(refusalWhere({ part: 'b1', control: 2 }, names)).toBe('part Band 1, control C');
-		expect(refusalWhere({ drive: 1 }, names)).toBe('drive Y');
+		const names = { parts: ['Floor', 'Tone 1', 'Band 1'], controls: ['A', 'B', 'C'], drives: ['X', 'Y'] };
+		expect(refusalWhere({ field: 'parts[2]' }, names)).toBe('part Band 1');
+		expect(refusalWhere({ field: 'drives[1]' }, names)).toBe('drive Y');
+		expect(refusalWhere({ field: 'law.tones.id' }, names)).toBe("the tones' law");
+		expect(refusalWhere({ field: 'config' }, names)).toBe('');
 	});
 });
 
@@ -167,6 +215,19 @@ describe('what the editor says first', () => {
 		const e = localErrors(d);
 		expect(e['bands.0.id']).toEqual(['Another part has this id.']);
 		expect(e['bands.0.schedule.of']).toEqual(['Choose the part it follows.']);
+	});
+
+	it("refuses a drive's abort at or under its ceiling, and an identification with no room", () => {
+		const d = filled();
+		d.drives[0].abort_vpk = 6;
+		d.drives[0].abort_vrms = 1.5;
+		d.drives[1].pretest_max_vrms = 0;
+		const e = localErrors(d);
+		expect(e['drives.0.abort_vpk']).toEqual(['The peak abort is above the peak ceiling.']);
+		expect(e['drives.0.abort_vrms']).toEqual(['The rms abort is above the rms ceiling.']);
+		expect(e['drives.1.pretest_max_vrms']).toBeDefined();
+		d.estimation.n_pts = 1000;
+		expect(localErrors(d)['estimation.n_pts']).toEqual(['A power of two from 64.']);
 	});
 
 	it('wants no controls or drives before anything is sent', () => {

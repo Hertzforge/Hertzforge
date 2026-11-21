@@ -1,47 +1,16 @@
 /**
  * MIMO Mixed Mode on the wire: sine tones and narrowband random on a random floor, on several
  * shakers controlled together. Every `mimo_mixed.*` name and shape the screens and the mock use is
- * in this one file.
+ * in this one file, as `schema/protocol.schema.json` and `schema/PROTOCOL.md` ("MIMO Mixed Mode")
+ * state them.
  *
- * Where the protocol leaves a name or a shape open, it is a sibling's: Mixed Mode's for the parts,
- * the schedules, the windows and the run verbs (`part`, `adjust`, `hold`, `resume`, the states and
- * phases); MIMO Random's for the channels, the reference, the estimation, the identification and
- * its gate (`override`, `exclude`), and the floor law (world `mimo`); MIMO Sine's for the tone law
- * (world `sine_mimo`). The parts' bodies follow the core's configuration: a value stated per
- * control is one number for every control or a list with one entry per control, in the controls'
- * order.
+ * The configuration is the controller's own, in its serialized form, less its reference, with the
+ * wire's own members (`title`, `operator`, `article`, `notes`, `specification`, `reference`,
+ * `record`, `simulator`). A value stated per control is one value for every control or a list
+ * with one entry per control, in the controls' order.
  */
-import type {
-	BandDb,
-	ClockDomain,
-	DataSource,
-	LadderMode,
-	LiveChannel,
-	LogEntry,
-	RandomRunState,
-	RefusalReason,
-	RunRecordRef,
-	Schedule,
-	StationClass,
-	StationRef,
-	View
-} from './types';
-import type {
-	LawEntry,
-	MimoBuildBreakpointsParams,
-	MimoControlRow,
-	MimoDriveRow,
-	MimoEstimation,
-	MimoGates,
-	MimoIdentification,
-	MimoImportParams,
-	MimoLawChoice,
-	MimoLimitRow,
-	MimoReference,
-	MimoReferenceResult
-} from './mimo';
-import type { MixedLogEntry, MixedPartKind, MixedPhase, MixedSchedule, MixedWindow } from './mixed';
-import type { SineProfileRow } from './sine';
+import type { BandDb, DataSource, LadderMode, LogEntry, RandomRunState, ReportItem, RunRecordRef, StationClass, StationRef, View } from './types';
+import type { MimoBuildBreakpointsParams, MimoImportParams, MimoReference, MimoReferenceResult } from './mimo';
 
 /** The test type's id in `tests.list`, setup files and run folders. */
 export const MIMO_MIXED_TEST_TYPE = 'mimo_mixed';
@@ -54,19 +23,19 @@ export const MIMO_MIXED_TOPICS = {
 	data: 'mimo_mixed.data'
 } as const;
 
-/** Every method, by its verb. */
+/** Every method the service serves, by its verb. */
 export const MIMO_MIXED_METHODS = {
 	configure: 'mimo_mixed.configure',
 	config: 'mimo_mixed.config',
 	arm: 'mimo_mixed.arm',
 	start: 'mimo_mixed.start',
 	proceed: 'mimo_mixed.proceed',
+	override: 'mimo_mixed.override',
 	level: 'mimo_mixed.level',
 	mode: 'mimo_mixed.mode',
 	hold: 'mimo_mixed.hold',
 	resume: 'mimo_mixed.resume',
 	part: 'mimo_mixed.part',
-	adjust: 'mimo_mixed.adjust',
 	stop: 'mimo_mixed.stop',
 	abort: 'mimo_mixed.abort',
 	reset: 'mimo_mixed.reset',
@@ -74,17 +43,29 @@ export const MIMO_MIXED_METHODS = {
 	state: 'mimo_mixed.state',
 	log: 'mimo_mixed.log',
 	subscribe: 'mimo_mixed.subscribe',
-	/** MIMO Random's reference verbs. */
+	/** MIMO Random's reference verbs under this module's names. */
 	buildBreakpoints: 'mimo_mixed.reference.build_breakpoints',
+	buildRigidBody: 'mimo_mixed.reference.build_rigid_body',
+	validateReference: 'mimo_mixed.reference.validate',
 	importReference: 'mimo_mixed.reference.import',
-	/** MIMO Random's identification verbs: past a failed gate with words, or a control taken out. */
-	override: 'mimo_mixed.override',
-	exclude: 'mimo_mixed.exclude',
 	/** The law catalog's, shared by every test type. */
 	lawsList: 'laws.list',
 	lawsImport: 'laws.import',
 	lawsCheck: 'laws.check'
 } as const;
+
+/**
+ * Names the module keeps for what it does not build: each is refused by its reason, whatever its
+ * parameters. The shell offers none of them as a working control.
+ */
+export const MIMO_MIXED_NOT_BUILT = {
+	'mimo_mixed.adjust': 'adjust_not_built',
+	'mimo_mixed.exclude': 'exclude_not_built',
+	'mimo_mixed.identification.save': 'identification_save_not_built',
+	'mimo_mixed.identification.load': 'identification_load_not_built'
+} as const;
+
+export type MimoMixedNotBuiltReason = (typeof MIMO_MIXED_NOT_BUILT)[keyof typeof MIMO_MIXED_NOT_BUILT];
 
 /** Which world `laws.list` is asked for, by role. */
 export const MIMO_MIXED_LAW_WORLDS = { floor: 'mimo', tones: 'sine_mimo' } as const;
@@ -95,7 +76,7 @@ export const MIMO_MIXED_MAX_LIMITS = 8;
 export const MIMO_MIXED_MAX_TONES = 12;
 export const MIMO_MIXED_MAX_BANDS = 12;
 
-/** The core's defaults, as the setup shows them. */
+/** The controller's defaults, as the setup shows them. */
 export const MIMO_MIXED_DEFAULTS = {
 	floor_law: 'pinv_closed',
 	tone_law: 'matrix',
@@ -108,8 +89,25 @@ export const MIMO_MIXED_DEFAULTS = {
 	floor_abort_db: [6, 6] as BandDb,
 	tone_alarm_db: [1.5, 1.5] as BandDb,
 	tone_abort_db: [3, 3] as BandDb,
-	control_tick_s: 0.01
+	band_alarm_db: [3, 3] as BandDb,
+	band_abort_db: [6, 6] as BandDb,
+	/** A drive's peak abort over its peak ceiling when `abort_vpk` is absent, dB. */
+	abort_over_peak_db: 1,
+	level_ramp_s: 0.5,
+	part_ramp_s: 3,
+	floor_settle_s: 30,
+	soft_start_db: 9,
+	soft_start_relax_db: 6,
+	crest_factor: 3,
+	control_tick_s: 0.01,
+	/** A level or part ramp is at least two control ticks. */
+	min_ramp_s: 0.02
 } as const;
+
+/** A drive's peak abort when `abort_vpk` is absent: its peak ceiling plus 1 dB. */
+export function defaultAbortVpk(peakV: number): number {
+	return peakV * 10 ** (MIMO_MIXED_DEFAULTS.abort_over_peak_db / 20);
+}
 
 // --- the three choices the service names itself ----------------------------------------------
 
@@ -130,8 +128,30 @@ export const MIMO_MIXED_FILL_RULES: readonly MimoMixedFillRule[] = ['no_error', 
 /** One value for every control, or one per control in the controls' order. */
 export type PerControl<T> = T | T[];
 
+/** A part's schedule: the controller's own form. */
+export type MimoMixedSchedule =
+	| { kind: 'fixed'; hz: number; for_s?: number; for_cycles?: number }
+	| {
+			kind: 'sweep';
+			lo_hz: number;
+			hi_hz: number;
+			start_hz: number;
+			direction?: 'up' | 'down';
+			law: 'linear_hz_per_s' | 'log_oct_per_min';
+			rate: number;
+			target: { kind: 'sweeps'; n: number } | { kind: 'duration'; s: number } | { kind: 'whichever_first'; sweeps: number; duration_s: number };
+	  }
+	| { kind: 'follow'; of: string; ratio: number }
+	| { kind: 'segments'; segments?: unknown[] };
+
+/** A part's time window, parts seconds; no `off_s`: to the end of the run. */
+export interface MimoMixedWindow {
+	on_s?: number;
+	off_s?: number | null;
+}
+
 /** A tone's full-level peak amplitude at a control. */
-export type MimoMixedToneAmplitude = { kind: 'constant'; g_pk: number } | { kind: 'profile'; rows: SineProfileRow[] };
+export type MimoMixedToneAmplitude = { kind: 'constant'; g_pk: number } | { kind: 'profile'; rows: { freq_hz: number; quantity: string; value: number; alarm_db?: BandDb | null; abort_db?: BandDb | null }[] };
 
 /** A narrowband's full width: Hz, or a share of its center (a swept band widens as it rises). */
 export type MimoMixedBandWidth = { kind: 'hz'; hz: number } | { kind: 'share'; share: number };
@@ -141,124 +161,166 @@ export type MimoMixedBandWidth = { kind: 'hz'; hz: number } | { kind: 'share'; s
  * `db` at each control. `added`: a density added at each control, with one coherence between the
  * controls (0: independent). `matrix` is reserved and refused `band_matrix_not_built`.
  */
-export type MimoMixedBandStatement =
-	| { kind: 'raise'; db: PerControl<number> }
-	| { kind: 'added'; level_g2_hz: PerControl<number>; coherence?: number }
-	| { kind: 'matrix'; values: unknown };
+export type MimoMixedBandStatement = { kind: 'raise'; db: PerControl<number> } | { kind: 'added'; level_g2_hz: PerControl<number>; coherence?: number } | { kind: 'matrix'; values?: unknown };
 
-export interface MimoMixedPartBase {
-	/** 1 to 32 letters, digits, `_` and `-`; unique in the list. */
-	id: string;
-	name?: string;
-	/** Default true; the floor is always on. */
-	enabled?: boolean;
-	window?: MixedWindow;
-}
-
-/** The floor: MIMO Random's reference, its bands per control. */
-export interface MimoMixedFloorPart extends MimoMixedPartBase {
+export interface MimoMixedFloorBody {
 	kind: 'floor';
 	alarm_db?: PerControl<BandDb>;
 	abort_db?: PerControl<BandDb>;
 }
 
-export interface MimoMixedTonePart extends MimoMixedPartBase {
+export interface MimoMixedToneBody {
 	kind: 'tone';
-	schedule: MixedSchedule;
+	schedule: MimoMixedSchedule;
 	amplitude: PerControl<MimoMixedToneAmplitude>;
 	/** False: the tone law chooses the phases between the controls. */
-	phases_stated: boolean;
+	phases_stated?: boolean;
 	/** One per control, degrees against the first control; read only when stated. */
-	phase_deg: number[];
+	phase_deg?: number[];
 	alarm_db?: PerControl<BandDb>;
 	abort_db?: PerControl<BandDb>;
 }
 
-export interface MimoMixedBandPart extends MimoMixedPartBase {
+export interface MimoMixedBandBody {
 	kind: 'narrowband';
-	schedule: MixedSchedule;
+	schedule: MimoMixedSchedule;
 	width: MimoMixedBandWidth;
 	statement: MimoMixedBandStatement;
-	/** Null or absent: the floor's. */
-	alarm_db?: PerControl<BandDb> | null;
-	abort_db?: PerControl<BandDb> | null;
+	/** Absent: the floor's defaults, 3 and 6 dB. */
+	alarm_db?: PerControl<BandDb>;
+	abort_db?: PerControl<BandDb>;
 }
 
-export type MimoMixedPart = MimoMixedFloorPart | MimoMixedTonePart | MimoMixedBandPart;
+export type MimoMixedPartBody = MimoMixedFloorBody | MimoMixedToneBody | MimoMixedBandBody;
+
+export type MimoMixedPartKind = MimoMixedPartBody['kind'];
+
+/** One part: exactly one floor, then at most 12 tones and 12 narrowbands. */
+export interface MimoMixedPart<B extends MimoMixedPartBody = MimoMixedPartBody> {
+	/** 1 to 32 letters, digits, `_` and `-`; unique in the list. */
+	id: string;
+	name?: string;
+	/** Default true; the floor is always on. */
+	enabled?: boolean;
+	window?: MimoMixedWindow;
+	body: B;
+}
 
 // --- configuration -------------------------------------------------------------------------------
+
+/** A law by catalog id, with its parameter values by key. */
+export interface MimoMixedLawPick {
+	id: string;
+	params?: Record<string, unknown>;
+}
 
 /** The five choices: two laws from the catalog, three the service names. */
 export interface MimoMixedLawChoice {
 	/** World `mimo`; default `pinv_closed`. */
-	floor?: MimoLawChoice;
+	floor?: MimoMixedLawPick;
 	/** World `sine_mimo`; default `matrix`. */
-	tones?: MimoLawChoice;
+	tones?: MimoMixedLawPick;
 	bands?: { id: MimoMixedBandLaw };
 	ceiling_rule?: { id: MimoMixedCeilingRule };
 	fill_rule?: { id: MimoMixedFillRule };
 }
 
-/** A drive: MIMO Random's row, its peak the summed ceiling the tones share with the floor. */
-export type MimoMixedDriveRow = MimoDriveRow & { peak_v: number };
-
-/** MIMO Random's run settings, with Mixed Mode's ramps and the floor's settle. Every field optional. */
-export interface MimoMixedControl {
-	/** `hold` only: an updated model is not built (`frf_update_not_built`). */
-	frf?: 'hold';
-	cap_up_db?: number;
-	cap_down_db?: number;
-	law_budget?: number;
-	law_misses?: number;
-	level_ramp_s?: number;
-	shutdown_ramp_s?: number;
-	/** One part's ramp in or out; default 3. */
-	part_ramp_s?: number;
-	/** The most the floor alone is given to equalize; default 30. */
-	floor_settle_s?: number;
-	soft_start_db?: number;
-	soft_start_relax_db?: number;
-	/** The random part's crest factor; default 3. */
-	crest_factor?: number;
-	/** Null: no clip. */
-	drive_clip_sigma?: number | null;
-	/** The tone tick, ms; default 10. */
-	tick_ms?: number;
+/** A drive output. */
+export interface MimoMixedDrive {
+	/** The drive row's channel index in the channel table. */
+	channel_index: number;
+	/** The random part's ceiling, V rms. */
+	ceiling_vrms: number;
+	/** The summed drive's peak ceiling, V: the floor and every tone share it. */
+	peak_v: number;
+	/** The realized rms that aborts the run; absent: the rms ceiling plus 1 dB. */
+	abort_vrms?: number;
+	/** The peak that aborts the run (`drive_vpk`), above `peak_v`; absent: `peak_v` plus 1 dB. */
+	abort_vpk?: number;
+	/** The highest rms the identification may use on this output, V. */
+	pretest_max_vrms: number;
+	shaker?: Record<string, unknown>;
+	moving_mass?: Record<string, number>;
 }
 
-/** MIMO Random's protections. Every field optional. */
-export interface MimoMixedProtections {
-	envelope_abort_lines?: number;
-	divergence_loops?: number;
-	divergence_floor_db?: number;
-	overload_fraction?: number;
-	settle_loops?: number;
+/** A monitored response held under a ceiling. */
+export interface MimoMixedLimit {
+	channel_index: number;
+	/** The PSD ceiling at full level, one value or one per line. */
+	ceiling_psd: number[];
+	abort_margin_db: number;
+}
+
+export interface MimoMixedEstimation {
+	/** The wire's: the grid is `fs_hz / n_pts` hertz between lines. */
+	fs_hz: number;
+	n_pts: number;
+	frames_per_loop: number;
+	memory_loops: number;
+	window?: 'Hann' | 'Rectangular';
+	overlap?: number;
+}
+
+export interface MimoMixedIdentification {
+	start_vrms: number;
+	below_reference_db: number;
+	tolerance_db: number;
+	max_steps: number;
+	frames: number;
+	noise_frames: number;
+}
+
+export interface MimoMixedLevelSchedule {
+	mode: LadderMode;
+	start_db: number;
+	table_db: number[];
+	/** One for every rung, or one value for all. */
+	dwell_s: number[];
 }
 
 export interface MimoMixedConfig {
 	title?: string;
-	channels: { controls: MimoControlRow[]; drives: MimoMixedDriveRow[]; limits?: MimoLimitRow[]; article_mass_lb?: number };
+	operator?: string;
+	article?: string;
+	notes?: string;
+	specification?: { document: string; clause: string };
+	/** Control channels, by table index. */
+	controls: number[];
+	drives: MimoMixedDrive[];
+	limits?: MimoMixedLimit[];
 	/** The floor's reference: MIMO Random's, inline or a reference file. */
 	reference: MimoReference;
-	/** Exactly one floor first, then at most 12 tones and 12 narrowbands. */
 	parts: MimoMixedPart[];
 	/** Hz each side of a tone that stands still; default 2. */
 	exclusion_hz?: number;
 	/** The tone tracker's bandwidth, Hz; default 0.5. */
 	tracking_hz?: number;
-	estimation?: MimoEstimation;
-	identification?: MimoIdentification;
-	/** Random's ladder; every part moves by the same dB. */
-	schedule: Schedule;
-	control?: MimoMixedControl;
-	protections?: MimoMixedProtections;
+	estimation: MimoMixedEstimation;
+	identification?: MimoMixedIdentification;
+	gates?: { coherence_threshold: number; condition_threshold: number };
+	caps?: { up_db: number; down_db: number };
+	protections?: { envelope_abort_lines: number; divergence_loops: number; divergence_floor_db: number; overload_fraction: number; settle_loops: number };
+	schedule: MimoMixedLevelSchedule;
+	full_level_duration_s?: number;
+	/** A level change's ramp; default 0.5, at least two control ticks. */
+	level_ramp_s?: number;
+	shutdown_ramp_s?: number;
+	/** One part's ramp in or out; default 3, at least two control ticks. */
+	part_ramp_s?: number;
+	floor_settle_s?: number;
+	soft_start_db?: number;
+	soft_start_relax_db?: number;
+	/** `Hold` only: an updated model is refused `frf_update_not_built`. */
+	frf_mode?: 'Hold';
+	crest_factor?: number;
+	drive_clip_sigma?: number;
+	article_mass_lb?: number;
 	law?: MimoMixedLawChoice;
-	operator?: string;
-	article?: string;
-	notes?: string;
-	specification?: { document: string; clause: string } | null;
-	record?: { streams: boolean } | null;
+	control_tick_s?: number;
 	metadata?: { key: string; label?: string; value: string }[];
+	seed?: number;
+	record?: { streams: boolean };
+	simulator?: { structure: string };
 }
 
 export interface MimoMixedConfigureParams {
@@ -268,12 +330,10 @@ export interface MimoMixedConfigureParams {
 
 // --- refusals --------------------------------------------------------------------------------------
 
-/** The verbs' refusals: Random's, Mixed Mode's two, and the configuration's. */
-export type MimoMixedRefusalReason = RefusalReason | 'adjust_refused' | 'part_refused' | 'config_invalid' | 'bad_state' | 'station_error' | 'law_error';
-
-/** A configuration refusal's name. */
+/** A configuration item's name: the controller's refusals, the table's and the laws'. */
 export type MimoMixedItemReason =
 	| 'no_floor'
+	| 'more_than_one_floor'
 	| 'unknown_part_kind'
 	| 'part_out_of_band'
 	| 'parts_too_close'
@@ -283,7 +343,8 @@ export type MimoMixedItemReason =
 	| 'follow_unknown_part'
 	| 'follow_self'
 	| 'follow_loop'
-	| 'schedule_unsupported'
+	| 'follow_no_frequency'
+	| 'segments_not_built'
 	| 'bad_part'
 	| 'bad_config'
 	| 'wrong_control_count'
@@ -291,127 +352,85 @@ export type MimoMixedItemReason =
 	| 'band_matrix_not_built'
 	| 'law_refuses_tone'
 	| 'budget_cannot_fit'
+	| 'tone_model_not_finite'
 	| 'frf_update_not_built'
 	| 'unknown_band_law'
 	| 'unknown_ceiling_rule'
 	| 'unknown_fill_rule'
+	| 'abort_below_ceiling'
+	| 'ramp_too_short'
+	| 'duplicate_drive'
+	| 'channel_unknown'
 	| 'reference_invalid'
 	| 'law_unknown'
-	| 'too_many_controls'
-	| 'too_many_drives'
-	| 'too_many_limits'
+	| 'law_wrong_world'
+	| 'param_unknown'
+	| 'param_out_of_range'
 	| 'out_of_range'
-	/** A warning: a tone sweeps faster than its tracker follows, and will abort. */
-	| 'sweep_beyond_tracker';
+	| 'config_unreadable'
+	| 'drive_channel_present';
 
-/**
- * One refusal or warning of the setup, by name, with where it is: the part by its id, the control
- * and the drive by their position from 0, and a field path where there is one.
- */
+/** One refusal or warning of the setup, by name, with where it is: a field path, a table row. */
 export interface MimoMixedReportItem {
-	reason: MimoMixedItemReason;
+	reason: MimoMixedItemReason | ReportItem['reason'];
 	message: string;
-	field?: string | null;
-	part?: string | null;
-	control?: number | null;
-	drive?: number | null;
+	field?: string;
 	channel?: number | null;
 	row?: number;
-	/** The refusal's own numbers: `{expected, got}`, `{line, min_eigenvalue_rel}`, `{time_s, need_v, ceiling_v}`. */
-	detail?: Record<string, unknown>;
 }
 
-/** `detail.why` of a `part_refused` refusal: Mixed Mode's. */
-export type MimoMixedPartRefusal = 'unknown_part' | 'floor' | 'window_closed' | 'schedule_ended';
+/** The verbs' refusals by name. */
+export type MimoMixedRefusalReason =
+	| 'not_configured'
+	| 'wrong_state'
+	| 'run_finished'
+	| 'run_active'
+	| 'shutting_down'
+	| 'config_invalid'
+	| 'config_unreadable'
+	| 'table_invalid'
+	| 'law_not_checked'
+	| 'arm_refused'
+	| 'record_unwritable'
+	| 'hardware_busy'
+	| 'gate_failed'
+	| 'prediction_exceeded'
+	| 'override_not_needed'
+	| 'budget_cannot_fit'
+	| 'tone_model_not_finite'
+	| 'manual_mode_required'
+	| 'not_a_rung'
+	| 'part_refused'
+	| 'bad_params'
+	| MimoMixedNotBuiltReason;
+
+/** `detail.why` of a `part_refused` refusal. */
+export type MimoMixedPartRefusal = 'unknown_part' | 'floor' | 'band_folded' | string;
 
 // --- what the service derives ----------------------------------------------------------------------
 
-export interface MimoMixedGrid {
-	fs_hz: number;
-	n_pts: number;
-	df_hz: number;
-	lines: number;
-	loop_s: number;
-	tick_s: number;
-	actual: boolean;
-}
-
-export interface MimoMixedDerivedPart {
-	id: string;
-	kind: MixedPartKind;
-	name: string;
-	/** Lowest and highest frequency or center of its whole motion; null for the floor. */
-	freq_hz: [number, number] | null;
-	/** A tone's largest amplitude per control, g peak; null otherwise. */
-	peak_g: number[] | null;
-	/** The band law a narrowband is held by (`auto` resolved); null otherwise. */
-	band_law: Exclude<MimoMixedBandLaw, 'auto'> | null;
-}
-
-/** One drive's prediction at the start, at full level (the core's `DrivePrediction`). */
-export interface MimoMixedDrivePrediction {
-	drive: number;
-	random_rms_v: number;
-	random_peak_v: number;
-	tone_peak_sum_v: number;
-	tone_rms_v: number;
-	total_rms_v: number;
-	peak_v: number;
-	ceiling_vrms: number;
-	ceiling_peak_v: number;
-	within: boolean;
-}
-
-/** One control's prediction at full level. */
-export interface MimoMixedControlPrediction {
-	control: number;
-	random_rms: number;
-	tone_rms: number;
-	total_rms: number;
-}
-
-/** The budget along the schedule: each drive's worst moment, and the first that cannot fit. */
-export interface MimoMixedForecast {
-	step_s: number;
-	/** Per drive, its worst moment: the peak needed against its peak ceiling. */
-	drives: { drive: number; time_s: number; need_v: number; ceiling_v: number }[];
-	/** The worst of them. */
-	worst: { drive: number; time_s: number; need_v: number; ceiling_v: number } | null;
-	/** The first moment and drive that cannot fit; null when every moment fits. */
-	cannot_fit: { drive: number; time_s: number; need_v: number; ceiling_v: number } | null;
-}
-
-/** What the model predicts once identified (the review's), null before. */
-export interface MimoMixedPrediction {
-	drives: MimoMixedDrivePrediction[];
-	controls: MimoMixedControlPrediction[];
-	forecast: MimoMixedForecast;
-	within: boolean;
-}
-
-export interface MimoMixedLawFacts {
+/** One role's law as the configuration resolves it. */
+export interface MimoMixedLawRole {
 	id: string;
 	name: string;
 	version: string;
 	sha256: string | null;
-	live: string[];
+	builtin: boolean;
+	world: 'mimo' | 'sine_mimo';
+	/** Whether it may drive hardware in its role now. */
 	hardware: boolean;
+	/** Why not, in words; null when it may. */
+	not_cleared: string | null;
 }
 
 export interface MimoMixedDerived {
+	grid: { fs_hz: number; n_pts: number; df_hz: number; lines: number };
 	band_hz: [number, number];
-	grid: MimoMixedGrid;
-	control_labels: string[];
-	drive_labels: string[];
-	parts: MimoMixedDerivedPart[];
-	/** Station time the floor needs alone before the parts come in. */
-	floor_equalize_s: number;
-	identification_s: number;
-	/** Parts time of the ladder; null in manual. */
-	test_s: number | null;
-	/** The tracker's delay at its bandwidth, s (about 0.63 / tracking_hz). */
-	tracker_delay_s: number;
-	law: { floor: MimoMixedLawFacts; tones: MimoMixedLawFacts; bands: MimoMixedBandLaw; ceiling_rule: MimoMixedCeilingRule; fill_rule: MimoMixedFillRule };
+	/** Each control's reference rms at full level. */
+	reference_rms: number[];
+	/** The reference in words. */
+	reference_source: string;
+	law: { floor: MimoMixedLawRole; tones: MimoMixedLawRole };
 }
 
 export interface MimoMixedConfigureResult {
@@ -436,14 +455,6 @@ export interface MimoMixedConfigResult {
 
 // --- running ---------------------------------------------------------------------------------------
 
-export interface MimoMixedArmParams {
-	override_ack?: string;
-}
-
-export interface MimoMixedProceedParams {
-	acknowledge?: string;
-}
-
 export type MimoMixedLevelParams = { delta_db: number } | { to_db: number };
 
 export interface MimoMixedModeParams {
@@ -455,53 +466,81 @@ export interface MimoMixedPartParams {
 	on: boolean;
 }
 
-export interface MimoMixedAdjustParams {
-	key: string;
-	value: number;
-}
-
+/** The two review holds an override releases. */
 export type MimoMixedOverrideReason = 'gate_failed' | 'prediction_exceeded';
 
 export interface MimoMixedOverrideParams {
+	/** The operator's words; not empty. */
 	ack: string;
+	/** When given, the hold in force, or the override is refused `override_not_needed`. */
 	reason?: MimoMixedOverrideReason;
-}
-
-export interface MimoMixedExcludeParams {
-	/** Control positions from 0. */
-	controls: number[];
-	ack: string;
 }
 
 export type MimoMixedBuildBreakpointsParams = MimoBuildBreakpointsParams;
 export type MimoMixedImportParams = MimoImportParams;
 export type MimoMixedReferenceResult = MimoReferenceResult;
 
+/** Random's states; `blocked` is never one of this module's. */
 export type MimoMixedRunState = RandomRunState;
 
-/** Mixed Mode's phases: the floor alone (`floor_only`) before the parts come in. */
-export type MimoMixedPhase = MixedPhase | 'gate_failed' | 'prediction_exceeded';
+export type MimoMixedPhase = 'idle' | 'armed' | 'sysid' | 'coherence_gate' | 'gate_failed' | 'prediction_exceeded' | 'awaiting_review' | 'floor_only' | 'engaged' | 'full_level' | 'ramping_down' | 'stopped' | 'aborted';
 
-export type MimoMixedOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'law_fault' | 'fault';
+export const MIMO_MIXED_PHASES: readonly MimoMixedPhase[] = ['idle', 'armed', 'sysid', 'coherence_gate', 'gate_failed', 'prediction_exceeded', 'awaiting_review', 'floor_only', 'engaged', 'full_level', 'ramping_down', 'stopped', 'aborted'];
 
-/** How a run ended: the trip by name, and the part, control or drive it names. */
+export type MimoMixedOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'law_fault' | 'fault' | 'sysid_level_unreachable';
+
+export const MIMO_MIXED_OUTCOMES: readonly MimoMixedOutcome[] = ['completed', 'operator_stop', 'operator_abort', 'safe_stop', 'aborted', 'law_fault', 'fault', 'sysid_level_unreachable'];
+
+/** The controller's names for an end, as `end.name` carries them. */
+export const MIMO_MIXED_END_NAMES = [
+	'completed',
+	'stopped',
+	'operator_abort',
+	'drive_vpk',
+	'drive_vrms',
+	'drive_not_finite',
+	'random_underrun',
+	'input_overload',
+	'kinematic',
+	'divergence',
+	'floor_envelope',
+	'floor_not_equalized',
+	'tone_abort',
+	'tone_abort_at_ceiling',
+	'tone_unreadable',
+	'band_abort',
+	'limit_abort',
+	'station_stop',
+	'law_fault',
+	'ident_unreachable',
+	'run_error',
+	'run_thread_failure'
+] as const;
+
+/** How a run ended: the controller's name for it, and the part, control or drive it names. */
 export interface MimoMixedEnd {
 	outcome: MimoMixedOutcome;
-	message: string;
-	/** The trip's name (`tone_abort`, `floor_abort`, `drive_vpk`, `tracker_lost` ...); null for an operator's stop. */
+	/** The controller's name for the end; null when it gave none. */
 	name: string | null;
-	part: string | null;
-	control: number | null;
-	drive: number | null;
+	message: string;
 	at_s: number | null;
 	level_db: number | null;
+	part: string | null;
+	/** The control's channel, when the end names one. */
+	control: number | null;
+	/** The drive's channel, when the end names one. */
+	drive: number | null;
+	/** The ramp down's length; null for an end that did not ramp. */
 	ramp_s: number | null;
 }
 
 /** One control's numbers on a part's row. */
 export interface MimoMixedControlCell {
+	channel: number;
+	/** The floor's rms at the level, a tone's peak amplitude; null on a band's row. */
 	target: number | null;
 	measured: number | null;
+	/** A band's added level against the stated. */
 	error_db: number | null;
 	alarm: boolean;
 }
@@ -509,71 +548,125 @@ export interface MimoMixedControlCell {
 /** One part's row in the state and in every frame, in the parts' order. */
 export interface MimoMixedPartRow {
 	id: string;
-	kind: MixedPartKind;
+	kind: MimoMixedPartKind;
 	name: string;
 	/** As configured, or as `mimo_mixed.part` last set it. */
 	enabled: boolean;
-	/** Playing now, ramps included. */
+	/** Playing now. */
 	on: boolean;
-	/** Its ramp now, 0 to 1. */
-	ramp: number;
-	/** A tone's frequency or a narrowband's center now; null for the floor. */
+	/** A tone's frequency or a band's center; null for the floor. */
 	freq_hz: number | null;
-	direction: 'up' | 'down' | null;
-	sweeps: { done: number; of: number | null } | null;
-	width_hz: number | null;
-	/** Its schedule's clock stands: the run is held, or a tone waits for its tracker. */
 	held: boolean;
-	/** The ceiling rule is scaling this tone down. */
+	/** A tone held down by the shared ceiling, or a band by the drive ceilings or the change cap. */
 	limiting: boolean;
-	/** The ceiling rule's scale on this tone, 0 to 1; null for the floor and a narrowband. */
+	/** The ceiling rule's scale on a tone, or a band's ramp; null for the floor. */
 	scale: number | null;
-	/** `g` (a tone peak, the floor rms) or `g²/Hz` (a narrowband). */
+	/** True for a band folded into the floor's reference; null for the others. */
+	folded: boolean | null;
+	/** How the row's numbers read. */
+	amplitude: 'rms' | 'peak' | 'db';
 	unit: string;
-	/** One per control. */
 	controls: MimoMixedControlCell[];
-	/** A narrowband's band law in force; null otherwise. */
-	band_law: Exclude<MimoMixedBandLaw, 'auto'> | null;
-	follows: { of: string; ratio: number } | null;
 }
 
-/** One drive's numbers now. */
-export interface MimoMixedDriveRowLive {
+/** One drive's numbers now, volts. */
+export interface MimoMixedDriveRow {
 	channel: number;
-	/** The random part's rms and its held peak, volts. */
-	random_rms_v: number;
-	random_peak_v: number;
-	/** The sum of the tones' amplitudes on the drive, volts peak. */
-	tone_sum_v: number;
-	/** The drive's peak ceiling. */
-	ceiling_v: number;
-	/** What is left to the tones at this level, volts. */
-	headroom_v: number;
+	/** The random part's rms alone (the floor and the bands). */
+	random_rms_v: number | null;
+	/** The largest magnitude played in the last chunk. */
+	peak_v: number | null;
+	/** The random part's peak held over the last second. */
+	random_peak_v: number | null;
+	/** The tones' summed amplitude in force. */
+	tone_sum_v: number | null;
+	/** The peak ceiling. */
+	ceiling_v: number | null;
+	/** The peak the run aborts at (`drive_vpk`). */
+	abort_vpk: number | null;
+	headroom_v: number | null;
+	headroom_db: number | null;
+	/** The tones' common scale on this drive. */
+	scale: number | null;
 }
 
-export interface MimoMixedLawRef {
-	id: string;
-	name: string;
-	version: string;
-	sha256: string | null;
+/** One limit channel: what it carries on its worst line over its ceiling, and that line. */
+export interface MimoMixedLimitRow {
+	channel: number;
+	/** dB over the ceiling (negative: under); null before anything is read. */
+	over_db: number | null;
+	at_hz: number | null;
+}
+
+/** One override of a review hold: the client, the operator's words, the hold it released. */
+export interface MimoMixedOverride {
+	by: string;
+	text: string;
+	reason: MimoMixedOverrideReason;
+}
+
+export interface MimoMixedForecastPoint {
+	/** The drive's channel. */
+	drive: number;
+	time_s: number | null;
+	need_v: number | null;
+	ceiling_v: number | null;
+}
+
+/** One drive's prediction at full level. */
+export interface MimoMixedDrivePrediction {
+	drive: number;
+	random_rms_v: number | null;
+	random_peak_v: number | null;
+	random_peak_factor: number | null;
+	tone_peak_sum_v: number | null;
+	tone_rms_v: number | null;
+	total_rms_v: number | null;
+	peak_v: number | null;
+	ceiling_vrms: number | null;
+	ceiling_peak_v: number | null;
+	within: boolean;
+}
+
+/** What the model predicts once identified (the review's), null before. */
+export interface MimoMixedPrediction {
+	drives: MimoMixedDrivePrediction[];
+	controls: { control: number; random_rms: number | null; tone_rms: number | null; total_rms: number | null }[];
+	/** The budget along the schedule: the moment nearest a ceiling, and the first that does not fit. */
+	forecast: { step_s: number; worst: MimoMixedForecastPoint | null; cannot_fit: MimoMixedForecastPoint | null; refused: string | null };
+	within: boolean;
+}
+
+export interface MimoMixedIdentificationView {
+	level_db: number | null;
+	steps: number;
+	frames: number;
+	lag_frames: number;
+	/** Each control's mean coherence over the band. */
+	band_coherence: (number | null)[];
+	/** The gate. */
+	gate_coherence: number | null;
+	passed: boolean;
+	/** The identification's drive per drive, V rms. */
+	drive_vrms: (number | null)[];
+}
+
+export interface MimoMixedFloorCounts {
+	equalized: boolean;
+	loops: number;
 	misses: number;
-	capped: number;
-	live: Record<string, number>;
+	underruns: number;
+	dropped: number;
+	clamped: number;
 }
 
-export interface MimoMixedLaws {
-	floor: MimoMixedLawRef;
-	tones: MimoMixedLawRef;
-	bands: MimoMixedBandLaw;
-	ceiling_rule: MimoMixedCeilingRule;
-	fill_rule: MimoMixedFillRule;
-}
-
-export interface MimoMixedShape {
-	controls: number;
-	drives: number;
-	labels: string[];
-	drive_labels: string[];
+export interface MimoMixedGrid {
+	fs_hz: number;
+	n_pts: number;
+	df_hz: number;
+	lines: number;
+	band_hz: [number, number];
+	actual: boolean;
 }
 
 /** The `mimo_mixed.state` result and event. */
@@ -585,81 +678,63 @@ export interface MimoMixedState {
 	source: DataSource | null;
 	station: StationRef | null;
 	grid: MimoMixedGrid | null;
-	clock: ClockDomain | null;
-	shape: MimoMixedShape | null;
+	clock: 'shared' | null;
 	mode: LadderMode | null;
 	levels_db: number[] | null;
 	level_db: number | null;
-	full_level_s: number | null;
+	/** Station time since engage; null before. */
 	t_s: number | null;
-	elapsed_s: number | null;
-	parts_s: number | null;
-	at_level_s: number | null;
-	remaining_at_level_s: number | null;
 	held: boolean;
 	alarm: boolean;
 	limiting: boolean;
-	/** The floor's error per control over its clean lines, dB. */
-	floor_error_db: number[];
-	floor_equalized: boolean;
-	/** The common scale on the tones (`common_scale`), 1 when nothing binds; null under `in_turn` or before the tones. */
-	scale: number | null;
 	parts: MimoMixedPartRow[];
-	drives: MimoMixedDriveRowLive[];
-	/** The identification's gate, once identified. */
-	gates: MimoGates | null;
-	/** The model's prediction and the budget forecast, once identified. */
+	drives: MimoMixedDriveRow[];
+	scale: number | null;
+	floor_error_db: (number | null)[];
+	floor_equalized: boolean;
+	floor: MimoMixedFloorCounts | null;
+	limits: MimoMixedLimitRow[];
+	identification: MimoMixedIdentificationView | null;
 	prediction: MimoMixedPrediction | null;
-	law: MimoMixedLaws | null;
-	excluded: number[];
-	override: { by: string; text: string; reason?: MimoMixedOverrideReason } | null;
+	override: MimoMixedOverride | null;
+	overrides: MimoMixedOverride[];
+	law: { floor: MimoMixedLawRole; tones: MimoMixedLawRole } | null;
 	end: MimoMixedEnd | null;
-	record?: RunRecordRef | null;
+	record?: RunRecordRef;
 }
 
-export type MimoMixedLogEntry = MixedLogEntry;
+export type MimoMixedLogEntry = LogEntry & { data?: Record<string, unknown> | null };
 
 export interface MimoMixedLogResult {
-	entries: (MimoMixedLogEntry | LogEntry)[];
+	entries: MimoMixedLogEntry[];
 	next: number;
 }
 
 export interface MimoMixedLogEvent {
 	run_id: string;
-	entries: (MimoMixedLogEntry | LogEntry)[];
+	entries: MimoMixedLogEntry[];
 }
 
 // --- display ---------------------------------------------------------------------------------------
 
 /**
  * What a plot can show. `control`: each control's spectrum with the tones in, against its
- * reference. `residual`: each control's autospectrum with the tones taken out, against the floor's
- * reference with the alarm and abort lines. `cross`: the chosen pairs' coherence and phase against
- * the reference's. `drive`: each drive's spectrum. `tone_amplitude` and `tone_phase`: each tone's
- * history per control. `band_level`: each narrowband's level history.
+ * reference. `residual`: the floor alone, the tones taken out, with the reference and its lines.
+ * `cross`: the residual's cross spectrum between each control and the next. `drive`: each drive's
+ * floor autospectrum. `tone_amplitude` and `tone_phase`: each tone's history per control.
+ * `band_level`: each band's added level against its statement per control.
  */
-export type MimoMixedQuantity =
-	| 'control'
-	| 'residual'
-	| 'cross'
-	| 'drive'
-	| 'tone_amplitude'
-	| 'tone_phase'
-	| 'band_level'
-	| 'identification'
-	| 'coherence'
-	| 'law'
-	| 'readings';
+export type MimoMixedQuantity = 'control' | 'residual' | 'cross' | 'drive' | 'tone_amplitude' | 'tone_phase' | 'band_level';
+
+export const MIMO_MIXED_QUANTITIES: readonly MimoMixedQuantity[] = ['control', 'residual', 'cross', 'drive', 'tone_amplitude', 'tone_phase', 'band_level'];
 
 export interface MimoMixedSubscribePlot {
 	id: string;
 	quantity: MimoMixedQuantity;
-	/** `control`, `residual`, `cross` and `drive`: table indexes, or every one. */
-	channels?: number[] | 'all' | 'control' | 'limited';
-	/** `cross` only: the control pairs, positions from 0; default the first pairs among the chosen channels. */
-	pairs?: [number, number][];
-	/** `tone_amplitude`, `tone_phase` and `band_level`: ids or a set; default `all`. */
-	parts?: string[] | 'all' | 'tones' | 'bands';
+	/** Control channels; absent or null: every control. */
+	channels?: number[] | null;
+	/** Part ids; absent or null: every part the quantity takes. */
+	parts?: string[] | null;
 }
 
 export type MimoMixedSubscribeParams = { rate_hz?: number; plots: MimoMixedSubscribePlot[] } | { default: true };
@@ -667,34 +742,33 @@ export type MimoMixedSubscribeParams = { rate_hz?: number; plots: MimoMixedSubsc
 export interface MimoMixedSubscribeResult {
 	default: boolean;
 	rate_hz: number;
-	plots: MimoMixedSubscribePlot[] | null;
+	plots: Required<MimoMixedSubscribePlot>[] | null;
 	quantities: MimoMixedQuantity[];
 }
 
+/** The live frame: the state's members of these names, the station's class and the floor loops run. */
 export interface MimoMixedLiveHead {
 	run_id: string;
 	source: DataSource;
 	class: StationClass;
-	state: 'running' | 'review' | 'stopping' | 'finished';
+	state: MimoMixedRunState;
 	phase: MimoMixedPhase;
-	mode: LadderMode;
+	mode: LadderMode | null;
 	t_s: number | null;
-	elapsed_s: number | null;
-	parts_s: number | null;
 	level_db: number | null;
-	commanded_db: number | null;
-	at_level_s: number | null;
-	remaining_at_level_s: number | null;
-	loop: number;
 	held: boolean;
 	alarm: boolean;
 	limiting: boolean;
-	floor_error_db: number[];
+	floor_error_db: (number | null)[];
 	floor_equalized: boolean;
 	scale: number | null;
 	parts: MimoMixedPartRow[];
-	drives: MimoMixedDriveRowLive[];
-	channels: LiveChannel[];
+	drives: MimoMixedDriveRow[];
+	loop: number;
+}
+
+export interface MimoMixedLive extends MimoMixedLiveHead {
+	views: View[];
 }
 
 export interface MimoMixedDataPlot {
@@ -712,17 +786,45 @@ export interface MimoMixedData extends MimoMixedLiveHead {
 
 // --- the laws ------------------------------------------------------------------------------------
 
-export type MimoMixedLawRole = 'floor' | 'tones';
+export type MimoMixedRole = 'floor' | 'tones';
 
-/** `laws.check` with a role: the law in that role with the other role's default. */
+/** `laws.check` with a role: the law in that role with the other role's built-in. */
 export interface MimoMixedLawsCheckParams {
 	id?: string;
 	path?: string;
 	params?: Record<string, unknown> | null;
-	mimo_mixed: MimoMixedLawRole;
+	mimo_mixed: MimoMixedRole;
 }
 
-export interface MimoMixedLawsListResult {
-	laws: LawEntry[];
-	problems: { file: string; reason: string }[];
+/** The MIMO Mixed check's cases, in order; `swept_tone_through_mode` is informational. */
+export const MIMO_MIXED_CHECK_CASES = [
+	'floor_only',
+	'fixed_tones_on_floor',
+	'swept_tone_through_mode',
+	'narrowband_fixed',
+	'narrowband_swept',
+	'level_ladder',
+	'shared_ceiling',
+	'more_drives_than_controls',
+	'transport_delay',
+	'limit_channel'
+] as const;
+
+export const MIMO_MIXED_CHECK_VERSION = 'mimo-mixed-check 2';
+
+export interface MimoMixedCheckCase {
+	name: string;
+	case: (typeof MIMO_MIXED_CHECK_CASES)[number];
+	role: MimoMixedRole;
+	plant: string;
+	requirement: string;
+	/** False: run and reported, no part of the verdict. */
+	required: boolean;
+	passed: boolean;
+	detail: unknown;
+}
+
+export interface MimoMixedLawsCheckResult {
+	law: MimoMixedLawRole;
+	report: { passed: boolean; recorded: boolean; role: MimoMixedRole; tool_version: string; cases: MimoMixedCheckCase[] };
 }

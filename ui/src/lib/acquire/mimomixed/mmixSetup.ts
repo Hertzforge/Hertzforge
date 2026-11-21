@@ -17,25 +17,28 @@
 import type { BandDb, ChannelRow, ReportItem } from '$lib/protocol/types';
 import type { LawEntry, MimoBuildBreakpointsParams, MimoReference } from '$lib/protocol/mimo';
 import {
+	defaultAbortVpk,
 	MIMO_MIXED_DEFAULTS,
 	MIMO_MIXED_MAX_BANDS,
 	MIMO_MIXED_MAX_CONTROLS,
 	MIMO_MIXED_MAX_DRIVES,
 	MIMO_MIXED_MAX_LIMITS,
 	MIMO_MIXED_MAX_TONES,
+	type MimoMixedBandBody,
 	type MimoMixedBandLaw,
-	type MimoMixedBandPart,
 	type MimoMixedCeilingRule,
 	type MimoMixedConfig,
 	type MimoMixedFillRule,
+	type MimoMixedFloorBody,
 	type MimoMixedPart,
 	type MimoMixedReportItem,
-	type MimoMixedTonePart,
+	type MimoMixedSchedule,
+	type MimoMixedToneBody,
 	type PerControl
 } from '$lib/protocol/mimoMixed';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
 import { breakpointsWire, defaultTable } from '../mimo/mimoSetup';
-import { newSchedule, scheduleOf, type ScheduleDraft, type WindowDraft } from '../mixed/mixedSetup';
+import { newSchedule, type ScheduleDraft, type WindowDraft } from '../mixed/mixedSetup';
 import { defaultRecord, followTitle, titleNumber, type BreakpointDraft, type FieldErrors, type LevelDraft, type RecordDraft } from '../setup';
 
 // ---------------------------------------------------------------------------------------------
@@ -56,8 +59,12 @@ export interface MmixDriveDraft {
 	ceiling_vrms: number;
 	/** Volts peak on the summed drive, the budget the floor and the tones share; NaN until given. */
 	peak_v: number;
-	/** Null: no rms abort of its own. */
+	/** Null: the service's, the rms ceiling plus 1 dB. */
 	abort_vrms: number | null;
+	/** The summed drive's peak abort, V, above the peak ceiling; null: the peak ceiling plus 1 dB. */
+	abort_vpk: number | null;
+	/** The highest rms the identification may use on this output, V. */
+	pretest_max_vrms: number;
 }
 
 export interface MmixLimitDraft {
@@ -92,7 +99,7 @@ export interface MmixBandDraft {
 	width: { by: 'hz' | 'share'; hz: number; share: number };
 	/** `raise`: the floor lifted by dB per control. `added`: a density per control and one coherence. */
 	statement: { kind: 'raise' | 'added'; db: number[]; level_g2_hz: number[]; coherence: number };
-	/** False: the floor's bands. */
+	/** False: the service's band defaults, 3 dB alarm and 6 dB abort. */
 	own_bands: boolean;
 	alarm_db: BandDb;
 	abort_db: BandDb;
@@ -118,8 +125,11 @@ export interface MmixDraft {
 	bands: MmixBandDraft[];
 	exclusion_hz: number;
 	tracking_hz: number;
-	estimation: { fs_hz: number; n_pts: number; frames_per_loop: number };
-	identification: { level_db: number; frames: number; coherence_floor: number; condition_limit: number; review: boolean };
+	estimation: { fs_hz: number; n_pts: number; frames_per_loop: number; memory_loops: number };
+	/** The identification's level search: from `start_vrms` up to its level below the reference, within `tolerance_db`. */
+	identification: { below_reference_db: number; frames: number; start_vrms: number; tolerance_db: number; max_steps: number; noise_frames: number };
+	/** The gates the identification must pass before the run holds for review. */
+	gates: { coherence_threshold: number; condition_threshold: number };
 	schedule: { mode: 'auto' | 'manual'; levels: LevelDraft[]; full_level_s: number };
 	control: {
 		part_ramp_s: number;
@@ -127,13 +137,12 @@ export interface MmixDraft {
 		level_ramp_s: number;
 		shutdown_ramp_s: number;
 		soft_start_db: number;
+		soft_start_relax_db: number;
 		crest_factor: number;
 		cap_up_db: number;
 		cap_down_db: number;
-		law_budget: number;
-		law_misses: number;
 	};
-	protections: { envelope_abort_lines: number; divergence_loops: number; overload_fraction: number };
+	protections: { envelope_abort_lines: number; divergence_loops: number; divergence_floor_db: number; overload_fraction: number; settle_loops: number };
 	laws: { floor: LawDraft; tones: LawDraft; bands: MimoMixedBandLaw; ceiling_rule: MimoMixedCeilingRule; fill_rule: MimoMixedFillRule };
 	record: RecordDraft;
 }
@@ -160,13 +169,28 @@ export function newControl(channel: number): MmixControlDraft {
 
 const fill = (n: number, v: number): number[] => Array.from({ length: n }, () => v);
 
+/** A part's schedule standing still at `freq`. Every sweep here ends: switched to a sweep, it ends after its sweeps. */
+export function mmixSchedule(freq: number): ScheduleDraft {
+	return { ...newSchedule('fixed', freq), end_by: 'sweeps' };
+}
+
+/** A new drive: its ceilings to be given, its aborts the service's. */
+export function newDrive(channel: number): MmixDriveDraft {
+	return { channel, ceiling_vrms: NaN, peak_v: NaN, abort_vrms: null, abort_vpk: null, pretest_max_vrms: 0.2 };
+}
+
+/** The peak abort a drive runs with: its own, or the peak ceiling plus 1 dB. NaN until the peak ceiling is given. */
+export function abortVpkOf(x: Pick<MmixDriveDraft, 'peak_v' | 'abort_vpk'>): number {
+	return x.abort_vpk ?? defaultAbortVpk(x.peak_v);
+}
+
 export function newTone(id: string, n: number, controls: number, freq = 100): MmixToneDraft {
 	return {
 		id,
 		name: `Tone ${n}`,
 		enabled: true,
 		window: { on_s: 0, off_s: null },
-		schedule: newSchedule('fixed', freq),
+		schedule: mmixSchedule(freq),
 		amp_g: fill(controls, 1),
 		phases_stated: true,
 		phase_deg: fill(controls, 0),
@@ -181,12 +205,12 @@ export function newBand(id: string, n: number, controls: number, freq = 250): Mm
 		name: `Narrowband ${n}`,
 		enabled: true,
 		window: { on_s: 0, off_s: null },
-		schedule: newSchedule('fixed', freq),
+		schedule: mmixSchedule(freq),
 		width: { by: 'hz', hz: 20, share: 0.05 },
 		statement: { kind: 'raise', db: fill(controls, 10), level_g2_hz: fill(controls, 0.01), coherence: 0 },
 		own_bands: false,
-		alarm_db: [...MIMO_MIXED_DEFAULTS.floor_alarm_db] as BandDb,
-		abort_db: [...MIMO_MIXED_DEFAULTS.floor_abort_db] as BandDb
+		alarm_db: [...MIMO_MIXED_DEFAULTS.band_alarm_db] as BandDb,
+		abort_db: [...MIMO_MIXED_DEFAULTS.band_abort_db] as BandDb
 	};
 }
 
@@ -209,8 +233,9 @@ export function defaultMmixSetup(): MmixDraft {
 		bands: [],
 		exclusion_hz: MIMO_MIXED_DEFAULTS.exclusion_hz,
 		tracking_hz: MIMO_MIXED_DEFAULTS.tracking_hz,
-		estimation: { fs_hz: 4096, n_pts: 2048, frames_per_loop: 4 },
-		identification: { level_db: -20, frames: 40, coherence_floor: 0.5, condition_limit: 1000, review: true },
+		estimation: { fs_hz: 4096, n_pts: 2048, frames_per_loop: 8, memory_loops: 4 },
+		identification: { below_reference_db: 20, frames: 64, start_vrms: 0.01, tolerance_db: 1, max_steps: 8, noise_frames: 32 },
+		gates: { coherence_threshold: 0.5, condition_threshold: 1000 },
 		schedule: {
 			mode: 'auto',
 			levels: [
@@ -220,8 +245,8 @@ export function defaultMmixSetup(): MmixDraft {
 			],
 			full_level_s: 120
 		},
-		control: { part_ramp_s: 3, floor_settle_s: 30, level_ramp_s: 3, shutdown_ramp_s: 3, soft_start_db: 9, crest_factor: 3, cap_up_db: 3.5, cap_down_db: 6, law_budget: 0.25, law_misses: 3 },
-		protections: { envelope_abort_lines: 5, divergence_loops: 5, overload_fraction: 0.9 },
+		control: { part_ramp_s: 3, floor_settle_s: 30, level_ramp_s: 3, shutdown_ramp_s: 3, soft_start_db: 9, soft_start_relax_db: 6, crest_factor: 3, cap_up_db: 3.5, cap_down_db: 6 },
+		protections: { envelope_abort_lines: 10, divergence_loops: 5, divergence_floor_db: 3, overload_fraction: 0.9, settle_loops: 1 },
 		laws: {
 			floor: { id: MIMO_MIXED_DEFAULTS.floor_law, params: {} },
 			tones: { id: MIMO_MIXED_DEFAULTS.tone_law, params: {} },
@@ -235,6 +260,13 @@ export function defaultMmixSetup(): MmixDraft {
 
 const arr = <T>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? (v as T[]) : fallback);
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+/** `base`'s members, each taken from `saved` where it has it: a member the setup no longer has is dropped. */
+const pick = <T extends object>(base: T, saved: unknown): T => {
+	const o = obj(saved);
+	return Object.fromEntries(Object.entries(base).map(([k, v]) => [k, k in o ? o[k] : v])) as T;
+};
+/** A sweep saved with no end ends after its sweeps: the controller's sweeps always end. */
+const everyEnds = (s: ScheduleDraft): ScheduleDraft => (s.end_by === 'none' ? { ...s, end_by: 'sweeps' } : s);
 const oneOf = <T extends string>(v: unknown, list: readonly T[], fallback: T): T => (list.includes(v as T) ? (v as T) : fallback);
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
@@ -244,24 +276,25 @@ export function mergeMmixSetup(saved: Partial<MmixDraft> | null): MmixDraft {
 	const out = { ...base, ...saved } as MmixDraft;
 	out.controls = arr<MmixControlDraft>(saved.controls, []).map((c) => ({ ...newControl(c?.channel ?? 0), ...obj(c) }) as MmixControlDraft);
 	out.notControls = arr(saved.notControls, []);
-	out.drives = arr(saved.drives, []);
+	out.drives = arr<MmixDriveDraft>(saved.drives, []).map((x) => pick(newDrive(x?.channel ?? 0), x));
 	out.limits = arr(saved.limits, []);
 	out.reference = { ...base.reference, ...obj(saved.reference) };
 	out.tones = arr<MmixToneDraft>(saved.tones, base.tones).map((t, i) => {
 		const n = newTone(t?.id ?? `t${i + 1}`, i + 1, 0);
-		return { ...n, ...obj(t), window: { ...n.window, ...obj(t?.window) }, schedule: { ...n.schedule, ...obj(t?.schedule) } } as MmixToneDraft;
+		return { ...n, ...obj(t), window: { ...n.window, ...obj(t?.window) }, schedule: everyEnds({ ...n.schedule, ...obj(t?.schedule) }) } as MmixToneDraft;
 	});
 	out.bands = arr<MmixBandDraft>(saved.bands, []).map((b, i) => {
 		const n = newBand(b?.id ?? `b${i + 1}`, i + 1, 0);
-		return { ...n, ...obj(b), window: { ...n.window, ...obj(b?.window) }, schedule: { ...n.schedule, ...obj(b?.schedule) }, width: { ...n.width, ...obj(b?.width) }, statement: { ...n.statement, ...obj(b?.statement) } } as MmixBandDraft;
+		return { ...n, ...obj(b), window: { ...n.window, ...obj(b?.window) }, schedule: everyEnds({ ...n.schedule, ...obj(b?.schedule) }), width: { ...n.width, ...obj(b?.width) }, statement: { ...n.statement, ...obj(b?.statement) } } as MmixBandDraft;
 	});
-	out.estimation = { ...base.estimation, ...obj(saved.estimation) };
-	out.identification = { ...base.identification, ...obj(saved.identification) };
+	out.estimation = pick(base.estimation, saved.estimation);
+	out.identification = pick(base.identification, saved.identification);
+	out.gates = pick(base.gates, saved.gates);
 	const s = obj(saved.schedule);
 	out.schedule = { ...base.schedule, ...s, levels: arr<LevelDraft>(s.levels, base.schedule.levels) } as MmixDraft['schedule'];
 	if (!out.schedule.levels.length) out.schedule.levels = base.schedule.levels;
-	out.control = { ...base.control, ...obj(saved.control) };
-	out.protections = { ...base.protections, ...obj(saved.protections) };
+	out.control = pick(base.control, saved.control);
+	out.protections = pick(base.protections, saved.protections);
 	const l = obj(saved.laws);
 	out.laws = {
 		floor: { ...base.laws.floor, ...obj(l.floor) } as LawDraft,
@@ -317,7 +350,7 @@ export function fitChannels(d: MmixDraft, rows: ChannelRow[]): boolean {
 	const first = d.controls[0];
 	d.controls = next.map((ch) => byChannel.get(ch) ?? (first ? { ...plainCopy(first), channel: ch } : newControl(ch)));
 	const drives = new Map(d.drives.map((x) => [x.channel, x]));
-	d.drives = on.filter((r) => r.role === 'drive').map((r) => drives.get(r.index) ?? { channel: r.index, ceiling_vrms: NaN, peak_v: NaN, abort_vrms: null });
+	d.drives = on.filter((r) => r.role === 'drive').map((r) => drives.get(r.index) ?? newDrive(r.index));
 	const inputs = new Set(on.filter((r) => r.role !== 'drive' && !next.includes(r.index)).map((r) => r.index));
 	d.limits = d.limits.filter((l) => inputs.has(l.channel));
 	fitPerControl(d);
@@ -381,83 +414,121 @@ export function perControl(list: readonly number[]): PerControl<number> {
 
 const band = (b: BandDb): BandDb => [b[0], b[1]];
 
-export function toneOf(t: MmixToneDraft): MimoMixedTonePart {
-	const same = t.amp_g.length > 0 && t.amp_g.every((v) => v === t.amp_g[0]);
+/**
+ * A part's schedule in the controller's form. A fixed part stands for its seconds or cycles (or
+ * the whole window); a sweep ends after its sweeps, its duration or whichever comes first.
+ */
+export function mmixScheduleOf(s: ScheduleDraft): MimoMixedSchedule {
+	if (s.kind === 'follow') return { kind: 'follow', of: s.of, ratio: s.ratio };
+	if (s.kind === 'fixed') {
+		const out: MimoMixedSchedule = { kind: 'fixed', hz: s.freq_hz };
+		if (s.dwell.by === 'seconds') out.for_s = s.dwell.seconds;
+		if (s.dwell.by === 'cycles') out.for_cycles = s.dwell.cycles;
+		return out;
+	}
+	const target: Extract<MimoMixedSchedule, { kind: 'sweep' }>['target'] =
+		s.end_by === 'duration' ? { kind: 'duration', s: s.duration_s } : s.end_by === 'both' ? { kind: 'whichever_first', sweeps: s.sweeps, duration_s: s.duration_s } : { kind: 'sweeps', n: s.sweeps };
 	return {
-		kind: 'tone',
-		id: t.id,
-		name: t.name,
-		enabled: t.enabled,
-		window: { on_s: t.window.on_s, off_s: t.window.off_s },
-		schedule: scheduleOf(t.schedule),
-		amplitude: same ? { kind: 'constant', g_pk: t.amp_g[0] } : t.amp_g.map((g) => ({ kind: 'constant' as const, g_pk: g })),
-		phases_stated: t.phases_stated,
-		phase_deg: t.phases_stated ? [...t.phase_deg] : [],
-		alarm_db: band(t.alarm_db),
-		abort_db: band(t.abort_db)
+		kind: 'sweep',
+		lo_hz: s.band_hz[0],
+		hi_hz: s.band_hz[1],
+		start_hz: s.start_hz ?? s.band_hz[0],
+		direction: s.direction,
+		law: s.law === 'log' ? 'log_oct_per_min' : 'linear_hz_per_s',
+		rate: s.law === 'log' ? s.oct_per_min : s.hz_per_s,
+		target
 	};
 }
 
-export function bandPartOf(b: MmixBandDraft): MimoMixedBandPart {
-	const s = b.statement;
-	return {
-		kind: 'narrowband',
-		id: b.id,
-		name: b.name,
-		enabled: b.enabled,
-		window: { on_s: b.window.on_s, off_s: b.window.off_s },
-		schedule: scheduleOf(b.schedule),
-		width: b.width.by === 'hz' ? { kind: 'hz', hz: b.width.hz } : { kind: 'share', share: b.width.share },
-		statement: s.kind === 'raise' ? { kind: 'raise', db: perControl(s.db) } : { kind: 'added', level_g2_hz: perControl(s.level_g2_hz), coherence: s.coherence },
-		alarm_db: b.own_bands ? band(b.alarm_db) : null,
-		abort_db: b.own_bands ? band(b.abort_db) : null
+const windowOf = (w: WindowDraft) => (w.off_s === null ? { on_s: w.on_s } : { on_s: w.on_s, off_s: w.off_s });
+
+export function toneOf(t: MmixToneDraft): MimoMixedPart<MimoMixedToneBody> {
+	const same = t.amp_g.length > 0 && t.amp_g.every((v) => v === t.amp_g[0]);
+	const body: MimoMixedToneBody = {
+		kind: 'tone',
+		schedule: mmixScheduleOf(t.schedule),
+		amplitude: same ? { kind: 'constant', g_pk: t.amp_g[0] } : t.amp_g.map((g) => ({ kind: 'constant' as const, g_pk: g })),
+		phases_stated: t.phases_stated,
+		alarm_db: band(t.alarm_db),
+		abort_db: band(t.abort_db)
 	};
+	if (t.phases_stated) body.phase_deg = [...t.phase_deg];
+	return { id: t.id, name: t.name, enabled: t.enabled, window: windowOf(t.window), body };
+}
+
+export function bandPartOf(b: MmixBandDraft): MimoMixedPart<MimoMixedBandBody> {
+	const s = b.statement;
+	const body: MimoMixedBandBody = {
+		kind: 'narrowband',
+		schedule: mmixScheduleOf(b.schedule),
+		width: b.width.by === 'hz' ? { kind: 'hz', hz: b.width.hz } : { kind: 'share', share: b.width.share },
+		statement: s.kind === 'raise' ? { kind: 'raise', db: perControl(s.db) } : { kind: 'added', level_g2_hz: perControl(s.level_g2_hz), coherence: s.coherence }
+	};
+	// no bands of its own: the members are left out, and the service's 3 and 6 dB hold
+	if (b.own_bands) {
+		body.alarm_db = band(b.alarm_db);
+		body.abort_db = band(b.abort_db);
+	}
+	return { id: b.id, name: b.name, enabled: b.enabled, window: windowOf(b.window), body };
 }
 
 export function partsOf(d: MmixDraft): MimoMixedPart[] {
 	const sameBands = (xs: BandDb[]): PerControl<BandDb> => (xs.every((x) => x[0] === xs[0][0] && x[1] === xs[0][1]) ? band(xs[0]) : xs.map(band));
-	const floor: MimoMixedPart = { kind: 'floor', id: 'floor', name: 'Floor', enabled: true };
+	const body: MimoMixedFloorBody = { kind: 'floor' };
 	if (d.controls.length) {
-		floor.alarm_db = sameBands(d.controls.map((c) => c.alarm_db));
-		floor.abort_db = sameBands(d.controls.map((c) => c.abort_db));
+		body.alarm_db = sameBands(d.controls.map((c) => c.alarm_db));
+		body.abort_db = sameBands(d.controls.map((c) => c.abort_db));
 	}
-	return [floor, ...d.tones.map(toneOf), ...d.bands.map(bandPartOf)];
+	return [{ id: 'floor', name: 'Floor', enabled: true, window: { on_s: 0 }, body }, ...d.tones.map(toneOf), ...d.bands.map(bandPartOf)];
+}
+
+/**
+ * The level schedule in the controller's form: the levels are the rungs, the first is where the
+ * run starts; each rung's dwell is its own, the last (full level) taking the full-level time.
+ */
+export function levelScheduleOf(d: Pick<MmixDraft, 'schedule'>): MimoMixedConfig['schedule'] {
+	const levels = d.schedule.levels;
+	const dwells = levels.slice(0, -1).map((l) => l.dwell_s);
+	return { mode: d.schedule.mode, start_db: levels[0]?.db ?? 0, table_db: levels.map((l) => l.db), dwell_s: dwells.length ? dwells : [0] };
 }
 
 /** The configuration the draft describes, given the reference the service built or read. */
 export function toMmixConfig(d: MmixDraft, reference: MimoReference | null, laws: { floor: LawEntry | null; tones: LawEntry | null }): MimoMixedConfig {
 	const r = d.record;
 	const [document, clause] = [r.document.trim(), r.clause.trim()];
-	const last = d.schedule.levels.length - 1;
 	const c = d.control;
-	return {
+	const out: MimoMixedConfig = {
 		title: mmixTitleOf(d),
-		channels: {
-			controls: d.controls.map((x) => ({ channel: x.channel, alarm_db: band(x.alarm_db), abort_db: band(x.abort_db) })),
-			drives: d.drives.map((x) => ({ channel: x.channel, ceiling_vrms: x.ceiling_vrms, peak_v: x.peak_v, abort_vrms: x.abort_vrms })),
-			limits: d.limits.map((l) => ({ channel: l.channel, ceiling: l.ceiling, abort_margin_db: l.abort_margin_db }))
-		},
+		operator: r.operator,
+		article: r.article,
+		notes: r.notes,
+		controls: d.controls.map((x) => x.channel),
+		drives: d.drives.map((x) => {
+			const w: MimoMixedConfig['drives'][number] = { channel_index: x.channel, ceiling_vrms: x.ceiling_vrms, peak_v: x.peak_v, pretest_max_vrms: x.pretest_max_vrms };
+			if (x.abort_vrms !== null) w.abort_vrms = x.abort_vrms;
+			if (x.abort_vpk !== null) w.abort_vpk = x.abort_vpk;
+			return w;
+		}),
+		limits: d.limits.map((l) => ({ channel_index: l.channel, ceiling_psd: [l.ceiling], abort_margin_db: l.abort_margin_db })),
 		reference: reference ?? { kind: 'inline', freqs_hz: [], n: d.controls.length, re: [], im: [] },
 		parts: partsOf(d),
 		exclusion_hz: d.exclusion_hz,
 		tracking_hz: d.tracking_hz,
-		estimation: { ...d.estimation },
+		estimation: { ...d.estimation, window: 'Hann', overlap: 0.5 },
 		identification: { ...d.identification },
-		schedule: { mode: d.schedule.mode, levels: d.schedule.levels.map((l, i) => (i === last ? { db: l.db } : { db: l.db, dwell_s: l.dwell_s })), full_level_s: d.schedule.full_level_s },
-		control: {
-			frf: 'hold',
-			cap_up_db: c.cap_up_db,
-			cap_down_db: c.cap_down_db,
-			law_budget: c.law_budget,
-			law_misses: c.law_misses,
-			level_ramp_s: c.level_ramp_s,
-			shutdown_ramp_s: c.shutdown_ramp_s,
-			part_ramp_s: c.part_ramp_s,
-			floor_settle_s: c.floor_settle_s,
-			soft_start_db: c.soft_start_db,
-			crest_factor: c.crest_factor
-		},
+		gates: { ...d.gates },
+		caps: { up_db: c.cap_up_db, down_db: c.cap_down_db },
 		protections: { ...d.protections },
+		schedule: levelScheduleOf(d),
+		full_level_duration_s: d.schedule.full_level_s,
+		level_ramp_s: c.level_ramp_s,
+		shutdown_ramp_s: c.shutdown_ramp_s,
+		part_ramp_s: c.part_ramp_s,
+		floor_settle_s: c.floor_settle_s,
+		soft_start_db: c.soft_start_db,
+		soft_start_relax_db: c.soft_start_relax_db,
+		frf_mode: 'Hold',
+		crest_factor: c.crest_factor,
 		law: {
 			floor: { id: d.laws.floor.id, params: lawWireParams(laws.floor, d.laws.floor.params) },
 			tones: { id: d.laws.tones.id, params: lawWireParams(laws.tones, d.laws.tones.params) },
@@ -465,12 +536,10 @@ export function toMmixConfig(d: MmixDraft, reference: MimoReference | null, laws
 			ceiling_rule: { id: d.laws.ceiling_rule },
 			fill_rule: { id: d.laws.fill_rule }
 		},
-		operator: r.operator,
-		article: r.article,
-		notes: r.notes,
-		specification: document ? { document, clause } : null,
 		record: { streams: r.streams }
 	};
+	if (document) out.specification = { document, clause };
+	return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -488,9 +557,10 @@ export const MMIX_SECTIONS: { id: MmixSection; label: string }[] = [
 	{ id: 'forecast', label: 'Prediction & Budget' }
 ];
 
-/** A refusal's name in words, for the list of refusals. */
+/** A finding's name in words, for the list of refusals: every name the service gives a setup finding. */
 export const REFUSAL_WORDS: Record<string, string> = {
 	no_floor: 'No floor',
+	more_than_one_floor: 'More than one floor',
 	unknown_part_kind: 'Unknown part kind',
 	part_out_of_band: 'Part outside the band',
 	parts_too_close: 'Parts too close',
@@ -500,71 +570,93 @@ export const REFUSAL_WORDS: Record<string, string> = {
 	follow_unknown_part: 'Follows an unknown part',
 	follow_self: 'Follows itself',
 	follow_loop: 'Followers in a loop',
-	schedule_unsupported: 'Schedule not offered',
+	follow_no_frequency: 'Follows a part with no frequency',
+	segments_not_built: 'Segment schedules: not built',
 	bad_part: 'Part not readable',
 	bad_config: 'Setting out of range',
 	wrong_control_count: 'Wrong number of values per control',
 	band_not_additive: 'Band not additive',
 	band_matrix_not_built: 'Band as a full matrix: not built',
-	law_refuses_tone: 'Tone law refuses the tone',
-	budget_cannot_fit: 'Budget cannot fit',
+	law_refuses_tone: 'Tone law does not run this tone',
+	budget_cannot_fit: 'Drive budget cannot fit',
+	tone_model_not_finite: 'Tone model not finite',
 	frf_update_not_built: 'Model update: not built',
 	unknown_band_law: 'Unknown band law',
 	unknown_ceiling_rule: 'Unknown ceiling rule',
 	unknown_fill_rule: 'Unknown fill rule',
+	abort_below_ceiling: 'Abort below its ceiling',
+	ramp_too_short: 'Ramp too short',
+	duplicate_drive: 'One channel as two drives',
+	channel_unknown: 'Channel not in the table',
 	reference_invalid: 'Reference not accepted',
 	law_unknown: 'Law not in the catalog',
-	too_many_controls: 'Too many controls',
-	too_many_drives: 'Too many drives',
-	too_many_limits: 'Too many limits',
+	law_wrong_world: 'Law of another kind of test',
+	param_unknown: 'Law setting not known',
+	param_out_of_range: 'Law setting out of range',
 	out_of_range: 'Out of range',
-	sweep_beyond_tracker: 'Sweep faster than the tracker follows'
+	config_unreadable: 'Setup not readable',
+	drive_channel_present: 'Drive channel present'
 };
 
-/** Where a refusal is: its part, control or drive, in words. */
-export function refusalWhere(item: Pick<MimoMixedReportItem, 'part' | 'control' | 'drive'>, names: { parts: Record<string, string>; controls: string[]; drives: string[] }): string {
-	const out: string[] = [];
-	if (item.part) out.push(`part ${names.parts[item.part] ?? item.part}`);
-	if (item.control !== undefined && item.control !== null) out.push(`control ${names.controls[item.control] ?? item.control + 1}`);
-	if (item.drive !== undefined && item.drive !== null) out.push(`drive ${names.drives[item.drive] ?? item.drive + 1}`);
-	return out.join(', ');
+/** What a field path names: a part by its place in the parts list, a control, a drive or a limit by its place. */
+function placeOf(field: string | undefined): { list: 'parts' | 'controls' | 'drives' | 'limits'; i: number } | null {
+	const m = /^(parts|controls|drives|limits)\[(\d+)\]/.exec(field ?? '');
+	return m ? { list: m[1] as 'parts' | 'controls' | 'drives' | 'limits', i: Number(m[2]) } : null;
 }
 
-/** The editor's key for a service finding: by its part, drive, control or field. */
+/** Where a finding is: its part, control, drive, limit or channel, in words. `parts` in the wire's order: the floor, the tones, the narrowbands. */
+export function refusalWhere(item: Pick<MimoMixedReportItem, 'field' | 'channel'>, names: { parts: string[]; controls: string[]; drives: string[]; limits?: string[] }): string {
+	const at = placeOf(item.field);
+	if (at) {
+		const word = { parts: 'part', controls: 'control', drives: 'drive', limits: 'limit' }[at.list];
+		return `${word} ${(names[at.list] ?? [])[at.i] ?? at.i + 1}`;
+	}
+	if (/^law\.floor/.test(item.field ?? '')) return "the floor's law";
+	if (/^law\.tones/.test(item.field ?? '')) return "the tones' law";
+	if (item.channel !== undefined && item.channel !== null) return `channel ${item.channel}`;
+	return '';
+}
+
+/** The editor's key for a service finding the controller names for the whole setup (`field: "config"`). */
+const CONFIG_KEYS: Record<string, string> = {
+	budget_cannot_fit: 'forecast',
+	tone_model_not_finite: 'forecast',
+	frf_update_not_built: 'control.frf',
+	unknown_band_law: 'laws.bands',
+	unknown_ceiling_rule: 'laws.ceiling_rule',
+	unknown_fill_rule: 'laws.fill_rule',
+	abort_below_ceiling: 'channels.drives',
+	ramp_too_short: 'control.part_ramp_s',
+	wrong_control_count: 'parts',
+	reference_invalid: 'reference'
+};
+
+/** The editor's key for a service finding: by its field path (a part, a drive, a control, a limit, a law) or its name. */
 export function mmixItemKey(d: Pick<MmixDraft, 'tones' | 'bands'>, item: MimoMixedReportItem | (Pick<ReportItem, 'field' | 'channel' | 'row'> & { reason: string })): string {
 	const it = item as MimoMixedReportItem;
-	if (it.reason === 'budget_cannot_fit') return 'forecast';
-	if (it.reason === 'frf_update_not_built') return 'control.frf';
-	if (it.reason === 'unknown_band_law') return 'laws.bands';
-	if (it.reason === 'unknown_ceiling_rule') return 'laws.ceiling_rule';
-	if (it.reason === 'unknown_fill_rule') return 'laws.fill_rule';
-	if (it.reason === 'reference_invalid') return 'reference';
-	if (it.part) {
-		const t = d.tones.findIndex((x) => x.id === it.part);
-		if (t >= 0) return `tones.${t}`;
-		const b = d.bands.findIndex((x) => x.id === it.part);
-		if (b >= 0) return `bands.${b}`;
+	const field = it.field ?? '';
+	if (field === 'config' || !field) {
+		if (CONFIG_KEYS[it.reason]) return CONFIG_KEYS[it.reason];
+		if (field === 'config') return 'parts';
+		if (it.reason.startsWith('law_')) return 'laws.floor.id';
+		if (it.channel !== undefined && it.channel !== null) return 'channels';
+		return 'setup';
+	}
+	const at = placeOf(field);
+	if (at?.list === 'parts') {
+		const t = at.i - 1;
+		if (t >= 0 && t < d.tones.length) return `tones.${t}`;
+		const b = t - d.tones.length;
+		if (b >= 0 && b < d.bands.length) return `bands.${b}`;
 		return 'parts';
 	}
-	if (it.drive !== undefined && it.drive !== null) return `drives.${it.drive}`;
-	const f = (it.field ?? '').replace(/^config\./, '').replace(/\[(\d+)\]/g, '.$1');
-	if (f) {
-		let m = /^law\.(floor|tones)(?:\.(id|params\.(\w+)))?/.exec(f);
-		if (m) return m[3] ? `laws.${m[1]}.params.${m[3]}` : `laws.${m[1]}.id`;
-		m = /^channels\.drives\.(\d+)/.exec(f);
-		if (m) return `drives.${m[1]}`;
-		m = /^channels\.limits\.(\d+)/.exec(f);
-		if (m) return `limits.${m[1]}`;
-		if (/^channels/.test(f)) return 'channels.controls';
-		if (/^reference/.test(f)) return 'reference';
-		m = /^schedule\.levels\.(\d+)/.exec(f);
-		if (m) return `schedule.levels.${m[1]}.db`;
-		if (/^law\./.test(f)) return f.replace(/^law\./, 'laws.');
-		return f;
-	}
-	if (it.control !== undefined && it.control !== null) return `controls.${it.control}`;
-	if (it.reason.startsWith('law_')) return 'laws.floor.id';
-	return 'setup';
+	if (at) return at.list === 'controls' ? 'channels.controls' : `${at.list}.${at.i}`;
+	const f = field.replace(/\[(\d+)\]/g, '.$1');
+	const m = /^law\.(floor|tones)(?:\.(id|params\.(\w+)))?/.exec(f);
+	if (m) return m[3] ? `laws.${m[1]}.params.${m[3]}` : `laws.${m[1]}.id`;
+	if (/^reference/.test(f)) return 'reference';
+	if (/^law\./.test(f)) return f.replace(/^law\./, 'laws.');
+	return f;
 }
 
 export function mmixByKey(d: Pick<MmixDraft, 'tones' | 'bands'>, items: readonly MimoMixedReportItem[]): FieldErrors {
@@ -579,7 +671,7 @@ export function mmixByKey(d: Pick<MmixDraft, 'tones' | 'bands'>, items: readonly
 export function mmixSectionOf(key: string): MmixSection {
 	if (/^(reference|controls\.\d+\.rows)(\.|$)/.test(key)) return 'reference';
 	if (/^(tones|bands|parts|exclusion_hz|tracking_hz)(\.|$)/.test(key)) return 'parts';
-	if (/^(schedule|identification|estimation)(\.|$)/.test(key)) return 'schedule';
+	if (/^(schedule|identification|estimation|gates)(\.|$)/.test(key)) return 'schedule';
 	if (/^laws(\.|$)/.test(key)) return 'laws';
 	if (/^(limits|protections|control)(\.|$)/.test(key)) return 'limits';
 	if (/^forecast(\.|$)/.test(key)) return 'forecast';
@@ -606,6 +698,8 @@ function scheduleErrors(out: FieldErrors, s: ScheduleDraft, at: string, ids: Set
 		need(out, `${at}.band_hz`, s.band_hz[0]);
 		need(out, `${at}.band_hz`, s.band_hz[1]);
 		need(out, `${at}.rate`, s.law === 'log' ? s.oct_per_min : s.hz_per_s);
+		if (s.end_by !== 'duration') need(out, `${at}.sweeps`, s.sweeps);
+		if (s.end_by === 'duration' || s.end_by === 'both') need(out, `${at}.duration_s`, s.duration_s);
 	} else {
 		if (!s.of || !ids.has(s.of)) add(out, `${at}.of`, 'Choose the part it follows.');
 		else if (s.of === self) add(out, `${at}.of`, 'A part cannot follow itself.');
@@ -630,6 +724,10 @@ export function localErrors(d: MmixDraft): FieldErrors {
 		if (!Number.isFinite(x.peak_v)) add(out, `drives.${i}.peak_v`, 'Give the peak ceiling in volts: the floor and the tones share it.');
 		else if (Number.isFinite(x.ceiling_vrms) && x.peak_v < x.ceiling_vrms) add(out, `drives.${i}.peak_v`, 'The peak ceiling is at least the rms ceiling.');
 		if (x.abort_vrms !== null && !Number.isFinite(x.abort_vrms)) add(out, `drives.${i}.abort_vrms`, NUMBER);
+		else if (x.abort_vrms !== null && Number.isFinite(x.ceiling_vrms) && x.abort_vrms <= x.ceiling_vrms) add(out, `drives.${i}.abort_vrms`, 'The rms abort is above the rms ceiling.');
+		if (x.abort_vpk !== null && !Number.isFinite(x.abort_vpk)) add(out, `drives.${i}.abort_vpk`, NUMBER);
+		else if (x.abort_vpk !== null && Number.isFinite(x.peak_v) && x.abort_vpk <= x.peak_v) add(out, `drives.${i}.abort_vpk`, 'The peak abort is above the peak ceiling.');
+		if (!(x.pretest_max_vrms > 0)) add(out, `drives.${i}.pretest_max_vrms`, 'Give the most the identification may put on this drive, volts rms above 0.');
 	});
 	d.limits.forEach((l, i) => {
 		need(out, `limits.${i}.ceiling`, l.ceiling);
@@ -682,13 +780,19 @@ export function localErrors(d: MmixDraft): FieldErrors {
 	need(out, 'estimation.fs_hz', d.estimation.fs_hz);
 	need(out, 'estimation.n_pts', d.estimation.n_pts, true);
 	need(out, 'estimation.frames_per_loop', d.estimation.frames_per_loop, true);
-	for (const k of ['level_db', 'coherence_floor', 'condition_limit'] as const) need(out, `identification.${k}`, d.identification[k]);
-	need(out, 'identification.frames', d.identification.frames, true);
+	need(out, 'estimation.memory_loops', d.estimation.memory_loops);
+	if (Number.isInteger(d.estimation.n_pts) && (d.estimation.n_pts < 64 || (d.estimation.n_pts & (d.estimation.n_pts - 1)) !== 0)) add(out, 'estimation.n_pts', 'A power of two from 64.');
+	for (const k of ['below_reference_db', 'start_vrms', 'tolerance_db'] as const) need(out, `identification.${k}`, d.identification[k]);
+	for (const k of ['frames', 'max_steps', 'noise_frames'] as const) need(out, `identification.${k}`, d.identification[k], true);
+	need(out, 'gates.coherence_threshold', d.gates.coherence_threshold);
+	if (Number.isFinite(d.gates.coherence_threshold) && (d.gates.coherence_threshold < 0 || d.gates.coherence_threshold > 1)) add(out, 'gates.coherence_threshold', 'A coherence from 0 to 1.');
+	need(out, 'gates.condition_threshold', d.gates.condition_threshold);
 	if (!d.schedule.levels.length) add(out, 'schedule.levels', 'Give at least one level.');
 	d.schedule.levels.forEach((l, i) => need(out, `schedule.levels.${i}.db`, l.db));
 	need(out, 'schedule.full_level_s', d.schedule.full_level_s);
-	for (const [k, v] of Object.entries(d.control)) need(out, `control.${k}`, v as number, k === 'law_misses');
-	for (const [k, v] of Object.entries(d.protections)) need(out, `protections.${k}`, v as number, k !== 'overload_fraction');
+	for (const [k, v] of Object.entries(d.control)) need(out, `control.${k}`, v as number);
+	for (const k of ['level_ramp_s', 'part_ramp_s'] as const) if (Number.isFinite(d.control[k]) && d.control[k] < MIMO_MIXED_DEFAULTS.min_ramp_s) add(out, `control.${k}`, `At least ${MIMO_MIXED_DEFAULTS.min_ramp_s} s: two control ticks.`);
+	for (const [k, v] of Object.entries(d.protections)) need(out, `protections.${k}`, v as number, k === 'envelope_abort_lines' || k === 'divergence_loops' || k === 'settle_loops');
 	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }
