@@ -13,26 +13,28 @@ named for the run. Every name the converter reads from the folder is in one tabl
 
 | In the run folder | In the project | How |
 | --- | --- | --- |
-| `table.json` | **Channel Table** | Each row's node, direction and analysis role, as for every run. |
-| `results/modal_frf` | **modal_frf** (Frf) | A record per response against each reference of every measurement, at the DOFs the measurement named (node and direction, written `1Z+`), in SI from the channel rows' units. A point measured again replaces the earlier measurement of it. Each record's comment says the estimator, the averages, the measurement and point, and the windows. |
+| `table.json` | **Channel Table** | Each row's node, direction and analysis role, as for every run. The rows the setup's check names as references (the hammer, or each shaker's force gauge, which the station table keeps as monitor rows) are the references. |
+| `results/modal_frf` | **modal_frf** (Frf) | A record per response against each reference of every measurement, at the DOFs the measurement named (node and direction, written `1Z+`), in SI from the channel rows' units. Points are numbered from 1, as the operator saw them (the run folder counts them from 0), and measurements from 1. A point measured again replaces the earlier measurement of it. Each record's comment says the estimator, the averages, the measurement and point, and the windows. |
 | `results/modal_frf`, excitation roving | **modal_frf fixed reference** (Frf) | The same FRFs turned round by reciprocity, every record marked "transposed by reciprocity". Made when the setup's roving channels are reference rows, as a roving hammer survey's hammer is; for a run with no roving plan, when it has more reference DOFs than response DOFs. |
-| `results/modal_coherence`, one reference | **modal_coherence** (Coherence), and **modal_coherence fixed reference** | The ordinary coherence of each record, and turned round as well when the FRFs are. |
-| `results/modal_coherence`, several references | **modal_coherence** (MultipleCoherence) | Each response's multiple coherence. |
+| `results/modal_coherence`, array `coherence` | **modal_coherence** (Coherence), and **modal_coherence fixed reference** | The ordinary coherence of each record (one reference), and turned round as well when the FRFs are. |
+| `results/modal_coherence`, array `multiple_coherence` | **modal_coherence** (MultipleCoherence) | Each response's multiple coherence (several references). The kind is the one the array names. |
 | `results/modal_reference_spectra` | **modal_reference_spectra** (Psd) | Each measurement's reference autospectra, in SI. With several references, the condition number of their spectral matrix stays in the run record as an array. |
-| `streams/inputs`, `results/modal_frames` | **Measurement k frames** (TimeHistory) | Each measurement's accepted frames, a record per channel per frame, labeled `hit 1`, `hit 2` (or `frame 1` for a shaker), timed from the trigger so the pre-trigger samples are at negative times. A measurement replaced by a later one of its point is kept, named "(replaced)". |
-| `results/modal_frames`, `results/modal_outcome` | **Run Record** | Every frame line (accepted, rejected and trial, with the reason and the checks) and the outcome (the points planned and measured, the frames, how the test ended). |
+| `streams/inputs`, `results/modal_frames` | **Measurement k frames** (TimeHistory) | Each measurement's accepted frames, a record per channel per frame, cut from the stream at each frame line's `span` (its first frame and length) and labeled `hit 1`, `hit 2` (or `frame 1` for a shaker). An impact frame is timed from the trigger, at the setup's pre-trigger sample, so the pre-trigger samples are at negative times; each record's comment carries the hit's checks (the peak, the target's verdict, a tip warning, a force window that cuts the pulse). The frame lines name no measurement: a point's accepted hits are given to its measurements in the order taken, as many to each as it averaged. A measurement replaced by a later one of its point is kept, named "(replaced)". |
+| `results/modal_frames`, `results/modal_outcome`, `end.json` | **Run Record** | Every frame line (accepted, rejected and undone, with the reason and the checks) and the outcome (the totals of hits or frames accepted and taken and of points measured and planned, how the test ended). |
 
 The streams are not copied whole. One time history per measurement, rather than per frame,
 keeps a survey of a hundred points at five hits to a hundred objects, and the frames of one
 measurement share their DOFs and their length, which is what estimating them again needs.
-Rejected and trial frames stay in the stream and in the frame lines.
+Rejected and undone frames stay in the stream and in the frame lines.
 
-The window record travels on the FRF, in each record's comment: the force window, the
-exponential window's time constant, the estimator and the averages, all of which survive a
-save. A fit reads the time constant back from there. What the run lacked is listed in the run record:
-points planned but not measured, values that are not finite numbers, a result whose units
-do not match the channel table (kept as arrays, with the reason). A run ended early, or
-killed, converts with what it has.
+The window record travels on the FRF: the run writes the windows once, on the FRF result
+(and in the setup), and the converter writes them into each record's comment with the force
+window, the exponential window's time constant, the estimator and the averages, all of which
+survive a save. A fit reads the time constant back from there. What the run lacked is listed
+in the run record: points planned but not measured, accepted hits in no finished measurement,
+hits whose frames a stream cut short does not hold, values that are not finite numbers, a
+result whose units do not match the channel table (kept as arrays, with the reason). A run
+ended early, or killed, converts with what it has.
 
 ## The Fixed-Reference Form
 
@@ -56,11 +58,12 @@ A survey taken as several runs merges into one set (Merge), before or after turn
 
 The force window holds one over the pre-trigger and the pulse, from the frame's trigger
 sample, then falls to zero by a steep half-cosine and stays zero for the rest of the frame.
-Its width is the pulse allowance after the trigger, given as a fraction of the block after
-the trigger; the fall is a tenth of the width, at least one sample. A window that would run
+Its width is the pulse allowance after the trigger, given as a fraction of the whole block
+and counted from the trigger; the fall is a tenth of the width, at least one sample. A window that would run
 past the block is refused rather than cut short, and a window that removes the pulse is
 refused with that cause named. The exponential window, w(t) = exp(-t / tau) from the frame's
-first sample, is applied to the force and every response alike. Both are an impact capture's
+first sample, is applied to the force and every response alike; tau is set from the value
+the window ends at, tau = -T / ln(end), with T the block's length in time (block / rate). Both are an impact capture's
 windows: the averaging of a continuous record does not offer them.
 
 ## The Exponential Window's Damping
