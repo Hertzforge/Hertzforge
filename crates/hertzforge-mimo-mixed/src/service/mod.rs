@@ -435,6 +435,8 @@ pub(crate) struct BandCtl {
     pub(crate) limiting: bool,
     /// The change cap cut the band law's last rise.
     pub(crate) cap_bound: bool,
+    /// Its law was held at its last loop (it was ramping in).
+    pub(crate) ramp_held: bool,
     pub(crate) alarm_db: Vec<(f64, f64)>,
     pub(crate) abort_db: Vec<(f64, f64)>,
     /// Its center's rate, Hz per second.
@@ -2259,6 +2261,7 @@ impl MimoMixedService {
                 error_db: vec![f64::NAN; n],
                 limiting: false,
                 cap_bound: false,
+                ramp_held: false,
                 alarm_db: alarm,
                 abort_db: abort,
                 rate_hz_s: 0.0,

@@ -901,6 +901,22 @@ impl MimoMixedService {
         let mut trip: Option<RunEnd> = None;
         let mut any = false;
         for b in &mut self.bands {
+            // The law is held while the band ramps in, and for the loop
+            // after: its estimate reads the band at a fraction of its level
+            // against the whole statement, and a servo iterating on that
+            // winds up. The ring plays ahead of the factor, so the loop the
+            // ramp ends still holds frames from under it: its estimate is
+            // restarted there, and the first loop the law runs reads the
+            // band at its level.
+            let hold = b.ramp < 1.0 || b.ramp_held;
+            if b.law.is_some() && b.ramp > 0.0 {
+                if b.ramp >= 1.0 && b.ramp_held {
+                    if let Some(mfe) = b.mfe.as_mut() {
+                        mfe.reset();
+                    }
+                }
+                b.ramp_held = b.ramp < 1.0;
+            }
             let (Some(law), Some(setup), Some(mfe)) =
                 (b.law.as_mut(), b.setup.as_ref(), b.mfe.as_ref())
             else {
@@ -952,8 +968,12 @@ impl MimoMixedService {
                 limiting: b.limiting,
             };
             let id = b.id.clone();
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| law.iterate(&inputs))) {
-                Ok(Ok(out)) => {
+            let called = (!hold).then(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| law.iterate(&inputs)))
+            });
+            match called {
+                None => {}
+                Some(Ok(Ok(out))) => {
                     if out.drive.lines() == offs && out.drive.n() == m {
                         // MIMO Random's change cap, in the band's frame
                         // against its drive in force; a cut rise marks the
@@ -974,7 +994,7 @@ impl MimoMixedService {
                         b.drive = Some(d);
                     }
                 }
-                Ok(Err(e)) => {
+                Some(Ok(Err(e))) => {
                     trip.get_or_insert(RunEnd {
                         name: "law_fault",
                         aborted: true,
@@ -984,7 +1004,7 @@ impl MimoMixedService {
                         words: format!("the band law of {id} failed: {}", e.0),
                     });
                 }
-                Err(_) => {
+                Some(Err(_)) => {
                     trip.get_or_insert(RunEnd {
                         name: "law_fault",
                         aborted: true,

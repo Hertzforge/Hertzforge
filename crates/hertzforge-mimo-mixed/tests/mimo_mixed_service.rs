@@ -497,3 +497,74 @@ fn mimo_mixed_the_law_call_record_is_written_to_the_run_folder() {
     assert!(recs.iter().all(|r| r.t_s.is_finite() && r.tone == 0));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A scalar-servoed band at 900 Hz (1e-2 g^2/Hz, its abort band opened to
+/// 40 dB) switched in over `ramp_s`: per status chunk once the band is
+/// fully in, the band's error mean over the controls, dB, for 14 s.
+fn band_ramp_run(ramp_s: f64) -> Vec<(f64, f64)> {
+    let s = SineStructure::Linear4x4;
+    let mut b = common::band("nb", common::fixed(900.0), 40.0, common::added(1e-2, 0.5));
+    if let hertzforge_mimo_mixed::config::MimoPartBody::Narrowband(nb) = &mut b.body {
+        nb.alarm_db = hertzforge_mimo_mixed::config::PerControl::All((40.0, 40.0));
+        nb.abort_db = hertzforge_mimo_mixed::config::PerControl::All((40.0, 40.0));
+    }
+    let mut cfg = run_config(s, 0.5, vec![b], 40.0);
+    cfg.law.bands = hertzforge_mixed::LawPick::new("scalar_servo");
+    cfg.part_ramp_s = ramp_s;
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    let mut after: Vec<(f64, f64)> = Vec::new();
+    let mut in_at: Option<f64> = None;
+    while svc.status().t_s < 90.0 {
+        let going = svc.run_chunk().expect("chunk");
+        let st = svc.status();
+        let b = &st.bands[0];
+        if in_at.is_none() && b.part_level >= 1.0 {
+            in_at = Some(st.t_s);
+        }
+        if let Some(t0) = in_at {
+            if st.t_s - t0 > 14.0 {
+                break;
+            }
+            let e = b.error_db.iter().sum::<f64>() / b.error_db.len() as f64;
+            if e.is_finite() && after.last().is_none_or(|l| l.1 != e) {
+                after.push((st.t_s - t0, e));
+            }
+        }
+        if !going {
+            break;
+        }
+    }
+    println!("end: {:?}", svc.end().map(|e| (e.name, e.words.clone())));
+    after
+}
+
+/// Requirement: a servoed band does not wind up while it ramps in. Its
+/// servo is held over the ramp (and the loop after, its estimate
+/// restarted), so a band switched in over 5 s comes to level as one
+/// switched in over 0.5 s does: from the model's drive, under the servo's
+/// own step response. Its largest error once in is within 0.3 dB of the
+/// short ramp's (the two runs' estimates differ by about 0.1 dB at a
+/// peak); a servo iterating against the whole statement through the ramp
+/// overshot 0.76 dB past the short ramp's.
+#[test]
+fn mimo_mixed_a_band_servo_does_not_wind_up_while_it_ramps_in() {
+    let worst = |ramp_s: f64| {
+        let after = band_ramp_run(ramp_s);
+        assert!(!after.is_empty(), "the band never came in");
+        let w = after.iter().map(|a| a.1).fold(f64::MIN, f64::max);
+        let first: Vec<String> = after
+            .iter()
+            .take(10)
+            .map(|(t, e)| format!("{t:.1}s {e:+.2}"))
+            .collect();
+        println!("{ramp_s} s ramp, once in: {first:?}; the largest error {w:+.2} dB");
+        w
+    };
+    let short = worst(0.5);
+    let long = worst(5.0);
+    assert!(
+        long <= short + 0.3,
+        "the band ramped in over 5 s overshot {long:+.2} dB, against {short:+.2} dB over 0.5 s"
+    );
+}
