@@ -88,6 +88,8 @@ export interface ModalTestConfig {
 	band?: { lo_hz?: number; hi_hz?: number };
 	estimator?: ModalEstimator;
 	averages?: number;
+	/** The decay check's threshold, percent, 0.01 to 100 (default 2). */
+	decay_warn_pct?: number;
 	roving?: { channels: number[]; points: ModalPoints };
 	impact?: ModalImpactConfig;
 	shaker?: ModalShakerConfig;

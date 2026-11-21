@@ -25,6 +25,7 @@ import {
 	type ModalTestConfig,
 	type ModalTestConfigResult,
 	type ModalTestConfigureResult,
+	type ModalMode,
 	type ModalTestDryRunResult,
 	type ModalTestInvalidDetail,
 	type ModalTestLive,
@@ -41,7 +42,7 @@ import type { AcquireState } from '../store.svelte';
 import type { RowEdit } from '../table';
 import { toRefusal, type Refusal } from '../words';
 import { modalKeyAction, type KeyLike, type ModalKeyAction } from './modalTestKeys';
-import { defaultModalSetup, fromModalConfig, itemsByKey, localErrors, mergeModalSetup, MODAL_SECTIONS, modalRows, modalSectionOf, toModalConfig, type ModalDraft, type ModalSection } from './modalTestSetup';
+import { defaultModalSetup, fromModalConfig, setModalMode, itemsByKey, localErrors, mergeModalSetup, MODAL_SECTIONS, modalRows, modalSectionOf, toModalConfig, type ModalDraft, type ModalSection } from './modalTestSetup';
 import { modalBarActions, modalIsLive, modalMeasureVerbs, modalPrimary, type ModalVerb, type ModalVerbContext } from './modalTestVerbs';
 import { chipState, MODAL_CHIP_WORDS, MODAL_OUTCOME_WORDS, MODAL_PHASE_WORDS } from './modalTestWords';
 
@@ -142,6 +143,8 @@ export class ModalTestStore {
 	step = $state<'setup' | 'run'>('setup');
 	/** Which response and reference the FRF plots show: a view choice, not part of the setup. */
 	shown = $state({ response: 0, reference: 0 });
+	/** Said when a mode change cleared the roving plan, until the next mode change or a draft adopted. */
+	rovingNote = $state<string | null>(null);
 
 	// ---- from the service ------------------------------------------------------------------
 	status = $state.raw<ModalTestState | null>(null);
@@ -491,7 +494,14 @@ export class ModalTestStore {
 		const c = this.served?.config;
 		if (!c || this.locked) return false;
 		this.setup = fromModalConfig(c);
+		this.rovingNote = null;
 		return true;
+	}
+
+	/** Change the mode; a roving plan the new mode cannot take is cleared, with a note saying so. */
+	chooseMode(mode: ModalMode): void {
+		if (this.locked || this.setup.mode === mode) return;
+		this.rovingNote = setModalMode(this.setup, mode, this.rows);
 	}
 
 	// =========================================================================================

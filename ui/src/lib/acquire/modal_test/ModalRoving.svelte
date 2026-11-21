@@ -48,6 +48,7 @@
 			<span class="word">{d.roving.on ? 'On' : 'Off'}</span>
 		</label>
 		<p class="help">Off, the test measures one point with every DOF as the table gives it. On, each roving row takes each point's node in turn; the others stay where they are. {d.mode === 'impact' ? 'Rove the hammer row for a roving hammer survey, or the responses for a roving accelerometer survey.' : "Rove the responses: a shaker's force row stays where it is."}</p>
+		{#if modal.rovingNote}<p class="mode-note" role="status" data-testid="mt-roving-cleared-here">{modal.rovingNote}</p>{/if}
 		<Findings items={findings('roving')} />
 
 		{#if d.roving.on}
@@ -115,6 +116,15 @@
 		flex-direction: column;
 		gap: var(--sp-3);
 		max-width: 860px;
+	}
+
+	.mode-note {
+		font-size: var(--text-sm);
+		color: var(--amber-2);
+		background: var(--amber-weak);
+		border-left: 2px solid var(--amber-2);
+		padding: var(--sp-1) var(--sp-2);
+		margin: var(--sp-2) 0 0;
 	}
 
 	.help {

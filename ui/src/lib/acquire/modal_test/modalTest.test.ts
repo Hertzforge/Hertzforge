@@ -7,9 +7,10 @@ import { describe, expect, it } from 'vitest';
 import type { ModalCounts, ModalLatest, ModalTestLive, ModalTestRun, ModalTile } from '$lib/protocol/modal_test';
 import type { ChannelRow } from '$lib/protocol/types';
 import { MODAL_KEY_WORDS, modalKeyAction, takesTyping, type KeyLike } from './modalTestKeys';
-import { defaultModalSetup, fromModalConfig, localErrors, modalItemKey, modalRows, modalSectionOf, modalSections, parsePoints, pointsText, toModalConfig } from './modalTestSetup';
+import { defaultModalSetup, fromModalConfig, localErrors, setModalMode, modalItemKey, modalRows, modalSectionOf, modalSections, parsePoints, pointsText, toModalConfig } from './modalTestSetup';
+import { loadModalSetup, saveModalSetup } from './modalTestStore.svelte';
 import { modalBarActions, modalMeasureVerbs, modalPrimary, type ModalVerbContext } from './modalTestVerbs';
-import { exponentialWeights, forceSpectrumView, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
+import { exponentialWeights, forceNotes, forceSpectrumView, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
 import { counterWords, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, pct, refusalWords, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, getAttribute: (k: string) => (extra[k] as string) ?? null, ...extra }) as unknown as EventTarget;
@@ -224,6 +225,42 @@ describe('modal test setup', () => {
 		const r = modalRows([row(0, 'reference'), row(1, 'response'), row(2, null), row(3, 'response'), row(4, null, 'drive')]);
 		expect([r.references.map((x) => x.index), r.responses.map((x) => x.index), r.unassigned.map((x) => x.index), r.drives.map((x) => x.index)]).toEqual([[0], [1, 3], [2], [4]]);
 	});
+
+	it('modal test decay threshold: the service default unless given, and kept by the setup file and the draft', () => {
+		const d = defaultModalSetup();
+		expect(Number.isNaN(d.decay_warn_pct)).toBe(true);
+		expect('decay_warn_pct' in toModalConfig(d)).toBe(false);
+		expect(Number.isNaN(loadModalSetup(saveModalSetup(d)).decay_warn_pct)).toBe(true);
+		d.decay_warn_pct = 0.5;
+		const c = toModalConfig(d);
+		expect(c.decay_warn_pct).toBe(0.5);
+		expect(fromModalConfig(c).decay_warn_pct).toBe(0.5);
+		expect(toModalConfig(fromModalConfig(c))).toEqual(c);
+		expect(loadModalSetup(saveModalSetup(d)).decay_warn_pct).toBe(0.5);
+		// a draft saved before the field reads back with the default
+		const old = JSON.parse(saveModalSetup(d));
+		delete old.decay_warn_pct;
+		expect(Number.isNaN(loadModalSetup(JSON.stringify(old)).decay_warn_pct)).toBe(true);
+	});
+
+	it('modal test mode change: a plan that roves the hammer is cleared for shaker mode, with a note', () => {
+		const rows = [row(1, 'reference'), row(3, 'response'), row(4, 'response')];
+		const hammer = defaultModalSetup();
+		hammer.roving = { ...hammer.roving, on: true, channels: [1], how: 'fill', fill: { start: 1, step: 1, count: 3 } };
+		const note = setModalMode(hammer, 'shaker', rows);
+		expect(hammer.mode).toBe('shaker');
+		expect(note).toBe("The roving plan was cleared: it moved row 1, a reference, and a shaker's force row does not rove. In Roving, choose the responses that rove and their points.");
+		expect(hammer.roving).toEqual(defaultModalSetup().roving);
+		expect(toModalConfig(hammer).roving).toBeUndefined();
+		// a plan that roves the responses stays, and so does any plan on the way back to impact
+		const accel = defaultModalSetup();
+		accel.roving = { ...accel.roving, on: true, channels: [3, 4], text: '5\n6' };
+		expect(setModalMode(accel, 'shaker', rows)).toBeNull();
+		expect(accel.roving.channels).toEqual([3, 4]);
+		expect(setModalMode(accel, 'impact', rows)).toBeNull();
+		expect(accel.roving.channels).toEqual([3, 4]);
+		expect(setModalMode(accel, 'impact', rows)).toBeNull();
+	});
 });
 
 describe('modal test traces', () => {
@@ -301,8 +338,25 @@ describe('modal test after review', () => {
 		expect(v.responseRegions).toHaveLength(1);
 		expect(v.second).toBeCloseTo(2 / 1024, 12);
 		expect(forceSpectrumView(live)?.readouts?.[0].text).toBe('9.5 dB');
+		// a soft tip is said in the header line beside the roll-off, never over the plot's axes
+		expect(forceSpectrumView(live, true)?.readouts).toEqual([{ label: 'Tip roll-off', text: '9.5 dB, Soft Tip', status: 'warn' }]);
 		expect(hitViews({ ...live, hit: null } as ModalTestLive, latest, dofs, 0).force).toBeNull();
 		const shaker = { ...live, hit: undefined, references: { frequency_hz: [1, 2], averages: 3, autospectra: [{ index: 1, unit: 'lbf^2/Hz', values: [1, 2] }] } } as unknown as ModalTestLive;
 		expect(referenceSpectraView(shaker, dofs)?.series[0].name).toBe('1Z+ (row 1)');
+	});
+
+	it('modal test force labels: inside the drawing area beside the second impact, near its top', () => {
+		expect(forceNotes(null, 1, false)).toEqual([]);
+		const [early] = forceNotes(0.08, 1, false);
+		expect(early).toEqual({ id: 'double-hit', text: 'Double Hit', fx: 0.1, fy: 0.03 });
+		// late in the block the label sits on the marker's left, so it stays inside the plot
+		expect(forceNotes(0.9, 1, false)[0].fx).toBeCloseTo(0.6, 12);
+		const both = forceNotes(0.08, 1, true);
+		expect(both.map((n) => [n.id, n.fy])).toEqual([['double-hit', 0.03], ['overload', 0.2]]);
+		for (const n of [...both, ...forceNotes(1.5, 1, true)]) {
+			expect(n.fx).toBeGreaterThanOrEqual(0);
+			expect(n.fx).toBeLessThanOrEqual(0.7);
+			expect(n.fy).toBeLessThan(0.5);
+		}
 	});
 });

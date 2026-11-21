@@ -9,6 +9,7 @@
 
 import type { ModalLatest, ModalRowDof, ModalTestLive, ModalTrace, ModalTraceRole } from '$lib/protocol/modal_test';
 import type { NumericArray, Region, SpectrumView } from '$lib/protocol/types';
+import type { PaneNote } from '$lib/viz/paneOptions';
 import { num } from './modalTestWords';
 
 const arr = (v: Float32Array | number[]): NumericArray => (v instanceof Float32Array ? v : Float64Array.from(v));
@@ -134,6 +135,22 @@ export function hitViews(live: ModalTestLive | null, latest: ModalLatest | null,
 	return { force, response: resp, second, forceRegions, responseRegions, n: h.n };
 }
 
+/**
+ * The labels over the force trace, inside the plot's drawing area: Double Hit near the top beside
+ * the second impact's marker (on its left when the marker is in the right part of the block), and
+ * Overload at the top left. Positions are fractions of the drawing area, the x axis running over
+ * the block.
+ */
+export function forceNotes(second: number | null, blockEnd: number, overload: boolean): PaneNote[] {
+	const out: PaneNote[] = [];
+	if (second !== null && blockEnd > 0) {
+		const at = Math.min(1, Math.max(0, second / blockEnd));
+		out.push({ id: 'double-hit', text: 'Double Hit', fx: at > 0.6 ? Math.max(0, at - 0.3) : at + 0.02, fy: 0.03 });
+	}
+	if (overload) out.push({ id: 'overload', text: 'Overload', fx: 0.02, fy: second !== null ? 0.2 : 0.03 });
+	return out;
+}
+
 /** A second impact in words, from the service's report: where, and how large against the peak. */
 export function secondImpactWords(d: { frame: number; peak: number; ratio: number } | null | undefined, rate: number, unit: string): string | null {
 	if (!d) return null;
@@ -187,8 +204,11 @@ export function frfViews(live: ModalTestLive | null, dofs: { references: ModalRo
 	return out;
 }
 
-/** The latest hit's force autospectrum on the analysis lines, with the tip's roll-off the service measured. */
-export function forceSpectrumView(live: ModalTestLive | null): SpectrumView | null {
+/**
+ * The latest hit's force autospectrum on the analysis lines, with the tip's roll-off the service
+ * measured in the plot's header line, and Soft Tip beside it when the service flagged it.
+ */
+export function forceSpectrumView(live: ModalTestLive | null, softTip = false): SpectrumView | null {
 	const s = live?.hit?.force_spectrum;
 	if (!s || !s.frequency_hz.length) return null;
 	return {
@@ -197,7 +217,7 @@ export function forceSpectrumView(live: ModalTestLive | null): SpectrumView | nu
 		x: { label: 'Frequency', unit: 'Hz', scale: 'linear' },
 		y: { label: 'Autospectrum', unit: s.unit, scale: 'log' },
 		series: [{ name: 'Force', role: 'drive', x: arr(s.frequency_hz), y: arr(s.values) }],
-		readouts: [{ label: 'Tip roll-off', text: s.tip_drop_db === null ? 'no force at the band top' : num(s.tip_drop_db, 'dB'), status: 'info' }]
+		readouts: [{ label: 'Tip roll-off', text: `${s.tip_drop_db === null ? 'no force at the band top' : num(s.tip_drop_db, 'dB')}${softTip ? ', Soft Tip' : ''}`, status: softTip ? 'warn' : 'info' }]
 	};
 }
 

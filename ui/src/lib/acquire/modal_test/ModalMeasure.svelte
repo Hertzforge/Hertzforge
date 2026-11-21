@@ -25,7 +25,7 @@
 	import { MODAL_KEY_WORDS } from './modalTestKeys';
 	import type { ModalTestStore } from './modalTestStore.svelte';
 	import type { ModalVerb } from './modalTestVerbs';
-	import { forceSpectrumView, frfViews, hitViews, referenceSpectraView, roleView, dofName, secondImpactWords } from './modalTestViews';
+	import { forceNotes, forceSpectrumView, frfViews, hitViews, referenceSpectraView, roleView, dofName, secondImpactWords } from './modalTestViews';
 	import { counterWords, MODAL_DRIVE_PHASE_WORDS, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, refusalWords, modalStateHint, modalStateWords, num, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 	interface Props {
@@ -52,9 +52,13 @@
 
 	const hit = $derived(impact ? hitViews(live, latest, dofs, modal.shown.response) : null);
 	const second = $derived(secondImpactWords(latest?.report?.double_hit, live?.time.rate_hz ?? 0, unit));
-	const tipDrop = $derived(live?.hit?.force_spectrum.tip_drop_db ?? latest?.report?.tip_drop_db ?? null);
 	const frf = $derived(frfViews(live, dofs, modal.shown.response, modal.shown.reference));
-	const fspec = $derived(impact ? forceSpectrumView(live) : null);
+	const fspec = $derived(impact ? forceSpectrumView(live, !!latest?.tip_warning) : null);
+	const blockEnd = $derived.by(() => {
+		const x = hit?.force?.series[0]?.x;
+		return x && x.length ? Number(x[x.length - 1]) : 0;
+	});
+	const fnotes = $derived(forceNotes(latest?.double_hit ? (hit?.second ?? null) : null, blockEnd, !!latest?.overload));
 	const refSpectra = $derived(!impact ? referenceSpectraView(live, dofs) : null);
 	const refTraces = $derived(!impact ? roleView(live, 'reference', dofs, 'Force') : null);
 	const respTraces = $derived(!impact ? roleView(live, 'response', dofs, 'Response') : null);
@@ -245,17 +249,14 @@
 			{#if impact}
 				<div class="plot" data-testid="mt-force-plot">
 					{#if hit?.force}
-						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.forceRegions} marker={hit.second} />
+						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.forceRegions} marker={hit.second} notes={fnotes} />
 					{:else}<p class="empty">The force is drawn once a hit lands.</p>{/if}
-					{#if latest?.double_hit}<span class="pflag double" title={second ?? undefined} data-testid="mt-double-flag">Double Hit</span>{/if}
-					{#if latest?.overload}<span class="pflag overload" data-testid="mt-overload-flag">Overload</span>{/if}
 				</div>
 				<div class="plot" data-testid="mt-response-plot">
 					{#if hit?.response}<SpectrumPane view={hit.response} live minHeight={150} readout={false} copyButton={false} regions={hit.responseRegions} marker={hit.second} />{:else}<p class="empty">The response is drawn once a hit lands.</p>{/if}
 				</div>
 				<div class="plot" data-testid="mt-fspec-plot">
 					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once a hit lands.</p>{/if}
-					{#if latest?.tip_warning}<span class="pflag tip" title="The force falls {num(tipDrop)} dB across the band. A harder tip reaches higher." data-testid="mt-tip-flag">Soft Tip</span>{/if}
 				</div>
 			{:else}
 				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
@@ -626,8 +627,7 @@
 		color: var(--text-2);
 	}
 
-	.flag,
-	.pflag {
+	.flag {
 		display: inline-block;
 		margin: 3px 3px 0 0;
 		padding: 1px 6px;
@@ -638,17 +638,14 @@
 	}
 
 	.flag.double,
-	.flag.overload,
-	.pflag.double,
-	.pflag.overload {
+	.flag.overload {
 		color: var(--status-fail);
 	}
 
 	.flag.high,
 	.flag.low,
 	.flag.tip,
-	.flag.cut,
-	.pflag.tip {
+	.flag.cut {
 		color: var(--status-warn);
 	}
 
@@ -683,24 +680,6 @@
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
-	}
-
-	.plot .pflag {
-		position: absolute;
-		left: 50%;
-		transform: translateX(-50%);
-		bottom: 34px;
-		background: var(--bg-1);
-	}
-
-	.plot .pflag.overload {
-		bottom: 58px;
-	}
-
-	.plot .pflag.tip {
-		max-width: 90%;
-		white-space: normal;
-		text-align: center;
 	}
 
 	.empty {

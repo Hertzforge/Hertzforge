@@ -63,6 +63,8 @@ export interface ModalDraft {
 	band: { lo_hz: number; hi_hz: number };
 	estimator: ModalEstimator;
 	averages: number;
+	/** The decay check's threshold, percent; NaN: not sent, the service's default. */
+	decay_warn_pct: number;
 	roving: ModalRovingDraft;
 	impact: ModalImpactDraft;
 	shaker: ModalShakerDraft;
@@ -102,6 +104,7 @@ export function defaultModalSetup(): ModalDraft {
 		band: { lo_hz: NaN, hi_hz: NaN },
 		estimator: 'H1',
 		averages: 5,
+		decay_warn_pct: NaN,
 		roving: { on: false, channels: [], how: 'list', text: '', fill: { start: 1, step: 1, count: 3 } },
 		impact: defaultImpact(),
 		shaker: defaultShaker(),
@@ -193,6 +196,7 @@ export function toModalConfig(d: ModalDraft): ModalTestConfig {
 		...(Object.keys(band).length ? { band } : {}),
 		estimator: d.estimator,
 		averages: d.averages,
+		...(given(d.decay_warn_pct) ? { decay_warn_pct: d.decay_warn_pct } : {}),
 		capture: { run_name: d.capture.run_name.trim() },
 		metadata: d.metadata.map((m) => (m.label ? { key: m.key, label: m.label, value: m.value } : { key: m.key, value: m.value })),
 		...(r.operator.trim() ? { operator: r.operator.trim() } : {}),
@@ -257,6 +261,7 @@ export function fromModalConfig(c: ModalTestConfig): ModalDraft {
 		band: { lo_hz: c.band?.lo_hz ?? NaN, hi_hz: c.band?.hi_hz ?? NaN },
 		estimator: c.estimator ?? 'H1',
 		averages: c.averages ?? (c.mode === 'shaker' ? 30 : 5),
+		decay_warn_pct: c.decay_warn_pct ?? NaN,
 		roving: {
 			on: !!c.roving,
 			channels: [...(c.roving?.channels ?? [])],
@@ -316,6 +321,24 @@ export function modalRows(rows: ChannelRow[]): { references: ChannelRow[]; respo
 		unassigned: inputs.filter((r) => !r.analysis_role),
 		drives: on.filter((r) => r.role === 'drive')
 	};
+}
+
+/**
+ * The draft in a new mode. A shaker's force row does not rove, so a plan that roves a reference row
+ * (a roving hammer survey) cannot stay when the mode becomes shaker: it is cleared, and the words
+ * say so. Returns the note, or null when the plan stays as it was.
+ */
+export function setModalMode(d: ModalDraft, mode: ModalMode, rows: ChannelRow[]): string | null {
+	if (d.mode === mode) return null;
+	d.mode = mode;
+	if (mode !== 'shaker' || !d.roving.on) return null;
+	const refs = new Set(modalRows(rows).references.map((r) => r.index));
+	const moved = d.roving.channels.filter((k) => refs.has(k));
+	if (!moved.length) return null;
+	const base = defaultModalSetup().roving;
+	d.roving = { ...base, fill: { ...base.fill } };
+	const which = moved.length === 1 ? `row ${moved[0]}, a reference` : `rows ${moved.join(', ')}, references`;
+	return `The roving plan was cleared: it moved ${which}, and a shaker's force row does not rove. In Roving, choose the responses that rove and their points.`;
 }
 
 // ---------------------------------------------------------------------------------------------
