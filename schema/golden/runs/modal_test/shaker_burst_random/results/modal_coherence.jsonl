@@ -1,0 +1,1 @@
+{"measurement":1,"point":0,"replaces":null,"averages":4,"estimator":"matrix H1","rows":{"references":[{"index":1,"node":1,"direction":"Z+","unit":"lbf"},{"index":4,"node":8,"direction":"Z+","unit":"lbf"}],"responses":[{"index":2,"node":4,"direction":"Z+","unit":"g"},{"index":3,"node":7,"direction":"Z+","unit":"g"}]}}

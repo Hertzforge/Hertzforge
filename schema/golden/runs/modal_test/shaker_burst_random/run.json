@@ -1,0 +1,114 @@
+{
+  "test": "modal_test",
+  "run_uid": "golden-shaker_burst_random",
+  "run_id": "modal-test-0001",
+  "title": "Golden Two Shakers",
+  "operator": "A. Operator",
+  "article": "Beam, SN 0007",
+  "notes": "",
+  "metadata": [],
+  "source": "SIM",
+  "sim": {
+    "model": "resonator_bank",
+    "parameters": {
+      "sample_rate_hz": 1024.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 2
+    },
+    "seed": 1515852340
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 1024,
+    "fs_hz": 1024,
+    "block_frames": 64,
+    "analysis_block": 512,
+    "df_hz": 2,
+    "rule": "the setup's own rate: a station that programs another is refused"
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "armed": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "4aa812835af0c84eb61aeb753dfdd867b517b26c593a96861228e159cc6ff71a"
+  },
+  "streams": [
+    {
+      "name": "inputs",
+      "kind": "inputs",
+      "channels": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "drives",
+      "kind": "drives",
+      "channels": [
+        5,
+        6
+      ]
+    }
+  ],
+  "results": [
+    {
+      "name": "modal_frames",
+      "kind": "modal_frames"
+    },
+    {
+      "name": "modal_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "modal_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "modal_reference_spectra",
+      "kind": "reference_spectra"
+    },
+    {
+      "name": "modal_outcome",
+      "kind": "modal_outcome"
+    }
+  ],
+  "complete": true
+}

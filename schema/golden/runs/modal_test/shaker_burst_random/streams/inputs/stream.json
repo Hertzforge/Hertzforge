@@ -1,0 +1,33 @@
+{
+  "kind": "inputs",
+  "fs_hz": 1024,
+  "channels": [
+    {
+      "index": 1,
+      "unit": "lbf",
+      "description": "reference 1"
+    },
+    {
+      "index": 2,
+      "unit": "g",
+      "description": "response 2"
+    },
+    {
+      "index": 3,
+      "unit": "g",
+      "description": "response 3"
+    },
+    {
+      "index": 4,
+      "unit": "lbf",
+      "description": "reference 4"
+    }
+  ],
+  "first_station_frame": 0,
+  "name": "inputs",
+  "frames": 1024,
+  "gaps": [],
+  "complete": true,
+  "fault": null,
+  "cut_from_frames": 16384
+}

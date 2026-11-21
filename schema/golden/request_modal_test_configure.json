@@ -1,0 +1,46 @@
+{
+ "type": "request",
+ "id": 210,
+ "method": "modal_test.configure",
+ "params": {
+  "config": {
+   "title": "Golden Roving Hammer",
+   "operator": "A. Operator",
+   "article": "Beam, SN 0007",
+   "specification": {
+    "document": "Test procedure",
+    "clause": "5.1"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "1"
+    }
+   ],
+   "mode": "impact",
+   "fs_hz": 1024,
+   "block": 512,
+   "band": {
+    "hi_hz": 200
+   },
+   "averages": 2,
+   "roving": {
+    "channels": [
+     1
+    ],
+    "points": {
+     "start": 1,
+     "count": 3
+    }
+   },
+   "impact": {
+    "holdoff_blocks": 0,
+    "exponential_window": {
+     "on": true,
+     "end_pct": 10
+    }
+   }
+  }
+ }
+}

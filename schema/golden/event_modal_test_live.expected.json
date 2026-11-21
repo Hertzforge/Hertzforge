@@ -1,0 +1,162 @@
+{
+ "type": "event",
+ "topic": "modal_test.live",
+ "seq": 412,
+ "data": {
+  "run_id": "modal-test-0001",
+  "state": "armed",
+  "point": 1,
+  "time": {
+   "rate_hz": 1024,
+   "channels": [
+    {
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       18.5,
+       2.25,
+       0.0
+      ]
+     }
+    },
+    {
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       0.5,
+       -1.25,
+       0.75
+      ]
+     }
+    },
+    {
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       -0.25,
+       0.625,
+       -0.375
+      ]
+     }
+    }
+   ]
+  },
+  "frf": {
+   "frequency_hz": {
+    "dtype": "f32",
+    "shape": [
+     4
+    ],
+    "values": [
+     0.0,
+     2.0,
+     4.0,
+     6.0
+    ]
+   },
+   "averages": 2,
+   "pairs": [
+    {
+     "response": 0,
+     "reference": 0,
+     "magnitude": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.03125,
+       0.0625,
+       0.125,
+       0.25
+      ]
+     },
+     "phase_deg": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.0,
+       -90.0,
+       -180.0,
+       90.0
+      ]
+     }
+    },
+    {
+     "response": 1,
+     "reference": 0,
+     "magnitude": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.015625,
+       0.03125,
+       0.0625,
+       0.125
+      ]
+     },
+     "phase_deg": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       180.0,
+       90.0,
+       0.0,
+       -90.0
+      ]
+     }
+    }
+   ],
+   "coherence": [
+    {
+     "response": 0,
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.5,
+       0.75,
+       0.875,
+       1.0
+      ]
+     }
+    },
+    {
+     "response": 1,
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       4
+      ],
+      "values": [
+       0.25,
+       0.5,
+       0.75,
+       1.0
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

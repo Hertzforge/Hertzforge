@@ -748,7 +748,7 @@ impl ModalRun {
                 }
                 self.shared.add_log_data(
                     "outcome",
-                    format!("ended {outcome}: {message}"),
+                    format!("ended ({outcome}): {message}"),
                     Some(json!({"outcome": outcome, "emergency_stop": o.emergency_stop})),
                 );
                 let end = End {

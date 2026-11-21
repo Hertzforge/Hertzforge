@@ -1,0 +1,27 @@
+{
+  "kind": "drives",
+  "fs_hz": 1024,
+  "channels": [
+    {
+      "index": 5,
+      "unit": "V",
+      "description": "shaker 5"
+    },
+    {
+      "index": 6,
+      "unit": "V",
+      "description": "shaker 6"
+    }
+  ],
+  "first_station_frame": 0,
+  "output_latency_frames": {
+    "frames": 4,
+    "how": "declared"
+  },
+  "name": "drives",
+  "frames": 1024,
+  "gaps": [],
+  "complete": true,
+  "fault": null,
+  "cut_from_frames": 16384
+}

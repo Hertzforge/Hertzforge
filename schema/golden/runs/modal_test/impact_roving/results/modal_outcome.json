@@ -1,0 +1,92 @@
+{
+  "name": "modal_outcome",
+  "kind": "modal_outcome",
+  "abscissa": null,
+  "channels": [],
+  "mode": "impact",
+  "outcome": "ended",
+  "reason": "the test was ended with the drive at zero (by Shell (controller))",
+  "emergency_stop": false,
+  "totals": {
+    "accepted": 6,
+    "taken": 6,
+    "points_measured": 3,
+    "points_planned": 3
+  },
+  "counts": {
+    "unit": "hits",
+    "point": {
+      "index": 2,
+      "accepted": 2,
+      "rejected": 0,
+      "asked": 2
+    },
+    "points": [
+      {
+        "index": 0,
+        "accepted": 2,
+        "rejected": 0,
+        "taken": 2,
+        "measured": true
+      },
+      {
+        "index": 1,
+        "accepted": 2,
+        "rejected": 0,
+        "taken": 2,
+        "measured": true
+      },
+      {
+        "index": 2,
+        "accepted": 2,
+        "rejected": 0,
+        "taken": 2,
+        "measured": true
+      }
+    ],
+    "totals": {
+      "accepted": 6,
+      "taken": 6,
+      "points_measured": 3,
+      "points_planned": 3
+    }
+  },
+  "arrays": [
+    {
+      "name": "accepted",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "",
+      "offset": 0
+    },
+    {
+      "name": "taken",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "",
+      "offset": 8
+    },
+    {
+      "name": "points_measured",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "",
+      "offset": 16
+    },
+    {
+      "name": "points_planned",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "",
+      "offset": 24
+    }
+  ]
+}

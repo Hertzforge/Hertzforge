@@ -1,0 +1,205 @@
+{
+  "config": {
+    "title": "Golden Two Shakers",
+    "operator": "A. Operator",
+    "article": "Beam, SN 0007",
+    "mode": "shaker",
+    "fs_hz": 1024,
+    "block": 512,
+    "band": {
+      "hi_hz": 200
+    },
+    "averages": 4,
+    "shaker": {
+      "drives": [
+        {
+          "row": 5,
+          "level_vrms": 0.05
+        },
+        {
+          "row": 6,
+          "level_vrms": 0.05
+        }
+      ],
+      "source": "burst_random",
+      "burst_pct": 40,
+      "ramp_s": 0.5,
+      "ceiling_v": 1.0,
+      "seed": 7
+    }
+  },
+  "resolved": {
+    "control": "open loop, no control law: each shaker plays its source at its level, and nothing is corrected from the response",
+    "inputs": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "drives": [
+      5,
+      6
+    ],
+    "windows": {
+      "analysis": "uniform",
+      "force": null,
+      "exponential": null
+    },
+    "capture": {
+      "run_name": "modal_test"
+    },
+    "stop": {
+      "depth_db": 40,
+      "ramp_s": 3,
+      "then": "zero"
+    },
+    "aborts": {
+      "drive": {
+        "ceiling_v": 1,
+        "judged": "every sample, after the ramp"
+      },
+      "underrun": "the source running empty takes the drive to zero at once",
+      "input_overload": "an overload on a row with abort limits takes the drive to zero at once"
+    },
+    "structure": {
+      "modes": [
+        {
+          "f_hz": 42,
+          "damping": 0.04
+        },
+        {
+          "f_hz": 118,
+          "damping": 0.03
+        },
+        {
+          "f_hz": 196,
+          "damping": 0.025
+        }
+      ],
+      "scale_g_per_lbf": 0.05,
+      "shape": "sin(m pi x), x = ((node - 1) mod 10 + 0.5) / 10; a direction ending in - flips the sign",
+      "force": {
+        "how": "each shaker's force is its drive as written, times the shaker's constant, one engine block later; each response is the sum over the shakers of the structure's impulse response convolved with that force",
+        "lbf_per_v": 100
+      },
+      "impulse_response_s": 1
+    }
+  },
+  "check": {
+    "source": "SIM",
+    "mode": "shaker",
+    "fs_hz": 1024,
+    "block": 512,
+    "frame_s": 0.5,
+    "df_hz": 2,
+    "band": {
+      "lo_hz": 0,
+      "hi_hz": 200,
+      "first_line": 0,
+      "last_line": 100,
+      "lines": 101
+    },
+    "estimator": "matrix H1",
+    "averages": 4,
+    "references": [
+      {
+        "index": 1,
+        "unit": "lbf",
+        "range": 100,
+        "node": 1,
+        "direction": "Z+",
+        "roves": false
+      },
+      {
+        "index": 4,
+        "unit": "lbf",
+        "range": 100,
+        "node": 8,
+        "direction": "Z+",
+        "roves": false
+      }
+    ],
+    "responses": [
+      {
+        "index": 2,
+        "unit": "g",
+        "range": 50,
+        "node": 4,
+        "direction": "Z+",
+        "roves": false
+      },
+      {
+        "index": 3,
+        "unit": "g",
+        "range": 50,
+        "node": 7,
+        "direction": "Z+",
+        "roves": false
+      }
+    ],
+    "points": [
+      {
+        "index": 0,
+        "references": [
+          {
+            "index": 1,
+            "node": 1,
+            "direction": "Z+",
+            "unit": "lbf"
+          },
+          {
+            "index": 4,
+            "node": 8,
+            "direction": "Z+",
+            "unit": "lbf"
+          }
+        ],
+        "responses": [
+          {
+            "index": 2,
+            "node": 4,
+            "direction": "Z+",
+            "unit": "g"
+          },
+          {
+            "index": 3,
+            "node": 7,
+            "direction": "Z+",
+            "unit": "g"
+          }
+        ]
+      }
+    ],
+    "shaker": {
+      "source": "burst_random",
+      "crest": 4,
+      "drives": [
+        {
+          "row": 5,
+          "level_vrms": 0.05,
+          "peak_v": 0.2,
+          "range_v": 10
+        },
+        {
+          "row": 6,
+          "level_vrms": 0.05,
+          "peak_v": 0.2,
+          "range_v": 10
+        }
+      ],
+      "ceiling_v": 1,
+      "burst_pct": 40,
+      "ramp_s": 0.5,
+      "delay_frames": 2,
+      "overlap_pct": null,
+      "seed": 7,
+      "window": "uniform",
+      "stop": {
+        "depth_db": 40,
+        "ramp_s": 3,
+        "then": "zero"
+      },
+      "seconds_per_point": 3.5
+    }
+  }
+}

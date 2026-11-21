@@ -6828,6 +6828,210 @@ Each run writes its folder `capture.run_name` under the local data root, a name 
 getting the first free `<name>-<n>`. The state names it from start on (`record.folder`). What the
 folder holds is "What a Playback Run Saves" in `docs/run-folder.md`.
 
+## Modal Test
+
+The Modal Test measures a structure's frequency response functions (FRFs) for modal analysis, in
+one of two modes. **Impact mode**: a roving hammer (or roving responses) over a list of points;
+each hit is captured on the hammer's trigger, checked (overload, double hit, tip, the force window)
+and accepted or rejected, and a point is measured once its averages are in. Nothing is driven:
+the station opens no drive row and writes no drive sample. **Shaker mode**: one or more shakers
+driven open loop with a broadband source (random, burst random, pseudo random, periodic random,
+periodic chirp or burst chirp), every point averaged over frames, with several references taking
+matrix H1. The run is one test like any other: a Modal Test and any other module's run, or a
+`sim.start` run, exclude each other, each refused `run_active` while another is live. **Any
+connected screen may end or abort** (`modal_test.end`, `modal_test.abort`); every other verb that
+acts needs control; everything that only reads is open to every connection. `modal_test.start`,
+`modal_test.arm` and `modal_test.drive_start` are on the drive list: each passes the table's arm
+gate.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `modal_test.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","check","warnings"}`; a dry run `{"errors","warnings","check"}` |
+| `modal_test.config` | `{}` | any | `{"run_id","config","check"}` |
+| `modal_test.start` | `{}` | `configured` | state, once the station runs |
+| `modal_test.select` | `{"point"}` (index from 0) | live | `{"ok","counts","state"}` |
+| `modal_test.next`, `modal_test.previous` | `{}` | live | `{"ok","counts","state"}`; the point after or before, wrapping |
+| `modal_test.arm`, `modal_test.disarm` | `{}` | live (arm: impact) | `{"ok","counts","state"}` |
+| `modal_test.accept`, `modal_test.reject`, `modal_test.undo` | `{}` | live | `{"ok","counts","state"}`; each acts on the latest hit or frame |
+| `modal_test.target_from_hit` | `{}` | live, impact | `{"ok","counts","state"}`; the force target's peak becomes the latest hit's |
+| `modal_test.drive_start`, `modal_test.drive_stop` | `{}` | live, shaker | `{"ok","counts","state"}` |
+| `modal_test.sim_hit` | `{"kind"}`: `clean`, `double` or `overload` | live, impact, simulator | `{"ok","counts","state"}`; the next simulated hit's kind |
+| `modal_test.end` | `{}` | any | state; the controlled end |
+| `modal_test.abort` | `{}` | any | state; the drive to zero at once |
+| `modal_test.reset`, `modal_test.clear` | `{}` | any but live | state |
+| `modal_test.state` | `{}` | any | state |
+| `modal_test.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+
+"state" is the `modal_test.state` object below. A verb before the start is refused `not_live`;
+`drive_start` and `drive_stop` in impact mode, and `arm` and `sim_hit` in shaker mode,
+`not_in_mode`; `sim_hit` on hardware `not_simulated`. The session's own
+refusals name what stops the verb: `already` (armed twice), `busy` (a hit waits for accept or
+reject), `no_hit` (nothing to accept, reject or take a target from), `no_such_point`,
+`nothing_to_undo`, `point_done` (the point is measured: undo, or select another). `reset`
+configures the present configuration again; `clear` forgets it (`none`).
+
+### Modal Test Configuration
+
+```
+{"title":"Golden Roving Hammer","operator":"A. Operator","article":"Beam, SN 0007",
+ "specification":{"document":"Test procedure","clause":"5.1"},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"1"}],
+ "mode":"impact","fs_hz":1024,"block":512,"band":{"hi_hz":200},"averages":2,
+ "roving":{"channels":[1],"points":{"start":1,"count":3}},
+ "impact":{"holdoff_blocks":0,"exponential_window":{"on":true,"end_pct":10}}}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `mode` | (required) | `impact` or `shaker` |
+| `fs_hz` | (required) | The sample rate, 256 to 204800 Hz |
+| `block` | 2048 | The analysis block, frames: a power of two, 256 to 65536. The line spacing is `fs_hz / block` |
+| `band.lo_hz`, `band.hi_hz` | 0, `fs_hz / 2.56` | The FRF's lines, inclusive |
+| `estimator` | `H1` | `H1`, `H2` or `Hv` with one reference; several references always take matrix H1 |
+| `averages` | 5 (impact), 30 (shaker) | Hits or frames per point, 1 to 10000 |
+| `roving.channels` | none | The table rows (`index`) that move from point to point |
+| `roving.points` | none | A list of `{"node","direction"}`, or `{"start","step","count"}` nodes in the rows' own direction |
+| `impact.trigger_pct` | 10 | The trigger, percent of the hammer row's range |
+| `impact.pretrigger_pct` | 5 | The pre-trigger, percent of the block |
+| `impact.holdoff_blocks` | 1 | Blocks after a capture before the trigger re-arms |
+| `impact.double_hit_pct` | 5 | A later force above this percent of the peak, after the pulse has fallen below 5 % of it, is a double hit |
+| `impact.tip_warn_db` | 20 | The force spectrum's drop to the band's top above which the tip is reported |
+| `impact.accept` | `auto` | `auto` (each clean hit accepted) or `manual` (each waits for accept or reject) |
+| `impact.force_window` | `{"on":true,"width_pct":10,"fall_pct":10}` | The force window: its width, percent of the block, after the trigger; its fall, percent of the width |
+| `impact.exponential_window` | `{"on":false,"end_pct":10}` | The exponential window on every channel, by its value at the block's end |
+| `impact.auto_advance` | true | Select the next point, armed, once a point is measured |
+| `impact.target` | none | `{"peak","tolerance_pct"}` (tolerance 20 unless given): a signal on each hit, never a rejection |
+| `shaker.drives` | (required in shaker mode) | `[{"row","level_vrms"}]`, each an enabled drive row, level 0.05 V rms unless given |
+| `shaker.source` | `burst_random` | `random`, `burst_random`, `pseudo_random`, `periodic_random`, `periodic_chirp`, `burst_chirp` |
+| `shaker.burst_pct` | 50 | The burst's part of the frame (the burst sources) |
+| `shaker.ramp_s` | 1 | The drive's ramp up, at most 60 s |
+| `shaker.ceiling_v` | 1 | The drive ceiling, volts: above 0, at most 10 and at most each drive row's `range_max` |
+| `shaker.delay_frames` | 2 | Frames played before averaging (periodic sources), at most 100 |
+| `shaker.overlap_pct` | 50 | The overlap of random's frames: 0, 50 or 75 |
+| `shaker.seed` | 1 | The source's seed |
+| `capture.run_name` | `modal_test` | The run folder's name under the local data root |
+| `operator`, `article`, `notes`, `specification`, `metadata` | empty | Random's: for the run's record |
+| `record.streams` | true | Whether the run's record keeps its time histories |
+
+The table's rows carry each measured channel's DOF (`node`, `direction` spelled `Z+` or `Z-`)
+and its part (`analysis_role`: `reference` or `response`). A configuration whose shape is wrong is
+refused `bad_params` naming the field (`config.impact.window`); its content errors
+`config_invalid`, with the items (`reason`, `field`, `message`) and `detail.check` (null when no
+plan could be made). Item reasons: `out_of_range`, `block_invalid`, `band_invalid`,
+`too_few_averages`, `roving_invalid`, `no_reference`, `no_response`, `reference_count`,
+`no_drive`, `drive_row_invalid`, `drive_repeated`, `level_over_ceiling`, `ceiling_over_range`.
+A force window past the block is refused, never clamped:
+
+```
+{"code":"bad_request","reason":"config_invalid",
+ "message":"The configuration has 1 error: The force window runs past the block: ...",
+ "detail":{"errors":[{"reason":"out_of_range","field":"config.impact.force_window",
+                      "message":"..."}],"warnings":[],"check":null}}
+```
+
+Warnings: `no_pretrigger`, `no_roving` (the table's DOFs are measured once),
+`one_average` (coherence is then 1 at every line), `exponential_window_damping` (the damping
+the window adds, at the band's middle).
+
+**The windows**, in samples. The force window, on the reference channels in impact mode, from the
+block's start: `w[n] = 1` for `n < pre + width`, then `w[n] = 0.5 (1 + cos(pi k / fall))` with
+`k = n - pre - width` for `0 <= k < fall`, then 0; `pre` is the pre-trigger
+(`round(pretrigger_pct / 100 x block)`, the trigger sample), `width` is
+`round(width_pct / 100 x block)`, `fall` is `max(1, round(fall_pct / 100 x width))`. A width not
+finite, not above zero or under one sample, or `pre + width + fall` past the block, is refused
+`out_of_range`. The exponential window, on every channel: `w[n] = exp(-(n / fs) / tau)` from the
+block's start, `tau = -T / ln(end)`, `T = block / fs`. FRFs are indexed
+`[response, reference, line]`, in the sign convention `X(f) = sum x(t) exp(-j 2 pi f t)`.
+
+### Running a Modal Test
+
+- **`modal_test.start`** passes the table's arm gate, checks the table still carries the plan,
+  opens the run's record (`record_unwritable` when it cannot) and opens the station at `fs_hz`
+  (`rate_mismatch` when it programs another). Impact mode opens the measured rows only.
+- **Impact.** `arm` waits for the trigger; a captured block is a hit at the selected point. A
+  hit is checked: an overloaded channel or a double hit rejects it (`reason` `overload` or
+  `double_hit`); a tip rolled off, a response with nothing in it, a force window that cuts the
+  pulse (the force has not fallen below 5 % of its peak before `pre + width`), or a peak off the
+  target are warnings on the hit, never rejections. In `auto` a clean hit is accepted; in `manual`
+  it waits (`captured`) for `accept` or `reject`. `accept`, `reject` and `undo` act on the
+  latest hit. Once a point's averages are in, its FRF is measured and, with `auto_advance`, the
+  next point is selected and armed.
+- **Shaker.** `drive_start` ramps the drive up over `ramp_s` from the next frame's start; frames
+  are averaged from the ramp's start plus the station's input delay. Once a point's averages are
+  in, the drive is stopped with the shared stop ramp, 40 dB down over 3 s. `drive_stop` stops it
+  the same way.
+- **`modal_test.end`** ends the test (`ended`), in shaker mode through the stop ramp;
+  **`modal_test.abort`** takes the drive to zero at once with the emergency stop (`aborted`).
+  The run also ends with the emergency stop on a response abort (`response_abort`), a drive
+  sample over the ceiling (`drive_ceiling`), an underrun (`drive_underrun`), an input overload on
+  a limited row (`input_overload`), a loop fault (`loop_faulted`) or a panic (`loop_panicked`).
+- A later measurement of a point is a new record naming the one it replaces; points finished
+  stay on the disk however the run ends.
+
+### Modal Test Run State
+
+```
+{"run_id":"modal-test-0001","state":"finished","mode":"impact","source":"SIM",
+ "station_class":"sim","title":"Golden Roving Hammer","drive_phase":"idle","point":2,
+ "point_dofs":{"references":[{"index":1,"node":3,"direction":"Z+","unit":"lbf"}],
+               "responses":[{"index":2,"node":4,"direction":"Z+","unit":"g"},
+                            {"index":3,"node":7,"direction":"Z+","unit":"g"}]},
+ "counts":{"unit":"hits","point":{"index":2,"accepted":2,"rejected":0,"asked":2},
+           "points":[{"index":0,"accepted":2,"rejected":0,"taken":2,"measured":true},...],
+           "totals":{"accepted":6,"taken":6,"points_measured":3,"points_planned":3}},
+ "hits":[{"n":1,"seq":5,"status":"accepted","reason":null,"overload":false,
+          "double_hit":false,"start_frame":6631,"peak":18.478,"tip_warning":false,
+          "force_window_cut":false},...],
+ "latest":{...,"point":2,"report":{"peak":18.478,"peak_frame":27,"overloaded":[],
+           "double_hit":null,"tip_drop_db":6.02,"tip_warning":false,
+           "no_response":[false,false],"force_window_cut":null,"rejected":null,
+           "reasons":[],"warnings":[]}},
+ "record":{"folder":"/home/operator/Hertzforge_Data/golden_roving_hammer","streams":true,
+           "problem":null},
+ "end":{"outcome":"ended","message":"...","emergency_stop":false,"at_s":16}}
+```
+
+`state`: `none` (the object is then `{"run_id":null,"state":"none"}`), `configured`,
+`starting`, `idle`, `armed`, `captured` (a hit waits for accept or reject), `measuring`
+(shaker: averaging), `stopping` (shaker: the stop ramp), `point_done` or `finished`.
+`drive_phase`: `idle`, `waiting`, `ramping`, `driving`, `stopping`, `zeroed`. `counts` is kept
+current after every take, accept, reject and undo; its `unit` is `hits` in impact mode and
+`frames` in shaker mode, counted in the same fields. `hits` are the selected point's tiles:
+`status` `pending`, `accepted`, `rejected` or `undone`, `reason` (rejected only) `overload`,
+`double_hit` or `operator`; `peak`, `tip_warning` and `force_window_cut` in impact mode, and
+`target_verdict` (`high`, `low`, `on_target`) with `target_diff_pct` when a target is set.
+`latest` is the latest tile with its point and its whole report; a report's `warnings` are
+`tip_roll_off`, `no_response`, `force_window_cuts_pulse` (with
+`force_window_cut: {"pulse_end_frame","window_end_frame"}`), `force_high` and `force_low`.
+`end`, once finished: `{"outcome","message","emergency_stop","at_s"}`, `at_s` station seconds.
+`modal_test.state` is sent when the state changes; `modal_test.log` with each run's new log
+entries (`{"run_id","entries"}`).
+
+### Modal Test Display
+
+`modal_test.live` goes to every connection ten times a second from start until the run has
+finished, then once more: a binary frame
+
+```
+{"run_id":"modal-test-0001","state":"armed","point":1,
+ "time":{"rate_hz":1024,"channels":[{"values":{"$array":"t0"}},...]},
+ "frf":{"frequency_hz":{"$array":"f"},"averages":2,
+        "pairs":[{"response":0,"reference":0,"magnitude":{"$array":"m0_0"},
+                  "phase_deg":{"$array":"p0_0"}},...],
+        "coherence":[{"response":0,"values":{"$array":"c0"}},...]}}
+```
+
+`time` holds the latest 1024 frames (or the block, when shorter) of every measured channel, in
+table order;
+`frf` the selected point's present estimate, a pair per response and reference, and the
+coherence per response (multiple coherence with several references). Every array is float32.
+
+### Modal Test Records
+
+Each run writes its folder `capture.run_name` under the local data root, a name already taken
+getting the first free `<name>-<n>`. The state names it from start on (`record.folder`). What the
+folder holds is "What a Modal Test Run Saves" in `docs/run-folder.md`.
+
 ## Control Laws
 
 The control laws an operator can choose, for single-output and MIMO Random, for classical and

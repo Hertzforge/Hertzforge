@@ -1,0 +1,143 @@
+{
+ "type": "event",
+ "topic": "modal_test.state",
+ "seq": 411,
+ "data": {
+  "run_id": "modal-test-0001",
+  "state": "finished",
+  "mode": "impact",
+  "source": "SIM",
+  "station_class": "sim",
+  "title": "Golden Roving Hammer",
+  "drive_phase": "idle",
+  "point": 2,
+  "point_dofs": {
+   "references": [
+    {
+     "index": 1,
+     "node": 3,
+     "direction": "Z+",
+     "unit": "lbf"
+    }
+   ],
+   "responses": [
+    {
+     "index": 2,
+     "node": 4,
+     "direction": "Z+",
+     "unit": "g"
+    },
+    {
+     "index": 3,
+     "node": 7,
+     "direction": "Z+",
+     "unit": "g"
+    }
+   ]
+  },
+  "counts": {
+   "unit": "hits",
+   "point": {
+    "index": 2,
+    "accepted": 2,
+    "rejected": 0,
+    "asked": 2
+   },
+   "points": [
+    {
+     "index": 0,
+     "accepted": 2,
+     "rejected": 0,
+     "taken": 2,
+     "measured": true
+    },
+    {
+     "index": 1,
+     "accepted": 2,
+     "rejected": 0,
+     "taken": 2,
+     "measured": true
+    },
+    {
+     "index": 2,
+     "accepted": 2,
+     "rejected": 0,
+     "taken": 2,
+     "measured": true
+    }
+   ],
+   "totals": {
+    "accepted": 6,
+    "taken": 6,
+    "points_measured": 3,
+    "points_planned": 3
+   }
+  },
+  "hits": [
+   {
+    "n": 1,
+    "seq": 5,
+    "status": "accepted",
+    "reason": null,
+    "overload": false,
+    "double_hit": false,
+    "start_frame": 6631,
+    "peak": 18.478137969970703,
+    "tip_warning": false,
+    "force_window_cut": false
+   },
+   {
+    "n": 2,
+    "seq": 6,
+    "status": "accepted",
+    "reason": null,
+    "overload": false,
+    "double_hit": false,
+    "start_frame": 8167,
+    "peak": 18.477951049804688,
+    "tip_warning": false,
+    "force_window_cut": false
+   }
+  ],
+  "latest": {
+   "n": 2,
+   "seq": 6,
+   "status": "accepted",
+   "reason": null,
+   "overload": false,
+   "double_hit": false,
+   "start_frame": 8167,
+   "peak": 18.477951049804688,
+   "tip_warning": false,
+   "force_window_cut": false,
+   "point": 2,
+   "report": {
+    "peak": 18.477951049804688,
+    "peak_frame": 27,
+    "overloaded": [],
+    "double_hit": null,
+    "tip_drop_db": 6.021501954408373,
+    "tip_warning": false,
+    "no_response": [
+     false,
+     false
+    ],
+    "force_window_cut": null,
+    "rejected": null,
+    "reasons": [],
+    "warnings": []
+   }
+  },
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/golden_roving_hammer",
+   "streams": true,
+   "problem": null
+  },
+  "end": {
+   "outcome": "ended",
+   "message": "the test was ended with the drive at zero (by Shell (controller))",
+   "emergency_stop": false,
+   "at_s": 16.0
+  }
+ }
+}
