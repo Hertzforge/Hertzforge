@@ -4,17 +4,18 @@
     "outcome": "completed",
     "name": "completed",
     "message": "Test complete: the schedule finished and every part ramped down with the controlled stop.",
-    "at_s": 12.75,
+    "at_s": 10.75,
     "level_db": 0,
     "part": null,
     "control": null,
     "drive": null,
     "ramp_s": 0.875
   },
+  "overrides": [],
   "at_unix": 1794240060.25,
-  "station_frames": 86528,
+  "station_frames": 79872,
   "summary": {
-    "t_s": 12.75,
+    "t_s": 10.75,
     "level_records": 2,
     "trace_records": 2,
     "spectra_records": 3
