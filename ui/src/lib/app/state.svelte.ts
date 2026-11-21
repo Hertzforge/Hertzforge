@@ -2112,6 +2112,13 @@ export class ProjectState {
 	}
 
 	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	/** Elements dragged onto an element group in the tree: they move into it (`project.move_elements`). */
+	async moveElements(name: string, ids: number[], group: number): Promise<boolean> {
+		const ok = await this.act(`Moving elements into element group ${group}`, 'project.move_elements', { geometry: name, elements: ids.join(', '), group });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
 	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
 		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
 		if (ok) void this.loadChildren(name);
