@@ -98,6 +98,9 @@ LIVE = frozenset({'project.set_averaging'})
 #: in the tree and left off the form.
 PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
 PICKED_ONE = frozenset({'record', 'drawn'})
+#: the actions whose `modes` are the modes picked under their shape set, named by the param
+#: that holds the set: every mode when the set is selected whole
+PICKED_MODES = {'project.synthesize_modal_frfs': 'source'}
 
 #: the rows that read a geometry's nodes, off until it has some
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
@@ -233,6 +236,10 @@ def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
         return reason
     if verb in dict(project.selection_verbs(*names)):
         return ''
+    if op.id == 'project.project_onto_basis':
+        from hertzforge.project import projection_why
+
+        return projection_why(project, fill['source'], fill['onto']) or 'It cannot take this selection'
     return (PAIR_WHY.get(op.id)
             or _why_not(op, [projects.kind_of(project[n]) for n in names])
             or 'It cannot take this selection')
@@ -544,7 +551,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picked = next((r for r in picks if r), [])
         unasked = []
         for param in op.params:
-            if param.name in PICKED_LISTS and param.type == 'string':
+            if param.name == 'modes' and op.id in PICKED_MODES:
+                modes = records.get(fill[PICKED_MODES[op.id]], [])
+                fill['modes'] = _runs(modes) if modes else ''
+                unasked.append('modes')
+            elif param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
                 unasked.append(param.name)
             elif param.name in PICKED_ONE and param.type == 'integer':
@@ -620,6 +631,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
                 continue
             more['omit'] = [*more.get('omit', []), 'mate']
+        if op.id in MATCHED:
+            fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:
             more['live'] = True
         rows.append(_op_row(op, fill=fill, **more))
@@ -705,6 +718,43 @@ def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
     scale = display_units.words_in('length')[1] if held.units_defined else 1.0
     fill['size'] = f'{size * scale:.4g}'
     return fill
+
+
+#: the projections whose node match tolerance, a distance, the row fills in
+MATCHED = frozenset(('project.project_onto_basis', 'project.projection_overlay',
+                     'project.project_onto_channels', 'project.expand'))
+
+
+def _match_fill(project: Any, op_id: str, fill: dict[str, str]) -> dict[str, str]:
+    """A projection's node match tolerance as its form opens: the distance 2 % of the
+    target's size comes to for the pair the row projects (`Project.match_distance`), in
+    the display units, or in the model's own when its units are not defined. Nothing when
+    the pair would not be projected: one geometry between them, or none."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.correlate import projection_order
+
+    from . import display_units
+
+    if op_id == 'project.projection_overlay':
+        first, second = fill['first'], fill['second']
+        flipped, _why = projection_order(project[first], project[second])
+        pair = (first, second) if flipped else (second, first)
+    elif op_id == 'project.expand':
+        # a record through a shape set matches no nodes: only a table on another geometry does
+        if not isinstance(project.get(fill['shapes']), ChannelTable):
+            return {}
+        basis = project.modal_basis(fill['source'])
+        if basis is None:
+            return {}
+        pair = (basis, fill['shapes'])
+    else:
+        pair = (fill['source'], fill.get('onto') or fill['table'])
+    distance = project.match_distance(*pair)
+    if distance is None:
+        return {}
+    defined = project.geometry_for(pair[0])[1].units_defined
+    scale = display_units.words_in('length')[1] if defined else 1.0
+    return {'distance': f'{distance * scale:.4g}'}
 
 
 def _shells_among(geometry: Any, groups: list[Any]) -> bool:

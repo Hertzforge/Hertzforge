@@ -441,3 +441,115 @@ def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
         project.project_onto_basis('Test Shapes', onto='FEM Shapes')
     made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
     assert list(project[made].coordinate) == list(project['Test Shapes'].coordinate)
+
+
+def test_a_distance_is_the_match_limit_itself():
+    """Node 101 sits 1 mm from the cube's corner and 102 1 mm from another: a limit a
+    little above that matches both, one a little below matches neither, and the limit the
+    report gives is the distance asked for, nothing added."""
+    from hertzforge.core.correlate import NoNodeMatched
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                       test_geometry, distance=0.0011)
+    assert report['limit'] == 0.0011
+    assert projected.coordinate == ['101X+', '102X+']
+    with pytest.raises(NoNodeMatched) as error:
+        project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry,
+                       distance=0.0009)
+    assert error.value.report['limit'] == 0.0009
+    # the distance takes the place of the share of the extent, however large that is
+    _projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                        test_geometry, tolerance=50.0, distance=0.0011)
+    assert report['limit'] == 0.0011
+
+
+def test_without_a_distance_the_limit_is_match_distance():
+    from hertzforge.core.correlate import match_distance
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    _projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                        test_geometry)
+    # two test nodes: the extent is half the distance between them
+    extent = 0.5 * float(np.linalg.norm(np.subtract([1.0, 1.0, 0.999], [0.001, 0.0, 0.0])))
+    assert report['limit'] == pytest.approx(0.02 * extent, rel=1e-12)
+    assert match_distance(fem_geometry, test_geometry) == report['limit']
+    assert match_distance(fem_geometry, test_geometry, 0.1) == pytest.approx(
+        0.1 * extent, rel=1e-12)
+
+
+@pytest.mark.parametrize('distance', [0.0, -0.001, float('nan'), float('inf')])
+def test_a_distance_that_is_not_above_zero_is_refused(distance):
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    with pytest.raises(ValueError, match='node match distance is .*above zero'):
+        project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry,
+                       distance=distance)
+
+
+def test_a_shape_set_projects_onto_every_node_of_another_geometry():
+    """The cube's modes put on the test geometry: X, Y and Z at each node, node 102's in
+    its rotated frame, whose X is global Y and whose Y is minus global X. Mode 1 moves a
+    node by (x+10, y+20, z+30), so 101 near (0, 0, 0) reads (10, 20, 30) and 102 near
+    (1, 1, 1) reads (21, -11, 31)."""
+    project = _two_geometries()
+    assert 'project_onto_basis' in dict(project.selection_verbs('FEM Shapes',
+                                                                'Test Geometry'))
+    name = project.project_onto_basis('FEM Shapes', onto='Test Geometry')
+    assert name == 'FEM Shapes @ Test Geometry'
+    made = project[name]
+    assert made.coordinate == ['101X+', '101Y+', '101Z+', '102X+', '102Y+', '102Z+']
+    assert made.shape_matrix[0] == pytest.approx([10.0, 20.0, 30.0, 21.0, -11.0, 31.0])
+    assert made.shape_matrix[1] == pytest.approx([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    assert list(made.frequency) == [10.0, 20.0]
+    assert name in project.object_group_of('Test Geometry')
+    assert made.projection_report['matched'] == 2
+
+
+def test_a_geometry_takes_the_distance_and_drops_a_node_beyond_it():
+    project = _two_geometries()
+    project['Test Geometry'] = _test_model(extra_node=True)[0]
+    made = project[project.project_onto_basis('FEM Shapes', onto='Test Geometry',
+                                              distance=0.0011)]
+    assert made.projection_report['limit'] == 0.0011
+    assert made.projection_report['unmatched'] == [103]
+    assert [str(d) for d in made.coordinate if str(d).startswith('103')] == []
+
+
+def test_what_cannot_go_onto_a_geometry_is_refused_and_not_offered():
+    from hertzforge.project import projection_why
+
+    project = _two_geometries()
+    project.add('Empty', hertzforge.Geometry(node_id=[], node_xyz=np.zeros((0, 3))))
+    cases = [
+        ('FEM Shapes', 'FEM Geometry', 'FEM Shapes is on FEM Geometry already'),
+        # each test node holds one direction: its other two would be taken as no motion
+        ('Test Shapes', 'FEM Geometry',
+         'Test Shapes has 2 nodes measured in fewer than three directions'),
+        ('FEM Shapes', 'Empty', 'Empty has no nodes')]
+    for source, onto, why in cases:
+        assert projection_why(project, source, onto) == why
+        assert 'project_onto_basis' not in dict(project.selection_verbs(source, onto))
+        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: '
+                                             f'{why[0].lower()}{why[1:]}'):
+            project.project_onto_basis(source, onto=onto)
+    assert projection_why(project, 'FEM Shapes', 'Test Geometry') == ''
+
+
+def test_the_match_distance_is_said_for_the_pair_it_projects():
+    from hertzforge.core.correlate import match_distance
+
+    project = _two_geometries()
+    onto_set = project.match_distance('FEM Shapes', 'Test Shapes')
+    assert onto_set == match_distance(project['FEM Geometry'], project['Test Geometry'])
+    assert project.match_distance('FEM Shapes', 'Test Geometry') == onto_set
+    # the other way is the cube's size, not the test's
+    assert project.match_distance('Test Shapes', 'FEM Shapes') == pytest.approx(
+        0.02 * np.sqrt(3) / 2, rel=1e-12)
+    made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
+    assert project[made].projection_report['limit'] == onto_set
+    project['Test Geometry'].define_units('m')
+    assert project.match_distance('FEM Shapes', 'Test Shapes') is None, \
+        'one geometry in meters and one in its own units overlay in no frame'

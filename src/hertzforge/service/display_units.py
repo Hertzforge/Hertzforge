@@ -220,8 +220,9 @@ def quantities_of(name: str, quantities: set[str]) -> dict[str, dict[str, Any]]:
 
 def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
     """`values` with each `length` param taken from the system `name` to meters, and each
-    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are."""
-    if not geometry.units_defined or name == DEFAULT:
+    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are;
+    with no geometry (None) they are taken as the system's."""
+    if (geometry is not None and not geometry.units_defined) or name == DEFAULT:
         return values
     system = _system(name)
     scale = float(system.transform('length')[0])
@@ -287,6 +288,9 @@ def _shape(view: dict, system: Any) -> None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)
         for layer in view.get('points', ()):
             # free points over the model, in its coordinates
+            layer['xyz'] = np.asarray(_values(layer['xyz'], change), dtype=np.float32)
+        for layer in view.get('segments', ()):
+            # free line segments over the model, in its coordinates
             layer['xyz'] = np.asarray(_values(layer['xyz'], change), dtype=np.float32)
         for frame in view.get('frames', ()):
             frame['origin'] = [float((v - change[1]) / change[0]) for v in frame['origin']]

@@ -130,3 +130,22 @@ export function wideLines(
 	};
 	return lines;
 }
+
+/**
+ * Segments that stay put, `xyz` [2K, 3] with segment k from row 2k to row 2k + 1, `width` pixels
+ * wide and drawn over the surface: a projection's matched node pairs, which are short beside the
+ * model and would be lost at 1 px or under a face.
+ */
+export function fixedWideLines(xyz: Float32Array, color: ColorRepresentation, width: number = LINE_WIDTH): LineSegments2 {
+	const geometry = new LineSegmentsGeometry();
+	geometry.setPositions(xyz);
+	const material = new LineMaterial({ color, linewidth: width, depthTest: false });
+	const lines = new LineSegments2(geometry, material);
+	lines.frustumCulled = false;
+	lines.renderOrder = 4;
+	const size = new Vector2();
+	lines.onBeforeRender = (renderer: WebGLRenderer) => {
+		material.resolution.copy(renderer.getSize(size));
+	};
+	return lines;
+}

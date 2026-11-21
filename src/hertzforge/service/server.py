@@ -38,6 +38,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
 from . import (
+    dialogs,
     display_units,
     drive_files,
     fitting,
@@ -169,13 +170,51 @@ SWITCH_INTERVAL = 0.001
 
 
 
-def _preview_copy(project: Any, name: str) -> Any:
-    """A project holding only a copy of geometry `name`, for an operation to act on while
-    its form is typed: nothing it does reaches the project or its journal."""
+def _typed_on(project: Any, op: Any, values: dict[str, Any]) -> Any:
+    """The geometry whose units an operation's lengths are typed in: its `geometry`, or
+    else the one the first object it names is drawn on; None when it names none."""
+    from hertzforge.core.geometry import Geometry
+
+    names = ([values['geometry']] if 'geometry' in values else
+             [values[p.name] for p in op.params if (p.kinds or p.verb) and p.name in values])
+    for name in names:
+        held = project.get(name) if isinstance(name, str) else None
+        if isinstance(held, Geometry):
+            return held
+        found = project.geometry_for(name) if held is not None else None
+        if found is not None:
+            return found[1]
+    return None
+
+
+def _preview_copy(project: Any, *names: str) -> Any:
+    """A project holding only copies of the objects `names`, for an operation to act on while
+    its form is typed: nothing it does reaches the project or its journal. Each is linked to
+    copies of the geometries linked to it, and the active geometry is copied for an object
+    with none, so a preview draws on, and matches against, the geometry Apply would."""
     from hertzforge import Project
+    from hertzforge.core.geometry import Geometry
 
     scratch = Project('preview')
-    scratch.add(name, copy.deepcopy(project[name]))
+    named = list(dict.fromkeys(names))
+    for name in named:
+        scratch.add(name, copy.deepcopy(project[name]))
+    lonely = False
+    for name in named:
+        if isinstance(project[name], Geometry):
+            continue
+        homes = [m for m in project.object_group_of(name) or ()
+                 if m != name and isinstance(project.get(m), Geometry)]
+        lonely = lonely or not homes
+        for home in homes:
+            if home not in scratch:
+                scratch.add(home, copy.deepcopy(project[home]))
+            scratch.link(home, name)
+    active = project.active_geometry
+    if lonely and active is not None and active in project:
+        if active not in scratch:
+            scratch.add(active, copy.deepcopy(project[active]))
+        scratch.active_geometry = active
     return scratch
 
 
@@ -202,8 +241,17 @@ class Service:
     threads. One per process."""
 
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
-                 workers: int = 2) -> None:
+                 workers: int = 2, dialogs: bool = False) -> None:
         self.operations: dict[str, Operation] = {op.id: op for op in operations}
+        #: the clients connected now, and the event loop's time when the last one left (None
+        #: until one has come and gone): `hertzforge` with no command stops once its browser
+        #: tab has been closed for a while (`__main__._closed_for`)
+        self.connections: int = 0
+        self.last_closed: float | None = None
+        #: whether `files.choose` shows the system's file dialogs: only for `hertzforge`
+        #: with no command, whose browser is on this machine. `hertzforge serve` may run
+        #: where its client is not, and a dialog there would wait on a screen nobody sees.
+        self.dialogs: bool = dialogs
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             workers, thread_name_prefix='hertzforge-service')
 
@@ -470,11 +518,13 @@ class Connection:
                 values['units'] = self.units
             if any(param.length or param.quantity for param in op.params):
                 values = display_units.typed_lengths(op.params, values, self.units,
-                                                     project[values['geometry']])
+                                                     _typed_on(project, op, values))
             if params.get('preview') and not op.previews:
                 raise bad_request(f'{op.id} does not preview')
             if params.get('preview'):
-                scratch = _preview_copy(project, values['geometry'])
+                scratch = _preview_copy(project, *(
+                    values[p.name] for p in op.params
+                    if (p.kinds or p.verb) and values.get(p.name) in project))
                 return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
             before, journaled = list(project), len(project.journal)
             self.running_op, self.cancel_asked = op.id, False
@@ -652,6 +702,28 @@ class Connection:
             # writer can take it
             self.run_log.close()
 
+    async def choose_files(self, params: Any) -> dict[str, Any]:
+        """`files.choose`: the system's open or save dialog on this machine, and the
+        paths chosen in it (none when cancelled). Refused where the service shows no
+        dialogs or none can be shown here, so the shell asks for a typed path."""
+        _only(params, ('purpose', 'name'), 'files.choose')
+        purpose = params.get('purpose')
+        if purpose not in dialogs.PURPOSES:
+            raise bad_request(f'files.choose takes a purpose of {", ".join(dialogs.PURPOSES)}')
+        if not self.service.dialogs:
+            raise refused('This service shows no file dialogs; type the path instead.')
+        name = params.get('name') or ''
+        if not isinstance(name, str):
+            raise bad_request('files.choose takes a name as text')
+        try:
+            # a dialog waits on the person for as long as it takes: on a thread of its own,
+            # not one of the workers an operation needs
+            paths = await asyncio.to_thread(dialogs.choose, purpose, name)
+        except dialogs.DialogUnavailable as error:
+            raise refused(f'No file dialog could be shown: {error}. Type the path '
+                          'instead.') from None
+        return {'paths': paths}
+
     async def answer(self, request: dict[str, Any]) -> None:
         """Run one request and send its response. A ProtocolError becomes an
         error response with its code; any other exception is logged and sent
@@ -691,6 +763,9 @@ class Connection:
                 else:
                     frame = frames.encode_text({'type': 'response', 'id': ident,
                                                 'result': result})
+            elif method == 'files.choose':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': await self.choose_files(params)})
             elif method == 'units.system':
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': self.units_request(params)})
@@ -835,7 +910,13 @@ async def start(service: Service, host: str = '127.0.0.1',
 
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
-        await Connection(service, socket).serve()
+        service.connections += 1
+        try:
+            await Connection(service, socket).serve()
+        finally:
+            service.connections -= 1
+            if not service.connections:
+                service.last_closed = asyncio.get_running_loop().time()
         log.info('connection from %s closed', socket.remote_address)
 
     # no per-message compression: loopback, and deflating a dense model's

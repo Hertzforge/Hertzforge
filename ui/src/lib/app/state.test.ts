@@ -584,3 +584,203 @@ describe("a report's Print", () => {
 		expect(app.report.printing).toBe('<p>page</p>');
 	});
 });
+
+describe('open, import and save in a browser', () => {
+	function browser(answer: (method: string, params: Record<string, unknown>) => unknown) {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const sent: [string, Record<string, unknown>][] = [];
+		(app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+			sent.push([method, params]);
+			return answer(method, params);
+		});
+		app.project.summary = { ...summary, title: 'Plate', file: null, modified: false } as never;
+		return { app, sent };
+	}
+
+	it('opens, imports and saves the paths picked in the dialog the service shows', async () => {
+		const { app, sent } = browser((method, params) => {
+			if (method === 'files.choose') return { paths: params.purpose === 'import' ? ['/d/a.uff', '/d/b.csv'] : params.purpose === 'save' ? ['/d/Plate.hforge'] : ['/d/run.hforge'] };
+			return { project: summary, added: [] };
+		});
+		// Save As first: the open that follows replaces the project, and its title with it
+		await app.project.fileAct('save-as');
+		await app.project.fileAct('import');
+		await app.project.fileAct('open');
+		expect(sent.filter(([m]) => m === 'files.choose').map(([, p]) => p)).toEqual([{ purpose: 'save', name: 'Plate.hforge' }, { purpose: 'import' }, { purpose: 'open' }]);
+		expect(sent.filter(([m]) => m !== 'files.choose' && m.startsWith('project.') && m !== 'project.actions').map(([m, p]) => [m, p.path])).toEqual([
+			['project.save', '/d/Plate.hforge'],
+			['project.import', '/d/a.uff'],
+			['project.import', '/d/b.csv'],
+			['project.open', '/d/run.hforge']
+		]);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('does nothing when the dialog is cancelled', async () => {
+		const { app, sent } = browser(() => ({ paths: [] }));
+		await app.project.fileAct('open');
+		expect(sent.map(([m]) => m)).toEqual(['files.choose']);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('asks for a typed path where the service shows no dialog, and does not ask it again', async () => {
+		const { app, sent } = browser((method) => {
+			if (method === 'files.choose') throw new RequestError('refused', 'This service shows no file dialogs; type the path instead.', method);
+			return {};
+		});
+		await app.project.fileAct('import');
+		expect(app.project.asking).toBe('import');
+		await app.project.fileAct('open');
+		expect(app.project.asking).toBe('open');
+		expect(sent.filter(([m]) => m === 'files.choose')).toHaveLength(1);
+	});
+});
+
+describe('a projection, whose distance its row fills in', () => {
+	const project = {
+		id: 'project.project_onto_basis',
+		title: 'Project onto Basis DOFs',
+		workspace: 'modal',
+		modules: ['modal'],
+		outputs: ['shape3d'],
+		params: [
+			{ name: 'source', label: 'Shape set', type: 'enum', options_from: 'verb:project_onto_basis' },
+			{ name: 'onto', label: 'Onto', type: 'enum', options_from: 'objects:shape_set|channel_table|geometry' },
+			{ name: 'distance', label: 'Node match tolerance', type: 'number', default: 0, unit: 'm', length: true }
+		]
+	} as unknown as OperationDescriptor;
+	const groups = (defined: boolean) =>
+		({
+			...summary,
+			active_geometry: null,
+			objects: [
+				{ name: 'Model', kind: 'geometry', records: 0, groups: ['A'], verbs: [], units_defined: defined },
+				{ name: 'Modes', kind: 'shape_set', records: 0, groups: ['A'], verbs: ['project_onto_basis'] },
+				{ name: 'Test', kind: 'geometry', records: 0, groups: ['B'], verbs: [], units_defined: defined }
+			]
+		}) as unknown as ProjectSummary;
+	const filled = { id: project.id, verb: 'Project', kind: 'run', ready: true, fill: { source: 'Modes', onto: 'Test', distance: '2.5' } } as unknown as ActionRow;
+
+	function projecting(defined = true) {
+		const made = make();
+		made.app.catalog = { operations: [project] } as never;
+		made.app.project.summary = groups(defined);
+		made.app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		return made;
+	}
+
+	it('opens its form on the distance rather than running at once', async () => {
+		const { a, runs } = projecting();
+		await a.perform(filled, column);
+		expect(a.formOpen).toBe(true);
+		expect(runs).toHaveLength(0);
+		expect(a.currentValues.distance).toBe(2.5);
+		expect(a.formParams.map((p) => p.name)).toEqual(['distance']);
+	});
+
+	it('shows the display unit when its geometries have units, and none when they have not', async () => {
+		const shown = projecting();
+		await shown.a.perform(filled, column);
+		expect(shown.a.formParams[0].unit).toBe('mm');
+		const own = projecting(false);
+		await own.a.perform(filled, column);
+		expect(own.a.formParams[0].unit).toBeUndefined();
+	});
+});
+
+describe("the MAC's node match, a distance", () => {
+	const offered = (defined: boolean) =>
+		({ title: 'MAC', views: [], note: '', offers: { projection: true, match_distance: { value: 0.0025, defined } } }) as unknown as AppState['analyze']['shown'];
+
+	it('shows the distance used in the display length and sends what is typed in meters', () => {
+		const { app, a } = make();
+		app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		a.shown = offered(true);
+		expect(a.matchShown).toEqual({ value: 2.5, unit: 'mm' });
+		expect(a.setMatchDistance(1.1)).toBe(true);
+		expect(a.prefs.match_distance).toBeCloseTo(0.0011, 12);
+		expect(a.setMatchDistance(0)).toBe(true);
+		expect(a.prefs.match_distance).toBe(0);
+	});
+
+	it("takes a model's own numbers as they are, and refuses one below zero", () => {
+		const { app, a } = make();
+		app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		a.shown = offered(false);
+		expect(a.matchShown).toEqual({ value: 0.0025, unit: '' });
+		a.setMatchDistance(0.004);
+		expect(a.prefs.match_distance).toBe(0.004);
+		expect(a.setMatchDistance(-1)).toBe(false);
+		expect(a.setMatchDistance(Number.NaN)).toBe(false);
+		expect(a.prefs.match_distance).toBe(0.004);
+	});
+
+	it('offers nothing to type for a selection with no such pair', () => {
+		const { a } = make();
+		a.shown = { title: 't', views: [], note: '', offers: { projection: false, match_distance: null } } as unknown as AppState['analyze']['shown'];
+		expect(a.matchShown).toBeNull();
+	});
+});
+
+describe('the display system changed', () => {
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	// the service draws in the system it was last set to, as the real one does
+	function unitsMade() {
+		const made = make();
+		let system = 'mm-kg-N-s';
+		const shows: { line: number | null; projection: boolean }[] = [];
+		const runs: Sent[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Sent & { name?: string; prefs?: { line: number | null; projection: boolean } }) => {
+			if (method === 'units.system') {
+				if (params.name) system = params.name;
+				return { name: system, systems: ['mm-kg-N-s', 'in-slinch-lbf-s'] };
+			}
+			if (method === 'project.show') {
+				shows.push({ line: params.prefs!.line, projection: params.prefs!.projection });
+				return { title: `shown in ${system}`, note: '', views: [] };
+			}
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: `${params.preview ? 'PREVIEW' : 'REAL'} in ${system}`, rows: [] }] };
+			}
+			return { table: { columns: [] } };
+		});
+		made.app.project.selection = { objects: ['Test Modes', 'FEM Modes'], records: {} } as never;
+		return { ...made, shows, runs };
+	}
+
+	it('draws the selection again in the new units, keeping its line, picks and Projection', async () => {
+		const { app, a, shows } = unitsMade();
+		await app.units.sync();
+		await a.showSelection();
+		a.setPref('projection', true);
+		a.moveLine(12);
+		a.pickCell({ row: 1, column: 2 });
+		await rest();
+		expect(a.shown?.title).toBe('shown in mm-kg-N-s');
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(a.shown?.title).toBe('shown in in-slinch-lbf-s');
+		expect(shows.at(-1)).toEqual({ line: 12, projection: true });
+		expect(a.picks).toEqual([{ row: 1, column: 2 }]);
+	});
+
+	it('keeps a reading that was applied, and draws a preview again', async () => {
+		const { app, a, runs } = unitsMade();
+		await app.units.sync();
+		await a.perform(row(addBlock), column);
+		await a.run();
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(said(a)).toBe('REAL in mm-kg-N-s');
+		expect(runs.filter((r) => !r.preview).length).toBe(1);
+		a.followPreview();
+		await rest();
+		expect(said(a)).toBe('PREVIEW in in-slinch-lbf-s');
+		await app.units.choose('mm-kg-N-s');
+		await rest();
+		expect(said(a)).toBe('PREVIEW in mm-kg-N-s');
+		expect(a.reading?.title).toBe('Add Block, preview');
+	});
+});

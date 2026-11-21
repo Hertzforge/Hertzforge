@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable
+from typing import Any
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,12 +70,28 @@ def _stdin_closed(loop: asyncio.AbstractEventLoop) -> asyncio.Future:
     return closed
 
 
+async def _closed_for(service: Any, seconds: float, poll: float = 0.25) -> None:
+    """Return once a client has come and gone and none has been connected
+    for `seconds`: the browser tab of `hertzforge` with no command was
+    closed. A reload reconnects within half a second, well inside it."""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(poll)
+        left = service.last_closed
+        if not service.connections and left is not None and loop.time() - left >= seconds:
+            return
+
+
 async def _serve(host: str, port: int, *, watch_stdin: bool = False,
-                 ready: Callable[[str, int], None] | None = None) -> None:
-    """Serve on `host`:`port` until cancelled, or until standard input
-    closes with `watch_stdin`. The shell's built pages are served beside the
-    protocol when the package carries them. `ready` is called with the
-    bound address once the port is open."""
+                 ready: Callable[[str, int], None] | None = None,
+                 quit_when_closed: float | None = None, dialogs: bool = False) -> None:
+    """Serve on `host`:`port` until cancelled, until standard input
+    closes with `watch_stdin`, or, with `quit_when_closed`, once no client
+    has been connected for that many seconds after one was (`_closed_for`).
+    The shell's built pages are served beside the protocol when the package
+    carries them. `ready` is called with the bound address once the port is
+    open. With `dialogs`, `files.choose` shows the system's file dialogs on this
+    machine, for a browser on it."""
     from .server import SWITCH_INTERVAL, Service, preload, shell_folder, start
 
     # Process-wide setup, done here and not in start(), so a caller that
@@ -85,7 +102,7 @@ async def _serve(host: str, port: int, *, watch_stdin: bool = False,
     preload()
     sys.setswitchinterval(SWITCH_INTERVAL)
 
-    service = Service()
+    service = Service(dialogs=dialogs)
     server = await start(service, host, port, shell=shell_folder())
     bound = server.sockets[0].getsockname()
     # one line a launcher can wait for
@@ -95,7 +112,17 @@ async def _serve(host: str, port: int, *, watch_stdin: bool = False,
         ready(bound[0], bound[1])
     try:
         serving = asyncio.ensure_future(server.serve_forever())
-        if watch_stdin:
+        if quit_when_closed is not None:
+            closed = asyncio.ensure_future(_closed_for(service, quit_when_closed))
+            closed.add_done_callback(lambda _: serving.cancel())
+            try:
+                await serving
+            except asyncio.CancelledError:
+                if not closed.done():
+                    raise
+            finally:
+                closed.cancel()
+        elif watch_stdin:
             closed = _stdin_closed(asyncio.get_running_loop())
             closed.add_done_callback(lambda _: serving.cancel())
             try:

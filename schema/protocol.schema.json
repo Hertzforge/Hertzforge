@@ -278,6 +278,13 @@
             "size": {"type": "number", "exclusiveMinimum": 0}
           }
         }},
+        "segments": {"type": "array", "items": {
+          "type": "object", "required": ["xyz", "color"], "additionalProperties": false,
+          "properties": {
+            "xyz": {"$ref": "#/$defs/arrayRef"},
+            "color": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3}
+          }
+        }},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
@@ -679,9 +686,11 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "limits", "complex", "projection", "shapes", "values_dofs", "arrows", "arrow_roles", "drives", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "limits", "complex", "projection", "match_distance", "shapes", "values_dofs", "arrows", "arrow_roles", "drives", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"},
           "projection": {"type": "boolean"},
+          "match_distance": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["value", "defined"], "additionalProperties": false,
+            "properties": {"value": {"type": "number", "exclusiveMinimum": 0}, "defined": {"type": "boolean"}}}]},
           "limits": {"type": "boolean"},
           "shapes": {"type": "boolean"},
           "values_dofs": {"type": "array", "items": {"type": "string"}},

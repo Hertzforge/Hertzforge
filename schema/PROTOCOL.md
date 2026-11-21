@@ -580,6 +580,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
+| `files.choose` | `{"purpose","name"?}` | `{"paths"}`: the paths picked in the system's dialog, none when cancelled (File Dialogs below) |
 | `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
 | `drive.inspect` | `{"path"}` or `{"objects"}` | `{"source","signals":[signal...],"rate_hz","notes"}` |
 | `drive.convert` | `{"path"` or `"objects","selections","rate_hz"?,"out"?,"fix_ends"?,"taper_s"?}` | `{"folder","drive","notes","fixed"?}` |
@@ -592,8 +593,17 @@ Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount
 in the param `values` names for that axis, and what `adds` (optional) gives for that axis. `origin` is
 in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters. A `slide` with `"in_display":true` takes the length as dragged, in the view's unit, since its `op` takes it as a length typed in the display system; the view then has no `to_si`.
 
+**File Dialogs.** A browser never gives a page the path of a file it picks, and the service reads a
+file where it is. `files.choose` shows the system's own dialog on the service's machine (AppleScript on
+macOS, Windows Forms through PowerShell on Windows, zenity or kdialog on Linux) and answers with the
+paths picked. `purpose` is `open` (one project file), `import` (any number of files) or `save` (where
+to write a project, offered as `name`). Only the service `hertzforge` starts with no command shows them,
+since its browser is on the same machine; `hertzforge serve` refuses, as it may run where its client is
+not. A dialog that cannot be shown (no desktop session, no dialog program) is refused with the reason,
+and the shell then asks for a typed path. The desktop app uses its own dialogs and never sends this.
+
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
-`"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
+`"preview": true` runs it on copies of the objects it takes (a geometry, a shape set) and answers `{"views"}`, with no `project`.
 Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
 operation without `previews` is a `bad_request`, and nothing runs.
 
@@ -729,9 +739,12 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
-projected onto. `prefs.match_tolerance` (percent of the test geometry's extent, above 0 and at most
-100, 2 when absent) is how far a test node may be from the model node it is matched to, for the MAC
-and for the projection; the shell offers it with `projection`. When no node matches at all the
+projected onto. `prefs.match_distance` (in meters, or in the model's own units when its geometries
+have none; 0 or absent for 2 % of the size of the geometry projected onto, plus half the model's
+thickest plate) is how far a test node may be from the model node it is matched to, for the MAC and
+for the projection. `offers.match_distance` is the distance used, `{value, defined}` (`defined`
+false when the geometries have no units), null when the sets are not on two geometries; the shell
+offers it with `projection`, in the display units. When no node matches at all the
 answer is a `reading` of how far off the nearest pair is and the limit, with the reason in `note`,
 so the tolerance can be set beside it. Which set is projected is decided by what the sets measure and not by their order: the
 set with nodes measured in fewer than three translation directions is the one projected onto, since it
@@ -772,7 +785,10 @@ from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's c
 `project.sensors` draws its view's sensors the same way. A geometry's nodes that no line, face or solid element
 uses are drawn as `points`: a list of layers, each `xyz` f32 [P, 3] in the view's coordinates,
 `colors` u8 [P, 3] (sRGB) and `size`, a point's width on screen in pixels. The points stay put and
-are framed with the model. A node in a one-node element takes the element's color, so the points
+are framed with the model. Free line segments over the model are `segments`, a list of layers, each `xyz`
+f32 [2K, 3] in the view's coordinates (segment k from row 2k to row 2k + 1) and one `color` [r, g, b]
+(sRGB); they stay put, are drawn over the surface and are framed with the model. Project onto Basis
+DOFs draws the node pairs its projection matched this way. A node in a one-node element takes the element's color, so the points
 measured on one surface (an element group of measured points, as a measuring arm's feature table
 imports) read together; more than 5,000 bare nodes, a laser scan's cloud, are colored by height
 along the axis they span least and drawn small; fewer are gray. More than 500,000 are drawn every

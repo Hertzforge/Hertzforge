@@ -153,15 +153,29 @@ class AnalyzeState {
 		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
 	}
 
-	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	/**
+	 * Whether the geometry an operation's lengths are typed on has no units, its numbers its own: the
+	 * form's geometry, or else the one the first object it names is drawn on, as the service takes them.
+	 */
 	private undefinedGeometry(op: OperationDescriptor): boolean {
-		const name = this.values[op.id]?.geometry;
-		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+		const summary = this.app.project.summary;
+		const objects = summary?.objects ?? [];
+		const values = this.values[op.id] ?? {};
+		const named = 'geometry' in values ? [values.geometry] : op.params.filter((p) => p.options_from).map((p) => values[p.name]);
+		for (const name of named) {
+			const obj = objects.find((o) => o.name === name);
+			if (!obj) continue;
+			const geometry =
+				obj.kind === 'geometry' ? obj : (objects.find((o) => o.kind === 'geometry' && o.groups.some((g) => obj.groups.includes(g))) ?? objects.find((o) => o.name === summary?.active_geometry));
+			if (geometry) return geometry.units_defined === false;
+		}
+		return false;
 	}
 
 	/**
 	 * The display system changed: each form holds the same lengths, and the same amount of each
-	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new).
+	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new), and what is
+	 * drawn is drawn again in them.
 	 */
 	unitsChanged(ratio: number | null, ratios: Record<string, number>): void {
 		const next = { ...this.values };
@@ -171,6 +185,14 @@ class AnalyzeState {
 			if (op.params.some((p) => p.quantity)) next[op.id] = rescaledQuantities(op.params, next[op.id], ratios);
 		}
 		this.values = next;
+		// the same selection is read again, so its line, picks and Projection stay; a reading that
+		// was applied stays as it was answered, since running it again could change the project,
+		// but a preview only reads a copy and is asked for again
+		void this.showSelection(true, true);
+		if (this.reading && this.reading === this.previewDrawn) {
+			this.forgetPreview();
+			this.followPreview();
+		}
 	}
 
 	get params(): ParamDescriptor[] {
@@ -236,12 +258,17 @@ class AnalyzeState {
 		this.values = next;
 	}
 
-	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
-	async showSelection(redraw = false): Promise<void> {
+	/**
+	 * The tree's selection changed: ask the service what it shows, dropping answers overtaken by
+	 * later picks. `keepReading` redraws the selection under a reading without ending it.
+	 */
+	async showSelection(redraw = false, keepReading = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
-		this.reading = null;
-		this.readingId = null;
+		if (!keepReading) {
+			this.reading = null;
+			this.readingId = null;
+		}
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
@@ -250,7 +277,7 @@ class AnalyzeState {
 			this.shapeView = null;
 			// each selection opens as it is: Projection is asked for again, not carried over
 			// and so is a loosened node match: one pair's tolerance is not the next pair's
-			if (this.prefs.projection || this.prefs.match_tolerance !== 2) this.prefs = { ...this.prefs, projection: false, match_tolerance: 2 };
+			if (this.prefs.projection || this.prefs.match_distance !== 0) this.prefs = { ...this.prefs, projection: false, match_distance: 0 };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -271,7 +298,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						match_tolerance: this.prefs.match_tolerance,
+						match_distance: this.prefs.match_distance,
 						limits: this.prefs.limits,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
@@ -499,8 +526,10 @@ class AnalyzeState {
 		this.openRow(row);
 		const op = this.op;
 		if (!op) return;
-		const filled = new Set(Object.keys(row.fill ?? {}));
-		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
+		// a field the row fills is asked for nothing only when the form hides it: an object, or
+		// one the row omits. A value it opens on, such as a projection's distance, is still asked
+		const fill = row.fill ?? {};
+		const asks = this.paramsOf(op).filter((p) => !p.in_view && !(p.name in fill && (p.options_from || row.omit?.includes(p.name))));
 		// a form that applies as it goes is filled in full and opens all the same
 		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
@@ -642,6 +671,26 @@ class AnalyzeState {
 			if (view.view === 'shape3d' && view.cursor === 'frequency') return view.modes[0]?.frequency_hz ?? null;
 		}
 		return null;
+	}
+
+	/**
+	 * The distance two shape sets on two geometries are matched within, as the bar shows it: in the
+	 * display system's length, or the model's own numbers when its geometries have no units. Null when
+	 * the selection compares no such pair.
+	 */
+	get matchShown(): { value: number; unit: string } | null {
+		const held = this.shown?.offers?.match_distance;
+		if (!held) return null;
+		const length = held.defined ? this.app.units.length : null;
+		return { value: Number((held.value / (length?.to_si ?? 1)).toPrecision(4)), unit: length?.unit ?? '' };
+	}
+
+	/** A node match distance typed in the bar, in the units it shows it in, 0 for the default; false, and nothing asked, for one below 0. */
+	setMatchDistance(typed: number): boolean {
+		if (!Number.isFinite(typed) || typed < 0) return false;
+		const held = this.shown?.offers?.match_distance;
+		this.setPref('match_distance', typed * (held?.defined ? (this.app.units.length?.to_si ?? 1) : 1));
+		return true;
 	}
 
 	/** One of the bar's choices changed: kept, and the selection read again. */
@@ -1066,6 +1115,8 @@ const PART_DELETES: Record<string, { op: string; param: string; words: string }>
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
+/** How long a file dialog the service shows may stay open: it waits on the person, not on work. */
+const DIALOG_TIMEOUT_MS = 3_600_000;
 
 // ---------------------------------------------------------------------------------------------
 
@@ -1595,7 +1646,7 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
-		match_tolerance: 2,
+		match_distance: 0,
 		limits: true,
 		bars: true,
 		values_dofs: 'all',
@@ -1655,6 +1706,8 @@ export class ProjectState {
 	namingGroup = $state<string | null>(null);
 	/** The path a browser is asking for in the top bar, and what it is for. */
 	asking = $state<'open' | 'import' | 'save' | null>(null);
+	/** The analysis service said it shows no file dialogs (`files.choose`): the top bar asks for a path. */
+	private noDialogs = false;
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1855,7 +1908,8 @@ export class ProjectState {
 
 	/**
 	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
-	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
+	 * which never gives the shell a file's path, the analysis service shows the system's dialog on its
+	 * own machine (`hertzforge` with no command), and where it shows none the top bar asks for a path.
 	 */
 	async fileAct(what: 'new' | 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
 		if (what === 'new') {
@@ -1877,7 +1931,32 @@ export class ProjectState {
 			if (paths) await (asked === 'import' ? this.importPaths(paths) : this.openPaths(paths));
 			return;
 		}
+		// a browser never gives the shell a file's path: the service on this machine shows the
+		// system's dialog instead, and where it shows none the top bar asks for a typed path
+		const chosen = await this.dialogPaths(asked, asked === 'save' ? `${this.summary?.title ?? 'Project'}.hforge` : '');
+		if (chosen !== null) {
+			if (!chosen.length) return;
+			if (asked === 'save') await this.save(chosen[0]);
+			else await (asked === 'import' ? this.importPaths(chosen) : this.openPaths(chosen));
+			return;
+		}
 		this.asking = this.asking === asked ? null : asked;
+	}
+
+	/**
+	 * The paths chosen in the system's dialog the analysis service shows (`files.choose`): none when
+	 * cancelled, null when the service shows none, which is remembered so the next act goes straight
+	 * to the typed path.
+	 */
+	private async dialogPaths(purpose: 'open' | 'import' | 'save', name: string): Promise<string[] | null> {
+		if (this.noDialogs) return null;
+		try {
+			const res = await this.app.analysis.request<{ paths: string[] }>('files.choose', name ? { purpose, name } : { purpose }, { timeoutMs: DIALOG_TIMEOUT_MS });
+			return res.paths;
+		} catch (err) {
+			if (err instanceof RequestError && (err.code === 'refused' || err.code === 'unknown_method')) this.noDialogs = true;
+			return null;
+		}
 	}
 
 	/** An act of the action table's on the selection itself, by its row's id. */

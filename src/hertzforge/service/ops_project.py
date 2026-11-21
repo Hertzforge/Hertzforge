@@ -370,13 +370,17 @@ TOP_FREQUENCY = Param('maximum_frequency', 'Highest frequency', 'number', defaul
                       unit='Hz', min=0.0, step=10.0, shown_with=('by', 'frequency'))
 MODAL_DAMPING = Param('damping', 'Damping', 'number', default=2.0, unit='%', min=0.0,
                       max=100.0, step=0.5)
-ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table|geometry')
 PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
                          options_from='objects:shape_set|channel_table')
-EXPAND_MATCH = Param('tolerance', 'Node match tolerance, on another geometry', 'number',
-                     default=2.0, unit='%', min=0.01, max=100.0, step=0.5)
-MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
-              min=0.01, max=100.0, step=0.5)
+#: how far a node may be from the nearest node of the other geometry, typed in the display
+#: system's length (or the model's own units); 0 for 2 % of the target geometry's size plus
+#: half its thickest plate (`Project.match_distance`), which the action table fills in
+MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
+              default=0.0, unit='m', min=0.0, step=0.001, length=True)
+EXPAND_MATCH = Param('distance', 'Node match tolerance, on another geometry (0 for 2 % of '
+                     "the target's size)", 'number', default=0.0, unit='m', min=0.0,
+                     step=0.001, length=True)
 
 
 def _added_shapes(project: Any, call: Any) -> list[dict]:
@@ -467,12 +471,12 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.channel_table import ChannelTable
 
     source, partner = params['source'], params['shapes']
-    tolerance = float(params.get('tolerance', 2.0)) / 100.0
+    distance = float(params.get('distance') or 0.0) or None
     at_table = isinstance(project.get(partner), ChannelTable)
     if not at_table:
         return _derived(project, lambda: project.expand(source, partner))
     try:
-        added = project.expand(source, partner, tolerance=tolerance)
+        added = project.expand(source, partner, distance=distance)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     made = project[added]
@@ -502,12 +506,90 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
     return [view, v.reading(f'{source} at {partner}', rows)]
 
 
+#: how the node matches are drawn: a model node a test node was matched to is reached by a
+#: link; a test node matched, one with no model node within the distance, and one the
+#: projection does not read (no DOF of the target at it) each in their own color
+MATCHED_COLOR = (67, 160, 71)
+UNMATCHED_COLOR = (229, 57, 53)
+UNREAD_COLOR = (140, 140, 140)
+LINK_COLOR = (255, 193, 7)
+TARGET_LINE_COLOR = (120, 144, 156)
+
+
+def node_matches(project: Any, source: str, onto: str, report: dict) -> dict:
+    """Both geometries of a projection overlaid in one frame, as `project_shapes` measured
+    them (`core.correlate.si_points`): the model's mesh, the target's nodes, those matched
+    in one color and those with no model node within the distance in another, the target's
+    own lines, and a link from each matched node to the model node it was matched to
+    (`report['pairs']`). What Project onto Basis DOFs previews as the distance is typed."""
+    from hertzforge.core.correlate import si_points
+    from hertzforge.core.geometry import Geometry
+
+    home = (onto, project[onto]) if isinstance(project[onto], Geometry) else project.geometry_for(onto)
+    theirs = project.geometry_for(source)
+    model, target = theirs[1], home[1]
+    model_points, target_points = si_points(model), si_points(target)
+    rows, triangles, lines = drawn_mesh(model)
+    model_row = {int(node): k for k, node in enumerate(model.node_id)}
+    target_row = {int(node): k for k, node in enumerate(target.node_id)}
+    matched = [target_row[t] for t, _m in report.get('pairs', [])]
+    unmatched = [target_row[t] for t in report.get('unmatched', [])]
+    unread = sorted(set(range(target.num_nodes)) - set(matched) - set(unmatched))
+
+    def layer(picked: list[int], color: tuple, size: float) -> dict:
+        return {'xyz': np.ascontiguousarray(target_points[picked], np.float32),
+                'colors': np.tile(np.asarray(color, np.uint8), (len(picked), 1)), 'size': size}
+
+    links = np.asarray([[target_points[target_row[t]], model_points[model_row[m]]]
+                        for t, m in report.get('pairs', [])], dtype=np.float32).reshape(-1, 3)
+    # the model node each was matched to, in the link's color: a pair reads as two dots
+    ends = {'xyz': np.ascontiguousarray(links[1::2], np.float32),
+            'colors': np.tile(np.asarray(LINK_COLOR, np.uint8), (len(links) // 2, 1)),
+            'size': 5.0}
+    drawn = [layer(unread, UNREAD_COLOR, 4.0), layer(matched, MATCHED_COLOR, 7.0), ends,
+             layer(unmatched, UNMATCHED_COLOR, 10.0)]
+    _target_rows, _faces, target_lines = drawn_mesh(target)
+    edges = target_points[_target_rows][np.asarray(target_lines, dtype=np.int64)].reshape(-1, 3)
+    points = [held for held in drawn if len(held['xyz'])]
+    segments = [{'xyz': np.ascontiguousarray(xyz, np.float32), 'color': list(color)}
+                for xyz, color in ((edges, TARGET_LINE_COLOR), (links, LINK_COLOR)) if len(xyz)]
+    return v.shape3d(f'Node matches: {source} onto {onto}',
+                     'm' if model.units_defined else 'undefined', model_points[rows], [],
+                     triangles=triangles, lines=lines, node_ids=np.asarray(model.node_id)[rows],
+                     points=points, segments=segments)
+
+
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
-    DOFs, or at a channel table's (`Project.project_onto_basis`), a node
-    matched within a share of the basis model's size, 2 %."""
-    return _added_shapes(project, lambda: project.project_onto_basis(
-        params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
+    DOFs, at a channel table's, or at every node of a geometry
+    (`Project.project_onto_basis`), a node matched within the distance
+    typed, or `Project.match_distance`'s for 0: the two geometries
+    overlaid with the node pairs matched and the nodes left out
+    (`node_matches`), what the projection matched, and the set it adds; when
+    no node is matched, the first two and nothing added, so the distance can
+    be set beside them."""
+    from hertzforge.core.correlate import NoNodeMatched
+
+    from .ops_modal_plan import _report_rows
+
+    source, onto = params['source'], params['onto']
+    try:
+        added = project.project_onto_basis(source, onto=onto,
+                                           distance=params['distance'] or None)
+    except NoNodeMatched as error:
+        defined = project.geometry_for(source)[1].units_defined
+        return [node_matches(project, source, onto, error.report),
+                v.reading(f'No node of {onto} matched, so nothing was added',
+                          _report_rows(error.report, defined))]
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    report = project[added].projection_report
+    found = project.geometry_for(added)
+    reading = v.reading(f'{added}: projection',
+                        _report_rows(report, project.geometry_for(source)[1].units_defined))
+    # the matches first: they are what the distance is set by, as it is typed
+    drawn = [_shape_view(project, added, found[0])] if found is not None else []
+    return [node_matches(project, source, onto, report), reading, *drawn]
 
 
 FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
@@ -606,10 +688,11 @@ MODAL_VERB_OPERATIONS = (
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
         workspace='modal',
-        summary='A shape set sampled at another set\'s DOFs, or at a channel '
-                'table\'s sensors, by the nearest node and its direction.',
+        summary='A shape set sampled at another set\'s DOFs, at a channel table\'s '
+                'sensors, or at every node of another geometry, by the nearest node '
+                'within the tolerance and its direction.',
         params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
-        outputs=('shape3d', 'reading'), run=onto_basis),
+        outputs=('shape3d', 'reading'), run=onto_basis, previews=True),
 )
 
 

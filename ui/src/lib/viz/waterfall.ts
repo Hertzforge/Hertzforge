@@ -7,6 +7,56 @@
 
 import { logTicks } from './logTicks';
 
+/** Where a level tick stands on the stage, at a fraction `f` of the level axis: the back left
+ * edge, at the low end of the abscissa where the records are named, for every kind of data
+ * (Brandon, 2026-11-21). It first stood at the back right. */
+export function levelAt(f: number): [number, number, number] {
+	return [-0.02, STAGE.y, f * STAGE.z];
+}
+
+/** Closest two labels of one kind may stand on screen, in pixels; nearer ones are skipped. */
+export const LABEL_GAP_PX = 12;
+
+/** A label pinned over the stage: whether it is in front of the camera, where it lands on screen,
+ * the box its text takes there, and the kind it is thinned among ('rec' a record name, 'z' a
+ * level, null never thinned). */
+export interface ScreenLabel {
+	sx: number;
+	sy: number;
+	box: { left: number; top: number; right: number; bottom: number };
+	front: boolean;
+	thinned: 'rec' | 'z' | null;
+}
+
+/**
+ * Which labels are shown. Record names and levels are each thinned by where they land on screen,
+ * so forty names on a depth axis seen end-on, or a decade every few pixels, do not overprint. The
+ * levels stand by the record names at the back left edge: the names are placed first, and a
+ * level whose text would cross a name's is skipped.
+ */
+export function shownLabels(labels: ScreenLabel[], gap = LABEL_GAP_PX): boolean[] {
+	const shown = labels.map((l) => l.front);
+	const near = (a: ScreenLabel, b: ScreenLabel) => Math.hypot(a.sx - b.sx, a.sy - b.sy) < gap;
+	// a level and a name both end at their points, so their texts can cross while the points
+	// stand apart: they are judged by the boxes they take
+	const over = (a: ScreenLabel, b: ScreenLabel) =>
+		a.box.left < b.box.right && b.box.left < a.box.right && a.box.top < b.box.bottom && b.box.top < a.box.bottom;
+	const names: ScreenLabel[] = [];
+	for (const kind of ['rec', 'z'] as const) {
+		let last: ScreenLabel | null = null;
+		labels.forEach((l, i) => {
+			if (!shown[i] || l.thinned !== kind) return;
+			if ((last && near(l, last)) || (kind === 'z' && names.some((n) => over(l, n)))) {
+				shown[i] = false;
+				return;
+			}
+			last = l;
+			if (kind === 'rec') names.push(l);
+		});
+	}
+	return shown;
+}
+
 /** At most this many record labels; past it every nth record is named. */
 export const LABEL_LIMIT = 40;
 

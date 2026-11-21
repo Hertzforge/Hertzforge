@@ -205,7 +205,7 @@ def test_a_preview_writes_nothing_and_what_the_model_cannot_be_is_refused(plate,
 
 def test_a_set_projects_onto_picked_channels(plate, validate):
     views = run(plate, 'project.project_onto_channels', source=MODEL, table='Channel Table',
-                rows='1-4, 11', tolerance=2.0)
+                rows='1-4, 11', distance=0.0)
     wire_views(views, validate)
     shape, reading = views
     added = f'{MODEL} @ Channel Table (5 channels)'
@@ -226,18 +226,21 @@ def test_rows_outside_the_table_are_refused(plate):
     assert error.value.code == 'refused'
 
 
-def test_project_onto_basis_takes_the_dialogs_tolerance(plate):
+def test_project_onto_basis_takes_the_dialogs_distance(plate):
+    """0 is 2 % of the table's geometry's size and half the model's plate, the distance the
+    row opens on; a distance typed is the limit itself, the plate not added again."""
     fitted(plate)
     limits = []
-    for tolerance in (0.5, 2.0):
+    for distance in (0.0, 1e-4):
         before = set(plate)
-        (view,) = run(plate, 'project.project_onto_basis', source=MODEL, onto='Channel Table',
-                      tolerance=tolerance)
+        views = run(plate, 'project.project_onto_basis', source=MODEL, onto='Channel Table',
+                    distance=distance)
         (added,) = set(plate) - before
         limits.append(plate[added].projection_report['limit'])
-        assert view['view'] == 'shape3d'
-    extent = limits[1] - limits[0]
-    assert extent > 0 and limits[0] == pytest.approx(0.005 / 0.015 * extent + 0.5 * 6.35e-6)
+        assert [view['view'] for view in views] == ['shape3d', 'reading', 'shape3d']
+    default = plate.match_distance(MODEL, 'Channel Table')
+    assert default > 0.5 * 6.35e-6
+    assert limits == [default, 1e-4]
 
 
 def test_the_projection_overlays_a_set_from_another_geometry(plate, validate):

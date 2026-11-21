@@ -333,12 +333,13 @@ def test_a_set_is_projected_onto_another_sets_dofs(plate):
     run(plate, 'project.generate_rigid_body_modes')
     fitted = next(n for n in plate if projects.kind_of(plate[n]) == 'shape_set'
                   and 'Rigid' not in n)
-    (view,) = run(plate, 'project.project_onto_basis', source='Geometry Rigid Body Modes',
-                  onto=fitted)
+    stage, reading, *drawn = run(plate, 'project.project_onto_basis',
+                                 source='Geometry Rigid Body Modes', onto=fitted)
     added = [n for n in plate if n.startswith('Geometry Rigid Body Modes') and
              n != 'Geometry Rigid Body Modes']
     assert added and plate[added[0]].num_shapes == 6
-    assert view['view'] in ('shape3d', 'reading')
+    assert stage['title'] == f'Node matches: Geometry Rigid Body Modes onto {fitted}'
+    assert reading['view'] == 'reading' and [view['view'] for view in drawn] == ['shape3d']
 
 
 def test_mac_of_a_set_against_itself_and_another_on_the_geometry(plate, validate):
