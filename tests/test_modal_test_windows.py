@@ -36,11 +36,12 @@ DEFINITIONS = {
               'pre + width <= n < pre + width + fall; 0 for n >= pre + width + fall. n counts '
               'from 0 at the frame\'s first sample; pre is the trigger\'s sample in the frame '
               '(the pre-trigger length); width is the pulse allowance after the trigger; all '
-              'in samples. A width given as a fraction of the block after the trigger is '
-              'floor(fraction * (block - pre) + 0.5) samples; the fall, when not given, is '
+              'in samples. A width given as a fraction of the block is floor(fraction * '
+              'block + 0.5) samples, counted after the trigger; the fall, when not given, is '
               'max(1, floor(0.1 * width + 0.5)). pre + width + fall beyond block is refused.'),
     'exponential': ('w[n] = exp(-n / (tau_s * rate_hz)), n counting from 0 at the frame\'s '
-                    'first sample; applied to the force and every response alike.'),
+                    'first sample; applied to the force and every response alike. A window '
+                    'given by its end value has tau_s = -(block / rate_hz) / ln(end).'),
     'damping': ('A mode windowed by exp(-t / tau_s) has its decay rate raised by 1 / tau_s, '
                 'so its damping ratio reads high by about 1 / (tau_s omega_n).'),
 }
@@ -107,9 +108,9 @@ def test_modal_test_force_window_holds_one_from_the_trigger_through_the_pulse():
     assert force_window(4096, 64, 4)[64:68].min() == 1.0
 
 
-def test_modal_test_force_width_is_a_fraction_of_the_block_after_the_trigger():
-    # 0.01 of the 4032 samples after a 64-sample pre-trigger is 40.32, so 40
-    assert force_width(0.01, 4096, 64) == 40
+def test_modal_test_force_width_is_a_fraction_of_the_block_counted_from_the_trigger():
+    # 0.01 of a 4096-sample block is 40.96, so 41, whatever the pre-trigger
+    assert force_width(0.01, 4096) == 41
     assert force_fall(40) == 4 and force_fall(3) == 1 and FORCE_FALL == 0.1
     # a half rounds up, where Python's round would take it to even
     assert nearest_sample(2.5) == 3 and nearest_sample(3.5) == 4 and round(2.5) == 2
@@ -126,11 +127,31 @@ def test_modal_test_exponential_window_is_scipys_exponential_from_the_first_samp
 
 
 def test_modal_test_exponential_tau_from_an_end_value_ends_there():
+    # the end value is reached at T = N / fs, one sample past the frame's last
     for length, end in ((256, 0.01), (1024, 0.05), (2, 0.5)):
-        w = exponential_window(length, exponential_tau(end, length))
+        w = exponential_window(length + 1, exponential_tau(end, length))
         assert w[0] == 1.0 and w[-1] == pytest.approx(end, rel=1e-12)
     assert math.isinf(exponential_tau(1.0, 8))
     assert np.all(exponential_window(8, math.inf) == 1.0)
+
+
+def test_modal_test_windows_are_the_control_services_own_from_a_golden_run():
+    """The windows the control service resolved for a recorded run, from its setup: the
+    width is a fraction of the block, counted from the trigger, and the exponential window
+    reaches its end value at T = block / rate, one sample past the block's last."""
+    path = os.path.join(os.path.dirname(GOLDEN), '..', '..', 'schema', 'golden', 'runs',
+                        'modal_test', 'impact_roving', 'setup.json')
+    with open(path, encoding='utf-8') as f:
+        setup = json.load(f)
+    block, rate = setup['check']['block'], setup['check']['fs_hz']
+    force = setup['resolved']['windows']['force']
+    exponential = setup['resolved']['windows']['exponential']
+    # the setup leaves both at their defaults: a width of 10 % and a fall of 10 % of it
+    assert 'force_window' not in setup['config']['impact']
+    width = force_width(0.10, block)
+    assert (width, force_fall(width)) == (force['width_frames'], force['fall_frames'])
+    assert exponential_tau(exponential['end'], block) / rate == pytest.approx(
+        exponential['tau_s'], rel=1e-12)
 
 
 @pytest.mark.parametrize('call, words', [
@@ -140,10 +161,10 @@ def test_modal_test_exponential_tau_from_an_end_value_ends_there():
     (lambda: force_window(64, 0, float('nan')), 'whole number'),
     (lambda: force_window(64, -1, 4), 'zero or more'),
     (lambda: force_window(64, 60, 4), 'runs past the block'),
-    (lambda: force_width(float('nan'), 64, 0), 'above zero'),
-    (lambda: force_width(float('inf'), 64, 0), 'above zero'),
-    (lambda: force_width(0.0, 64, 0), 'above zero'),
-    (lambda: force_width(0.001, 64, 0), 'holds no sample'),
+    (lambda: force_width(float('nan'), 64), 'above zero'),
+    (lambda: force_width(float('inf'), 64), 'above zero'),
+    (lambda: force_width(0.0, 64), 'above zero'),
+    (lambda: force_width(0.001, 64), 'holds no sample'),
     (lambda: exponential_window(8, 0.0), 'above zero'),
     (lambda: exponential_window(8, float('nan')), 'above zero'),
     (lambda: exponential_tau(0.0, 8), 'between 0 and 1'),

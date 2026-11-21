@@ -470,12 +470,13 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     method : str, default 'H1'
         'H1', 'H2' or 'Hv'.
     force : float, optional
-        The force window's width as a fraction of the block after the
-        trigger, on the references (`impact_windows.force_width`); none
-        when omitted.
+        The force window's width as a fraction of the block, counted
+        after the trigger, on the references (`impact_windows.force_width`);
+        none when omitted.
     exponential : float, optional
-        The exponential window's end value at the block's last sample,
-        on every channel; none when omitted.
+        The exponential window's value at the block's end, T = block /
+        rate, on every channel (`impact_windows.exponential_tau`); none
+        when omitted.
     block : int, optional
         Samples of each frame to use, from its first; the whole frame
         when omitted.
@@ -542,7 +543,7 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
         every = every * exponential_window(block, tau)
     if shaker_window is not None:
         every = every * window_shape(shaker_window, block)
-    width = force_width(force, block, pre) if force is not None else None
+    width = force_width(force, block) if force is not None else None
     on_force = force_window(block, pre, width) if width is not None else np.ones(block)
     for k, i in enumerate(keep):
         identity = (history.response_dof[i], history.ordinate_dim[i])

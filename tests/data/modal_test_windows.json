@@ -2,8 +2,8 @@
  "about": "The force and exponential windows of an impact test, sample by sample. Every implementation reproduces \"samples\" to \"tolerance\" from the other members of its case. \"inf\" is an infinite time constant (no decay).",
  "tolerance": 1e-12,
  "definitions": {
-  "force": "w[n] = 1 for n < pre + width; (1 + cos(pi (n - pre - width) / fall)) / 2 for pre + width <= n < pre + width + fall; 0 for n >= pre + width + fall. n counts from 0 at the frame's first sample; pre is the trigger's sample in the frame (the pre-trigger length); width is the pulse allowance after the trigger; all in samples. A width given as a fraction of the block after the trigger is floor(fraction * (block - pre) + 0.5) samples; the fall, when not given, is max(1, floor(0.1 * width + 0.5)). pre + width + fall beyond block is refused.",
-  "exponential": "w[n] = exp(-n / (tau_s * rate_hz)), n counting from 0 at the frame's first sample; applied to the force and every response alike.",
+  "force": "w[n] = 1 for n < pre + width; (1 + cos(pi (n - pre - width) / fall)) / 2 for pre + width <= n < pre + width + fall; 0 for n >= pre + width + fall. n counts from 0 at the frame's first sample; pre is the trigger's sample in the frame (the pre-trigger length); width is the pulse allowance after the trigger; all in samples. A width given as a fraction of the block is floor(fraction * block + 0.5) samples, counted after the trigger; the fall, when not given, is max(1, floor(0.1 * width + 0.5)). pre + width + fall beyond block is refused.",
+  "exponential": "w[n] = exp(-n / (tau_s * rate_hz)), n counting from 0 at the frame's first sample; applied to the force and every response alike. A window given by its end value has tau_s = -(block / rate_hz) / ln(end).",
   "damping": "A mode windowed by exp(-t / tau_s) has its decay rate raised by 1 / tau_s, so its damping ratio reads high by about 1 / (tau_s omega_n)."
  },
  "cases": [

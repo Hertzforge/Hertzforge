@@ -7,7 +7,8 @@ They are not windows for averaged spectra of a continuous record, which
 is why `core.averaging.WINDOWS` does not hold them.
 
 **The force window** holds one over the leading part of the frame, the
-pre-trigger and the pulse after the trigger, then falls by a steep
+pre-trigger and the pulse after the trigger (a width given as a fraction
+of the block, counted from the trigger), then falls by a steep
 half-cosine to zero and stays zero for the rest of the frame
 (`force_window`). It keeps the force pulse and takes away what the force
 channel holds after it (noise, and the ringing of the hammer's own
@@ -16,9 +17,11 @@ It cures nothing about a second hit inside the frame: a double hit is a
 second force the structure felt, and cutting it from the force channel
 leaves it in every response.
 
-**The exponential window** w(t) = exp(-t / tau), from the frame's first
-sample, on the force and every response alike, makes a response that has
-not died out by the end of the frame die out inside it (`exponential_window`).
+**The exponential window** w(t) = exp(-t / tau), t = n / fs from the
+frame's first sample, on the force and every response alike, makes a
+response that has not died out by the end of the frame die out inside it
+(`exponential_window`). Its tau is set from the value it reaches at the
+frame's end, T = N / fs (`exponential_tau`).
 It does that by adding damping: each mode's decay rate becomes its own
 plus 1 / tau, so the damping ratio a fit reads is high by about
 1 / (tau omega_n) (`core.modal_test.window_damping`).
@@ -83,10 +86,10 @@ def force_fall(width: int) -> int:
     return max(1, nearest_sample(FORCE_FALL * int(width)))
 
 
-def force_width(fraction: float, block: int, pre: int) -> int:
-    """The force window's width in samples from the fraction of the block
-    after the trigger it is given as: ``nearest_sample(fraction * (block
-    - pre))``.
+def force_width(fraction: float, block: int) -> int:
+    """The force window's width in samples, counted after the trigger, from
+    the fraction of the block it is given as: ``nearest_sample(fraction *
+    block)``, as the control service resolves it.
 
     Parameters
     ----------
@@ -94,8 +97,6 @@ def force_width(fraction: float, block: int, pre: int) -> int:
         Above zero.
     block : int
         The frame's samples.
-    pre : int
-        The trigger's sample in the frame (the pre-trigger's length).
 
     Returns
     -------
@@ -110,12 +111,12 @@ def force_width(fraction: float, block: int, pre: int) -> int:
     """
     fraction = float(fraction)
     if not math.isfinite(fraction) or fraction <= 0.0:
-        raise ValueError(f'the force window\'s width is a fraction of the block after the '
-                         f'trigger, above zero; {fraction:g} is not')
-    width = nearest_sample(fraction * (int(block) - int(pre)))
+        raise ValueError(f'the force window\'s width is a fraction of the block, above zero; '
+                         f'{fraction:g} is not')
+    width = nearest_sample(fraction * int(block))
     if width < 1:
-        raise ValueError(f'a force window of {fraction:g} of the {int(block) - int(pre)} '
-                         'samples after the trigger holds no sample of the pulse')
+        raise ValueError(f'a force window of {fraction:g} of the {int(block)}-sample block '
+                         'holds no sample of the pulse')
     return width
 
 
@@ -184,13 +185,14 @@ def force_window(block: int, pre: int, width: int, fall: int | None = None) -> n
 
 def exponential_tau(end: float, length: int) -> float:
     """The time constant, in samples, of an exponential window whose value
-    at the last sample of a frame of `length` samples is `end`:
-    ``(length - 1) / -ln(end)``, infinite for an end of one (no decay).
+    is `end` at the end of a frame of `length` samples, ``T = length / fs``
+    (one sample past its last): ``length / -ln(end)``, infinite for an end
+    of one (no decay).
 
     Parameters
     ----------
     end : float
-        The window's last value, above 0 and at most 1.
+        The window's value at the frame's end, above 0 and at most 1.
     length : int
         The frame's samples.
 
@@ -207,9 +209,9 @@ def exponential_tau(end: float, length: int) -> float:
     end = float(end)
     if not 0.0 < end <= 1.0:
         raise ValueError(f'an exponential window ends between 0 and 1; {end:g} does not')
-    if end == 1.0 or int(length) < 2:
+    if end == 1.0 or int(length) < 1:
         return float('inf')
-    return (int(length) - 1) / -math.log(end)
+    return int(length) / -math.log(end)
 
 
 def exponential_window(length: int, tau: float) -> np.ndarray:

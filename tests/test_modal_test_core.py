@@ -215,9 +215,9 @@ def test_modal_test_reprocess_carries_its_windows_and_a_subset_of_frames():
     assert frf.averaging.window == 'boxcar'
     assert frf_tau(frf) == pytest.approx(exponential_tau(0.01, 512) / FS, rel=1e-9)
     assert 'captures 1, 3' in frf.comment[0]
-    # 0.05 of the 480 samples after the 32-sample pre-trigger: 24, falling over 2
-    assert ('force window on the references, 24 samples after the trigger at sample 32 '
-            'and a fall of 2') in frf.comment[0]
+    # 0.05 of the 512-sample block is 25.6, so 26 after the trigger at 32, falling over 3
+    assert ('force window on the references, 26 samples after the trigger at sample 32 '
+            'and a fall of 3') in frf.comment[0]
     # the windowed estimate differs from the plain one: the windows were applied
     plain, _ = reprocess(history, block=512, captures=[0, 2])
     assert not np.allclose(plain.ordinate, frf.ordinate)

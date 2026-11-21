@@ -16,7 +16,7 @@ FRAMES = Param('source', 'Measurement frames', 'enum', options_from='objects:tim
 ESTIMATOR = Param('method', 'Estimator', 'enum', default='H1',
                   options=(Option('H1', 'H1'), Option('H2', 'H2'), Option('Hv', 'Hv')))
 FORCE = Param('force', 'Force window', 'number', default=0.0,
-              unit='of the block after the trigger', min=0.0, max=1.0, step=0.01)
+              unit='of the block', min=0.0, max=1.0, step=0.01)
 EXPONENTIAL = Param('exponential', 'Exponential window ends at', 'number', default=0.0,
                     unit='of its start', min=0.0, max=1.0, step=0.01)
 BLOCK = Param('block', 'Block', 'integer', default=0, unit='samples', min=0, step=1024)
