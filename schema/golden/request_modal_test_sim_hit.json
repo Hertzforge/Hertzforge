@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 215,
+ "method": "modal_test.sim_hit",
+ "params": {
+  "kind": "double"
+ }
+}

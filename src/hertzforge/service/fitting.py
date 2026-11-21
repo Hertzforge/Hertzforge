@@ -224,9 +224,13 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
 def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
     """`fit.publish`: the confirmed modes added to the project as a shape
     set, or put in place of the set the fit was started from; its name."""
+    from hertzforge.core.modal_test import note_window_damping
+
     if not fit.session.modes:
         raise refused('confirm a mode before publishing the fit')
     shapes = fit.session.shape_set()
+    # an FRF estimated with an exponential window: each mode notes the damping it added
+    note_window_damping(shapes, project[fit.frf])
     # what a simulated run gives is simulated, however far it is carried
     if getattr(project[fit.frf], 'source', None) is not None:
         shapes.source = project[fit.frf].source

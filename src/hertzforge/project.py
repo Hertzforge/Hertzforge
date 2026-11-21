@@ -3252,6 +3252,66 @@ class Project(dict):
                             f'{source} {method} FRFs',
                             recipe=('compute_frfs', {'method': method}))
 
+    def reprocess_modal_test(self, source: Any, method: str = 'H1', *,
+                             force: float | None = None,
+                             exponential: float | None = None,
+                             block: int | None = None,
+                             captures: Sequence[int] | None = None,
+                             shaker_window: str | None = None,
+                             name: str | None = None) -> tuple[str, str]:
+        """Estimate a Modal Test measurement's FRFs and coherence again from
+        its frames, with the estimator, windows, block and frames chosen
+        (`core.modal_test.reprocess`), into two new objects beside the
+        frames; the run's own FRFs are left as they are.
+
+        Parameters
+        ----------
+        source : str or object
+            A measurement's frames (a converted Modal Test run's
+            'Measurement k frames').
+        method : str, default 'H1'
+            'H1', 'H2' or 'Hv'.
+        force : float, optional
+            The force window's width as a fraction of the block, on the
+            references.
+        exponential : float, optional
+            The exponential window's end value, on every channel.
+        block : int, optional
+            Samples of each frame to use, from its first.
+        captures : sequence of int, optional
+            Which frames, by capture number from 0; every frame when
+            omitted.
+        shaker_window : str, optional
+            A window on every channel instead of the transient ones.
+        name : str, optional
+            What to call the FRFs; the coherence takes the same name with
+            'coherence' in place of 'FRFs'. Defaults to the source's name
+            followed by the estimator.
+
+        Returns
+        -------
+        (str, str)
+            The names the FRFs and the coherence were added under.
+
+        Raises
+        ------
+        ValueError
+            In the core's words, for what `core.modal_test.reprocess`
+            refuses.
+        """
+        from .core.modal_test import reprocess
+
+        source = self.name_of(source)
+        frf, coherence = reprocess(self[source], method=method, force=force,
+                                   exponential=exponential, block=block,
+                                   captures=captures, shaker_window=shaker_window)
+        base = name or f'{source} {method}'
+        made = self._derive(source, frf, f'{base} FRFs' if name is None else base)
+        said = (f'{base} coherence' if name is None
+                else base.replace('FRFs', 'coherence') if 'FRFs' in base
+                else f'{base} coherence')
+        return made, self._derive(source, coherence, said)
+
     def read_transmissibility(self, name: Any, record: int = 0) -> Any:
         """The ASD-ratio transmissibility behind one record of an FRF,
         beside its H1, with H1's coherence and random error.
@@ -6331,6 +6391,7 @@ class Project(dict):
         # silently skipped the second mode of a repeated pair that
         # `suggest` had offered on purpose.
         from .core.modal_fit import ModalFitSession
+        from .core.modal_test import note_window_damping
 
         source = self.name_of(source)
         if at is None and bounds is not None:
@@ -6363,8 +6424,10 @@ class Project(dict):
                     break
         for _ in range(int(refine)):
             session.refine_residues()
-        return self._derive(source, session.shape_set(),
-                            name or f'{source} Modes')
+        # an FRF estimated with an exponential window: each mode notes the
+        # damping it added, and the mode less it (`core.modal_test`)
+        shapes = note_window_damping(session.shape_set(), self[source])
+        return self._derive(source, shapes, name or f'{source} Modes')
 
     def fit_replay_line(self, source: str, name: str, session: Any,
                         coherence: str | None = None) -> str:
@@ -10419,6 +10482,7 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
+    'reprocess_modal_test',
     'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'rescale',
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',

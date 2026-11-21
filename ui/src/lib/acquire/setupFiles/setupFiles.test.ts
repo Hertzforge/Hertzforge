@@ -24,6 +24,7 @@ import { TwrStore } from '../twr/twrStore.svelte';
 import { ExplorerStore } from '../explorer/explorerStore.svelte';
 import { RecorderStore } from '../recorder/recorderStore.svelte';
 import { PlaybackStore } from '../playback/playbackStore.svelte';
+import { ModalTestStore } from '../modal_test/modalTestStore.svelte';
 import { MimoShockStore } from '../mimoshock/msStore.svelte';
 import { MimoSineStore } from '../mimosine/msineStore.svelte';
 import { MimoState } from '../mimo/mimoStore.svelte';
@@ -50,7 +51,8 @@ const REQUESTS: Record<SetupModule, [string, string]> = {
 	mimo_random: ['request_mimo_random_setup', 'setup'],
 	mimo_shock: ['request_mimo_shock_configure', 'config'],
 	mimo_sine: ['request_mimo_sine_configure', 'config'],
-	playback: ['request_playback_configure', 'config']
+	playback: ['request_playback_configure', 'config'],
+	modal_test: ['request_modal_test_configure', 'config']
 };
 
 const GOLDEN_RUNS: SetupModule[] = ['random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer', 'recorder', 'mimo_random', 'playback'];
@@ -105,7 +107,8 @@ async function shell() {
 		mimoShock: new MimoShockStore(acq, opts),
 		mimoSine: new MimoSineStore(acq, opts),
 		mimo: new MimoState(acq, opts),
-		playback: new PlaybackStore(acq, opts)
+		playback: new PlaybackStore(acq, opts),
+		modalTest: new ModalTestStore(acq, opts)
 	};
 	await Promise.all(Object.values(stores).map((s) => s.sync()));
 	// what the control service is asked from here on: opening a setup must ask nothing but dry runs

@@ -865,6 +865,73 @@ frames and the read-ahead's fill. Its drive stream is whole, 1536 frames; its
 input stream is cut to the same 1536 frames (`cut_from_frames`);
 `scripts/make_golden_runs.sh` rewrites it.
 
+## What a Modal Test Run Saves
+
+From start, before the station is opened: `run.json` (`test` `modal_test`, with
+the run's `metadata` and, when the configuration names one, its
+`specification`; its `grid` adds `analysis_block`, the setup's block, and
+`df_hz`, the line spacing), `table.json`, `setup.json` and `log.jsonl`.
+`setup.json` holds `config` as accepted; `resolved`: `control` (impact mode:
+the words "no drive: impact mode writes no drive sample"; shaker mode: "open
+loop, no control law", each shaker playing its source at its level), the input
+rows and the drive rows (none in impact mode), `windows` (the analysis window,
+the force window's `pre_frames`, `width_frames` and `fall_frames`, and the
+exponential window's `tau_s`, `inv_tau_per_s`, `end` and `added_damping`, each
+null when off), `capture`, in shaker mode the `stop` (40 dB over 3 s, then
+zero) and the `aborts` in force (with `latency`: `bound_s`, the station's
+characterized time from an abort to the drive at zero, and `from`, where it comes
+from; null on a station with none, the words then saying what bounds it in the
+loop), and on the simulator the simulated `structure`
+(its modes, scale, shapes, the hammer's force and the impulse responses'
+length); `check`, the check report the run was configured with (the rate, the
+block, the band and its lines, the estimator, the averages, the references, the
+responses, every point's DOFs, and the mode's settings; in impact mode the
+trigger's signed `level`, its `polarity` and the words of what it `watches`). Then these, each checked
+against the golden run folders (`schema/golden/runs/modal_test/impact_roving/` and
+`schema/golden/runs/modal_test/shaker_burst_random/`) by
+`tests/test_run_folder_golden_modal_test.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every measured row as read from the station, in table order (`kind` `inputs`), from the station's first frame |
+| `streams/drives` | Shaker mode only: every drive as the device accepted it, in volts (`kind` `drives`), frame for frame with the inputs. Impact mode opens no drive row and has no `drives` stream |
+| `results/modal_frames` | Repeating, a line per hit or frame taken (`event` `taken`) and per change of its status (`event` `status`): the tile (`n`, `seq`, `status`, `reason`, `overload`, `double_hit`, `start_frame`, `decay` (on a hit or a burst frame `{"row","ratio","warning"}`, the decay check of `schema/PROTOCOL.md`, after the windows; otherwise null); in impact mode `peak`, `tip_warning`, `force_window_cut` and the hit's whole `report`, whose `double_hit` is null or `{"frame","peak","ratio"}` and whose frames count from the block's start; with a target `target_verdict` and `target_diff_pct`) and its `point`; array `span` (`f8` `[2]`, unit `frame`), the first station input frame and the length |
+| `results/modal_frf` | Repeating, a record per measured point (`kind` `frf`, `layout` `["response","reference","line"]`, the abscissa in Hz from the band's first line, `windows` as in `setup.json`); array `frf`, `c16` `[responses, references, lines]`, unit response over reference (`g/lbf`). The line: `measurement` (from 1), `point` (from 0), `replaces` (the measurement it replaces, or null), `averages`, `estimator` (`H1`, `H2` or `Hv`; `matrix H1` with several references), the point's `rows` (each reference and response with its `index`, `node`, `direction` and `unit`) and `decay`, the largest decay check over the hits or frames averaged (null when none was checked) |
+| `results/modal_coherence` | Repeating, the same lines (`layout` `["response","line"]`): array `coherence` with one reference, `multiple_coherence` with several, `f8` `[responses, lines]` |
+| `results/modal_reference_spectra` | Repeating, the same lines (`layout` `["reference","line"]`): array `autospectra`, `f8` `[references, lines]`, unit the reference's squared per Hz (`lbf^2/Hz`); with several references also `condition_number`, `f8` `[lines]` |
+| `results/modal_outcome` | Once at the end (`kind` `modal_outcome`): the `mode`, the `outcome` and its `reason` in words, whether the emergency stop was issued, the `totals` (`accepted`, `taken`, `points_measured`, `points_planned`) and the per-point `counts`; arrays `accepted`, `taken`, `points_measured` and `points_planned`, each `f8` `[1]` |
+| `end.json` | The end, as the run's state reports it, the `totals`, each stream's frames, drops, gaps and fault, and the state itself |
+
+Every record is written as it is made, off the run's thread: a test cut off
+part way leaves every finished point's FRF, coherence and spectra, and every
+hit taken, on the disk, with `run.json` `complete` false and no `end.json`. A
+point measured again is a new record whose `replaces` names the earlier one; a
+reader takes each point's last record.
+
+The log has an entry for the configure and the start (`state`, `data.event`
+`started`), each state the run enters (`state`, `data.event` `state`; impact mode enters
+`arming` on every arm and re-arm, then `armed` once the pre-trigger is full), each
+point selected (`selected`), each hit or frame and its status (`hit`), each
+point measured (`result`, with its `measurement` and `replaces`), the first hit or
+frame of a measurement over the decay check's threshold (`warning`, `data.event`
+`response_not_decayed`, with the `point`, `seq`, `row` and `ratio`), a drive
+start (`drive_start`), an operator's verb and who asked (`operator`), a point cleared
+(`operator`, `clear_point`), a force
+target set from a hit (`operator`, `target_from_hit`), an abort (`abort`) and
+the outcome (`outcome`). With `record.streams` false there is no `streams/`
+folder. The Modal Test has no law.
+
+The golden folders are written by `cargo test -p sds-control --test
+modal_test_golden_run` on the simulator, at 1024 Hz with a band to 200 Hz:
+`impact_roving`, a roving hammer over three points, two hits a point, a
+512-frame block, the force and exponential windows on; and
+`shaker_burst_random`, two shakers playing burst random (seed 7, 40 percent of
+the frame) at one point, a 1024-frame block, matrix H1 over four frames.
+What follows the wall clock is normalized: the wall times, the run's unique
+identity, the build fields, the folders' paths and the station frames when
+the run ended. Each stream is cut to its first 1024 frames, 512 in the shaker
+folder (`cut_from_frames`); `scripts/make_golden_runs.sh` rewrites them.
+
 ## Reports and the Run Log
 
 A converted run's report reads its run record before anything else. The

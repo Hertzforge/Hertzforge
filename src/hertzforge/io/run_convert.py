@@ -67,6 +67,13 @@ The project holds, in this order:
   what the folder lacked. A Playback run has no specification: its
   inputs and its drives as played are its time histories.
 
+A Modal Test run has no specification either, and its streams are not
+copied whole: its measurements become each measurement's accepted
+frames, its FRFs (turned round by reciprocity as well when the
+excitation roved), its coherence and its reference autospectra
+(`modal_run`, which says how); its frame lines and outcome stay in the
+run record.
+
 All of them are linked in one object group named for the run. A gap in
 a stream is not padded: the samples after it follow on, and each record
 of the history says where the gap was and how many frames it lost.
@@ -87,14 +94,14 @@ from typing import Any
 
 import numpy as np
 
-from . import native, run_folder
+from . import modal_run, native, run_folder
 from .rattlesnake import _stream_offsets, _unit_scale
 
 #: the project type each test is a run of; a test not here sets none
 PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration',
                  'sine': 'Sine Sweep', 'classical_shock': 'Shock', 'srs': 'Shock',
                  'mimo_shock': 'Shock', 'twr': 'Transient', 'mixed': 'Random and Sine',
-                 'mimo_sine': 'Sine Sweep'}
+                 'mimo_sine': 'Sine Sweep', 'modal_test': 'Modal Test'}
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays
@@ -1328,10 +1335,26 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     lacked = list(run.missing)
     table = channel_table_from_rows(run.rows)
     objects: dict[str, Any] = {'Channel Table': table}
-    for name, history in _histories(run, table, lacked, progress):
+    modal = run.test == modal_run.WIRE['test']
+    if modal:
+        # a Modal Test's force gauges are input rows its setup names as references
+        rows = {int(i): k for k, i in enumerate(table['channel'])}
+        for index in modal_run.reference_rows(run):
+            if index in rows:
+                table.set_cell('role', rows[index], 'reference')
+    measured = (modal_run.frames(run, table, lacked) if modal
+                else _histories(run, table, lacked, progress))
+    for name, history in measured:
         objects[_unique(name, objects)] = history
     units = {int(row['index']): str(row.get('units', '') or '') for row in run.rows}
-    if run.test == 'sine':
+    handled: set[str] = set()
+    unmapped: dict[str, dict[str, np.ndarray]] = {}
+    if modal:
+        spec = None
+        held_objects, handled, unmapped = modal_run.results(run, table, lacked)
+        for name, held in held_objects:
+            objects[_unique(name, objects)] = held
+    elif run.test == 'sine':
         spec = _sine_specification(run, table, lacked)
     elif run.test == 'mimo_sine':
         spec = _mimo_sine_specification(run, table, lacked)
@@ -1354,11 +1377,12 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     if tones is not None:
         objects[_unique('Tones', objects)] = tones
     descriptions: dict[str, dict[str, Any]] = {}
-    unmapped: dict[str, dict[str, np.ndarray]] = {}
     for name, result in run.results.items():
         descriptions[name] = dict(result.description)
         if result.records is not None:
             descriptions[name]['records'] = result.records
+        if name in handled:
+            continue
         why = f'its kind {result.kind!r} has no analysis class'
         held = None
         if result.kind == 'sine_levels':

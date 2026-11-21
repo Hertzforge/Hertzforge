@@ -441,6 +441,7 @@ impl Service {
                 || inner.explorer_live()
                 || inner.recorder_live()
                 || inner.playback_live()
+                || inner.modal_test_live()
                 || inner.mimo_shock_live()
                 || inner.mimo_sine_live()
             {

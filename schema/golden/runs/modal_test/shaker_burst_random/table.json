@@ -1,0 +1,132 @@
+{
+  "revision": 2,
+  "sha256": "4aa812835af0c84eb61aeb753dfdd867b517b26c593a96861228e159cc6ff71a",
+  "rows": [
+    {
+      "index": 1,
+      "enabled": true,
+      "description": "reference 1",
+      "role": "monitor",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "lbf",
+      "sensitivity_mv_per_eu": 10,
+      "range_max": 100,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      },
+      "node": 1,
+      "direction": "Z+",
+      "analysis_role": "reference"
+    },
+    {
+      "index": 2,
+      "enabled": true,
+      "description": "response 2",
+      "role": "monitor",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 10,
+      "range_max": 50,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      },
+      "node": 4,
+      "direction": "Z+",
+      "analysis_role": "response"
+    },
+    {
+      "index": 3,
+      "enabled": true,
+      "description": "response 3",
+      "role": "monitor",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 10,
+      "range_max": 50,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      },
+      "node": 7,
+      "direction": "Z+",
+      "analysis_role": "response"
+    },
+    {
+      "index": 4,
+      "enabled": true,
+      "description": "reference 4",
+      "role": "monitor",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "lbf",
+      "sensitivity_mv_per_eu": 10,
+      "range_max": 100,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      },
+      "node": 8,
+      "direction": "Z+",
+      "analysis_role": "reference"
+    },
+    {
+      "index": 5,
+      "enabled": true,
+      "description": "shaker 5",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 6,
+      "enabled": true,
+      "description": "shaker 6",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    }
+  ]
+}

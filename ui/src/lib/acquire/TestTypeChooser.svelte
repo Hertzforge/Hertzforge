@@ -90,6 +90,10 @@
 											{:else if t.id === 'playback'}
 												<path d="M3 5v18l9-9z" class="fill" />
 												<path d="M16 14h2l2-6 3 12 3-9 2 5 2-4 2 2h7" />
+											{:else if t.id === 'modal_test'}
+												<path d="M2 4h9v5H2z" class="fill" />
+												<path d="M6.5 9v15" />
+												<path d="M15 14q1.5-11 3 0t3 0q1.5-7 3 0t3 0q1.5-4 3 0t3 0q1.5-2 3 0t3 0h4" />
 											{:else if t.id === 'mimo_random'}
 												<path d="M2 8l2.5-3 2.5 5 2.5-6 2.5 7 2.5-5 2.5 3 2.5-6 2.5 8 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" />
 												<path d="M2 21l2.5-4 2.5 6 2.5-7 2.5 8 2.5-5 2.5 3 2.5-7 2.5 9 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" class="faint" />

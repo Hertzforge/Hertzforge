@@ -167,6 +167,12 @@ way.
   Golub and V. Pereyra**, "The Differentiation of Pseudo-Inverses and Nonlinear Least Squares
   Problems Whose Variables Separate", SIAM Journal on Numerical Analysis, 1973: the modal fit of the
   identified system that the laws' tracked model option starts from.
+- **M. W. Trethewey and J. A. Cafeo**, "Tutorial: Signal Processing Aspects of Structural Impact
+  Testing", International Journal of Analytical and Experimental Modal Analysis, 1992, **W. A.
+  Fladung**, "Windows Used for Impact Testing", Proceedings of IMAC XV, 1997, and **P. Avitabile**,
+  "Modal Space" column, Experimental Techniques, February 2002: the force window and the exponential
+  window of the Modal Test, the damping the exponential window adds and its correction, the rule
+  that a force window never cures a double impact, and burst random as the Modal Test plays it.
 - **MIL-STD-810H**, Method 516.8 (Shock) and Method 527.2 (Multi-Exciter Test), and **IEC
   60068-2-27**, *Environmental testing, Part 2-27: Tests, Test Ea and guidance: Shock*: the
   classical pulses and their tolerances, the SRS tolerance and the effective duration window each

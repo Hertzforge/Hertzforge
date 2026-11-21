@@ -349,6 +349,7 @@ impl Service {
                 || inner.explorer_live()
                 || inner.recorder_live()
                 || inner.playback_live()
+                || inner.modal_test_live()
             {
                 inner.run_active()?;
             }

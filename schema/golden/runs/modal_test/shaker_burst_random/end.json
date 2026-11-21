@@ -1,0 +1,184 @@
+{
+  "run_uid": "golden-shaker_burst_random",
+  "run_id": "modal-test-0001",
+  "end": {
+    "outcome": "ended",
+    "message": "the test was ended with the drive at zero (by Shell (controller))",
+    "emergency_stop": false,
+    "at_s": 16.0
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 16384,
+  "totals": {
+    "accepted": 4,
+    "taken": 4,
+    "points_measured": 1,
+    "points_planned": 1
+  },
+  "state": {
+    "run_id": "modal-test-0001",
+    "state": "finished",
+    "mode": "shaker",
+    "source": "SIM",
+    "station_class": "sim",
+    "title": "Golden Two Shakers",
+    "drive_phase": "idle",
+    "point": 0,
+    "point_dofs": {
+      "references": [
+        {
+          "index": 1,
+          "node": 1,
+          "direction": "Z+",
+          "unit": "lbf"
+        },
+        {
+          "index": 4,
+          "node": 8,
+          "direction": "Z+",
+          "unit": "lbf"
+        }
+      ],
+      "responses": [
+        {
+          "index": 2,
+          "node": 4,
+          "direction": "Z+",
+          "unit": "g"
+        },
+        {
+          "index": 3,
+          "node": 7,
+          "direction": "Z+",
+          "unit": "g"
+        }
+      ]
+    },
+    "counts": {
+      "unit": "frames",
+      "point": {
+        "index": 0,
+        "accepted": 4,
+        "rejected": 0,
+        "asked": 4,
+        "decay": {
+          "row": 2,
+          "ratio": 0.0003957449710470431,
+          "warning": false
+        }
+      },
+      "points": [
+        {
+          "index": 0,
+          "accepted": 4,
+          "rejected": 0,
+          "taken": 4,
+          "measured": true
+        }
+      ],
+      "totals": {
+        "accepted": 4,
+        "taken": 4,
+        "points_measured": 1,
+        "points_planned": 1
+      }
+    },
+    "hits": [
+      {
+        "n": 1,
+        "seq": 1,
+        "status": "accepted",
+        "reason": null,
+        "overload": false,
+        "double_hit": false,
+        "start_frame": 2120,
+        "decay": {
+          "row": 3,
+          "ratio": 0.00025319965740637815,
+          "warning": false
+        }
+      },
+      {
+        "n": 2,
+        "seq": 2,
+        "status": "accepted",
+        "reason": null,
+        "overload": false,
+        "double_hit": false,
+        "start_frame": 3144,
+        "decay": {
+          "row": 2,
+          "ratio": 0.0003957449710470431,
+          "warning": false
+        }
+      },
+      {
+        "n": 3,
+        "seq": 3,
+        "status": "accepted",
+        "reason": null,
+        "overload": false,
+        "double_hit": false,
+        "start_frame": 4168,
+        "decay": {
+          "row": 2,
+          "ratio": 0.0002601098367537032,
+          "warning": false
+        }
+      },
+      {
+        "n": 4,
+        "seq": 4,
+        "status": "accepted",
+        "reason": null,
+        "overload": false,
+        "double_hit": false,
+        "start_frame": 5192,
+        "decay": {
+          "row": 2,
+          "ratio": 0.00034606331212293847,
+          "warning": false
+        }
+      }
+    ],
+    "latest": {
+      "n": 4,
+      "seq": 4,
+      "status": "accepted",
+      "reason": null,
+      "overload": false,
+      "double_hit": false,
+      "start_frame": 5192,
+      "decay": {
+        "row": 2,
+        "ratio": 0.00034606331212293847,
+        "warning": false
+      }
+    },
+    "record": {
+      "folder": "golden-shaker_burst_random",
+      "streams": true,
+      "problem": null
+    },
+    "end": {
+      "outcome": "ended",
+      "message": "the test was ended with the drive at zero (by Shell (controller))",
+      "emergency_stop": false,
+      "at_s": 16.0
+    }
+  },
+  "streams": {
+    "inputs": {
+      "frames": 512,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    },
+    "drives": {
+      "frames": 512,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    }
+  }
+}
