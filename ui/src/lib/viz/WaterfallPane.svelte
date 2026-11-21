@@ -73,11 +73,14 @@
 		axisTicks,
 		exceedTriangles,
 		fraction,
+		levelAt,
 		levelRange,
 		namedRecords,
 		pickedPoint,
 		recordOf,
 		segmentIndex,
+		shownLabels,
+		type ScreenLabel,
 		stageMap,
 		onStage,
 		regionHandles,
@@ -357,7 +360,7 @@
 		for (const t of zTicks) {
 			const f = fraction(t, zRange, logZ) * Z;
 			seg([0, Y, f], [X, Y, f]);
-			seg([X, Y, f], [X + 0.012, Y, f]);
+			seg([0, Y, f], [-0.012, Y, f]);
 		}
 		const g = new BufferGeometry();
 		g.setAttribute('position', new BufferAttribute(new Float32Array(p), 3));
@@ -749,34 +752,28 @@
 	}
 
 	const probe = new Vector3();
-	/** Closest two record labels may stand on screen, in pixels; nearer ones are skipped. */
-	const LABEL_GAP_PX = 12;
-
-	/**
-	 * Pin each HTML label over its point on the stage. Record and level labels are thinned by where
-	 * they land on screen, not only by count: forty names along a depth axis seen end-on, or a
-	 * decade every few pixels on a short level axis, would overprint.
-	 */
+	/** Pin each HTML label over its point on the stage, showing those `shownLabels` keeps. */
 	function placeLabels() {
 		if (!overlay) return;
 		const w = canvasHost.clientWidth;
 		const h = canvasHost.clientHeight;
-		const last: Record<string, [number, number]> = {};
-		for (const el of overlay.querySelectorAll<HTMLElement>('[data-at]')) {
+		const els = [...overlay.querySelectorAll<HTMLElement>('[data-at]')];
+		// each label is moved to its point first, so the box its text takes there can be read
+		const points = els.map((el) => {
 			const [x, y, z] = el.dataset.at!.split(',').map(Number);
 			probe.set(x, y, z).project(camera);
 			const sx = ((probe.x + 1) / 2) * w;
 			const sy = ((1 - probe.y) / 2) * h;
-			let visible = probe.z < 1;
-			const thinned = el.classList.contains('rec') ? 'rec' : el.classList.contains('z') ? 'z' : null;
-			if (visible && thinned) {
-				const [lx, ly] = last[thinned] ?? [-Infinity, -Infinity];
-				if (Math.hypot(sx - lx, sy - ly) < LABEL_GAP_PX) visible = false;
-				else last[thinned] = [sx, sy];
-			}
-			el.style.visibility = visible ? 'visible' : 'hidden';
 			el.style.transform = `translate(${sx}px, ${sy}px)`;
-		}
+			return { sx, sy, front: probe.z < 1 };
+		});
+		const labels = els.map((el, i): ScreenLabel => {
+			const r = el.getBoundingClientRect();
+			const thinned = el.classList.contains('rec') ? 'rec' : el.classList.contains('z') ? 'z' : null;
+			return { ...points[i], box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, thinned };
+		});
+		const shown = shownLabels(labels);
+		els.forEach((el, i) => (el.style.visibility = shown[i] ? 'visible' : 'hidden'));
 	}
 
 	/** Draw the curves alone around (px, py) with the picking material and read back what is there. */
@@ -921,9 +918,7 @@
 	});
 
 	const xAt = (t: number) => `${fraction(t, xRange, logX) * STAGE.x},${-0.035},0`;
-	// the level axis stands at the back right, where a spectrum's levels are usually lowest, so
-	// the curves rarely pass in front of its labels
-	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
+	const zAt = (t: number) => levelAt(fraction(t, zRange, logZ)).join(',');
 	// the records are named at the low end of the abscissa, as the earlier toolset named them
 	// (Brandon, 2026-11-14)
 	const recordAt = (r: number) => `${-0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
@@ -1141,8 +1136,9 @@
 		translate: -50% 2px;
 	}
 
+	/* at the low end of the abscissa, as the record names are: a level ends at its point */
 	.tick.z {
-		translate: 4px -50%;
+		translate: calc(-100% - 4px) -50%;
 	}
 
 	.tick.region {
