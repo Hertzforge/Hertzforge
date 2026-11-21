@@ -411,7 +411,6 @@ fn mimo_mixed_mv8_shared_ceiling_common_scale_in_the_run() {
 
 /// The same requirement under `in_turn`.
 #[test]
-#[ignore = "method: the forecast's random peak is under the held peak; in_turn's last tone ends tone_abort_at_ceiling at -4.08 dB"]
 fn mimo_mixed_mv8_shared_ceiling_in_turn_in_the_run() {
     mv8_run("in_turn");
 }

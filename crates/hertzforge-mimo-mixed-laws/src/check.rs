@@ -108,7 +108,7 @@ impl MimoMixedCheckCase {
                 "sine-linear-4x4; a 1 g tone at 240 Hz through -9, -6, -3 and 0 dB"
             }
             MimoMixedCheckCase::SharedCeiling => {
-                "sine-linear-4x4; 2 g tones at 150, 240 and 700 Hz, every drive's peak ceiling 1.25 V, common_scale"
+                "sine-linear-4x4; 2 g tones at 150, 240 and 700 Hz, every drive's peak ceiling 1.4 V, common_scale"
             }
             MimoMixedCheckCase::MoreDrivesThanControls => {
                 "sine-wide-3x6; a 1 g tone at 240 Hz"
@@ -354,7 +354,7 @@ pub fn mimo_mixed_check_config(case: MimoMixedCheckCase) -> MimoMixedConfig {
     let mut law = MimoMixedLawChoice::default();
     if case == MimoMixedCheckCase::SharedCeiling {
         for d in drives.iter_mut() {
-            d.peak_v = 1.25;
+            d.peak_v = 1.4;
         }
         law.ceiling_rule = LawPick::new("common_scale");
     }

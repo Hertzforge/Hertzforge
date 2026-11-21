@@ -29,8 +29,9 @@ use std::sync::Arc;
 /// The abort ramp, seconds (single-output Mixed Mode's).
 pub const ABORT_RAMP_S: f64 = 0.02;
 /// The random part's held peak decays with this time constant, seconds
-/// (single-output Mixed Mode's).
-pub const RANDOM_PEAK_RELEASE_S: f64 = 1.0;
+/// (single-output Mixed Mode's); the setup forecast's random peak is taken
+/// from the same constant.
+pub use crate::predict::RANDOM_PEAK_RELEASE_S;
 /// A tone's reading must stay outside its abort band this long, seconds
 /// (single-output Mixed Mode's).
 pub const TONE_ABORT_DEBOUNCE_S: f64 = 0.5;
