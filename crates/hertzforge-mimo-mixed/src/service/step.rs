@@ -276,6 +276,11 @@ pub struct MimoMixedStep {
     /// Each drive's peak ceiling (the abort as demanded) and clamp, volts.
     pub(crate) peak_v: Vec<f64>,
     pub(crate) abort_v: Vec<f64>,
+    /// A level ramp asked for between ticks, `(target, frames)`: started at
+    /// the next tick, so the tick's look-ahead sees it.
+    level_next: Option<(f64, f64)>,
+    /// The same for the random part's ramp.
+    rand_next: Option<(f64, f64)>,
     pub(crate) trip: Option<StepTrip>,
     pub(crate) clamped: u64,
     pub(crate) records: StepRecords,
@@ -325,6 +330,8 @@ pub(crate) struct StepShape {
     pub(crate) n_out: usize,
     pub(crate) out_slots: Vec<usize>,
     pub(crate) peak_v: Vec<f64>,
+    /// Each drive's peak abort, above its `peak_v`.
+    pub(crate) abort_v: Vec<f64>,
     pub(crate) tick_s: f64,
     pub(crate) ring_frames: usize,
     pub(crate) record_frames: usize,
@@ -376,8 +383,10 @@ impl MimoMixedStep {
             level: Ramp::at(0.0),
             rand_ramp: Ramp::at(0.0),
             stop: Ramp::at(1.0),
-            abort_v: s.peak_v.clone(),
+            abort_v: s.abort_v,
             peak_v: s.peak_v,
+            level_next: None,
+            rand_next: None,
             trip: None,
             clamped: 0,
             records: StepRecords::new(q, m, s.record_frames),
@@ -503,10 +512,28 @@ impl MimoMixedStep {
         }
     }
 
+    /// Ramp the level to `target` over `frames`, from the next control
+    /// tick: a ramp started between ticks would play up to a tick of frames
+    /// the ceiling rule's look-ahead never saw.
+    pub(crate) fn go_level(&mut self, target: f64, frames: f64) {
+        self.level_next = Some((target, frames));
+    }
+
+    /// Ramp the random part to `target` over `frames`, from the next tick.
+    pub(crate) fn go_random(&mut self, target: f64, frames: f64) {
+        self.rand_next = Some((target, frames));
+    }
+
     /// One control tick: the part clock, each tone's law, the ceiling rule.
     fn tick(&mut self) {
         let dt = self.tick_s;
         let (n, m) = (self.n, self.m);
+        if let Some((t, f)) = self.level_next.take() {
+            self.level.go(t, f);
+        }
+        if let Some((t, f)) = self.rand_next.take() {
+            self.rand_ramp.go(t, f);
+        }
         {
             let now = self.clock.tick(dt);
             for (i, pn) in now.iter().enumerate() {
@@ -545,8 +572,14 @@ impl MimoMixedStep {
                 self.tones[k].target = want;
                 self.bank.set_part_level(k, want, self.part_ramp_frames);
                 if want > 0.0 && !self.tones[k].engaged {
-                    let ff = &self.tones[k].ff[line * m..(line + 1) * m];
-                    self.bank.set_drive(k, ff, 0);
+                    // Switched on from no drive: the ceiling rule below
+                    // decides this tick's drive (the feed-forward, scaled)
+                    // and the tone ramps to it over the tick, so every frame
+                    // is a mix of drives inside the budget. The feed-forward
+                    // set in force at once, scaled or not by the last scale,
+                    // was not: that scale was decided without this tone.
+                    self.prop.fill(C64::new(0.0, 0.0));
+                    self.bank.set_drive(k, &self.prop, 0);
                 }
             }
             // A tracker reads a tone whose amplitude is still ramping (its

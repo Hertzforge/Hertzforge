@@ -374,6 +374,12 @@ pub struct MimoDrive {
     /// the ceiling plus 1 dB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abort_vrms: Option<f64>,
+    /// The drive's abort, volts peak, above `peak_v`: a summed drive frame at
+    /// or over it ends the run (`drive_vpk`), so the clamp at `peak_v` is a
+    /// backstop under it (MIMO Sine's `abort_vpk`). `None` takes `peak_v`
+    /// plus 1 dB, so a setup written before the field loads unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abort_vpk: Option<f64>,
     /// The highest rms the identification may use on this output.
     pub pretest_max_vrms: f64,
     /// The shaker on this output, for the prediction.
@@ -397,10 +403,17 @@ impl MimoDrive {
             ceiling_vrms: d.ceiling_vrms,
             peak_v: d.peak_v,
             abort_vrms: d.abort_vrms,
+            abort_vpk: None,
             pretest_max_vrms: d.pretest_max_vrms,
             shaker: d.shaker.clone(),
             moving_mass: d.moving_mass,
         }
+    }
+
+    /// The peak abort in force, volts: `abort_vpk`, or `peak_v` plus 1 dB.
+    pub fn abort_level_vpk(&self) -> f64 {
+        self.abort_vpk
+            .unwrap_or(self.peak_v * 10f64.powf(DEFAULT_ABORT_OVER_PEAK_DB / 20.0))
     }
 
     /// As MIMO Random's drive.
@@ -505,13 +518,15 @@ pub struct MimoMixedConfig {
     /// Test time at full level before the scheduled stop, seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_level_duration_s: Option<f64>,
-    /// Ramp time per level change, seconds.
-    #[serde(default)]
+    /// Ramp time per level change, seconds; at least two control ticks
+    /// (`ramp_too_short`). Absent, [`DEFAULT_LEVEL_RAMP_S`].
+    #[serde(default = "default_level_ramp")]
     pub level_ramp_s: f64,
     /// Controlled-stop ramp, seconds.
     #[serde(default)]
     pub shutdown_ramp_s: f64,
-    /// How long a tone or band takes to ramp in or out, seconds.
+    /// How long a tone or band takes to ramp in or out, seconds; at least
+    /// two control ticks (`ramp_too_short`).
     #[serde(default = "default_part_ramp")]
     pub part_ramp_s: f64,
     /// The longest the floor plays alone before tones and bands ramp in.
@@ -569,6 +584,19 @@ pub struct MimoMixedConfig {
 
 /// The default control tick, seconds (design section 3).
 pub const DEFAULT_CONTROL_TICK_S: f64 = 0.01;
+
+/// A drive's peak abort over its peak ceiling when `abort_vpk` is not
+/// stated, dB (as MIMO Random's rms abort over its rms ceiling).
+pub const DEFAULT_ABORT_OVER_PEAK_DB: f64 = 1.0;
+
+/// The level ramp when a setup does not state one, seconds. A level ramp
+/// under two control ticks is refused, so the old default of zero would
+/// refuse a setup that never named the field.
+pub const DEFAULT_LEVEL_RAMP_S: f64 = 0.5;
+
+fn default_level_ramp() -> f64 {
+    DEFAULT_LEVEL_RAMP_S
+}
 
 fn default_exclusion() -> f64 {
     DEFAULT_EXCLUSION_HZ
@@ -673,6 +701,26 @@ pub enum MimoMixedConfigError {
         /// The id as written.
         id: String,
     },
+    /// `abort_below_ceiling`: a drive's peak abort not above its peak
+    /// ceiling (MIMO Sine's name).
+    AbortBelowCeiling {
+        /// The drive's index in [`MimoMixedConfig::drives`].
+        drive: usize,
+        /// The abort, volts peak.
+        abort_vpk: f64,
+        /// The ceiling, volts peak.
+        peak_v: f64,
+    },
+    /// `ramp_too_short`: a level or part ramp under two control ticks, so a
+    /// ramp could start and end between two of the ceiling rule's looks.
+    RampTooShort {
+        /// The field (`level_ramp_s` or `part_ramp_s`).
+        field: &'static str,
+        /// The ramp, seconds.
+        seconds: f64,
+        /// The shortest accepted, seconds.
+        min_s: f64,
+    },
 }
 
 impl MimoMixedConfigError {
@@ -689,6 +737,8 @@ impl MimoMixedConfigError {
             MimoMixedConfigError::UnknownBandLaw { .. } => "unknown_band_law",
             MimoMixedConfigError::UnknownCeilingRule { .. } => "unknown_ceiling_rule",
             MimoMixedConfigError::UnknownFillRule { .. } => "unknown_fill_rule",
+            MimoMixedConfigError::AbortBelowCeiling { .. } => "abort_below_ceiling",
+            MimoMixedConfigError::RampTooShort { .. } => "ramp_too_short",
         }
     }
 
@@ -754,6 +804,22 @@ impl fmt::Display for MimoMixedConfigError {
                 write!(f, "unknown ceiling rule {id:?}")
             }
             MimoMixedConfigError::UnknownFillRule { id } => write!(f, "unknown fill rule {id:?}"),
+            MimoMixedConfigError::AbortBelowCeiling {
+                drive,
+                abort_vpk,
+                peak_v,
+            } => write!(
+                f,
+                "drive {drive}: a peak abort of {abort_vpk} V; above its peak ceiling ({peak_v} V)                  is accepted"
+            ),
+            MimoMixedConfigError::RampTooShort {
+                field,
+                seconds,
+                min_s,
+            } => write!(
+                f,
+                "{field} of {seconds} s; at least two control ticks ({min_s} s) is accepted"
+            ),
         }
     }
 }
@@ -1057,6 +1123,29 @@ impl MimoMixedConfig {
                 .is_some_and(|a| !(finite_pos(a) && a >= d.ceiling_vrms))
             {
                 return Err(bad_config("drives", "an abort at or above the ceiling"));
+            }
+        }
+        for (j, d) in self.drives.iter().enumerate() {
+            let a = d.abort_level_vpk();
+            if !(a.is_finite() && a > d.peak_v) {
+                return Err(MimoMixedConfigError::AbortBelowCeiling {
+                    drive: j,
+                    abort_vpk: a,
+                    peak_v: d.peak_v,
+                });
+            }
+        }
+        let min_s = 2.0 * self.control_tick_s();
+        for (field, seconds) in [
+            ("level_ramp_s", self.level_ramp_s),
+            ("part_ramp_s", self.part_ramp_s),
+        ] {
+            if seconds.is_finite() && seconds >= 0.0 && seconds < min_s {
+                return Err(MimoMixedConfigError::RampTooShort {
+                    field,
+                    seconds,
+                    min_s,
+                });
             }
         }
         for l in &self.limits {

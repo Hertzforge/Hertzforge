@@ -358,6 +358,10 @@ pub struct DriveStatus {
     pub peak_v: f64,
     /// The tones' summed amplitude in force, volts at the level.
     pub tone_sum_v: f64,
+    /// The peak abort the run's step holds this drive to, volts (above the
+    /// clamp at the drive's `peak_v`); the configured one before the step
+    /// is built.
+    pub abort_vpk: f64,
 }
 
 /// The run's status.
@@ -1333,7 +1337,7 @@ impl MimoMixedService {
         if matches!(self.cfg.parts[i].body, MimoPartBody::Floor(_)) {
             if let Some(s) = self.step.as_mut() {
                 let frames = (self.cfg.part_ramp_s * self.fs).max(1.0);
-                s.rand_ramp.go(if on { 1.0 } else { 0.0 }, frames);
+                s.go_random(if on { 1.0 } else { 0.0 }, frames);
             }
         } else if let Some(s) = self.step.as_mut() {
             s.clock.set_enabled(i, on);
@@ -1649,7 +1653,7 @@ impl MimoMixedService {
         self.level_db = db;
         let frames = (self.cfg.level_ramp_s * self.fs).max(1.0);
         if let Some(s) = self.step.as_mut() {
-            s.level.go(10f64.powf(db / 20.0), frames);
+            s.go_level(10f64.powf(db / 20.0), frames);
         }
         self.note(format!("Level {db:.2} dB."));
     }
@@ -1695,6 +1699,11 @@ impl MimoMixedService {
                     random_rms_v: self.chunk_rms.get(j).copied().unwrap_or(0.0),
                     peak_v: self.chunk_peak.get(j).copied().unwrap_or(0.0),
                     tone_sum_v,
+                    abort_vpk: self
+                        .step
+                        .as_ref()
+                        .and_then(|s| s.abort_v.get(j).copied())
+                        .unwrap_or_else(|| self.cfg.drives[j].abort_level_vpk()),
                 }
             })
             .collect();
@@ -1880,6 +1889,12 @@ impl MimoMixedService {
             n_out: self.n_out,
             out_slots: self.drive_slots.clone(),
             peak_v: self.cfg.drives.iter().map(|d| d.peak_v).collect(),
+            abort_v: self
+                .cfg
+                .drives
+                .iter()
+                .map(|d| d.abort_level_vpk())
+                .collect(),
             tick_s: self.cfg.control_tick_s(),
             ring_frames: 4 * chunk + 4 * self.nfft,
             record_frames: 2 * TICKS_PER_BATCH as usize * block + 4096,
@@ -2378,6 +2393,7 @@ impl StepCostProbe {
             n_out: m,
             out_slots: (0..m).collect(),
             peak_v: vec![1e9; m],
+            abort_v: vec![1e9; m],
             tick_s: 0.01,
             ring_frames: 1 << 16,
             record_frames: 1 << 16,

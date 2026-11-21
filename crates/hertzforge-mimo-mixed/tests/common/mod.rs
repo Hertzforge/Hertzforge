@@ -190,7 +190,7 @@ pub fn config(n: usize, m: usize, gamma: f64, parts: Vec<MimoPart>) -> MimoMixed
         tracking_hz: DEFAULT_TRACKING_HZ,
         schedule: LevelSchedule::auto_default(),
         full_level_duration_s: Some(60.0),
-        level_ramp_s: 0.0,
+        level_ramp_s: DEFAULT_LEVEL_RAMP_S,
         shutdown_ramp_s: 0.0,
         part_ramp_s: 3.0,
         floor_settle_s: 30.0,

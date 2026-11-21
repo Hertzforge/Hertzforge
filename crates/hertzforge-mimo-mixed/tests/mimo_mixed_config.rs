@@ -341,6 +341,74 @@ fn mimo_mixed_forecast_refuses_a_budget_that_cannot_fit() {
     }
 }
 
+/// Requirement: a drive's peak abort at or under its peak ceiling is
+/// refused `abort_below_ceiling` (the clamp at the ceiling must sit under the
+/// abort), and a level or part ramp under two control ticks is refused
+/// `ramp_too_short`; two ticks exactly is accepted. A setup that states
+/// neither the peak abort nor the level ramp loads and validates: the abort
+/// is the peak ceiling plus 1 dB and the level ramp `DEFAULT_LEVEL_RAMP_S`.
+#[test]
+fn mimo_mixed_refuses_a_peak_abort_at_its_ceiling_and_short_ramps() {
+    let ok = base(vec![floor("f"), tone("t1", fixed(100.0), 1.0)]);
+    assert_eq!(name(&ok), "ok");
+    let mut cfg = ok.clone();
+    cfg.drives[1].abort_vpk = Some(cfg.drives[1].peak_v);
+    assert_eq!(name(&cfg), "abort_below_ceiling");
+    cfg.drives[1].abort_vpk = Some(cfg.drives[1].peak_v * 0.9);
+    assert_eq!(name(&cfg), "abort_below_ceiling");
+    cfg.drives[1].abort_vpk = Some(f64::NAN);
+    assert_eq!(name(&cfg), "abort_below_ceiling");
+    cfg.drives[1].abort_vpk = Some(cfg.drives[1].peak_v * 1.01);
+    assert_eq!(name(&cfg), "ok");
+    let tick = ok.control_tick_s();
+    for (field, set) in [
+        (
+            "level_ramp_s",
+            (|c: &mut MimoMixedConfig, v| c.level_ramp_s = v) as fn(&mut _, f64),
+        ),
+        ("part_ramp_s", |c: &mut MimoMixedConfig, v| {
+            c.part_ramp_s = v
+        }),
+    ] {
+        for (v, want) in [
+            (0.0, "ramp_too_short"),
+            (1.9 * tick, "ramp_too_short"),
+            (2.0 * tick, "ok"),
+        ] {
+            let mut c = ok.clone();
+            set(&mut c, v);
+            assert_eq!(name(&c), want, "{field} {v}");
+        }
+    }
+    // A setup written before either field (finite tolerance lines: JSON has
+    // no `NaN`, as the round trip below notes).
+    let mut ok = ok;
+    let mut tol = ok.floor_tolerances();
+    for v in tol
+        .alarm_upper
+        .iter_mut()
+        .chain(tol.alarm_lower.iter_mut())
+        .chain(tol.abort_upper.iter_mut())
+        .chain(tol.abort_lower.iter_mut())
+    {
+        if v.is_nan() {
+            *v = 0.0;
+        }
+    }
+    ok.reference.tolerances = tol;
+    let mut v = serde_json::to_value(&ok).unwrap();
+    v.as_object_mut().unwrap().remove("level_ramp_s");
+    for d in v["drives"].as_array_mut().unwrap() {
+        assert!(d.get("abort_vpk").is_none(), "None is not written");
+    }
+    let back: MimoMixedConfig = serde_json::from_value(v).unwrap();
+    assert_eq!(back.level_ramp_s, DEFAULT_LEVEL_RAMP_S);
+    assert_eq!(back.drives[0].abort_vpk, None);
+    let a = back.drives[0].abort_level_vpk() / back.drives[0].peak_v;
+    assert!((20.0 * a.log10() - 1.0).abs() < 1e-12, "{a}");
+    assert_eq!(name(&back), "ok");
+}
+
 #[test]
 fn mimo_mixed_configuration_round_trips_through_json() {
     let mut t = tone("t1", fixed(100.0), 1.0);

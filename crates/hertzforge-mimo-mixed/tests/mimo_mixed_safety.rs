@@ -358,6 +358,35 @@ fn mimo_mixed_a_trip_during_a_stop_is_the_end_and_ramps_at_once() {
     assert_aborted_to_zero(&svc, &e);
 }
 
+/// Requirement: the run's step holds each drive to a peak abort above its
+/// peak ceiling, so the clamp at the ceiling is a backstop under the abort:
+/// the stated `abort_vpk` where one is stated, the ceiling plus 1 dB where
+/// none is.
+#[test]
+fn mimo_mixed_each_drive_aborts_above_its_peak_ceiling() {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = two_tone_config(30.0);
+    let stated = cfg.drives[2].peak_v * 1.5;
+    cfg.drives[2].abort_vpk = Some(stated);
+    let peaks: Vec<f64> = cfg.drives.iter().map(|d| d.peak_v).collect();
+    let mut svc = service(s, cfg);
+    engage(&mut svc);
+    let st = svc.status();
+    for (j, d) in st.drives.iter().enumerate() {
+        println!(
+            "drive {j}: peak ceiling {} V, abort {} V",
+            peaks[j], d.abort_vpk
+        );
+        assert!(d.abort_vpk > peaks[j], "drive {j}");
+        let want = if j == 2 {
+            stated
+        } else {
+            peaks[j] * 10f64.powf(1.0 / 20.0)
+        };
+        assert!((d.abort_vpk - want).abs() <= 1e-12 * want, "drive {j}");
+    }
+}
+
 // =============================================================================
 // Law faults in either role.
 // =============================================================================
