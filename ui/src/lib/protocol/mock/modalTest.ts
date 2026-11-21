@@ -320,7 +320,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 	function hitPeak(r: Run, kind: ModalHitKind): number {
 		const range = r.check.references[0]?.range ?? 100;
 		if (kind === 'overload') return range * 1.02;
-		const base = r.target?.peak ?? range * 0.4;
+		const base = r.target?.peak ?? r.check.impact?.checks.target?.peak ?? range * 0.4;
 		return round(base * (0.75 + 0.6 * r.rand()), 3);
 	}
 

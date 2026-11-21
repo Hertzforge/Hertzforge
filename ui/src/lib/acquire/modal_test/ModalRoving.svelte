@@ -128,8 +128,14 @@
 	textarea {
 		width: 100%;
 		max-width: 360px;
+		height: auto;
+		min-height: 8.5em;
 		display: block;
 		margin-top: var(--sp-1);
+	}
+
+	.lbl {
+		display: block;
 	}
 
 	.aq-seg {

@@ -71,8 +71,11 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
-	<SetupFileBar {app} module="modal_test" />
-	<ModalSummary {modal} onopen={(s: ModalSection) => open(s)} />
+	<!-- One column beside the section: the frame's grid has a single cell for the summary. -->
+	<div class="side">
+		<SetupFileBar {app} module="modal_test" />
+		<ModalSummary {modal} onopen={(s: ModalSection) => open(s)} />
+	</div>
 {/snippet}
 
 {#snippet run()}
@@ -107,5 +110,12 @@
 
 	.stack p {
 		margin: 0;
+	}
+
+	.side {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-3);
+		min-width: 0;
 	}
 </style>

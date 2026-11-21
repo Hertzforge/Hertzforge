@@ -111,7 +111,7 @@ describe('modal test counter, tiles and flags', () => {
 	it('modal test flags: the target flag reads the service percent and never rejects', () => {
 		expect(targetFlag('high', 26)).toEqual({ word: 'High +26%', tone: 'high' });
 		expect(targetFlag('low', -8)).toEqual({ word: 'Low −8%', tone: 'low' });
-		expect(targetFlag('on', 3)).toEqual({ word: 'On Target', tone: 'on' });
+		expect(targetFlag('on_target', 3)).toEqual({ word: 'On Target', tone: 'on' });
 		expect(targetFlag(null, null)).toBeNull();
 		// a High flag on an accepted hit stays accepted
 		const t = tileWords(tile({ target_verdict: 'high', target_diff_pct: 40 }));

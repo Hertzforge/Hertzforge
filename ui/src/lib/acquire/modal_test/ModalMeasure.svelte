@@ -119,8 +119,19 @@
 	{/if}
 {/snippet}
 
+{#snippet barNums()}
+	<div>
+		<dt>Point</dt>
+		<dd class="num">{s ? `${s.point + 1} of ${s.counts.totals.points_planned}` : '-'}</dd>
+	</div>
+	<div>
+		<dt>Measured</dt>
+		<dd class="num">{s ? `${s.counts.totals.points_measured} of ${s.counts.totals.points_planned}` : '-'}</dd>
+	</div>
+{/snippet}
+
 <div class="measure" class:shaker={!impact} data-testid="mt-measure" data-mode={mode} data-state={s?.state ?? 'none'}>
-	<div class="bar"><RunBar acq={modal} onoverride={() => {}} {abortKeys} /></div>
+	<div class="bar"><RunBar acq={modal} onoverride={() => {}} {abortKeys} nums={barNums} /></div>
 
 	<aside class="left">
 		<section class="panel state" data-testid="mt-state">
@@ -131,7 +142,7 @@
 
 		<section class="panel counter" data-testid="mt-counter" aria-label="Counts">
 			{#if counter && s}
-				<p class="count" data-testid="mt-count"><span class="num">{counter.point}</span></p>
+				<p class="count" style:font-size={counter.point.length <= 6 ? null : counter.point.length <= 8 ? '40px' : '30px'} data-testid="mt-count"><span class="num">{counter.point}</span></p>
 				<p class="unit">{impact ? 'accepted hits' : 'frames'} at point {s.point + 1}</p>
 				{#if impact}<p class="rej" class:some={s.counts.point.rejected > 0} data-testid="mt-rejected"><span class="num">{counter.rejected}</span></p>{/if}
 				<p class="tot" data-testid="mt-dataset">{counter.dataset}</p>
@@ -162,6 +173,8 @@
 				{/each}
 			</ol>
 		</section>
+
+		<div class="endtest">{@render verbButton('end', 'End Test', null)}</div>
 	</aside>
 
 	<main class="center">
@@ -172,7 +185,7 @@
 					<div class="tile {w.tone}" class:latest={t.seq === latest?.seq} data-testid="mt-tile" data-status={t.status}>
 						<p class="tn">Hit <span class="num">{t.n}</span></p>
 						<p class="ts">{w.status}</p>
-						{#if w.reason}<p class="tr">{w.reason}</p>{/if}
+						{#if w.reason && !w.flags.some((f) => f.word === w.reason)}<p class="tr">{w.reason}</p>{/if}
 						{#each w.flags as f (f.kind)}<span class="flag {f.kind}" data-flag={f.kind}>{f.word}</span>{/each}
 					</div>
 				{:else}
@@ -185,28 +198,28 @@
 			{#if impact}
 				<div class="plot" data-testid="mt-force-plot">
 					{#if hit?.force}
-						<SpectrumPane view={hit.force} live minHeight={150} regions={hit.window} marker={hit.second} />
+						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.window} marker={hit.second} />
 					{:else}<p class="empty">The force is drawn once a hit lands.</p>{/if}
 					{#if latest?.double_hit}<span class="pflag double" data-testid="mt-double-flag">Double Hit{hit?.second !== null && hit?.second !== undefined ? `: second impact at ${num(hit.second, 's')}` : ''}</span>{/if}
 					{#if latest?.overload}<span class="pflag overload" data-testid="mt-overload-flag">Overload</span>{/if}
 					{#if hit && hit.force && !hit.ownBlock}<span class="pnote">The most recent frames: the windows are drawn on a hit's own block.</span>{/if}
 				</div>
 				<div class="plot" data-testid="mt-response-plot">
-					{#if hit?.response}<SpectrumPane view={hit.response} live minHeight={150} regions={hit.window} marker={hit.second} />{:else}<p class="empty">The response is drawn once a hit lands.</p>{/if}
+					{#if hit?.response}<SpectrumPane view={hit.response} live minHeight={150} readout={false} copyButton={false} regions={hit.window} marker={hit.second} />{:else}<p class="empty">The response is drawn once a hit lands.</p>{/if}
 				</div>
 				<div class="plot" data-testid="mt-fspec-plot">
-					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} />{:else}<p class="empty">The force spectrum is drawn once the service sends it with a hit.</p>{/if}
+					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once the service sends it with a hit.</p>{/if}
 					{#if latest?.tip_warning}<span class="pflag tip" data-testid="mt-tip-flag">Tip: the force falls {num(latest.report?.tip_drop_db)} dB across the band. A harder tip reaches higher.</span>{/if}
 				</div>
 			{:else}
-				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} live minHeight={150} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot">{#if respTraces}<SpectrumPane view={respTraces} live minHeight={150} />{:else}<p class="empty">The responses are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot">{#if driveTraces}<SpectrumPane view={driveTraces} live minHeight={150} />{:else}<p class="empty">The drives are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot" data-testid="mt-refspec-plot">{#if refSpectra}<SpectrumPane view={refSpectra} live minHeight={150} />{:else}<p class="empty">The reference autospectra are drawn once the service sends them.</p>{/if}</div>
+				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
+				<div class="plot">{#if respTraces}<SpectrumPane view={respTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The responses are drawn while the shakers drive.</p>{/if}</div>
+				<div class="plot">{#if driveTraces}<SpectrumPane view={driveTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The drives are drawn while the shakers drive.</p>{/if}</div>
+				<div class="plot" data-testid="mt-refspec-plot">{#if refSpectra}<SpectrumPane view={refSpectra} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The reference autospectra are drawn once the service sends them.</p>{/if}</div>
 			{/if}
-			<div class="plot" data-testid="mt-frf-plot">{#if frf.magnitude}<SpectrumPane view={frf.magnitude} live minHeight={150} />{:else}<p class="empty">The FRF is drawn after the first accepted {impact ? 'hit' : 'frame'}.</p>{/if}</div>
-			<div class="plot">{#if frf.phase}<SpectrumPane view={frf.phase} live minHeight={150} yFixed={[-180, 180]} />{:else}<p class="empty">The phase is drawn with the FRF.</p>{/if}</div>
-			<div class="plot" data-testid="mt-coh-plot">{#if frf.coherence}<SpectrumPane view={frf.coherence} live minHeight={150} yFixed={[0, 1.05]} />{:else}<p class="empty">The coherence is drawn with the FRF.</p>{/if}</div>
+			<div class="plot" data-testid="mt-frf-plot">{#if frf.magnitude}<SpectrumPane view={frf.magnitude} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The FRF is drawn after the first accepted {impact ? 'hit' : 'frame'}.</p>{/if}</div>
+			<div class="plot">{#if frf.phase}<SpectrumPane view={frf.phase} live minHeight={150} readout={false} copyButton={false} yFixed={[-180, 180]} />{:else}<p class="empty">The phase is drawn with the FRF.</p>{/if}</div>
+			<div class="plot" data-testid="mt-coh-plot">{#if frf.coherence}<SpectrumPane view={frf.coherence} live minHeight={150} readout={false} copyButton={false} yFixed={[0, 1.05]} />{:else}<p class="empty">The coherence is drawn with the FRF.</p>{/if}</div>
 		</div>
 		<div class="pick">
 			<label>Response
@@ -228,7 +241,7 @@
 	<aside class="right">
 		{#if end}
 			<section class="panel endline {outcomeTone(end.outcome)}" data-testid="mt-end" data-outcome={end.outcome}>
-				<p class="big">{MODAL_OUTCOME_WORDS[end.outcome] ?? end.outcome}</p>
+				<h2 class="outcome">{MODAL_OUTCOME_WORDS[end.outcome] ?? end.outcome}</h2>
 				<p class="hint">{end.message}</p>
 				{#if record}<RunRecordLine {record} ended />{/if}
 				{#if record && opener}<RunOpenActions {record} {opener} />{/if}
@@ -286,8 +299,8 @@
 				<div class="row2">
 					{@render verbButton('drive_start', 'Start Driving', null, 'primary')}
 					{@render verbButton('drive_stop', 'Stop Driving', null)}
+					{@render verbButton('undo', 'Undo', MODAL_KEY_WORDS.undo)}
 				</div>
-				{@render verbButton('undo', 'Undo', MODAL_KEY_WORDS.undo)}
 				{#if modal.verbRefusal}<p class="refused" role="alert" data-testid="mt-refusal">{modal.verbRefusal.message}</p>{/if}
 				{#if check?.shaker}
 					<ul class="report">
@@ -313,7 +326,6 @@
 			<p class="hint">Not while a text field has the focus.</p>
 		</section>
 
-		{@render verbButton('end', 'End Test', null)}
 	</aside>
 </div>
 
@@ -397,6 +409,7 @@
 	}
 
 	.counter .count {
+		white-space: nowrap;
 		font-size: 56px;
 		line-height: 1;
 		font-weight: var(--weight-strong);
@@ -445,6 +458,11 @@
 	.nav {
 		display: flex;
 		gap: var(--sp-1);
+	}
+
+	.endtest {
+		display: flex;
+		flex-direction: column;
 	}
 
 	.plist {
@@ -601,15 +619,20 @@
 
 	.plots {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		grid-auto-rows: minmax(170px, 1fr);
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-auto-rows: minmax(150px, 1fr);
 		gap: var(--sp-2);
 		flex: 1;
 		min-height: 0;
 	}
 
 	.plots.impact {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-auto-rows: minmax(170px, 1fr);
+	}
+
+	/* Shaker mode draws seven plots: the coherence takes the third row whole. */
+	.plots:not(.impact) > .plot:last-child {
+		grid-column: 1 / -1;
 	}
 
 	.plot {
@@ -730,16 +753,17 @@
 		min-height: 76px;
 		font-size: 22px;
 		font-weight: var(--weight-strong);
-		color: #fff;
 		border: none;
 	}
 
 	.btn.accept {
-		background: var(--status-pass);
+		background: var(--accent);
+		color: var(--text-on-accent);
 	}
 
 	.btn.reject {
-		background: var(--status-fail);
+		background: var(--status-fail-fill);
+		color: var(--status-fail-text);
 	}
 
 	.btn.accept.off,
@@ -852,7 +876,13 @@
 		color: var(--text-2);
 	}
 
-	.endline.fail .big {
+	.endline .outcome {
+		margin: 0;
+		font-size: var(--text-md);
+		font-weight: var(--weight-strong);
+	}
+
+	.endline.fail .outcome {
 		color: var(--status-fail);
 	}
 </style>
