@@ -50,6 +50,8 @@ mod srs_methods;
 #[path = "server_mimo_shock.rs"]
 mod mimo_shock_methods;
 
+#[path = "server_mimo_mixed.rs"]
+mod mimo_mixed_methods;
 #[path = "server_mimo_sine.rs"]
 mod mimo_sine_methods;
 #[path = "server_mixed.rs"]
@@ -89,7 +91,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 68] = [
+const DRIVE_METHODS: [&str; 74] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -158,6 +160,12 @@ const DRIVE_METHODS: [&str; 68] = [
     "mimo_sine.resume",
     "mimo_sine.jog",
     "mimo_sine.goto",
+    "mimo_mixed.arm",
+    "mimo_mixed.start",
+    "mimo_mixed.proceed",
+    "mimo_mixed.level",
+    "mimo_mixed.resume",
+    "mimo_mixed.part",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -184,6 +192,12 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_sine.level, mimo_sine.mode, mimo_sine.hold, mimo_sine.resume, mimo_sine.reverse, \
     mimo_sine.jog, mimo_sine.goto, mimo_sine.stop, mimo_sine.abort, mimo_sine.reset, \
     mimo_sine.clear, mimo_sine.state, mimo_sine.log, mimo_sine.report, mimo_sine.subscribe, \
+    mimo_mixed.configure, mimo_mixed.config, mimo_mixed.arm, mimo_mixed.start, \
+    mimo_mixed.proceed, mimo_mixed.level, mimo_mixed.hold, mimo_mixed.resume, mimo_mixed.part, \
+    mimo_mixed.stop, mimo_mixed.abort, mimo_mixed.reset, mimo_mixed.clear, mimo_mixed.state, \
+    mimo_mixed.log, mimo_mixed.subscribe, mimo_mixed.reference.build_breakpoints, \
+    mimo_mixed.reference.build_rigid_body, mimo_mixed.reference.validate, \
+    mimo_mixed.reference.import, \
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
@@ -342,6 +356,7 @@ pub enum Feed {
     MimoSine,
     Sine,
     Mixed,
+    MimoMixed,
     Twr,
     Explorer,
     Recorder,
@@ -473,6 +488,11 @@ struct Inner {
     mixed_runs: u64,
     mixed_state_key: String,
     mixed_log_sent: (String, u64),
+    /// The MIMO Mixed Mode configuration and its run, and what of it has been sent.
+    mimo_mixed: Option<Arc<crate::mimo_mixed::MimoMixedRun>>,
+    mimo_mixed_runs: u64,
+    mimo_mixed_state_key: String,
+    mimo_mixed_log_sent: (String, u64),
     /// The TWR configuration and its run, beside the others, and what of it has
     /// been sent.
     twr: Option<Arc<crate::twr::TwrRun>>,
@@ -553,6 +573,12 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
+    fn mimo_mixed_live(&self) -> bool {
+        self.mimo_mixed
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     fn twr_live(&self) -> bool {
         self.twr.as_ref().is_some_and(|s| s.view().state.is_live())
     }
@@ -590,6 +616,7 @@ impl Inner {
             || self.mimo_sine_live()
             || self.sine_live()
             || self.mixed_live()
+            || self.mimo_mixed_live()
             || self.twr_live()
             || self.explorer_live()
             || self.recorder_live()
@@ -698,6 +725,21 @@ impl Inner {
                     ErrorCode::Refused,
                     "run_active",
                     format!("Sine run {} is {}; stop it first.", s.id, v.state.name()),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.mimo_mixed {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "MIMO Mixed Mode run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
                 )
                 .with_detail(json!({"run_id": s.id})));
             }
@@ -853,6 +895,12 @@ pub struct Service {
     /// Mixed Mode runs' publishes, in order.
     mixed_notify: mpsc::UnboundedSender<crate::mixed::Notice>,
     mixed_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::mixed::Notice>>>,
+    /// The connections with a MIMO Mixed Mode display subscription.
+    mimo_mixed_displays: std::sync::Mutex<HashMap<ConnId, mimo_mixed_methods::MimoMixedDisplay>>,
+    /// MIMO Mixed Mode runs' publishes, in order.
+    mimo_mixed_notify: mpsc::UnboundedSender<crate::mimo_mixed::Notice>,
+    mimo_mixed_notices:
+        std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::mimo_mixed::Notice>>>,
     /// The connections with a TWR display subscription.
     twr_displays: std::sync::Mutex<HashMap<ConnId, twr_methods::TwrDisplay>>,
     /// TWR runs' publishes, in order.
@@ -985,6 +1033,7 @@ impl Service {
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
         let (mimo_sine_notify, mimo_sine_notices) = mpsc::unbounded_channel();
         let (mixed_notify, mixed_notices) = mpsc::unbounded_channel();
+        let (mimo_mixed_notify, mimo_mixed_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
@@ -1033,6 +1082,10 @@ impl Service {
                 mixed_runs: 0,
                 mixed_state_key: String::new(),
                 mixed_log_sent: (String::new(), 0),
+                mimo_mixed: None,
+                mimo_mixed_runs: 0,
+                mimo_mixed_state_key: String::new(),
+                mimo_mixed_log_sent: (String::new(), 0),
                 twr: None,
                 twr_runs: 0,
                 twr_state_key: String::new(),
@@ -1086,6 +1139,9 @@ impl Service {
             mixed_displays: std::sync::Mutex::new(HashMap::new()),
             mixed_notify,
             mixed_notices: std::sync::Mutex::new(Some(mixed_notices)),
+            mimo_mixed_displays: std::sync::Mutex::new(HashMap::new()),
+            mimo_mixed_notify,
+            mimo_mixed_notices: std::sync::Mutex::new(Some(mimo_mixed_notices)),
             twr_displays: std::sync::Mutex::new(HashMap::new()),
             twr_notify,
             twr_notices: std::sync::Mutex::new(Some(twr_notices)),
@@ -1165,6 +1221,7 @@ impl Service {
             Feed::Sine => self.sine_displays().contains_key(&conn),
             Feed::MimoSine => self.mimo_sine_displays().contains_key(&conn),
             Feed::Mixed => self.mixed_displays().contains_key(&conn),
+            Feed::MimoMixed => self.mimo_mixed_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
             Feed::Recorder => self.recorder_displays().contains_key(&conn),
@@ -1315,6 +1372,19 @@ impl Service {
                 }
             });
         }
+        let mimo_mixed_notices = self
+            .mimo_mixed_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = mimo_mixed_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, _view)) = notices.recv().await {
+                    svc.mimo_mixed_changed(&run_id).await;
+                }
+            });
+        }
         let twr_notices = self.twr_notices.lock().ok().and_then(|mut n| n.take());
         if let Some(mut notices) = twr_notices {
             let svc = self.clone();
@@ -1436,6 +1506,10 @@ impl Service {
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
             let msine = inner.mimo_sine.clone().filter(|s| s.view().state.is_live());
             let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
+            let mmixed = inner
+                .mimo_mixed
+                .clone()
+                .filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
@@ -1475,6 +1549,15 @@ impl Service {
             }
             if let Some(s) = twr {
                 twr_methods::stop_twr(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = mmixed {
+                mimo_mixed_methods::stop_mimo_mixed(
                     &s,
                     Some("safe_stop"),
                     "the service (nobody held control)".into(),
@@ -1563,6 +1646,39 @@ impl Service {
                 while s.view().state.is_live() {
                     if asked.elapsed() > patience {
                         mixed_methods::stop_mixed(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
+        let mmixed = self.inner.lock().await.mimo_mixed.clone();
+        let mmixed_said = match mmixed.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mimo_mixed_methods::stop_mimo_mixed(
+                    &s,
+                    Some("safe_stop"),
+                    rrun::SHUTDOWN_BY.into(),
+                    true,
+                )
+                .await;
+                let asked = Instant::now();
+                let patience = mimo_mixed_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        mimo_mixed_methods::stop_mimo_mixed(
+                            &s,
+                            None,
+                            rrun::SHUTDOWN_BY.into(),
+                            true,
+                        )
+                        .await;
                         break;
                     }
                     tokio::time::sleep(SHUTDOWN_POLL).await;
@@ -1871,6 +1987,7 @@ impl Service {
                 .or(msine_said)
                 .or(sine_said)
                 .or(mixed_said)
+                .or(mmixed_said)
                 .or(twr_said)
                 .or(explorer_said)
                 .or(recorder_said)
@@ -1929,6 +2046,7 @@ impl Service {
         self.mimo_sine_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
         self.mixed_displays().remove(&conn.id);
+        self.mimo_mixed_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
         self.explorer_displays().remove(&conn.id);
         self.recorder_displays().remove(&conn.id);
@@ -2049,6 +2167,12 @@ impl Service {
             "sine.profile.validate" => self.sine_profile_validate(params).await,
             "mixed.configure" => self.mixed_configure(conn, params).await,
             "mixed.config" => Ok(self.mixed_config().await),
+            "mimo_mixed.configure" => self.mimo_mixed_configure(conn, params).await,
+            "mimo_mixed.config" => Ok(self.mimo_mixed_config().await),
+            "mimo_mixed.reference.build_breakpoints"
+            | "mimo_mixed.reference.build_rigid_body"
+            | "mimo_mixed.reference.validate"
+            | "mimo_mixed.reference.import" => self.mimo_mixed_reference(method, params).await,
             "twr.configure" => self.twr_configure(conn, params).await,
             "twr.config" => Ok(self.twr_config().await),
             "twr.reference.import" => self.twr_reference_import(params).await,
@@ -2245,6 +2369,20 @@ impl Service {
             "mixed.state" => Ok(self.mixed_state_now().await),
             "mixed.log" => self.mixed_log(params).await,
             "mixed.subscribe" => self.mixed_subscribe(conn, params).await,
+            "mimo_mixed.arm" => self.mimo_mixed_arm(conn, false).await,
+            "mimo_mixed.start" => self.mimo_mixed_arm(conn, true).await,
+            "mimo_mixed.proceed" | "mimo_mixed.level" | "mimo_mixed.hold" | "mimo_mixed.resume"
+            | "mimo_mixed.part" => self.mimo_mixed_running_verb(conn, method, params).await,
+            "mimo_mixed.stop" => Ok(self.mimo_mixed_end(conn, false).await),
+            "mimo_mixed.abort" => Ok(self.mimo_mixed_end(conn, true).await),
+            "mimo_mixed.reset" => self.mimo_mixed_reset(conn).await,
+            "mimo_mixed.clear" => self.mimo_mixed_clear(conn).await,
+            "mimo_mixed.state" => Ok(self.mimo_mixed_state_now().await),
+            "mimo_mixed.log" => self.mimo_mixed_log(params).await,
+            "mimo_mixed.subscribe" => self.mimo_mixed_subscribe(conn, params).await,
+            m if crate::mimo_mixed::not_built(m).is_some() => {
+                Err(crate::mimo_mixed::not_built(m).expect("listed"))
+            }
             "twr.arm" => self.twr_arm(conn, params, false).await,
             "twr.start" => self.twr_arm(conn, params, true).await,
             "twr.proceed" => self.twr_proceed(conn).await,
@@ -2326,6 +2464,9 @@ impl Service {
             "twr.plays" => self.twr_plays(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
+            "laws.check" if params.get("mimo_mixed").is_some_and(|m| !m.is_null()) => {
+                self.mimo_mixed_laws_check(conn, params).await
+            }
             "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
                 self.mixed_laws_check(conn, params).await
             }
@@ -2903,6 +3044,7 @@ impl Service {
                 || inner.srs_live()
                 || inner.sine_live()
                 || inner.mixed_live()
+                || inner.mimo_mixed_live()
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
@@ -3188,6 +3330,7 @@ impl Service {
             || inner.srs_live()
             || inner.sine_live()
             || inner.mixed_live()
+            || inner.mimo_mixed_live()
             || inner.twr_live()
             || inner.explorer_live()
             || inner.recorder_live()

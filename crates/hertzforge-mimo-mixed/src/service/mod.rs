@@ -331,6 +331,15 @@ pub struct ToneStatus {
     pub target: Vec<f64>,
 }
 
+/// One tone's phasors ([`MimoMixedService::tone_phasors`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TonePhasors {
+    /// Per control: the tracked response, peak EU.
+    pub measured: Vec<C64>,
+    /// Per drive: what it plays, volts peak.
+    pub drive: Vec<C64>,
+}
+
 /// One band's line in the status.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BandStatus {
@@ -834,6 +843,36 @@ impl MimoMixedService {
     /// The fill rule's last report.
     pub fn fill_report(&self) -> Option<crate::fill::FillReport> {
         self.fill_report.clone()
+    }
+
+    /// The last frame the floor loop averaged: every control's then every
+    /// limit's spectrum, line-major (`n + p` per line), scaled so `X X^H` is
+    /// the frame's one-sided periodogram at the level it played (the tones
+    /// in). `None` before the run.
+    pub fn frame_spectra(&self) -> Option<&[C64]> {
+        self.spectra.as_ref().map(|s| s.spectra())
+    }
+
+    /// Each tone's phasors now: per control the tracked response (peak EU),
+    /// per drive what it plays at its part level and the level in force
+    /// (volts peak). Empty before the run.
+    pub fn tone_phasors(&self) -> Vec<TonePhasors> {
+        let Some(s) = self.step.as_ref() else {
+            return Vec::new();
+        };
+        let (n, m) = (self.cfg.n(), self.cfg.m());
+        let lam = s.level.value();
+        (0..s.tones.len())
+            .map(|k| {
+                let mut d = vec![C64::new(0.0, 0.0); m];
+                s.bank.drive_in_force(k, &mut d);
+                let g = s.bank.part_level(k) * lam;
+                TonePhasors {
+                    measured: (0..n).map(|i| s.bank.tracked(k, i)).collect(),
+                    drive: d.iter().map(|z| *z * g).collect(),
+                }
+            })
+            .collect()
     }
 
     /// The step (the cost measure and the tests read it).

@@ -2660,6 +2660,8 @@ dependencies = [
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-law-host",
+ "hertzforge-mimo-mixed",
+ "hertzforge-mimo-mixed-laws",
  "hertzforge-mimo-random",
  "hertzforge-mimo-shock",
  "hertzforge-mimo-shock-laws",

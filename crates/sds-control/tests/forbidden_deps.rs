@@ -181,6 +181,22 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-mimo-sine",
     "hertzforge-mimo-sine-laws",
     "hertzforge-mimo-sine-law-math",
+    // MIMO Mixed Mode, reviewed 2026-11-21 with its contracts as the wire reaches it:
+    // the parts, the run service and its law seam (`hertzforge-mimo-mixed`, MIT,
+    // written here), whose `[dependencies]` are `hertzforge-mixed` (its parts model,
+    // without the service), `hertzforge-mimo-random`, `hertzforge-random`,
+    // `hertzforge-sdm`, `hertzforge-dsp`, `hertzforge-reference`,
+    // `hertzforge-breakpoints`, `hertzforge-shaker-db`, `serde` and `serde_json`, and
+    // behind its `service` feature `hertzforge-engine`, `hertzforge-hal`,
+    // `hertzforge-channel-table`, `hertzforge-module-abi`, `hertzforge-mimo-sine`
+    // and `hertzforge-sine` (their pure cores), `hertzforge-random-laws` and
+    // `hertzforge-law-host`, all on this list. It names no backend: the run service
+    // is handed a finished `Box<dyn Backend>` by the station factory, and the Sim is
+    // a dev-dependency only. The laws' roles, the hardware rule per role and the
+    // check's cases (`hertzforge-mimo-mixed-laws`, MIT, written here) run a case on
+    // the backend they are handed and name none; that crate is on LAW_CRATES.
+    "hertzforge-mimo-mixed",
+    "hertzforge-mimo-mixed-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -210,6 +226,11 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// `hertzforge-mimo-sine` was written here as well (2026-11-17): the MIMO Sine
 /// contracts (the run's setup, the per-update law inputs and outputs, the law traits
 /// and their validation) and the run engine's surface. It names no backend.
+///
+/// `hertzforge-mimo-mixed` was written here as well (2026-11-21): the MIMO Mixed Mode
+/// parts, run service and law seam, composed from the MIMO Random and MIMO Sine
+/// cores. It names no backend; the run service hands it a finished station, and the
+/// Sim is a dev-dependency only.
 ///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
@@ -243,6 +264,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-ipc",
     "hertzforge-mimo-random",
     "hertzforge-mimo-shock",
+    "hertzforge-mimo-mixed",
     "hertzforge-mimo-sine",
     "hertzforge-mixed",
     "hertzforge-modal-test",
@@ -308,7 +330,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// `mimo-sine-paired`, `mimo-sine-steepest-descent`, `mimo-sine-secant` and
 /// `mimo-sine-ratio` (the SDK over the same math), and the `sine-mimo-misbehave` host
 /// fixture; the `sine-mimo-template` host fixture (the SDK template's law, compiled as
-/// a law file) joined them with the law plumbing.
+/// a law file) joined them with the law plumbing. So was the MIMO Mixed Mode set
+/// (2026-11-21): the laws' roles, the hardware rule per role and the check's cases
+/// (`hertzforge-mimo-mixed-laws`); it adds no world (its floor law is a MIMO Random
+/// law and its tone law a MIMO Sine law), so no law file or fixture.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -340,6 +365,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-twr-correct",
     "hertzforge-mimo-laws",
     "hertzforge-mimo-shock-law-math",
+    "hertzforge-mimo-mixed-laws",
     "hertzforge-mimo-shock-laws",
     "hertzforge-mimo-sine-law-math",
     "hertzforge-mimo-sine-laws",
