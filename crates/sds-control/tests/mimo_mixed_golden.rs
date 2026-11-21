@@ -217,6 +217,8 @@ fn running() -> MimoMixedView {
         phase: MimoMixedPhase::FullLevel,
         t_s: 96.25,
         level_db: 0.0,
+        at_level_s: Some(36.25),
+        remaining_at_level_s: Some(263.75),
         floor_error_db: vec![-0.25, 0.125, 0.5, -0.0625],
         floor_equalized: true,
         loops: 377,

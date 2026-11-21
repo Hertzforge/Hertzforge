@@ -33,6 +33,8 @@
   ],
   "level_db": 0,
   "t_s": 96.25,
+  "at_level_s": 36.25,
+  "remaining_at_level_s": 263.75,
   "held": false,
   "alarm": false,
   "limiting": true,

@@ -634,7 +634,7 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 		if (!r) {
 			return {
 				run_id: null, state: 'unconfigured', phase: 'idle', title: null, source: null, station: null, grid: null, clock: null, mode: null, levels_db: null,
-				level_db: null, t_s: null, held: false, alarm: false, limiting: false, parts: [], drives: [], scale: null, floor_error_db: [], floor_equalized: false, floor: null,
+				level_db: null, t_s: null, at_level_s: null, remaining_at_level_s: null, held: false, alarm: false, limiting: false, parts: [], drives: [], scale: null, floor_error_db: [], floor_equalized: false, floor: null,
 				limits: [], identification: null, prediction: null, override: null, overrides: [], law: null, end: null
 			};
 		}
@@ -654,6 +654,7 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 			levels_db: r.levels,
 			level_db: r.levelDb === null ? null : round(r.levelDb, 2),
 			t_s: r.t === null ? null : round(r.t, 3),
+			...levelProgress(r),
 			held: r.held,
 			alarm: rows.some((p) => p.controls.some((c) => c.alarm)),
 			limiting: rows.some((p) => p.limiting),
@@ -857,6 +858,19 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 		}
 		keep(r);
 		stateChanged();
+	}
+
+	/** The time at the rung or at full level, and what is left of it, as the schedule below counts them. */
+	function levelProgress(r: Run): { at_level_s: number | null; remaining_at_level_s: number | null } {
+		const lr = r.config.level_ramp_s ?? MIMO_MIXED_DEFAULTS.level_ramp_s;
+		const at = round(Math.max(0, r.phaseT), 3);
+		const left = (total: number) => round(Math.max(0, total - r.phaseT), 3);
+		if (r.phase === 'engaged') return { at_level_s: at, remaining_at_level_s: r.mode === 'auto' ? left(dwellFor(r.config.schedule.dwell_s, r.rung) + lr) : null };
+		if (r.phase === 'full_level') {
+			const d = r.config.full_level_duration_s;
+			return { at_level_s: at, remaining_at_level_s: d === undefined || d === null ? null : left(d + lr) };
+		}
+		return { at_level_s: null, remaining_at_level_s: null };
 	}
 
 	/** The level schedule: the rungs between the start and full level, each its dwell, then full level for its time. */
@@ -1088,6 +1102,8 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 			phase: s.phase,
 			mode: s.mode,
 			t_s: s.t_s,
+			at_level_s: s.at_level_s,
+			remaining_at_level_s: s.remaining_at_level_s,
 			level_db: s.level_db,
 			held: s.held,
 			alarm: s.alarm,

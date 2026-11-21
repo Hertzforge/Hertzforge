@@ -332,6 +332,8 @@ export class MimoMixedStore {
 			mode: l.mode,
 			level_db: l.level_db,
 			t_s: l.t_s,
+			at_level_s: l.at_level_s,
+			remaining_at_level_s: l.remaining_at_level_s,
 			held: l.held,
 			alarm: l.alarm,
 			limiting: l.limiting,
@@ -410,9 +412,8 @@ export class MimoMixedStore {
 			mode: s.mode,
 			levels_db: s.levels_db,
 			level_db: s.level_db,
-			// the service does not report the time at a level, nor what is left of it
-			at_level_s: null,
-			remaining_at_level_s: null,
+			at_level_s: s.at_level_s,
+			remaining_at_level_s: s.remaining_at_level_s,
 			end: s.end ? ({ outcome: s.end.outcome, message: s.end.message, at_s: s.end.at_s, level_db: s.end.level_db, trip: null } as unknown as RunHead['end']) : null,
 			record: s.record ?? null
 		};
@@ -421,7 +422,7 @@ export class MimoMixedStore {
 	get frame(): { level_db: number | null; at_level_s: number | null; remaining_at_level_s: number | null } | null {
 		const l = this.frameOfRun;
 		if (!l || this.status?.state === 'finished') return null;
-		return { level_db: l.level_db, at_level_s: null, remaining_at_level_s: null };
+		return { level_db: l.level_db, at_level_s: l.at_level_s, remaining_at_level_s: l.remaining_at_level_s };
 	}
 
 	get record(): RunRecordRef | null {

@@ -21,8 +21,8 @@ const readJson = (name: string) => JSON.parse(readFileSync(`${DIR}${name}`, 'utf
 const keys = (o: object) => Object.keys(o).sort();
 
 /** Every member a state carries, as the shell's type names them (`record` once a folder is claimed). */
-const STATE_KEYS = ['alarm', 'clock', 'drives', 'end', 'floor', 'floor_equalized', 'floor_error_db', 'grid', 'held', 'identification', 'law', 'level_db', 'levels_db', 'limiting', 'limits', 'mode', 'override', 'overrides', 'parts', 'phase', 'prediction', 'run_id', 'scale', 'source', 'state', 'station', 't_s', 'title'];
-const LIVE_KEYS = ['alarm', 'class', 'drives', 'floor_equalized', 'floor_error_db', 'held', 'level_db', 'limiting', 'loop', 'mode', 'parts', 'phase', 'run_id', 'scale', 'source', 'state', 't_s', 'views'];
+const STATE_KEYS = ['alarm', 'at_level_s', 'clock', 'drives', 'end', 'floor', 'floor_equalized', 'floor_error_db', 'grid', 'held', 'identification', 'law', 'level_db', 'levels_db', 'limiting', 'limits', 'mode', 'override', 'overrides', 'parts', 'phase', 'prediction', 'remaining_at_level_s', 'run_id', 'scale', 'source', 'state', 'station', 't_s', 'title'];
+const LIVE_KEYS = ['alarm', 'at_level_s', 'class', 'drives', 'floor_equalized', 'floor_error_db', 'held', 'level_db', 'limiting', 'loop', 'mode', 'parts', 'phase', 'remaining_at_level_s', 'run_id', 'scale', 'source', 'state', 't_s', 'views'];
 
 function row(index: number, role: ChannelRow['role']): ChannelRow {
 	return { index, enabled: true, description: '', role, physical: null, interface: 'single_ended', iepe_bias_v: null, units: role === 'drive' ? 'V' : 'g', sensitivity_mv_per_eu: role === 'drive' ? 1000 : 100, range_max: 10, polarity: 'positive', control_group: null, abort: { enabled: false } } as unknown as ChannelRow;

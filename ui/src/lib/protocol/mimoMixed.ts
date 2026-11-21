@@ -684,6 +684,10 @@ export interface MimoMixedState {
 	level_db: number | null;
 	/** Station time since engage; null before. */
 	t_s: number | null;
+	/** Time at the present rung or at full level, from the start of its ramp, holds left out; null outside them. */
+	at_level_s: number | null;
+	/** Time left there: the rung's dwell in auto, or the full-level duration when set; null otherwise. */
+	remaining_at_level_s: number | null;
 	held: boolean;
 	alarm: boolean;
 	limiting: boolean;
@@ -755,6 +759,8 @@ export interface MimoMixedLiveHead {
 	phase: MimoMixedPhase;
 	mode: LadderMode | null;
 	t_s: number | null;
+	at_level_s: number | null;
+	remaining_at_level_s: number | null;
 	level_db: number | null;
 	held: boolean;
 	alarm: boolean;

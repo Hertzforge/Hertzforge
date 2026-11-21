@@ -127,6 +127,22 @@ describe('the MIMO Mixed Mode store', () => {
 		expect(mm.wire.drives.map((d) => 'abort_vpk' in d)).toEqual([false, false]);
 	});
 
+	it('gives the run bar the time at the level and what is left of it, from the live frame and the state', async () => {
+		const { mm } = await screen();
+		await applied(mm);
+		expect(mm.run?.at_level_s).toBeNull();
+		expect(await mm.start()).toBe(true);
+		await until(() => mm.status?.state === 'review');
+		expect(await mm.proceed()).toBe(true);
+		await until(() => (mm.live?.at_level_s ?? 0) > 0, 20000);
+		const l = mm.live!;
+		expect(l.remaining_at_level_s).not.toBeNull();
+		expect(mm.frame).toEqual({ level_db: l.level_db, at_level_s: l.at_level_s, remaining_at_level_s: l.remaining_at_level_s });
+		expect(mm.run?.at_level_s).not.toBeNull();
+		expect(mm.run?.remaining_at_level_s).not.toBeNull();
+		await mm.abort();
+	}, 30000);
+
 	it('runs a session: identify, review, the floor equalizes, the tones come in, a drive runs out of room, completed', async () => {
 		const { mm } = await screen();
 		await applied(mm);

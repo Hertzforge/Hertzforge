@@ -9,6 +9,8 @@
   "phase": "full_level",
   "mode": "manual",
   "t_s": 96.25,
+  "at_level_s": 36.25,
+  "remaining_at_level_s": 263.75,
   "level_db": 0,
   "held": false,
   "alarm": false,

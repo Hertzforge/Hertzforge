@@ -387,6 +387,15 @@ pub struct MimoMixedStatus {
     pub t_s: f64,
     /// The level in force, dB.
     pub level_db: f64,
+    /// Time at the level in force, seconds, holds excluded: from when the
+    /// schedule took the level (its ramp included); `None` until the parts
+    /// have come in and the schedule runs.
+    pub at_level_s: Option<f64>,
+    /// Time left at the level in force before the schedule moves on, or at
+    /// full level before the run completes, seconds, holds excluded; `None`
+    /// when the level waits for the operator (manual, under full level) or
+    /// full level has no time.
+    pub remaining_at_level_s: Option<f64>,
     /// Each control's floor error on clean lines, dB (rms level against the
     /// reference).
     pub floor_error_db: Vec<f64>,
@@ -1866,6 +1875,30 @@ impl MimoMixedService {
         }
     }
 
+    /// The time at the level in force and the time left on it, as `advance`
+    /// counts them (from the phase's start, holds excluded).
+    fn level_progress(&self) -> (Option<f64>, Option<f64>) {
+        let since = (self.t_s - self.phase_at_s).max(0.0);
+        let left = |total: f64| Some((total - since).max(0.0));
+        match self.phase {
+            MimoMixedPhase::Schedule => {
+                let left = if self.run_mode == hertzforge_random::RunMode::Auto {
+                    left(self.cfg.schedule.dwell_for(self.rung) + self.cfg.level_ramp_s)
+                } else {
+                    None
+                };
+                (Some(since), left)
+            }
+            MimoMixedPhase::FullLevel => (
+                Some(since),
+                self.cfg
+                    .full_level_duration_s
+                    .and_then(|d| left(d + self.cfg.level_ramp_s)),
+            ),
+            _ => (None, None),
+        }
+    }
+
     /// The level schedule and the phases.
     fn advance(&mut self) {
         let since = self.t_s - self.phase_at_s;
@@ -2024,11 +2057,14 @@ impl MimoMixedService {
                 }
             })
             .collect();
+        let (at_level_s, remaining_at_level_s) = self.level_progress();
         MimoMixedStatus {
             state: self.state,
             phase: self.phase,
             t_s: self.t_s,
             level_db: self.level_db,
+            at_level_s,
+            remaining_at_level_s,
             floor_error_db: self.floor_err_db.clone(),
             floor_equalized: self.equalized,
             loops: self.loops,

@@ -4722,7 +4722,7 @@ down; one still live twice its stop ramp later (at least ten seconds) is aborted
  "station":{"kind":"sim","class":"sim","devices":[]},
  "grid":{"fs_hz":16384,"n_pts":4096,"df_hz":4,"lines":2049,"band_hz":[20,1800],"actual":true},
  "clock":"shared","mode":"manual","levels_db":[-6,-3,0],"level_db":0,"t_s":96.25,
- "held":false,"alarm":false,"limiting":true,
+ "at_level_s":36.25,"remaining_at_level_s":263.75,"held":false,"alarm":false,"limiting":true,
  "parts":[{"id":"floor","kind":"floor","name":"floor","enabled":true,"on":true,"freq_hz":null,
            "held":false,"limiting":false,"scale":null,"folded":null,"amplitude":"rms","unit":"g",
            "controls":[{"channel":1,"target":1.336,"measured":1.298,"error_db":-0.25,
@@ -4752,6 +4752,11 @@ down; one still live twice its stop ramp later (at least ten seconds) is aborted
   (`grid.actual`).
 - `mode` is the schedule's (`auto`, `manual`); `levels_db` its rungs; `level_db` the level in force
   and `t_s` the station time since engage (null before).
+- `at_level_s` is the time at the present schedule rung or at full level, counted from the start
+  of its ramp with holds left out (null before the parts are in and once the run ramps down).
+  `remaining_at_level_s` is the time left there: the rung's dwell in `auto`, or the full-level
+  duration when one is set, each with its ramp; null in `manual` on a rung, at full level with
+  no duration, and whenever `at_level_s` is null.
 - `held` is the operator's hold. `alarm` is true while any control of any part is outside its
   alarm band. `limiting` is true while the shared ceiling holds a tone down or the drive
   ceilings or the change cap hold a band.
@@ -4858,8 +4863,9 @@ Event topics:
 - `mimo_mixed.data` (binary, to one subscribed connection): the live frame's numbers and `plots`,
   at most `rate_hz` times a second, and once at once on subscribe.
 
-**The live frame.** `{"run_id","source","class","state","phase","mode","t_s","level_db","held",
-"alarm","limiting","floor_error_db","floor_equalized","scale","parts","drives","loop","views"}`:
+**The live frame.** `{"run_id","source","class","state","phase","mode","t_s","at_level_s",
+"remaining_at_level_s","level_db","held","alarm","limiting","floor_error_db","floor_equalized",
+"scale","parts","drives","loop","views"}`:
 the state's members of those names, `class` the station's class, `loop` the floor loops run, and
 `views` **Control spectra** (per control `Control <index>` (`measured`, the composite with the
 tones in) with its `Reference`, `Alarm high`, `Alarm low`, `Abort high` and `Abort low` lines at

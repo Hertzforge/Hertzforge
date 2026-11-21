@@ -162,6 +162,50 @@ fn mimo_mixed_a_hold_stops_the_dwell_and_the_time_at_full_level() {
     assert_eq!(svc.end().map(|e| e.name), Some("completed"));
 }
 
+/// Requirement: the status gives the time at the level in force and the time
+/// left on it as the schedule counts them: none before the schedule runs; on
+/// a rung in automatic, the two summing to the dwell and the level ramp; in
+/// manual under full level, no time left (the level waits for the operator);
+/// at full level, the full-level time and the ramp; a hold stops both.
+#[test]
+fn mimo_mixed_the_status_gives_the_time_at_the_level_and_the_time_left() {
+    let mut svc = service_unhurried(S, one_tone(3.0));
+    engage(&mut svc);
+    let st = svc.status();
+    assert_eq!((st.at_level_s, st.remaining_at_level_s), (None, None));
+    assert!(
+        run_until(&mut svc, MimoMixedPhase::Schedule, 60.0),
+        "{:?}",
+        svc.end()
+    );
+    let t = svc.status().t_s + 1.0;
+    assert!(run_to(&mut svc, t), "{:?}", svc.end());
+    let st = svc.status();
+    let (at, left) = (st.at_level_s.expect("at"), st.remaining_at_level_s.expect("left"));
+    assert!((0.9..1.6).contains(&at), "{at}");
+    // The 2 s dwell and the 0.5 s level ramp.
+    assert!((at + left - 2.5).abs() < 1e-9, "{at} + {left}");
+    svc.hold().expect("hold");
+    let t = svc.status().t_s + 3.0;
+    assert!(run_to(&mut svc, t), "{:?}", svc.end());
+    let held = svc.status().at_level_s.expect("at");
+    assert!((held - at).abs() < 0.3, "the clock ran while held: {at} then {held}");
+    svc.set_run_mode(RunMode::Manual).expect("manual");
+    let st = svc.status();
+    assert!(st.at_level_s.is_some() && st.remaining_at_level_s.is_none(), "{st:?}");
+    svc.resume().expect("resume");
+    svc.set_level_db(0.0).expect("level");
+    let t = svc.status().t_s + 1.0;
+    assert!(run_to(&mut svc, t), "{:?}", svc.end());
+    assert_eq!(svc.phase(), MimoMixedPhase::FullLevel);
+    let st = svc.status();
+    let (at, left) = (st.at_level_s.expect("at"), st.remaining_at_level_s.expect("left"));
+    // The 3 s at full level and the 0.5 s level ramp.
+    assert!((at + left - 3.5).abs() < 1e-9, "{at} + {left}");
+    svc.abort("done").expect("abort");
+    while svc.run_chunk().expect("chunk") {}
+}
+
 /// Requirement: a failed coherence gate holds the run: proceed is refused,
 /// the operator's override in words takes it to the review, and an
 /// override with nothing to override is refused `override_not_needed`.

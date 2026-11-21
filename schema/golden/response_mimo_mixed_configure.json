@@ -33,6 +33,8 @@
    ],
    "level_db": null,
    "t_s": null,
+   "at_level_s": null,
+   "remaining_at_level_s": null,
    "held": false,
    "alarm": false,
    "limiting": false,
