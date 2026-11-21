@@ -1,16 +1,25 @@
 //! The time windows of an impact block: the force window on the reference and the
 //! exponential window on every channel.
 //!
-//! Definitions (to be confirmed against the cited source by the lead):
+//! * **Force window.** Defined from the trigger sample, in samples. With `pre` the
+//!   block's trigger sample (the pre-trigger length), `width` the pulse allowance after
+//!   the trigger and `fall` the fall's length:
 //!
-//! * **Force window.** One over the pulse, then a half-cosine fall to zero, zero after.
-//!   Here it is one from the block's first sample through `width` samples, falls over
-//!   `taper` samples as `0.5 (1 + cos(pi k / taper))`, and is zero after.
-//! * **Exponential window.** `w(t) = exp(-t / tau)`, with `t` measured from the start of
-//!   the block, and end value `w(T) = exp(-T / tau)`, `T` the block's length
-//!   (`N / fs`). It adds `1 / tau` to every mode's decay rate, so a damping ratio
-//!   measured at natural frequency `f_n` (Hz) exceeds the true one by
-//!   `1 / (2 pi f_n tau)` ([`ExpWindow::added_damping`]).
+//!   ```text
+//!   w[n] = 1                                         n < pre + width
+//!   w[n] = 0.5 (1 + cos(pi k / fall)), k = n - pre - width,   0 <= k < fall
+//!   w[n] = 0                                         n >= pre + width + fall
+//!   ```
+//!
+//!   `width` is the setup's fraction of the block, counted after the trigger; `fall`
+//!   is the setup's fraction of `width` (10 % unless set), at least one sample. A
+//!   window longer than the block is refused at configure, never clamped.
+//! * **Exponential window.** `w[n] = exp(-(n / fs) / tau)` from the start of the block,
+//!   on every channel, force and responses alike, with `tau` set by the end value
+//!   `w(T) = exp(-T / tau)`, `T = N / fs`. It adds `1 / tau` to every mode's decay
+//!   rate, so a damping ratio measured at natural frequency `f_n` (Hz) exceeds the true
+//!   one by `1 / (2 pi f_n tau)` ([`ExpWindow::added_damping`]). `tau` and `1 / tau` are
+//!   stored with every FRF.
 
 use crate::setup::{ExpWindowSet, ForceWindowSet};
 use serde_json::{json, Value};
@@ -18,32 +27,59 @@ use serde_json::{json, Value};
 /// The force window of a block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForceWindow {
-    /// Samples at one.
+    /// The trigger sample: the pre-trigger length.
+    pub pre: usize,
+    /// Samples at one after the trigger.
     pub width: usize,
     /// Samples of the half-cosine fall.
-    pub taper: usize,
+    pub fall: usize,
     pub block: usize,
 }
 
+/// The force window's `width` and `fall` in samples for a block of `block`, or why it
+/// cannot be made: `None` when the width is not finite or not above zero.
+pub fn force_window_samples(set: &ForceWindowSet, block: usize) -> Option<(usize, usize)> {
+    if !(set.width_pct.is_finite() && set.width_pct > 0.0) {
+        return None;
+    }
+    let width = ((set.width_pct / 100.0) * block as f64).round() as usize;
+    if width == 0 {
+        return None;
+    }
+    let fall = if set.taper_pct.is_finite() {
+        ((set.taper_pct / 100.0) * width as f64).round().max(1.0) as usize
+    } else {
+        1
+    };
+    Some((width, fall))
+}
+
 impl ForceWindow {
-    pub fn new(set: &ForceWindowSet, block: usize) -> ForceWindow {
-        let width = ((set.width_pct / 100.0) * block as f64).round().max(1.0) as usize;
-        let width = width.min(block);
-        let taper = ((set.taper_pct / 100.0) * width as f64).round() as usize;
+    /// The window of a block whose trigger is at sample `pre`. The setup's refusals
+    /// have already refused a window that does not fit ([`force_window_samples`]).
+    pub fn new(set: &ForceWindowSet, block: usize, pre: usize) -> ForceWindow {
+        let (width, fall) = force_window_samples(set, block).unwrap_or((block, 1));
         ForceWindow {
+            pre,
             width,
-            taper: taper.min(block - width),
+            fall,
             block,
         }
     }
 
+    /// The first sample after the window's flat part: `pre + width`.
+    pub fn flat_end(&self) -> usize {
+        self.pre + self.width
+    }
+
     /// The window's value at sample `n`.
     pub fn at(&self, n: usize) -> f64 {
-        if n < self.width {
+        let flat = self.flat_end();
+        if n < flat {
             1.0
-        } else if n < self.width + self.taper {
-            let k = (n - self.width) as f64;
-            0.5 * (1.0 + (std::f64::consts::PI * k / self.taper as f64).cos())
+        } else if n < flat + self.fall {
+            let k = (n - flat) as f64;
+            0.5 * (1.0 + (std::f64::consts::PI * k / self.fall as f64).cos())
         } else {
             0.0
         }
@@ -107,7 +143,7 @@ pub struct Windows {
 
 impl Windows {
     /// The data window of a reference row: the force window times the exponential
-    /// one, each when on.
+    /// one, each when on (the exponential window is on every channel alike).
     pub fn reference(&self, block: usize) -> Vec<f64> {
         (0..block)
             .map(|n| {
@@ -138,9 +174,10 @@ impl Windows {
     pub fn to_json(&self) -> Value {
         json!({
             "analysis": self.analysis,
-            "force": self.force.as_ref().map(|f| json!({"width_frames": f.width, "taper_frames": f.taper})),
+            "force": self.force.as_ref().map(|f| json!({"pre_frames": f.pre, "width_frames": f.width, "fall_frames": f.fall})),
             "exponential": self.exp.as_ref().map(|e| json!({
                 "tau_s": e.tau_s,
+                "inv_tau_per_s": 1.0 / e.tau_s,
                 "end": e.end,
                 "added_damping": "1/(2*pi*f_n*tau_s)",
             })),
@@ -152,27 +189,49 @@ impl Windows {
 mod tests {
     use super::*;
 
+    fn set(width_pct: f64, taper_pct: f64) -> ForceWindowSet {
+        ForceWindowSet {
+            on: true,
+            width_pct,
+            taper_pct,
+        }
+    }
+
     #[test]
-    fn modal_test_force_window_is_one_then_a_half_cosine_then_zero() {
-        let w = ForceWindow::new(
-            &ForceWindowSet {
-                on: true,
-                width_pct: 10.0,
-                taper_pct: 50.0,
-            },
-            1000,
-        );
-        assert_eq!((w.width, w.taper), (100, 50));
+    fn modal_test_force_window_is_one_to_the_trigger_plus_width_then_a_half_cosine() {
+        // block 1000, trigger at 50, width 10 % (100), fall 50 % of it (50).
+        let w = ForceWindow::new(&set(10.0, 50.0), 1000, 50);
+        assert_eq!((w.pre, w.width, w.fall), (50, 100, 50));
         assert_eq!(w.at(0), 1.0);
-        assert_eq!(w.at(99), 1.0);
-        assert_eq!(w.at(100), 1.0);
-        assert!((w.at(125) - 0.5).abs() < 1e-12);
-        assert!(w.at(149) < 0.01 && w.at(149) > 0.0);
-        assert_eq!(w.at(150), 0.0);
+        assert_eq!(w.at(149), 1.0);
+        // The fall begins at pre + width with 1, k = n - pre - width.
+        assert_eq!(w.at(150), 1.0);
+        assert!((w.at(175) - 0.5).abs() < 1e-12);
+        let k = 49.0;
+        assert!((w.at(199) - 0.5 * (1.0 + (std::f64::consts::PI * k / 50.0).cos())).abs() < 1e-15);
+        assert!(w.at(199) > 0.0 && w.at(199) < 0.01);
+        assert_eq!(w.at(200), 0.0);
         assert_eq!(w.at(999), 0.0);
-        // Falling only.
         let v = w.values();
+        assert_eq!(v.len(), 1000);
         assert!(v.windows(2).all(|p| p[1] <= p[0]));
+    }
+
+    #[test]
+    fn modal_test_force_window_fall_defaults_to_a_tenth_and_is_at_least_one_sample() {
+        assert_eq!(
+            force_window_samples(&set(10.0, 10.0), 1024),
+            Some((102, 10))
+        );
+        // A fall that rounds to nothing is one sample.
+        assert_eq!(force_window_samples(&set(0.4, 10.0), 1024), Some((4, 1)));
+        let w = ForceWindow::new(&set(0.4, 10.0), 1024, 10);
+        assert_eq!((w.at(13), w.at(14), w.at(15)), (1.0, 1.0, 0.0));
+        // No width: refused, not clamped.
+        assert_eq!(force_window_samples(&set(0.0, 10.0), 1024), None);
+        assert_eq!(force_window_samples(&set(-5.0, 10.0), 1024), None);
+        assert_eq!(force_window_samples(&set(f64::NAN, 10.0), 1024), None);
+        assert_eq!(force_window_samples(&set(0.01, 10.0), 1024), None);
     }
 
     #[test]
@@ -200,5 +259,17 @@ mod tests {
         let lhs = (-zeta * w * t).exp() * e.at((t * fs) as usize);
         let rhs = (-(zeta + e.added_damping(fn_hz)) * w * t).exp();
         assert!((lhs - rhs).abs() < 1e-12);
+        // w[n] = exp(-(n / rate) / tau), sample by sample.
+        for n in [0usize, 1, 100, 1023] {
+            assert_eq!(e.at(n), (-(n as f64 / fs) / e.tau_s).exp());
+        }
+        let ws = Windows {
+            force: None,
+            exp: Some(e.clone()),
+            analysis: "uniform",
+        };
+        assert_eq!(ws.reference(1024), ws.response(1024));
+        let j = ws.to_json();
+        assert_eq!(j["exponential"]["inv_tau_per_s"], 1.0 / e.tau_s);
     }
 }

@@ -39,6 +39,18 @@ pub struct HitInput<'a> {
     pub double_hit_pct: f64,
     pub tip_warn_db: f64,
     pub target: Option<ForceTarget>,
+    /// The force window's flat end, `pre + width`, when the window is on.
+    pub force_window_end: Option<usize>,
+}
+
+/// A force window that cuts into the pulse: the pulse had not fallen below
+/// [`PULSE_END_FRACTION`] of its peak before the window's flat end.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowCut {
+    /// The first sample after the peak below the fraction, `None` if none in the block.
+    pub pulse_end_frame: Option<usize>,
+    /// `pre + width`.
+    pub window_end_frame: usize,
 }
 
 /// A double hit's numbers.
@@ -75,6 +87,8 @@ pub struct HitReport {
     /// Per response: `Some(true)` when it showed no response, `None` when not judged.
     pub no_response: Vec<Option<bool>>,
     pub target: Option<TargetCheck>,
+    /// A warning only: the force window cuts into the pulse.
+    pub window_cut: Option<WindowCut>,
     /// Every reason the automatic rule rejects the hit for, in order: `overload`,
     /// `double_hit`.
     pub reasons: Vec<&'static str>,
@@ -92,6 +106,9 @@ impl HitReport {
         }
         if self.no_response.contains(&Some(true)) {
             w.push("no_response");
+        }
+        if self.window_cut.is_some() {
+            w.push("force_window_cuts_pulse");
         }
         if let Some(t) = self.target.as_ref().filter(|t| t.verdict != "on_target") {
             w.push(if t.verdict == "high" {
@@ -114,6 +131,7 @@ impl HitReport {
             "tip_drop_db": self.tip_drop_db,
             "tip_warning": self.tip_warning,
             "no_response": self.no_response,
+            "force_window_cut": self.window_cut.as_ref().map(|c| json!({"pulse_end_frame": c.pulse_end_frame, "window_end_frame": c.window_end_frame})),
             "rejected": self.rejected(),
             "reasons": self.reasons,
             "warnings": self.warnings(),
@@ -134,7 +152,7 @@ pub fn double_hit(force: &[f64], fraction: f64) -> Option<DoubleHit> {
     if peak <= 0.0 {
         return None;
     }
-    let end = (p..force.len()).find(|&n| force[n].abs() < PULSE_END_FRACTION * peak)?;
+    let end = pulse_end(force, p, peak)?;
     let (q, later) = force[end..]
         .iter()
         .enumerate()
@@ -229,6 +247,13 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
         })
         .collect();
     let target = h.target.as_ref().map(|t| target_check(peak, t));
+    let window_cut = h.force_window_end.and_then(|end| {
+        let pulse_end = pulse_end(h.force, peak_frame, peak);
+        (peak > 0.0 && pulse_end.is_none_or(|e| e >= end)).then_some(WindowCut {
+            pulse_end_frame: pulse_end,
+            window_end_frame: end,
+        })
+    });
     let mut reasons = Vec::new();
     if !overloaded.is_empty() {
         reasons.push("overload");
@@ -245,8 +270,15 @@ pub fn check(h: &HitInput<'_>) -> HitReport {
         tip_warning: tip > h.tip_warn_db,
         no_response,
         target,
+        window_cut,
         reasons,
     }
+}
+
+/// The first sample after the peak at `p` where the force is below
+/// [`PULSE_END_FRACTION`] of `peak`.
+pub fn pulse_end(force: &[f64], p: usize, peak: f64) -> Option<usize> {
+    (p..force.len()).find(|&n| force[n].abs() < PULSE_END_FRACTION * peak)
 }
 
 #[cfg(test)]
@@ -277,7 +309,31 @@ mod tests {
             double_hit_pct: 5.0,
             tip_warn_db: 20.0,
             target,
+            force_window_end: None,
         }
+    }
+
+    #[test]
+    fn modal_test_a_force_window_cutting_the_pulse_is_a_warning_with_its_numbers() {
+        // A pulse of 10 samples from the trigger at 20: it falls below 5 % at 30.
+        let mut f = vec![0.0; 1024];
+        pulse(&mut f, 20, 10, 20.0);
+        let mut h = input(&f, &[], None);
+        h.force_window_end = Some(40);
+        let r = check(&h);
+        assert_eq!(r.window_cut, None);
+        // A window whose flat part ends at 25 cuts into it.
+        h.force_window_end = Some(25);
+        let r = check(&h);
+        let c = r.window_cut.clone().expect("warned");
+        assert_eq!(c.window_end_frame, 25);
+        let end = c.pulse_end_frame.unwrap();
+        assert!((28..=30).contains(&end), "{c:?}");
+        assert!(r.warnings().contains(&"force_window_cuts_pulse"));
+        assert_eq!(r.rejected(), None);
+        let j = r.to_json();
+        assert_eq!(j["force_window_cut"]["window_end_frame"], 25);
+        assert_eq!(j["force_window_cut"]["pulse_end_frame"], end);
     }
 
     #[test]

@@ -2598,6 +2598,7 @@ dependencies = [
  "hertzforge-mimo-sine-laws",
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
+ "hertzforge-modal-test",
  "hertzforge-module-abi",
  "hertzforge-playback",
  "hertzforge-random",

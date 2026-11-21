@@ -96,8 +96,9 @@ impl AcceptMode {
     }
 }
 
-/// The force window on the reference: one from the block's start over `width_pct` of
-/// the block, then a half-cosine fall over a further `taper_pct` of that width.
+/// The force window on the reference: one from the trigger sample over `width_pct` of
+/// the block, then a half-cosine fall over `taper_pct` of that width
+/// ([`crate::window`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ForceWindowSet {
     pub on: bool,
@@ -388,6 +389,11 @@ impl ModalSetup {
         }
     }
 
+    /// The block's trigger sample: the pre-trigger length, frames.
+    pub fn pretrigger_frames(&self) -> usize {
+        ((self.impact.pretrigger_pct / 100.0) * self.block as f64).round() as usize
+    }
+
     /// The line spacing, Hz.
     pub fn df_hz(&self) -> f64 {
         self.fs_hz / self.block as f64
@@ -564,33 +570,38 @@ impl ModalSetup {
         if i.force_window.on {
             pct_in(
                 r,
-                "impact.force_window.width_pct",
-                i.force_window.width_pct,
-                1.0,
-                100.0,
-                "The force window's width (percent of the block)",
-            );
-            pct_in(
-                r,
-                "impact.force_window.taper_pct",
+                "impact.force_window.fall_pct",
                 i.force_window.taper_pct,
                 0.0,
                 100.0,
                 "The force window's fall (percent of its width)",
             );
-            if i.force_window.width_pct * (1.0 + i.force_window.taper_pct / 100.0) > 100.0 + 1e-9 {
-                r.push(Refusal::field(
-                    "out_of_range",
-                    "impact.force_window",
-                    "The force window and its fall are longer than the block.",
-                ));
-            }
-            if i.force_window.width_pct <= i.pretrigger_pct {
-                r.push(Refusal::field(
+            match crate::window::force_window_samples(&i.force_window, self.block) {
+                None => r.push(Refusal::field(
                     "out_of_range",
                     "impact.force_window.width_pct",
-                    "The force window ends before the trigger: make it wider than the pre-trigger.",
-                ));
+                    format!(
+                        "The force window's width is {} percent of the block; it must be a \
+                         number above zero that is at least one sample.",
+                        i.force_window.width_pct
+                    ),
+                )),
+                Some((width, fall)) => {
+                    let pre = self.pretrigger_frames();
+                    if pre + width + fall > self.block {
+                        r.push(Refusal::field(
+                            "out_of_range",
+                            "impact.force_window",
+                            format!(
+                                "The force window runs past the block: the trigger at sample \
+                                 {pre}, {width} samples at one and a fall of {fall} end at \
+                                 {}, after the block's {} samples.",
+                                pre + width + fall,
+                                self.block
+                            ),
+                        ));
+                    }
+                }
             }
         }
         if i.exp_window.on {
@@ -805,6 +816,28 @@ mod tests {
             .refusals()
             .is_empty());
         assert!(shaker(SourceKind::BurstRandom, 2).refusals().is_empty());
+    }
+
+    #[test]
+    fn modal_test_force_window_past_the_block_or_without_width_is_refused() {
+        let mut s = ModalSetup::new(Mode::Impact, 1024.0, 1024);
+        // Trigger at 51, width 923, fall 50: ends at exactly 1024, passes.
+        s.impact.pretrigger_pct = 5.0;
+        s.impact.force_window.width_pct = 923.0 / 10.24;
+        s.impact.force_window.taper_pct = 100.0 * 50.0 / 923.0;
+        assert!(s.refusals().is_empty(), "{:?}", s.refusals());
+        // One sample more is refused, not clamped.
+        s.impact.force_window.width_pct = 924.0 / 10.24;
+        let r = s.refusals();
+        assert_eq!(reasons(&s), vec!["out_of_range"]);
+        assert_eq!(r[0].field, "impact.force_window");
+        for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            s.impact.force_window.width_pct = w;
+            assert_eq!(reasons(&s), vec!["out_of_range"], "{w}");
+        }
+        // Off, nothing is judged.
+        s.impact.force_window.on = false;
+        assert!(s.refusals().is_empty());
     }
 
     #[test]

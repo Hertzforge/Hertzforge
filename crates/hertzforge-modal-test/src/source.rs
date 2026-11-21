@@ -5,7 +5,7 @@
 //! level's amplitude. Frames are made on the feeder thread ([`Feeder`]), never on the
 //! loop thread.
 //!
-//! Definitions (to be confirmed against the cited source by the lead):
+//! Definitions:
 //!
 //! * **Burst random.** Random for the burst fraction of the frame, with tapered ends,
 //!   and zero for the rest. Here the random part is a band-limited Gaussian frame,

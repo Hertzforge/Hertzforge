@@ -84,6 +84,7 @@ impl Taken {
         if let (Some(r), Some(o)) = (&self.report, v.as_object_mut()) {
             o.insert("peak".into(), json!(r.peak));
             o.insert("tip_warning".into(), json!(r.tip_warning));
+            o.insert("force_window_cut".into(), json!(r.window_cut.is_some()));
             if let Some(t) = &r.target {
                 o.insert("target_verdict".into(), json!(t.verdict));
                 o.insert("target_diff_pct".into(), json!(t.diff_pct));
@@ -189,8 +190,9 @@ impl Session {
     pub fn new(setup: ModalSetup, plan: Plan) -> Session {
         let n = setup.block;
         let windows = Windows {
-            force: (setup.mode == Mode::Impact && setup.impact.force_window.on)
-                .then(|| ForceWindow::new(&setup.impact.force_window, n)),
+            force: (setup.mode == Mode::Impact && setup.impact.force_window.on).then(|| {
+                ForceWindow::new(&setup.impact.force_window, n, setup.pretrigger_frames())
+            }),
             exp: (setup.mode == Mode::Impact && setup.impact.exp_window.on)
                 .then(|| ExpWindow::new(&setup.impact.exp_window, n, setup.fs_hz)),
             analysis: if setup.mode == Mode::Shaker && setup.shaker.source == SourceKind::Random {
@@ -264,7 +266,7 @@ impl Session {
     }
 
     fn pretrigger(&self) -> usize {
-        ((self.setup.impact.pretrigger_pct / 100.0) * self.setup.block as f64).round() as usize
+        self.setup.pretrigger_frames()
     }
 
     fn set_state(&mut self, s: State, ev: &mut Vec<Event>) {
@@ -539,6 +541,7 @@ impl Session {
             double_hit_pct: self.setup.impact.double_hit_pct,
             tip_warn_db: self.setup.impact.tip_warn_db,
             target: self.setup.impact.target,
+            force_window_end: self.windows.force.as_ref().map(ForceWindow::flat_end),
         });
         let spectra = self.spectra(&b);
         let p = self.point;

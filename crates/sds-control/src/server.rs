@@ -59,6 +59,8 @@ mod sine_methods;
 
 #[path = "server_explorer.rs"]
 mod explorer_methods;
+#[path = "server_modal_test.rs"]
+mod modal_test_methods;
 #[path = "server_playback.rs"]
 mod playback_methods;
 #[path = "server_recorder.rs"]
@@ -87,7 +89,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 65] = [
+const DRIVE_METHODS: [&str; 68] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -138,6 +140,9 @@ const DRIVE_METHODS: [&str; 65] = [
     "explorer.steer",
     "explorer.sweep",
     "playback.start",
+    "modal_test.start",
+    "modal_test.arm",
+    "modal_test.drive_start",
     "recorder.start",
     "recorder.arm",
     "recorder.record",
@@ -196,7 +201,12 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     recorder.recordings, recorder.marks, recorder.reset, recorder.clear, recorder.state, \
     recorder.log, recorder.subscribe, playback.configure, playback.config, \
     playback.start, playback.stop, playback.abort, playback.reset, playback.clear, \
-    playback.state, playback.log, laws.list, laws.import, laws.check, sim.profiles, \
+    playback.state, playback.log, modal_test.configure, modal_test.config, \
+    modal_test.start, modal_test.select, modal_test.next, modal_test.previous, \
+    modal_test.arm, modal_test.disarm, modal_test.accept, modal_test.reject, \
+    modal_test.undo, modal_test.target_from_hit, modal_test.drive_start, \
+    modal_test.drive_stop, modal_test.sim_hit, modal_test.end, modal_test.abort, \
+    modal_test.reset, modal_test.clear, modal_test.state, modal_test.log, laws.list, laws.import, laws.check, sim.profiles, \
     sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -489,6 +499,11 @@ struct Inner {
     playback_runs: u64,
     playback_state_key: String,
     playback_log_sent: (String, u64),
+    /// The Modal Test's configuration and its run, and what of it has been sent.
+    modal_test: Option<Arc<crate::modal_test::run::ModalRun>>,
+    modal_test_runs: u64,
+    modal_test_state_key: String,
+    modal_test_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -560,6 +575,10 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
+    fn modal_test_live(&self) -> bool {
+        self.modal_test.as_ref().is_some_and(|s| s.view().is_live())
+    }
+
     /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
     /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
@@ -575,6 +594,7 @@ impl Inner {
             || self.explorer_live()
             || self.recorder_live()
             || self.playback_live()
+            || self.modal_test_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -738,6 +758,17 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.modal_test {
+            let v = s.view();
+            if v.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!("Modal Test {} is {}; end it first.", s.id, v.state),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         if let Some(s) = &self.recorder {
             let v = s.view();
             if v.state.is_live() {
@@ -851,6 +882,14 @@ pub struct Service {
             >,
         >,
     >,
+    /// Modal Test runs' publishes, in order.
+    modal_test_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::modal_test::run::ModalView>>,
+    modal_test_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::modal_test::run::ModalView>>,
+        >,
+    >,
     /// Playback runs' publishes, in order.
     playback_notify:
         mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::playback::run::PlaybackView>>,
@@ -950,6 +989,7 @@ impl Service {
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
         let (playback_notify, playback_notices) = mpsc::unbounded_channel();
+        let (modal_test_notify, modal_test_notices) = mpsc::unbounded_channel();
         let stations = Stations::new(opts.scanner.clone());
         let table = Self::starting_table(&opts, &stations);
         Arc::new(Service {
@@ -1011,6 +1051,10 @@ impl Service {
                 playback_runs: 0,
                 playback_state_key: String::new(),
                 playback_log_sent: (String::new(), 0),
+                modal_test: None,
+                modal_test_runs: 0,
+                modal_test_state_key: String::new(),
+                modal_test_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -1054,6 +1098,8 @@ impl Service {
             recorder_signal: std::sync::Mutex::new(None),
             playback_notify,
             playback_notices: std::sync::Mutex::new(Some(playback_notices)),
+            modal_test_notify,
+            modal_test_notices: std::sync::Mutex::new(Some(modal_test_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -1296,6 +1342,19 @@ impl Service {
                 }
             });
         }
+        let modal_test_notices = self
+            .modal_test_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = modal_test_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.modal_test_changed(&run_id, &view).await;
+                }
+            });
+        }
         let recorder_notices = self.recorder_notices.lock().ok().and_then(|mut n| n.take());
         if let Some(mut notices) = recorder_notices {
             let svc = self.clone();
@@ -1381,6 +1440,7 @@ impl Service {
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
             let playback = inner.playback.clone().filter(|s| s.view().state.is_live());
+            let modal = inner.modal_test.clone().filter(|s| s.view().is_live());
             let random = inner.random.clone();
             drop(inner);
             if let Some(s) = msine {
@@ -1394,6 +1454,9 @@ impl Service {
             }
             if let Some(s) = playback {
                 playback_methods::stop_playback(&s, "the service (nobody held control)".into());
+            }
+            if let Some(s) = modal {
+                modal_test_methods::end_modal_test(&s, "the service (nobody held control)".into());
             }
             if let Some(s) = recorder {
                 recorder_methods::stop_recorder(
@@ -1525,6 +1588,33 @@ impl Service {
                     if !aborted && asked.elapsed() > patience {
                         aborted = true;
                         playback_methods::abort_playback(&s, rrun::SHUTDOWN_BY.into());
+                    }
+                    if asked.elapsed() > patience + Duration::from_secs(5) {
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
+        let modal = self.inner.lock().await.modal_test.clone();
+        // A Modal Test takes its controlled end (in shaker mode the shared stop ramp).
+        // Should it still be live well after, it is aborted.
+        let modal_said = match modal.filter(|s| s.view().is_live()) {
+            None => None,
+            Some(s) => {
+                modal_test_methods::end_modal_test(&s, rrun::SHUTDOWN_BY.into());
+                let asked = Instant::now();
+                let patience = modal_test_methods::wait_for(&s);
+                let mut aborted = false;
+                while s.view().is_live() {
+                    if !aborted && asked.elapsed() > patience {
+                        aborted = true;
+                        modal_test_methods::abort_modal_test(&s, rrun::SHUTDOWN_BY.into());
                     }
                     if asked.elapsed() > patience + Duration::from_secs(5) {
                         break;
@@ -1784,7 +1874,8 @@ impl Service {
                 .or(twr_said)
                 .or(explorer_said)
                 .or(recorder_said)
-                .or(playback_said);
+                .or(playback_said)
+                .or(modal_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -2185,6 +2276,29 @@ impl Service {
             "playback.clear" => self.playback_clear(conn).await,
             "playback.state" => Ok(self.playback_state_now().await),
             "playback.log" => self.playback_log(params).await,
+            "modal_test.configure" => self.modal_test_configure(conn, params).await,
+            "modal_test.config" => Ok(self.modal_test_config().await),
+            "modal_test.start" => self.modal_test_start(conn).await,
+            "modal_test.select" => self.modal_test_call(conn, "select", params).await,
+            "modal_test.next" => self.modal_test_call(conn, "next", params).await,
+            "modal_test.previous" => self.modal_test_call(conn, "previous", params).await,
+            "modal_test.arm" => self.modal_test_call(conn, "arm", params).await,
+            "modal_test.disarm" => self.modal_test_call(conn, "disarm", params).await,
+            "modal_test.accept" => self.modal_test_call(conn, "accept", params).await,
+            "modal_test.reject" => self.modal_test_call(conn, "reject", params).await,
+            "modal_test.undo" => self.modal_test_call(conn, "undo", params).await,
+            "modal_test.target_from_hit" => {
+                self.modal_test_call(conn, "target_from_hit", params).await
+            }
+            "modal_test.drive_start" => self.modal_test_call(conn, "drive_start", params).await,
+            "modal_test.drive_stop" => self.modal_test_call(conn, "drive_stop", params).await,
+            "modal_test.sim_hit" => self.modal_test_call(conn, "sim_hit", params).await,
+            "modal_test.end" => self.modal_test_end(conn, false).await,
+            "modal_test.abort" => self.modal_test_end(conn, true).await,
+            "modal_test.reset" => self.modal_test_reset(conn).await,
+            "modal_test.clear" => self.modal_test_clear(conn).await,
+            "modal_test.state" => Ok(self.modal_test_state_now().await),
+            "modal_test.log" => self.modal_test_log(params).await,
             "recorder.configure" => self.recorder_configure(conn, params).await,
             "recorder.config" => Ok(self.recorder_config().await),
             "recorder.start" => self.recorder_start(conn, params).await,
@@ -2792,7 +2906,7 @@ impl Service {
                 || inner.explorer_live()
                 || inner.recorder_live()
                 || inner.playback_live()
-                || inner.playback_live()
+                || inner.modal_test_live()
                 || inner.mimo_shock_live()
                 || inner.mimo_sine_live()
             {
@@ -3077,6 +3191,7 @@ impl Service {
             || inner.explorer_live()
             || inner.recorder_live()
             || inner.playback_live()
+            || inner.modal_test_live()
             || inner.mimo_shock_live()
             || inner.mimo_sine_live()
         {
