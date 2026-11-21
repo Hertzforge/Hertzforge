@@ -194,11 +194,22 @@ export type ModalTileStatus = 'pending' | 'accepted' | 'rejected' | 'undone';
 export type ModalRejectReason = 'overload' | 'double_hit' | 'operator';
 export type ModalTargetVerdict = 'high' | 'low' | 'on_target';
 
+/**
+ * The decay check: the response row (its table index) whose block ends loudest, that ratio of its
+ * last 5% to its loudest 5% (a fraction), and whether it is over the configured threshold.
+ */
+export interface ModalDecay {
+	row: number;
+	ratio: number;
+	warning: boolean;
+}
+
 /** The counts, kept by the service after every take, accept, reject and undo. */
 export interface ModalCounts {
 	/** `hits` in impact mode, `frames` in shaker mode, which counts frames in the same fields. */
 	unit: 'hits' | 'frames';
-	point: { index: number; accepted: number; rejected: number; asked: number };
+	/** `decay` is the largest decay check over the point's accepted hits or frames. */
+	point: { index: number; accepted: number; rejected: number; asked: number; decay?: ModalDecay | null };
 	points: { index: number; accepted: number; rejected: number; taken: number; measured: boolean }[];
 	totals: { accepted: number; taken: number; points_measured: number; points_planned: number };
 }
@@ -212,6 +223,8 @@ export interface ModalTile {
 	overload: boolean;
 	double_hit: boolean;
 	start_frame: number;
+	/** Null when not checked (a shaker source other than the bursts). */
+	decay?: ModalDecay | null;
 	/** Impact only. */
 	peak?: number;
 	tip_warning?: boolean;
@@ -235,6 +248,7 @@ export interface ModalHitReport {
 	/** Per response: true when it showed no response, null when not judged. */
 	no_response: (boolean | null)[];
 	force_window_cut: { pulse_end_frame: number; window_end_frame: number } | null;
+	decay?: ModalDecay | null;
 	/** The first reason the automatic rule rejects the hit for, or null. */
 	rejected: ModalRejectReason | null;
 	reasons: string[];

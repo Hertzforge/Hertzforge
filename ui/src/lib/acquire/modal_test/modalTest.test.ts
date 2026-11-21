@@ -134,6 +134,14 @@ describe('modal test counter, tiles and flags', () => {
 			'A response stayed inside its noise: check the sensor and its cable.'
 		]);
 	});
+
+	it('modal test report: a response not decayed names its row and how loud the block ends', () => {
+		const base = { peak: 18, double_hit: null, overloaded: [], tip_drop_db: 6, tip_warning: false, no_response: [false], force_window_cut: null };
+		const quiet = reportLines({ ...base, decay: { row: 3, ratio: 0.0004, warning: false } } as never, 'N');
+		expect(quiet).toHaveLength(2);
+		const loud = reportLines({ ...base, decay: { row: 3, ratio: 0.083, warning: true } } as never, 'N');
+		expect(loud[2]).toBe('Row 3 has not died away by the end of the block: it ends at 8.3% of its loudest. A longer block or an exponential window helps.');
+	});
 });
 
 describe('modal test verbs', () => {

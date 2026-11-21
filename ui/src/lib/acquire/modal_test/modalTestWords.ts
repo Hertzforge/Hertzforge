@@ -237,7 +237,8 @@ export const HIT_WARNING_WORDS: Record<string, string> = {
 	force_high: 'The force is above the target.',
 	force_low: 'The force is below the target.',
 	tip_roll_off: 'The force spectrum falls more than the tip limit across the band: a harder tip reaches higher.',
-	no_response: 'A response stayed inside its noise: check the sensor and its cable.'
+	no_response: 'A response stayed inside its noise: check the sensor and its cable.',
+	response_not_decayed: 'A response has not died away by the end of the block: a longer block or an exponential window helps.'
 };
 
 /** A hit report's checks as lines of words with the service's numbers. */
@@ -249,5 +250,6 @@ export function reportLines(r: ModalHitReport | null | undefined, unit: string):
 	out.push(r.tip_drop_db === null ? 'The force spectrum is zero at the band top.' : `Force spectrum falls ${num(r.tip_drop_db)} dB across the band${r.tip_warning ? ', more than the tip limit' : ''}.`);
 	if (r.no_response.some((x) => x === true)) out.push(HIT_WARNING_WORDS.no_response);
 	if (r.force_window_cut) out.push(HIT_WARNING_WORDS.force_window_cuts_pulse);
+	if (r.decay?.warning) out.push(`Row ${r.decay.row} has not died away by the end of the block: it ends at ${num(r.decay.ratio * 100)}% of its loudest. A longer block or an exponential window helps.`);
 	return out;
 }
