@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedRun, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
+import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedRun, markedShapes, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
 
 describe('nearestNode', () => {
 	const screen = [0, 0, 10, 0, 100, 100];
@@ -112,5 +112,20 @@ describe('node numbers', () => {
 		const screen = [10, 10, 20, 20, 30, 30];
 		expect(numbered(screen, [true, true, true], 3, 100, 100, 2)).toBeNull();
 		expect(numbered(screen, [true, true, true], 3, 100, 100, 3)).toEqual([0, 1, 2]);
+	});
+});
+
+describe('markedShapes', () => {
+	const sets = [
+		{ link: 'nodes:G', ids: [1, 2], rows: [[0], [1]] },
+		{ link: 'elements:G', ids: [7, 8, 9], faces: [[0, 1, 2], [2, 3, 4], [5, 6, 7]], edges: [[0, 1], [2, 3], []] }
+	];
+	it("fills and outlines the marked elements of each set, by its own link", () => {
+		const marks: Record<string, number[]> = { 'elements:G': [9, 7], 'nodes:G': [1] };
+		expect(markedShapes(sets, (link) => marks[link] ?? [])).toEqual({ faces: [0, 1, 2, 5, 6, 7], edges: [0, 1] });
+	});
+	it('draws nothing when nothing of its link is marked, or for a set with no faces or edges', () => {
+		expect(markedShapes(sets, (link) => (link === 'nodes:G' ? [1, 2] : []))).toEqual({ faces: [], edges: [] });
+		expect(markedShapes(sets, () => [42])).toEqual({ faces: [], edges: [] });
 	});
 });

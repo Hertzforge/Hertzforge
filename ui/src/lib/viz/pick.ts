@@ -181,3 +181,28 @@ export function numbered(screen: ArrayLike<number>, visible: ArrayLike<boolean>,
 	}
 	return rows;
 }
+
+/** A `mark_sets` entry, as far as its faces and edges go. */
+interface ShapedSet {
+	link: string;
+	ids: number[];
+	faces?: number[][];
+	edges?: number[][];
+}
+
+/** The triangles and edges, as flat rows of the view's nodes, of every id marked under its set's link (`marked`): the elements whose rows are selected in a table or the tree. */
+export function markedShapes(sets: readonly ShapedSet[], marked: (link: string) => readonly number[]): { faces: number[]; edges: number[] } {
+	const faces: number[] = [];
+	const edges: number[] = [];
+	for (const set of sets) {
+		if (!set.faces && !set.edges) continue;
+		const wanted = new Set(marked(set.link));
+		if (!wanted.size) continue;
+		set.ids.forEach((id, k) => {
+			if (!wanted.has(id)) return;
+			for (const row of set.faces?.[k] ?? []) faces.push(row);
+			for (const row of set.edges?.[k] ?? []) edges.push(row);
+		});
+	}
+	return { faces, edges };
+}

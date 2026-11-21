@@ -73,12 +73,15 @@ def test_the_node_table_and_its_view_mark_nodes_together(project, validate):
     assert table['marks'] == {'link': 'nodes:Geometry', 'column': 0}
     ids = [int(n) for n in project['Geometry'].node_id]
     assert list(view['node_ids']) == ids == [int(row[0]) for row in table['rows']]
-    # the Nodes part picked in the tree marks with them; the other tables mark nothing
+    # the Nodes part picked in the tree marks with them; the element table marks elements,
+    # which its view draws by `mark_sets`, not by a click on a node; the others mark nothing
     (drawn,) = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
     assert drawn['marks'] == view['marks'] and list(drawn['node_ids']) == ids
     for kind in ('coordinate_systems', 'elements', 'groups'):
         view, table = run(project, 'project.view_entities', kind=kind)
-        assert 'marks' not in view and 'marks' not in table
+        assert 'marks' not in view
+        assert table.get('marks') == ({'link': 'elements:Geometry', 'column': 0}
+                                      if kind == 'elements' else None)
         assert list(view['node_ids']) == ids, 'numbered whatever is edited'
 
 
@@ -727,3 +730,50 @@ def test_a_familys_table_stays_the_familys_through_its_edits(project, validate, 
     assert remove['params'] == edit['params']
     left = only_family(run(project, remove['op'], **remove['params'], ids=added['rows'][-1][0]))
     assert len(left['rows']) == count - 1
+
+
+def test_an_element_tables_rows_mark_their_elements_in_the_view(project, validate):
+    """A row selected in an element table highlights its element in the view beside it:
+    the table marks by element id, and the view holds each row's element, its nodes,
+    its two triangles (a quad) and its four sides, by node row."""
+    geometry = project['Geometry']
+    run(project, 'project.add_element', family='beams', nodes='101 102')
+    drawn, quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    assert quads['marks'] == {'link': 'elements:Geometry', 'column': 0}
+    (marks,) = drawn['mark_sets']
+    assert marks['link'] == quads['marks']['link']
+    assert marks['ids'] == [int(row[0]) for row in quads['rows']], 'a set entry per row, in order'
+    first = int(np.flatnonzero(np.asarray(geometry.elem_id) == marks['ids'][0])[0])
+    index = {int(n): r for r, n in enumerate(geometry.node_id)}
+    corners = [index[int(n)] for n in geometry.elem_conn[first]]
+    assert marks['rows'][0] == corners
+    a, b, c, d = corners
+    assert marks['faces'][0] == [a, b, c, a, c, d]
+    assert sorted(map(sorted, np.reshape(marks['edges'][0], (-1, 2)).tolist())) == sorted(
+        sorted(pair) for pair in ([a, b], [b, c], [c, d], [d, a]))
+    beam_view, _beams = _edited(project, {'kind': 'family', 'id': 'beams'}, validate)
+    (beam,) = beam_view['mark_sets']
+    assert beam['faces'] == [[]] and beam['edges'] == [[index[101], index[102]]]
+    assert 'note' not in drawn
+
+
+def test_a_solid_element_is_highlighted_by_each_side_once():
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.service.mesh import element_highlights
+
+    cube = np.array([[x, y, z] for z in (0, 1) for y in (0, 1) for x in (0, 1)], dtype=float)
+    geometry = Geometry(node_id=np.arange(1, 9), node_xyz=cube, elem_id=[1], elem_type=[115],
+                        elem_conn=[np.array([1, 2, 4, 3, 5, 6, 8, 7])], elem_group=[1],
+                        group_id=[1], group_name=['brick'])
+    (faces,), (edges,) = element_highlights(geometry, [0])
+    assert len(faces) == 6 * 2 * 3, 'six faces, two triangles each'
+    assert len(edges) == 12 * 2, 'a hexahedron has twelve sides'
+
+
+def test_a_long_element_table_says_which_rows_the_view_highlights(project, validate, monkeypatch):
+    from hertzforge.service import ops_geometry
+
+    monkeypatch.setattr(ops_geometry, 'MARKED_ELEMENTS', 10)
+    drawn, quads = _edited(project, {'kind': 'family', 'id': 'quads'}, validate)
+    assert len(drawn['mark_sets'][0]['ids']) == 10 < len(quads['rows'])
+    assert drawn['note'] == 'Rows after the first 10 are not highlighted in the view.'

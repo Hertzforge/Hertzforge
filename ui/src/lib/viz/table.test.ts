@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DRAWN_FROM, drawnRows, flagOn, scrollFor, tableHtml, TALLEST } from './table';
-import { blockText, fillTargets, numeric, openedAtFirst, parseTsv, pasteTargets, spanned, tableText, toggled } from './table';
+import { blockText, fillTargets, numeric, openedAtFirst, parseTsv, pasteTargets, removedIds, spanned, tableText, toggled } from './table';
 
 describe('table', () => {
 	it('reads numbers as numbers and words as words', () => {
@@ -122,5 +122,19 @@ describe('rows that open onto a table of their own', () => {
 		expect([...more].sort()).toEqual([0, 2]);
 		expect([...toggled(more, 0)]).toEqual([2]);
 		expect([...first]).toEqual([0]);
+	});
+});
+
+describe('removedIds', () => {
+	const known = [['7', 'quad4'], ['9', 'quad4'], ['12', 'quad4'], ['15', 'quad4']];
+	it('takes the rows marked here, apart or together, when they are marked by the id column', () => {
+		expect(removedIds(known, 0, spanned({ row: 0, col: 0 }, { row: 0, col: 1 }), [9, 15], 0)).toEqual(['9', '15']);
+	});
+	it("takes the block's rows when nothing is marked here, or the marks are by another column", () => {
+		const block = spanned({ row: 1, col: 1 }, { row: 2, col: 0 });
+		expect(removedIds(known, 0, block, null, 0)).toEqual(['9', '12']);
+		expect(removedIds(known, 0, block, [], 0)).toEqual(['9', '12']);
+		expect(removedIds(known, 0, block, [7], 1)).toEqual(['9', '12']);
+		expect(removedIds(known, 0, null, null, 0)).toEqual([]);
 	});
 });

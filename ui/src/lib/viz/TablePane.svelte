@@ -13,7 +13,9 @@
 	 * cell, a drag or Shift a block, and the arrows move. Typing, Enter or a double-click opens the
 	 * cell; Enter commits and moves down, Tab across, Escape cancels. Typed with a block selected,
 	 * the value goes to every cell of it (Batch Edit). Delete clears the block, or, in a table whose rows
- * are the entities themselves (a geometry's nodes or elements), removes its rows. Cmd or Ctrl+C copies
+	 * are the entities themselves (a geometry's nodes or elements), removes its rows. In a table with
+	 * `marks`, Cmd (Ctrl)-click adds a row to the rows marked or takes it from them, and Delete then
+	 * removes the rows marked. Cmd or Ctrl+C copies
 	 * it, and tab-separated text pasted sets the cells it covers. The square at the selection's
 	 * corner is the fill handle: dragged, it repeats the block down, up or across; double-clicked,
 	 * down to the last row. Each value goes through the table's own operation, so one it refuses
@@ -23,7 +25,8 @@
 	import type { TableEdit, TableView } from '$lib/protocol/types';
 	import Self from './TablePane.svelte';
 	import { mark, marked, markedRow } from './marks.svelte';
-	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, spanned, tableHtml, tableText, toggled, type Block } from './table';
+	import { markedBy } from './pick';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, removedIds, spanned, tableHtml, tableText, toggled, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -211,14 +214,9 @@
 		grid?.focus();
 	}
 
-	/** Delete in a table of entities: the block's rows go, and the selection with them. */
-	async function removeRows(b: Block) {
-		const column = view.edit?.remove?.column ?? 0;
-		const ids: string[] = [];
-		for (let r = b.r0; r <= b.r1; r++) {
-			const id = known[r]?.[column];
-			if (id) ids.push(id);
-		}
+	/** Delete in a table of entities: the block's rows go, or the rows marked here with Cmd (Ctrl), and the selection with them. */
+	async function removeRows(b: Block | null) {
+		const ids = removedIds(known, view.edit?.remove?.column ?? 0, b, sent, view.marks?.column);
 		if (!onremove || !ids.length || saving) return;
 		saving = true;
 		refusal = await onremove(ids);
@@ -226,6 +224,7 @@
 		if (!refusal) {
 			anchor = null;
 			focus = null;
+			sent = null;
 		}
 	}
 
@@ -289,7 +288,7 @@
 			const row = Math.max(0, Math.min(count - 1, focus.row + step[0]));
 			const col = Math.max(0, Math.min(view.columns.length - 1, focus.col + step[1]));
 			select(row, col, e.shiftKey);
-		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block && view.edit?.remove && onremove) {
+		} else if ((e.key === 'Delete' || e.key === 'Backspace') && (block || sent?.length) && view.edit?.remove && onremove) {
 			e.preventDefault();
 			void removeRows(block);
 		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block) {
@@ -326,8 +325,26 @@
 
 	function down(e: PointerEvent, row: number, col: number) {
 		if (e.button !== 0 || editing) return;
+		if ((e.metaKey || e.ctrlKey) && view.marks) {
+			toggleMark(row, col);
+			return;
+		}
 		select(row, col, e.shiftKey);
 		dragging = 'select';
+	}
+
+	/** Cmd (Ctrl)-click in a table with `marks`: the row's id added to the ones marked, or taken from them, as in the 3-D view. */
+	function toggleMark(row: number, col: number) {
+		const marks = view.marks!;
+		const id = Number(known[row]?.[marks.column]);
+		if (!Number.isFinite(id)) return;
+		const ids = markedBy(sent ?? marked(marks.link), id, true);
+		sent = ids;
+		mark(marks.link, ids, row);
+		// the rows marked are the selection now, Delete's among them, and the arrows move from this cell
+		anchor = null;
+		focus = { row, col };
+		grid?.focus();
 	}
 
 	function grabHandle(e: PointerEvent) {
