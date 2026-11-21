@@ -786,7 +786,13 @@ async fn a_control_excluded_at_a_failed_gate_is_kept_as_a_monitor_and_the_run_go
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_loop_soft_starts_below_the_first_rung_and_climbs_to_it() {
-    let svc = Service::with_options(real_options());
+    // Paced: the status follower samples the level on a wall-clock tick, and an
+    // unpaced simulator finishes the 20 s climb before the first sample, so the
+    // first status read was already at the rung. At 20 times real time the climb
+    // lasts a second of wall time.
+    let mut o = real_options();
+    o.sim_speed = 20.0;
+    let svc = Service::with_options(o);
     let addr = serve(svc).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c, table(4, 0, 4)).await;
