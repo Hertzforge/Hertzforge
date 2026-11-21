@@ -181,7 +181,10 @@ fn mimo_mixed_the_status_gives_the_time_at_the_level_and_the_time_left() {
     let t = svc.status().t_s + 1.0;
     assert!(run_to(&mut svc, t), "{:?}", svc.end());
     let st = svc.status();
-    let (at, left) = (st.at_level_s.expect("at"), st.remaining_at_level_s.expect("left"));
+    let (at, left) = (
+        st.at_level_s.expect("at"),
+        st.remaining_at_level_s.expect("left"),
+    );
     assert!((0.9..1.6).contains(&at), "{at}");
     // The 2 s dwell and the 0.5 s level ramp.
     assert!((at + left - 2.5).abs() < 1e-9, "{at} + {left}");
@@ -189,17 +192,26 @@ fn mimo_mixed_the_status_gives_the_time_at_the_level_and_the_time_left() {
     let t = svc.status().t_s + 3.0;
     assert!(run_to(&mut svc, t), "{:?}", svc.end());
     let held = svc.status().at_level_s.expect("at");
-    assert!((held - at).abs() < 0.3, "the clock ran while held: {at} then {held}");
+    assert!(
+        (held - at).abs() < 0.3,
+        "the clock ran while held: {at} then {held}"
+    );
     svc.set_run_mode(RunMode::Manual).expect("manual");
     let st = svc.status();
-    assert!(st.at_level_s.is_some() && st.remaining_at_level_s.is_none(), "{st:?}");
+    assert!(
+        st.at_level_s.is_some() && st.remaining_at_level_s.is_none(),
+        "{st:?}"
+    );
     svc.resume().expect("resume");
     svc.set_level_db(0.0).expect("level");
     let t = svc.status().t_s + 1.0;
     assert!(run_to(&mut svc, t), "{:?}", svc.end());
     assert_eq!(svc.phase(), MimoMixedPhase::FullLevel);
     let st = svc.status();
-    let (at, left) = (st.at_level_s.expect("at"), st.remaining_at_level_s.expect("left"));
+    let (at, left) = (
+        st.at_level_s.expect("at"),
+        st.remaining_at_level_s.expect("left"),
+    );
     // The 3 s at full level and the 0.5 s level ramp.
     assert!((at + left - 3.5).abs() < 1e-9, "{at} + {left}");
     svc.abort("done").expect("abort");
