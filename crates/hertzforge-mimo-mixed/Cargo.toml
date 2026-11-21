@@ -75,3 +75,11 @@ hertzforge-hal-sim.workspace = true
 [[test]]
 name = "mimo_mixed_service"
 required-features = ["service"]
+
+[[test]]
+name = "mimo_mixed_step_cost"
+required-features = ["service"]
+
+[[test]]
+name = "mimo_mixed_safety"
+required-features = ["service"]

@@ -204,7 +204,9 @@ impl MimoMixedService {
         self.top_up()?;
         self.unpark()?;
         self.fresh_engine()?;
-        self.start_station("identification")?;
+        if let Err(e) = self.start_station("identification") {
+            return Err(self.refuse_start(e));
+        }
         let hop = self.nfft / 2;
         let settle = self.nfft + (RANDOM_RAMP_S * self.fs) as usize;
         let max_lag = self.nfft / 4;

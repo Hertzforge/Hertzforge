@@ -25,6 +25,8 @@ mod floor;
 mod ident;
 pub mod records;
 pub mod step;
+#[cfg(test)]
+mod tests;
 
 pub use step::{
     MimoMixedStep, StepTrip, ABORT_RAMP_S, RANDOM_PEAK_RELEASE_S, TONE_ABORT_DEBOUNCE_S,
@@ -1025,6 +1027,26 @@ impl MimoMixedService {
         Ok(())
     }
 
+    /// A start the station refused: the step and the synthesis dropped (no
+    /// drive was taken by a started station), the station parked, the run
+    /// ended `start_refused`.
+    pub(crate) fn refuse_start(&mut self, e: MimoMixedError) -> MimoMixedError {
+        self.step = None;
+        self.synth = None;
+        self.ident_rec = None;
+        self.park();
+        self.state = MimoMixedState::Ended;
+        self.end = Some(RunEnd {
+            name: "start_refused",
+            aborted: true,
+            part: None,
+            control: None,
+            drive: None,
+            words: e.to_string(),
+        });
+        e
+    }
+
     /// An engaged start must hold the frames ahead the identification
     /// measured its lag with.
     pub(crate) fn check_start(&self, start: &StationStart) -> Result<(), MimoMixedError> {
@@ -1503,7 +1525,7 @@ impl MimoMixedService {
                         control: None,
                         drive: None,
                         words: format!(
-                            "the floor did not equalize within {:.0} s (errors {:?} dB)",
+                            "the floor did not equalize within {:.1} s (errors {:?} dB)",
                             self.cfg.floor_settle_s, self.floor_err_db
                         ),
                     });
@@ -1760,17 +1782,7 @@ impl MimoMixedService {
         self.unpark()?;
         self.fresh_engine()?;
         if let Err(e) = self.start_station("engaged") {
-            self.park();
-            self.state = MimoMixedState::Ended;
-            self.end = Some(RunEnd {
-                name: "start_refused",
-                aborted: true,
-                part: None,
-                control: None,
-                drive: None,
-                words: e.to_string(),
-            });
-            return Err(e);
+            return Err(self.refuse_start(e));
         }
         self.state = MimoMixedState::Running;
         self.phase = MimoMixedPhase::FloorAlone;
@@ -2213,7 +2225,7 @@ impl StepCostProbe {
         let q = n + p;
         let lines = 1025usize;
         let df = fs / 2048.0;
-        let grid: Vec<f64> = (1..lines).map(|l| l as f64 * df).collect();
+        let grid: Vec<f64> = (1..lines - 1).map(|l| l as f64 * df).collect();
         let gl = grid.len();
         let mut resp = MatrixStack::zeros(gl, n, m);
         for k in 0..gl {
