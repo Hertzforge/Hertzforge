@@ -569,3 +569,5 @@ hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_shared_ceili
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_more_drives_than_controls
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_transport_delay
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_a_tone_law_that_misses_its_level_fails_the_check
+hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_limit_channel
+hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_a_floor_law_that_overdrives_fails_the_check

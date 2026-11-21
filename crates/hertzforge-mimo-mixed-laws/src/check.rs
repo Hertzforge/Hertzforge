@@ -52,11 +52,13 @@ pub enum MimoMixedCheckCase {
     MoreDrivesThanControls,
     /// A flat wire behind a hardware station's lag.
     TransportDelay,
+    /// The floor and a tone with a monitor channel held under a limit.
+    LimitChannel,
 }
 
 impl MimoMixedCheckCase {
     /// Every case, in the order the check runs them.
-    pub const ALL: [MimoMixedCheckCase; 9] = [
+    pub const ALL: [MimoMixedCheckCase; 10] = [
         MimoMixedCheckCase::FloorOnly,
         MimoMixedCheckCase::FixedTonesOnFloor,
         MimoMixedCheckCase::SweptToneThroughMode,
@@ -66,6 +68,7 @@ impl MimoMixedCheckCase {
         MimoMixedCheckCase::SharedCeiling,
         MimoMixedCheckCase::MoreDrivesThanControls,
         MimoMixedCheckCase::TransportDelay,
+        MimoMixedCheckCase::LimitChannel,
     ];
 
     /// The stable record and wire name.
@@ -80,6 +83,7 @@ impl MimoMixedCheckCase {
             MimoMixedCheckCase::SharedCeiling => "shared_ceiling",
             MimoMixedCheckCase::MoreDrivesThanControls => "more_drives_than_controls",
             MimoMixedCheckCase::TransportDelay => "transport_delay",
+            MimoMixedCheckCase::LimitChannel => "limit_channel",
         }
     }
 
@@ -116,6 +120,9 @@ impl MimoMixedCheckCase {
             MimoMixedCheckCase::TransportDelay => {
                 "sine-loopback-4x4 behind 553 frames of lag; the floor at 1e-4 g^2/Hz and a 0.3 g tone at 240 Hz"
             }
+            MimoMixedCheckCase::LimitChannel => {
+                "sine-base-article-6x4; a 1 g tone at 150 Hz; monitor channel 5 a limit, its flat ceiling 0.2 g^2/Hz, abort 3 dB over it"
+            }
         }
     }
 
@@ -126,7 +133,10 @@ impl MimoMixedCheckCase {
                 "the run completes; from 5 s into full level every control's floor within 1 dB and the tone, whenever usable, within its abort band"
             }
             MimoMixedCheckCase::SharedCeiling => {
-                "the run completes with no drive frame clamped; from 5 s into full level every control's floor within 1 dB"
+                "the run completes with no drive frame clamped; from 5 s into full level every control's floor within 1 dB, no drive's peak over its ceiling, every tone at one common scale, and every tone, whenever usable, within its alarm band of its target as the ceiling rule scales it"
+            }
+            MimoMixedCheckCase::LimitChannel => {
+                "the run completes; from 5 s into full level every control's floor within 1 dB, the tone, whenever usable, within its alarm band, and the limit channel never over its ceiling"
             }
             MimoMixedCheckCase::NarrowbandFixed | MimoMixedCheckCase::NarrowbandSwept => {
                 "the run completes; from 5 s into full level every control's floor within 1 dB; from 20 s every control's band level within its alarm band"
@@ -174,6 +184,7 @@ pub struct MimoMixedCheckStation {
 pub fn mimo_mixed_check_station(case: MimoMixedCheckCase) -> MimoMixedCheckStation {
     let (structure, dims, delay) = match case {
         MimoMixedCheckCase::MoreDrivesThanControls => ("sine-wide-3x6", (3, 3, 6), 0),
+        MimoMixedCheckCase::LimitChannel => ("sine-base-article-6x4", (6, 4, 4), 0),
         MimoMixedCheckCase::TransportDelay => (
             "sine-loopback-4x4",
             (4, 4, 4),
@@ -193,6 +204,24 @@ pub fn mimo_mixed_check_station(case: MimoMixedCheckCase) -> MimoMixedCheckStati
     }
 }
 
+/// The range of every acceleration channel of a check's station, g: a
+/// common accelerometer range, about four times the largest peak a case
+/// carries (the shared-ceiling case's three 2 g tones on its floor), so a
+/// law that runs away meets the run's overload watch.
+pub const MIMO_MIXED_CHECK_RANGE_G: f64 = 50.0;
+
+/// The range of every drive channel of a check's station, volts.
+pub const MIMO_MIXED_CHECK_RANGE_V: f64 = 10.0;
+
+/// The limit-channel case's limit channel (the base article's first
+/// monitor).
+pub const MIMO_MIXED_CHECK_LIMIT_CHANNEL: u32 = 5;
+
+/// The limit-channel case's flat ceiling, g^2/Hz: about 3 dB over what the
+/// built-in pair puts on the channel's worst line (the tone's, 0.097 g^2/Hz
+/// there), so a law that puts 3 dB more on it fails the case.
+pub const MIMO_MIXED_CHECK_LIMIT_CEILING: f64 = 0.2;
+
 /// The channel table `station` runs on: its outputs on channels 1 up
 /// (controls first), its drives after them.
 pub fn mimo_mixed_check_table(station: &MimoMixedCheckStation) -> ChannelTable {
@@ -202,14 +231,16 @@ pub fn mimo_mixed_check_table(station: &MimoMixedCheckStation) -> ChannelTable {
         if k < station.n_controls {
             c.role = ChannelRole::Control;
             c.units = Units::AccelG;
+            c.range_max = MIMO_MIXED_CHECK_RANGE_G;
         } else if k < station.n_outputs {
             c.role = ChannelRole::Monitor;
             c.units = Units::AccelG;
+            c.range_max = MIMO_MIXED_CHECK_RANGE_G;
         } else {
             c.role = ChannelRole::Drive;
             c.units = Units::VoltageV;
+            c.range_max = MIMO_MIXED_CHECK_RANGE_V;
         }
-        c.range_max = 1e9;
         t.channels.push(c);
     }
     t
@@ -341,6 +372,7 @@ pub fn mimo_mixed_check_config(case: MimoMixedCheckCase) -> MimoMixedConfig {
         MimoMixedCheckCase::LevelLadder | MimoMixedCheckCase::MoreDrivesThanControls => {
             parts.push(tone("t1", fixed(240.0), 1.0))
         }
+        MimoMixedCheckCase::LimitChannel => parts.push(tone("t1", fixed(150.0), 1.0)),
         MimoMixedCheckCase::SharedCeiling => {
             parts.push(tone("t1", fixed(150.0), 2.0));
             parts.push(tone("t2", fixed(240.0), 2.0));
@@ -366,7 +398,15 @@ pub fn mimo_mixed_check_config(case: MimoMixedCheckCase) -> MimoMixedConfig {
         },
         controls: (1..=n as u32).collect(),
         drives,
-        limits: Vec::new(),
+        limits: if case == MimoMixedCheckCase::LimitChannel {
+            vec![hertzforge_mimo_random::config::LimitSpec {
+                channel_index: MIMO_MIXED_CHECK_LIMIT_CHANNEL,
+                ceiling_psd: vec![MIMO_MIXED_CHECK_LIMIT_CEILING],
+                abort_margin_db: 3.0,
+            }]
+        } else {
+            Vec::new()
+        },
         reference: reference(n, floor_level),
         parts,
         // Two 4 Hz lines (the least the exclusion may cover).
@@ -489,6 +529,22 @@ pub fn run_mimo_mixed_check_case(
     let mut rung: (f64, f64) = (f64::NAN, 0.0);
     let mut rungs_seen: Vec<f64> = Vec::new();
     let ladder = case == MimoMixedCheckCase::LevelLadder;
+    let shared = case == MimoMixedCheckCase::SharedCeiling;
+    let peak_ceiling: Vec<f64> = mimo_mixed_check_config(case)
+        .drives
+        .iter()
+        .map(|d| d.peak_v)
+        .collect();
+    // The limit channels' worst reading over their ceilings, dB.
+    let mut limit_over = (f64::NEG_INFINITY, 0.0);
+    // The shared ceiling: readings where the rule held a tone, the scales
+    // seen (least, most), the widest spread of scale between tones in one
+    // reading, and the largest peak played over each drive's ceiling.
+    let mut held = 0usize;
+    let mut scales = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut spread = 0.0f64;
+    let mut peak_over = f64::NEG_INFINITY;
+    let mut scaled: Vec<Worst> = Vec::new();
     while svc.run_chunk()? {
         let s: MimoMixedStatus = svc.status();
         if (s.level_db - rung.0).abs() > 0.01 {
@@ -512,6 +568,36 @@ pub fn run_mimo_mixed_check_case(
             rungs_seen.push(s.level_db);
         }
         floor.see(&s.floor_error_db, floor_within);
+        for l in &s.limits {
+            if l.over_db > limit_over.0 {
+                limit_over = (l.over_db, l.at_hz);
+            }
+        }
+        if shared {
+            for (d, c) in s.drives.iter().zip(&peak_ceiling) {
+                peak_over = peak_over.max(d.peak_v - c);
+            }
+            let (lo, hi) = s
+                .tones
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                    (lo.min(t.scale), hi.max(t.scale))
+                });
+            held += s.tones.iter().any(|t| t.limiting || t.scale < 1.0) as usize;
+            scales = (scales.0.min(lo), scales.1.max(hi));
+            spread = spread.max(hi - lo);
+            scaled.resize_with(s.tones.len(), Worst::default);
+            for (w, t) in scaled.iter_mut().zip(&s.tones) {
+                if t.usable {
+                    let e: Vec<f64> = t
+                        .error_db
+                        .iter()
+                        .map(|e| e - 20.0 * t.scale.log10())
+                        .collect();
+                    w.see(&e, &tone_alarm);
+                }
+            }
+        }
         tones.resize_with(s.tones.len(), Worst::default);
         for (w, t) in tones.iter_mut().zip(&s.tones) {
             if !t.usable {
@@ -546,8 +632,30 @@ pub fn run_mimo_mixed_check_case(
             detail.push_str(&format!("; {}", w.words(&format!("tone {}", t.id))));
         }
     } else {
+        // The rule is judged on what it did, not only on the run not
+        // aborting: one scale for every tone, every tone at its scaled
+        // target, no peak over a ceiling and nothing clamped.
         ok &= s.clamped == 0;
         detail.push_str(&format!("; {} drive frames clamped", s.clamped));
+        for (w, t) in scaled.iter().zip(&s.tones) {
+            ok &= w.ok();
+            detail.push_str(&format!(
+                "; {}",
+                w.words(&format!("tone {} of its scaled target", t.id))
+            ));
+        }
+        ok &= scaled.len() == s.tones.len() && spread <= 1e-9 && peak_over <= 0.0;
+        detail.push_str(&format!(
+            "; scales {:.4} to {:.4}, spread {spread:.2e} between tones, held in {held} readings; largest peak {peak_over:+.3} V over its ceiling",
+            scales.0, scales.1
+        ));
+    }
+    if case == MimoMixedCheckCase::LimitChannel {
+        ok &= limit_over.0 <= 0.0;
+        detail.push_str(&format!(
+            "; limit channel worst {:+.2} dB over its ceiling, at {:.0} Hz",
+            limit_over.0, limit_over.1
+        ));
     }
     for (w, b) in bands.iter().zip(&s.bands) {
         ok &= w.ok();
@@ -576,16 +684,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mimo_mixed_nine_cases_with_unique_names_that_read_back() {
+    fn mimo_mixed_ten_cases_with_unique_names_that_read_back() {
         let mut names: Vec<_> = MimoMixedCheckCase::ALL.iter().map(|c| c.name()).collect();
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 10);
         for c in MimoMixedCheckCase::ALL {
             assert_eq!(MimoMixedCheckCase::from_name(c.name()), Some(c));
             assert!(!c.plant().is_empty() && !c.requirement().is_empty());
         }
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 10);
         assert_eq!(MimoMixedCheckCase::from_name("nope"), None);
     }
 
