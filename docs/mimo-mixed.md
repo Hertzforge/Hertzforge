@@ -60,8 +60,8 @@ The first version runs up to 16 controls, 8 drives and 8 limit channels.
 8. **Each loop.** Each tone is tracked at every control and taken out of the control signal; the
    floor's law is called on what is left; each narrowband is servoed; the tones' law is called for
    every tone; the ceiling rule fits the sum to each drive's budget; every part is judged.
-9. **End.** The schedule finishes and every part ramps down together, or the run is stopped, aborted
-   or held, and says why in plain words.
+9. **End.** The schedule finishes and every part ramps down together, or the run is stopped or
+   aborted, and says why in plain words.
 
 ## Setting One Up
 
@@ -203,6 +203,13 @@ moves and how late the tracker reads it.
   resonance are beyond it. A wider tracking bandwidth shortens the delay but lets more of the floor
   into each tone's reading.
 - **A tone amplitude profile against frequency.** Each tone's amplitude is constant at each control.
+- **Changing a law's parameters during the run.** Neither the floor's laws nor the tones' laws take
+  parameters while they run; set them in the setup.
+- **Taking a control out at the gate.** The floor, every tone and every narrowband are stated at
+  every control, so a control cannot be dropped once the run has identified. Change the controls
+  in the setup, or proceed past the gate with your words.
+- **Keeping an identification for a later run.** Every run identifies. The record keeps the
+  identification, but it cannot be loaded into another run.
 
 ## The Run Screen
 
@@ -223,7 +230,51 @@ floor has none.
 
 ## What a Run Saves
 
-<!-- PLACEHOLDER FOR THE LEAD: the run folder's contents and the Open in Analysis table, once the run record is settled. -->
+Every run that arms leaves a run folder under the data folder, named
+`<date>-<time>_mimo_mixed_<run id>`. It is written while the run goes and can be read at any
+moment. The run is labelled SIM or HARDWARE from the station it ran on.
 
-**Placeholder:** what a MIMO Mixed Mode run saves is to be written here, once the run record is
-settled.
+**From the arm:**
+
+- The setup as accepted, and what it resolved to: every part as the controller plays it, with
+  its alarm and abort bands at every control. It also holds:
+  - the floor's reference and where it came from;
+  - the controls, the drives with their ceilings and aborts, and the limit channels;
+  - both laws, the band law, and the ceiling and fill rules;
+  - the gate, the schedule and the full-level time.
+- The channel table as it was used.
+- Both laws, each with the world it comes from and its parameters. A law that is a file is kept
+  beside the record.
+
+**After the identification:** the model from every drive to every control and limit channel,
+each control's coherence, the response and drive spectra, and the identification's own facts:
+its level, its steps, its frames and its lag.
+
+**As the run goes:**
+
+- every tone's frequency, its scale under the shared ceiling, and at every control its tracked
+  amplitude, phase, target and error;
+- every band's level against its statement at every control;
+- every drive's random part, peak, tones' sum and headroom;
+- the floor's spectra at each level change and at the end;
+- every call of both laws.
+
+The log holds every state, the review's prediction, every override with your words, every level
+and mode change, and every hold, part switch, alarm, limit and trip. The end says how the run
+ended and holds every override again. Every input as read and every drive as played are kept as
+time histories unless the setup switches them off.
+
+**Open in Analysis** turns the folder into a project:
+
+| In the run folder | In the project |
+|---|---|
+| `streams/inputs`, `streams/drives` | Time histories, in SI |
+| `results/reference` | `Specification`: the floor's reference, every control's autospectrum and every cross term, with each control's alarm and abort lines |
+| `results/identification_frf` | `identification_frf`: an FRF of every control against every drive |
+| `results/identification_coherence` | `identification_coherence`: each control's multiple coherence |
+| `results/identification_response`, `results/identification_drive` | Spectra of the controls and the drives during the identification, with their cross terms |
+| `results/control_spectra`, `results/drive_spectra`, `results/tone_levels`, `results/band_levels`, `results/drive_levels`, `results/control_trace`, `results/identification`, the log and the end | The `Run Record`, as named arrays |
+
+The project also holds the setup the run was accepted with. The tones', bands' and drives'
+histories have no analysis object of their own yet and stay in the run record. The file-by-file
+list is in [run-folder.md](run-folder.md), "What a MIMO Mixed Mode Run Saves".

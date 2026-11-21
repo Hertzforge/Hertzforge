@@ -508,8 +508,9 @@ identity, the world it comes from, whether it may drive hardware and its paramet
 as given; the band and ceiling rules; and `calls`, the format of the law-call record,
 `hertzforge.mimo_mixed.law_ticks.v1`, and the result that holds it; a law that is a
 file has its bytes beside it) and `log.jsonl` (the controller's events, its state
-changes, levels, each part coming in and going out, alarms, holds, the operator's
-level, part, stop and abort, each as it is made), and these files, each checked
+changes, levels, each part coming in and going out, alarms, holds, the review's
+prediction, the operator's overrides with their words, level, mode, part, stop and
+abort, each as it is made), and these files, each checked
 against the golden run folder (`schema/golden/runs/mimo_mixed/`) by
 `tests/test_run_folder_golden_mimo_mixed.py`. Spectral results are on the floor's
 band lines, matrices in the file's convention (`conj(X) Y`); levels are at the level
@@ -531,7 +532,7 @@ in force:
 | `results/band_levels` | Each band through the run: its center, its ramp, whether it is folded into the floor's reference; per control its added level against the stated, and alarm (`kind` `mimo_mixed_bands`) |
 | `results/drive_levels` | The run's level and each control's floor error; per drive the random part's rms, the largest magnitude played, the peak held over the last second, the tones' summed amplitude and the headroom to its peak ceiling (`kind` `mimo_mixed_drives`) |
 | `results/control_trace` | Every call of the two laws in the order taken, the law-call record `law_ticks v1`: station time, the law (0 the floor's, once a loop; 1 a tone's, once a tick), the tone, the drive in force before the call and the drive taken from it, the call's time, a miss and its flags; 64 calls to a record (`kind` `mimo_mixed_control`) |
-| `end.json` | The end, as the run's state reports it (the outcome and why, the drops), with what the record counted (the test time, the level, trace and spectra records) and the station's frames |
+| `end.json` | The end, as the run's state reports it (the outcome and why, the drops), every override with the operator's words, with what the record counted (the test time, the level, trace and spectra records) and the station's frames |
 
 A run that ends before identification has no identification, and none of the loop or
 level results; one that ends before it engages has no law calls. With

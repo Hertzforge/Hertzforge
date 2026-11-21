@@ -4543,7 +4543,8 @@ together on several drives at once, and controls the response at several control
 floor against a cross-spectral reference (MIMO Random's), each tone against its own amplitude per
 control (MIMO Sine's), each band against its stated added level. The service identifies the
 structure before the run with independent random on every drive at low level, gates on the
-identification's coherence and holds for review; on `mimo_mixed.proceed` the floor comes in alone
+identification's coherence, predicts each drive at full level and holds for review; on
+`mimo_mixed.proceed` the floor comes in alone
 at the soft-start level until it is equalized (`floor_only`), the tones and bands ramp in and the
 level goes to the schedule's start (`engaged`), and in the automatic schedule the level climbs the
 schedule's rungs to full level (`full_level`) and the run completes after its full-level time.
@@ -4552,10 +4553,11 @@ Sine law, world `sine_mimo`) are called; one drive budget per shaker is shared b
 every tone (the ceiling rule), and every protection and abort is the service's. Drives are in
 volts. The run is one test like any other and excludes every other run (`run_active`). **Any
 connected screen may stop or abort** (`mimo_mixed.stop`, `mimo_mixed.abort`);
-`mimo_mixed.configure` (other than a dry run), `arm`, `start`, `proceed`, `level`, `hold`,
-`resume`, `part`, `reset` and `clear` need control; everything that only reads is open to every
-connection. While the service shuts down, `arm`, `start`, `proceed`, `level`, `resume` and
-`part` are refused `shutting_down`; `hold`, `stop` and `abort` are not. Words mean what they mean
+`mimo_mixed.configure` (other than a dry run), `arm`, `start`, `proceed`, `override`, `level`,
+`mode`, `hold`, `resume`, `part`, `reset` and `clear` need control; everything that only reads is
+open to every connection. While the service shuts down, `arm`, `start`, `proceed`, `override`,
+`level`, `mode`, `resume` and `part` are refused `shutting_down`; `hold`, `stop` and `abort` are
+not. Words mean what they mean
 in "MIMO Random", "MIMO Sine" and "Mixed Mode" unless this section says otherwise.
 
 | Method | Params | From | Result |
@@ -4565,7 +4567,9 @@ in "MIMO Random", "MIMO Sine" and "Mixed Mode" unless this section says otherwis
 | `mimo_mixed.arm` | `{}` | `configured` | state |
 | `mimo_mixed.start` | `{}` | `configured`, `armed` | state |
 | `mimo_mixed.proceed` | `{}` | `review` (phase `awaiting_review`) | state |
+| `mimo_mixed.override` | `{"ack","reason"}` (`reason` optional: `gate_failed` or `prediction_exceeded`) | `review` (phase `gate_failed` or `prediction_exceeded`) | state |
 | `mimo_mixed.level` | `{"delta_db"}` or `{"to_db"}`, exactly one | `running`, in `manual` | `{"level_db"}` |
+| `mimo_mixed.mode` | `{"mode"}` (`auto` or `manual`) | any but `finished` | `{"mode"}` |
 | `mimo_mixed.hold` | `{}` | `running` | state |
 | `mimo_mixed.resume` | `{}` | `running`, held | state |
 | `mimo_mixed.part` | `{"id","on"}` | `running` | `{"id","on"}` |
@@ -4577,9 +4581,7 @@ in "MIMO Random", "MIMO Sine" and "Mixed Mode" unless this section says otherwis
 | `mimo_mixed.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
 | `mimo_mixed.subscribe` | see "MIMO Mixed Mode Display" | any | as there |
 | `mimo_mixed.reference.build_breakpoints`, `.build_rigid_body`, `.validate`, `.import` | as `mimo_random.reference.*` | any | as there |
-| `mimo_mixed.mode` | any | any | refused `mode_not_built` |
 | `mimo_mixed.adjust` | any | any | refused `adjust_not_built` |
-| `mimo_mixed.override` | any | any | refused `override_not_built` |
 | `mimo_mixed.exclude` | any | any | refused `exclude_not_built` |
 | `mimo_mixed.identification.save` | any | any | refused `identification_save_not_built` |
 | `mimo_mixed.identification.load` | any | any | refused `identification_load_not_built` |
@@ -4592,10 +4594,11 @@ is reset or configured again. `mimo_mixed.configure` replaces a run that is not 
 `mimo_mixed.reset` configures the present run's configuration again on the present table and
 station under a new run id; `mimo_mixed.clear` forgets it (`unconfigured`). A configuration is
 validated with `mimo_mixed.configure` and `dry_run: true`, which checks without replacing anything
-and needs no control. The six verbs refused `*_not_built` are names this module keeps for what it
-does not build: the schedule's mode is the configuration's (configure it instead), the laws take
-no live parameters, a control target cannot be overridden or a control excluded mid-run, and the
-run identifies every time (its record keeps the identification). The reference verbs are MIMO
+and needs no control. The four verbs refused `*_not_built` are names this module keeps for what
+it does not build: the laws take no live parameters (neither a MIMO Random floor law nor a MIMO
+Sine tone law declares one), a control cannot be taken out of control at the gate (the floor,
+every tone and every band are stated per control), and the run identifies every time (its record
+keeps the identification, but no identification can be saved for a later run or loaded into one). The reference verbs are MIMO
 Random's own handlers under this module's names, with the same parameters, results and refusals.
 
 ### MIMO Mixed Mode Configuration
@@ -4652,9 +4655,17 @@ it may drive hardware in its role now, `not_cleared` why not, in words). Every p
 of the report: a channel that is not an enabled control or drive of the table
 (`channel_unknown`), a part the controller refuses, a law of the wrong world for its role
 (`law_wrong_world`), an unknown law (`law_unknown`), a parameter the law does not declare
-(`param_unknown`) or outside its range (`param_out_of_range`), a budget the schedule cannot fit
+(`param_unknown`) or outside its range (`param_out_of_range`), a channel named as two drives
+(`duplicate_drive`, at the second), a drive's peak abort not above its peak ceiling
+(`abort_below_ceiling`), a level or part ramp under two control ticks (`ramp_too_short`), a tone
+the model gives no finite drive for (`tone_model_not_finite`), a budget the schedule cannot fit
 (`budget_cannot_fit`); with any error the configuration is refused `config_invalid` with the
 report, and a configuration that cannot be read at all `config_unreadable`.
+
+Two members of the controller's configuration are worth naming. Each drive's `abort_vpk` is the
+peak at which the run aborts `drive_vpk`; absent, it is the drive's peak ceiling (`peak_v`) plus
+1 dB, and it must be above that ceiling. `level_ramp_s` (default 0.5) is the ramp of a level
+change.
 
 ### Running a MIMO Mixed Mode Test
 
@@ -4662,15 +4673,35 @@ report, and a configuration that cannot be read at all `config_unreadable`.
 on a hardware station each role's law is looked up again and must clear its role (below), or the
 arm is refused `law_not_checked` with `detail.role` before the station is touched.
 `mimo_mixed.start` arms first when the run is configured, then identifies (`sysid`) and gates on
-the identification's coherence (`coherence_gate`): a pass holds for review (state `review`, phase
-`awaiting_review`), a failure ends the run `held` (phase `coherence_hold`). `mimo_mixed.proceed`
-engages: the floor alone (`floor_only`) until it is equalized, then the parts and the schedule
-(`engaged`) and, in the automatic schedule, full level (`full_level`) until the run completes. In
-the `manual` schedule the level moves only by `mimo_mixed.level` (`delta_db` a step, `to_db` a
-level, each capped at full level; refused `manual_mode_required` in `auto`) and the run never
-completes on its own: it ends on `mimo_mixed.stop`. `mimo_mixed.hold` stops the parts' clock (a
-sweep, a window, the schedule's dwell) while the drive keeps playing; `mimo_mixed.resume` starts
-it again. `mimo_mixed.part` switches a tone or a band
+the identification's coherence (`coherence_gate`). Every outcome holds for review in state
+`review`: a gate failure at phase `gate_failed`; a pass goes on to the prediction (the state's
+`prediction`), and holds at `awaiting_review` when every drive is within its ceilings, at
+`prediction_exceeded` when one is not. `mimo_mixed.proceed` is accepted at `awaiting_review` only,
+and refused `gate_failed` or `prediction_exceeded` at those holds. `mimo_mixed.override` is the
+operator's acknowledgement in words: `ack` (not empty, or `bad_params`) is kept with the client's
+name in the state's `overrides`, in a log entry of kind `override` and in `end.json`; `reason`,
+when given, must name the hold in force, or the override is refused `override_not_needed` (with
+`detail.holds`), as it is at `awaiting_review`. An override of a failed gate goes on to the
+prediction and engages only if that is within (otherwise it holds again at
+`prediction_exceeded`); an override of the prediction engages. An override never passes the
+budget forecast: a schedule that cannot fit is refused `budget_cannot_fit` (`detail` `drive`,
+`time_s`, `need_v`, `ceiling_v`), and a tone with no finite drive `tone_model_not_finite`
+(`detail` `part`, `f_hz`). Nor does it pass any protection: every ceiling and abort still holds
+the drive.
+
+Once engaged, the floor plays alone (`floor_only`) until it is equalized, then the parts and the
+schedule come in (`engaged`); at full level the phase is `full_level`, and the run completes
+after its full-level time. In the automatic schedule the level climbs the schedule's rungs. In
+the `manual` schedule the level moves only by `mimo_mixed.level` (`delta_db` a step, `to_db` one
+of the schedule's rungs or refused `not_a_rung` with `detail.levels_db`; each held between the
+schedule's lowest rung and full level; refused `manual_mode_required` with `detail.mode` in
+`auto`); at full level it completes after the same full-level time, and a step down from full
+level leaves `full_level` until the level is back. `mimo_mixed.mode` switches the schedule's mode
+before arm or at any time in the run: switched to `auto` the climb starts again from the rung at
+or below the level in force; switched to `manual` the level stays where it is. The switch is a
+log entry of kind `level`. `mimo_mixed.hold` stops the parts' clock (a sweep, a window, the
+schedule's dwell, the time at full level) while the drive keeps playing; `mimo_mixed.resume`
+starts it again. `mimo_mixed.part` switches a tone or a band
 on or off on its part ramp; the floor cannot be switched off and is refused `part_refused` with
 `detail.why` `floor`, an id the run does not have `unknown_part`, and a band folded into the
 floor's reference `band_folded`.
@@ -4696,47 +4727,81 @@ down; one still live twice its stop ramp later (at least ten seconds) is aborted
            "controls":[{"channel":1,"target":1.336,"measured":1.298,"error_db":-0.25,
                         "alarm":false}, ...]}, ...],
  "drives":[{"channel":5,"random_rms_v":0.5,"peak_v":2.25,"random_peak_v":2.5,"tone_sum_v":0.75,
-            "ceiling_v":6,"headroom_v":3.5,"headroom_db":7.6,"scale":0.875}, ...],
+            "ceiling_v":6,"abort_vpk":4,"headroom_v":3.5,"headroom_db":7.6,"scale":0.875}, ...],
  "scale":0.875,"floor_error_db":[-0.25,0.13,0.5,-0.06],"floor_equalized":true,
- "floor":{"equalized":true,"loops":377,"misses":0,"underruns":0,"clamped":0},
+ "floor":{"equalized":true,"loops":377,"misses":0,"underruns":0,"dropped":0,"clamped":0},
+ "limits":[{"channel":9,"over_db":-3.25,"at_hz":152}],
  "identification":{"level_db":-20,"steps":2,"frames":64,"lag_frames":265,
                    "band_coherence":[0.9937,0.9943,0.993,0.9923],"gate_coherence":0.5,
                    "passed":true,"drive_vrms":[0.01278,0.01278,0.01278,0.01278]},
+ "prediction":null,
+ "override":{"by":"bench","text":"Coherence low at the band edges; accepted.",
+             "reason":"gate_failed"},
+ "overrides":[{"by":"bench","text":"Coherence low at the band edges; accepted.",
+               "reason":"gate_failed"}],
  "law":{"floor":{...},"tones":{...}},"end":null,
  "record":{"folder":"...","streams":true,"problem":null}}
 ```
 
 - `state` is Random's (`unconfigured`, `configured`, `armed`, `running`, `review`, `stopping`,
-  `finished`); `phase` is one of `idle`, `armed`, `sysid`, `coherence_gate`, `coherence_hold`,
-  `awaiting_review`, `floor_only`, `engaged`, `full_level`, `ramping_down`, `stopped`, `aborted`.
+  `finished`); `phase` is one of `idle`, `armed`, `sysid`, `coherence_gate`, `gate_failed`,
+  `prediction_exceeded`, `awaiting_review`, `floor_only`, `engaged`, `full_level`,
+  `ramping_down`, `stopped`, `aborted`.
 - `source` is `SIM` or `HW`; `clock` is `shared` once the station has programmed its rate
   (`grid.actual`).
 - `mode` is the schedule's (`auto`, `manual`); `levels_db` its rungs; `level_db` the level in force
   and `t_s` the station time since engage (null before).
 - `held` is the operator's hold. `alarm` is true while any control of any part is outside its
-  alarm band. `limiting` is true while the shared ceiling holds a tone down.
+  alarm band. `limiting` is true while the shared ceiling holds a tone down or the drive
+  ceilings or the change cap hold a band.
 - `parts`: one row per part in configuration order. `enabled` is the switch as configured or as
   `mimo_mixed.part` last set it, and `on` whether it plays now. `freq_hz` is a tone's frequency
   or a band's center. `scale` is the ceiling rule's scale on a tone, or a band's ramp. `folded` is
-  true for a band folded into the floor's reference (null for the others). `amplitude` is how the
+  true for a band folded into the floor's reference (null for the others). `limiting` is true
+  while a tone is held down by the shared ceiling, or a band by the drive ceilings or the change
+  cap. `amplitude` is how the
   row's numbers read (`rms`, `peak`, `db`). `controls` gives per control its `target` (the
   floor's rms at the level, a tone's peak amplitude), `measured`, `error_db` and `alarm`; a
   band's rows give `error_db` alone, its added level against the stated.
-- `drives`: one row per drive. `random_rms_v` is the floor's rms. `peak_v` is the largest
-  magnitude played in the last chunk and `random_peak_v` the peak held over the last second.
-  `tone_sum_v` is the tones' summed amplitude in force. Then come the peak `ceiling_v` and the
-  headroom to it (`headroom_v`, `headroom_db`), and the tones' common `scale`.
+- `drives`: one row per drive. `random_rms_v` is the random part's rms alone (the floor and the
+  bands, without the tones). `peak_v` is the largest magnitude played in the last chunk and
+  `random_peak_v` the peak held over the last second. `tone_sum_v` is the tones' summed amplitude
+  in force. Then come the peak `ceiling_v`, the peak `abort_vpk` the run aborts at (`drive_vpk`;
+  the configured value before the run plays), the headroom to the ceiling (`headroom_v`,
+  `headroom_db`), and the tones' common `scale`.
 - `floor` is the floor loop's counts: loops run, the law's misses in a row, frames the ring could
-  not supply (`underruns`) and frames clamped at a peak ceiling.
+  not supply (`underruns`), frames dropped (`dropped`) and frames clamped at a peak ceiling.
+- `limits`: one row per limit channel, `{"channel","over_db","at_hz"}`: what the channel carries
+  on its worst line over its ceiling, dB (null before anything is read), and that line's
+  frequency. The run aborts `limit_abort` past the limit's abort margin, during the
+  identification as well as the run.
 - `identification` is null until the identification has run. `band_coherence` is each control's
   mean coherence over the band, `gate_coherence` the gate, and `drive_vrms` the identification's
   drive.
+- `prediction` is null until the review has a prediction, then
+  `{"drives","controls","forecast","within"}`. Each of `drives` is
+  `{"drive","random_rms_v","random_peak_v","random_peak_factor","tone_peak_sum_v","tone_rms_v",
+  "total_rms_v","peak_v","ceiling_vrms","ceiling_peak_v","within"}` at full level:
+  `random_rms_v` the random part alone, `random_peak_factor` its peak over its rms,
+  `tone_peak_sum_v` and `tone_rms_v` the tones', `total_rms_v` and `peak_v` the whole drive,
+  against its rms and peak ceilings. Each of `controls` is
+  `{"control","random_rms","tone_rms","total_rms"}`. `forecast` is the budget forecast along the
+  schedule, `{"step_s","worst","cannot_fit","refused"}`: `worst` the moment nearest a ceiling
+  (`{"drive","time_s","need_v","ceiling_v"}`), `cannot_fit` the first moment that does not fit
+  (null when every moment fits), `refused` the forecast's refusal by name (null when none).
+  `within` is true when every drive is within its ceilings.
+- `override` is the last override (null before one); `overrides` every override of the run in
+  order, each `{"by","text","reason"}`: the client, the operator's words, and the hold it released.
 - `law` holds the two roles' laws as `derived.law` states them.
 - `end` is null until the run ends, then
   `{"outcome","name","message","at_s","level_db","part","control","drive","ramp_s"}`. `outcome`
   is `completed`, `operator_stop`, `operator_abort`, `safe_stop`, `aborted` (a trip),
-  `held` (the coherence gate), `law_fault`, `fault` or `sysid_level_unreachable`. `name` is the
-  controller's own name for the end; `part`, `control` and `drive` are what the end names.
+  `law_fault`, `fault` (a run error) or `sysid_level_unreachable`. `name` is the controller's own
+  name for the end: for a trip `drive_vpk`, `drive_vrms`, `drive_not_finite`, `random_underrun`,
+  `input_overload`, `kinematic`, `divergence`, `floor_envelope`, `floor_not_equalized`,
+  `tone_abort`, `tone_abort_at_ceiling`, `tone_unreadable`, `band_abort`, `limit_abort` or
+  `station_stop`; `law_fault` for a law fault (its `part` the floor, a tone or a band); `run_error`
+  or `run_thread_failure` for a fault. `part`, `control` and `drive` are what the end names.
   `ramp_s` is the ramp down's length, null for an end that did not ramp.
 - `record` appears once a run folder is claimed (Run Folders).
 
@@ -4761,7 +4826,7 @@ are written as the run goes, off the control thread:
 - `tone_levels`, `band_levels` and `drive_levels`, as the run went;
 - `control_trace`: every call of both laws.
 
-`end.json` holds `end` as `mimo_mixed.state` reports it. A failure to write the record is a log
+`end.json` holds `end` as `mimo_mixed.state` reports it and the run's `overrides`. A failure to write the record is a log
 entry of kind `record` and the state's `record.problem`; the run goes on.
 
 **The law-call record, `hertzforge.mimo_mixed.law_ticks.v1`.** Every call of either law is one
@@ -4780,11 +4845,13 @@ to a record, its arrays `time`, `role`, `tone`, `drive_in`, `drive_out`, `call_u
 
 Event topics:
 
-- `mimo_mixed.state` (text): the state object on every change of `state`, `phase`, `level_db`,
-  `held`, `end`, `record` or a part's `on`, `limiting` or alarm.
+- `mimo_mixed.state` (text): the state object on every change of `state`, `phase`, `mode`,
+  `level_db`, `held`, `end`, `record`, the overrides, or a part's `on`, `limiting` or alarm.
 - `mimo_mixed.log` (text): new log entries, Random's form, of the kinds `state`, `station`,
-  `identification`, `engage`, `level`, `hold`, `part`, `alarm`, `limit`, `floor`, `note` and
-  `record`.
+  `identification`, `override`, `engage`, `level`, `hold`, `part`, `alarm`, `limit`, `floor`,
+  `note` and `record`. The review's are of kind `identification`, with `event` `gate_failed` or
+  `prediction`; an override's `{"action","reason","by","text"}`; a mode switch is of kind
+  `level`, `{"action":"mode","mode"}`.
 - `mimo_mixed.live` (binary, the **default subscription**, from the start of identification until
   the run has finished, then once more).
 - `mimo_mixed.data` (binary, to one subscribed connection): the live frame's numbers and `plots`,
@@ -4834,17 +4901,22 @@ always may. The simulator runs any law. `laws.check` with `{"mimo_mixed":"floor"
 law in that role and the built-in in the other. Each case is a whole MIMO Mixed Mode run on a
 simulated station: `floor_only`, `fixed_tones_on_floor`, `swept_tone_through_mode`,
 `narrowband_fixed`, `narrowband_swept`, `level_ladder`, `shared_ceiling`,
-`more_drives_than_controls` and `transport_delay`, each with its `plant` and `requirement` in
-words. One `laws.check` event goes out as each case starts and as it ends. The answer is
-`{"law","report":{"passed","recorded","role","tool_version","cases"}}`: `law` is the role's facts,
-read again after the record is written, and `tool_version` is `mimo-mixed-check 1`. A law of the
+`more_drives_than_controls`, `transport_delay` and `limit_channel`, each with its `plant` and
+`requirement` in words and `required`. `swept_tone_through_mode` is informational (`required`
+false): it runs and is reported, but takes no part in the verdict. Every other case is required.
+One `laws.check` event goes out as each case starts and as it ends. The answer is
+`{"law","report":{"passed","recorded","role","tool_version","cases"}}`: `passed` is true when
+every required case passed, `law` is the role's facts, read again after the record is written,
+and `tool_version` is `mimo-mixed-check 2`. A law of the
 wrong world for the role is refused `law_wrong_world` (`detail` its `id` and `role`).
 
 A law file's result is recorded against its SHA-256 for that role, passed or not, beside the file
 as `laws/<sha256>.mimo-mixed-floor.check.json` or `laws/<sha256>.mimo-mixed-tones.check.json`. A
-built-in law is checked and not recorded. A record clears its file in its role only: a passed
-record at the check's present version and its present cases, by name and in order. A record of
-the other role, of an earlier version or case list, or for other bytes clears nothing.
+built-in law is checked and not recorded. The record's `cases` are the required cases and its
+`informational` the informational ones, kept beside the verdict. A record clears its file in its
+role only: a passed record at the check's present version and its present required cases, by
+name and in order. A record of the other role, of an earlier version or case list, or for other
+bytes clears nothing.
 
 ## Mixed Mode
 
