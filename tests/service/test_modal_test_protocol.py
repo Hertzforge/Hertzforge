@@ -141,6 +141,29 @@ def test_modal_test_double_hit_names_its_frame_peak_and_ratio(validate):
     _refused(validate, second, 'modalTestHitReport')
 
 
+def test_modal_test_decay_check_names_its_row_ratio_and_warning(validate):
+    state = _text('event_modal_test_state')['data']
+    report, tile, counts = state['latest']['report'], state['hits'][0], state['counts']
+    for holder, whole, name in ((report, report, 'modalTestHitReport'),
+                                (tile, tile, 'modalTestTile'),
+                                (counts['point'], counts, 'modalTestCounts')):
+        assert set(holder['decay']) == {'row', 'ratio', 'warning'}
+        validate(whole, name)
+        for decay, good in ((None, True), ({'row': 3, 'ratio': 0.2}, False)):
+            saved = holder['decay']
+            holder['decay'] = decay
+            if good:
+                validate(whole, name)
+            else:
+                _refused(validate, whole, name)
+            holder['decay'] = saved
+    report = copy.deepcopy(report)
+    report['warnings'] = ['response_not_decayed']
+    validate(report, 'modalTestHitReport')
+    report['warnings'] = ['not_decayed']
+    _refused(validate, report, 'modalTestHitReport')
+
+
 def test_modal_test_shaker_live_frame_carries_its_reference_autospectra(validate):
     live = _text('event_modal_test_state')['data']
     arr = {'$array': 'a'}
