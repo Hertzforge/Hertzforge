@@ -14,11 +14,13 @@
  */
 
 import type { ChannelRow, ReportItem } from '$lib/protocol/types';
-import type { ModalAcceptMode, ModalEstimator, ModalMode, ModalPoint, ModalSource, ModalTestConfig } from '$lib/protocol/modal_test';
+import type { ModalAcceptMode, ModalEstimator, ModalMode, ModalPoint, ModalPolarity, ModalSource, ModalTestConfig } from '$lib/protocol/modal_test';
 import { defaultRecord, type FieldErrors, type RecordDraft } from '../setup';
 
 export interface ModalImpactDraft {
 	trigger_level_pct: number;
+	/** The hammer's sign: the trigger watches the force rising through the level in it. */
+	polarity: ModalPolarity;
 	pretrigger_pct: number;
 	holdoff_blocks: number;
 	double_hit_pct: number;
@@ -74,6 +76,7 @@ export const MODAL_BLOCKS = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 655
 export function defaultImpact(): ModalImpactDraft {
 	return {
 		trigger_level_pct: 10,
+		polarity: 'positive',
 		pretrigger_pct: 5,
 		holdoff_blocks: 1,
 		double_hit_pct: 5,
@@ -209,6 +212,7 @@ export function toModalConfig(d: ModalDraft): ModalTestConfig {
 		const i = d.impact;
 		out.impact = {
 			trigger_level_pct: i.trigger_level_pct,
+			polarity: i.polarity,
 			pretrigger_pct: i.pretrigger_pct,
 			holdoff_blocks: i.holdoff_blocks,
 			double_hit_pct: i.double_hit_pct,
@@ -262,6 +266,7 @@ export function fromModalConfig(c: ModalTestConfig): ModalDraft {
 		},
 		impact: {
 			trigger_level_pct: i.trigger_level_pct ?? 10,
+			polarity: i.polarity === 'negative' ? 'negative' : 'positive',
 			pretrigger_pct: i.pretrigger_pct ?? 5,
 			holdoff_blocks: i.holdoff_blocks ?? 1,
 			double_hit_pct: i.double_hit_pct ?? 5,

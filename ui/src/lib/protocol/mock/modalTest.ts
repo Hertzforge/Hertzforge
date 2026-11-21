@@ -4,7 +4,7 @@
  *
  * The references and responses are the channel table's rows by their analysis role, each with its
  * node and direction; the roving rows take each point's node in turn. Impact mode: an armed test
- * takes a hit about every 1.5 s of station time; each is checked (an overload, a second impact over
+ * is arming for a moment (the pre-trigger filling), then takes a hit about every 1.5 s of station time; each is checked (an overload, a second impact over
  * the double-hit limit, the tip drop, a force against the target) and, in automatic mode, judged
  * then and there (an overload or a double hit is rejected, any other accepted), or in manual mode
  * held for the operator. `modal_test.sim_hit` makes the next hit clean, double or overloaded and
@@ -16,8 +16,8 @@
  * `config_invalid` naming the field, a verb in a state it does not apply to by `wrong_state`, an
  * impact verb in shaker mode by `not_in_mode`, an observer by `not_controller` for everything but
  * end, abort and the reads, and another live run by `run_active`. It sends `modal_test.live` ten
- * times a second, with the members the screen reads once the service sends them (the hit's own
- * block, each trace's row and role, the force spectrum, the reference autospectra). Every value is
+ * times a second, as the service does: each trace's row, role and unit, the latest hit's own block
+ * with its windows and force spectrum (impact), the reference autospectra (shaker). Every value is
  * synthetic, made only so the shell has something to draw; nothing here is the service's analysis.
  */
 
@@ -48,6 +48,8 @@ const TICK_MS = 50;
 const LIVE_MS = 100;
 /** Station seconds between hits while armed. */
 const HIT_EVERY_S = 1.5;
+/** Station time an arm takes to fill the pre-trigger before the trigger is live. */
+const ARMING_S = 0.3;
 /** Station seconds per shaker frame. */
 const FRAME_EVERY_S = 0.4;
 const SHOWN = 1024;
@@ -110,6 +112,8 @@ interface Run {
 	drivePhase: ModalTestRun['drive_phase'];
 	log: ModalTestLogEntry[];
 	rand: () => number;
+	/** An end or an abort was asked: nothing new starts (`ending`). */
+	ending: boolean;
 }
 
 const ITEM = (reason: string, field: string, message: string): ReportItem => ({ reason: reason as ItemReason, field, message });
@@ -201,7 +205,12 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			if (c.target && !(c.target.peak > 0)) errors.push(ITEM('out_of_range', 'config.impact.target.peak', 'The target peak is above zero.'));
 			impact = {
 				drives: 'none: the hammer is the excitation',
-				trigger: { level: round(((c.trigger_level_pct ?? 10) / 100) * (hammer?.range_max ?? 100), 4), unit: hammer?.units ?? '', pretrigger_frames: pre },
+				trigger: (() => {
+					const polarity = c.polarity ?? 'positive';
+					const level = round(((polarity === 'negative' ? -1 : 1) * (c.trigger_level_pct ?? 10) * (hammer?.range_max ?? 100)) / 100, 4);
+					const unit = hammer?.units ?? '';
+					return { level, unit, polarity, watches: `the force rising through ${level} ${unit} (${polarity} hammer); live once ${pre} pre-trigger frames are in`, pretrigger_frames: pre };
+				})(),
 				holdoff_blocks: c.holdoff_blocks ?? 1,
 				accept: c.accept ?? 'auto',
 				auto_advance: c.auto_advance ?? true,
@@ -375,7 +384,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				peak,
 				peak_frame: pre + 2,
 				overloaded: overloaded ? [0] : [],
-				double_hit: kind === 'double' ? { frame: second, ratio } : null,
+				double_hit: kind === 'double' ? { frame: second, peak: round(peak * ratio, 3), ratio } : null,
 				tip_drop_db: tipDrop,
 				tip_warning: tipDrop > imp.checks.tip_warn_db,
 				no_response: r.plan[r.point].responses.map(() => false),
@@ -401,13 +410,13 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			const nextOpen = c.points.findIndex((p, k) => k > r.point && !p.measured);
 			if (auto && nextOpen >= 0) {
 				r.point = nextOpen;
-				r.state = 'armed';
+				r.state = 'arming';
 				r.clock = 0;
 			} else {
 				r.state = 'point_done';
 				r.drivePhase = r.config.mode === 'shaker' ? 'zeroed' : 'idle';
 			}
-		} else if (r.config.mode === 'impact') r.state = 'armed';
+		} else if (r.config.mode === 'impact') r.state = 'arming';
 	}
 
 	function latestHere(r: Run): Hit | null {
@@ -424,6 +433,12 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 		if (r.state === 'starting') {
 			r.state = 'idle';
 			note(r, 'state', 'The station is open; the test is at its first point.');
+		} else if (r.state === 'arming') {
+			r.clock += dt;
+			if (r.clock >= ARMING_S) {
+				r.state = 'armed';
+				r.clock = 0;
+			}
 		} else if (r.state === 'armed') {
 			r.clock += dt;
 			if (r.clock >= HIT_EVERY_S || r.nextKind) {
@@ -574,7 +589,6 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				}
 				hch.push({ values: v, index: d.index, role: 'response', unit: d.unit });
 			});
-			out.hit = { seq: last.seq, point: last.point, rate_hz: fs, channels: hch };
 			const fsv = new Float32Array(lines);
 			const fc = 1 / (width / fs);
 			for (let i = 0; i < lines; i++) {
@@ -583,13 +597,26 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				const dbl = rep.double_hit ? Math.abs(1 + rep.double_hit.ratio * Math.cos((2 * Math.PI * f[i] * (rep.double_hit.frame - pre)) / fs)) : 1;
 				fsv[i] = Math.max(1e-9, (rep.peak * width) / fs) ** 2 * Math.max(1e-6, sinc * sinc) * dbl * dbl;
 			}
-			out.force_spectrum = { frequency_hz: f, values: fsv, unit: `${dofs.references[0]?.unit ?? ''}²/Hz` };
-		}
+			const imp = r.check.impact!;
+			out.hit = {
+				point: last.point,
+				n: last.n,
+				seq: last.seq,
+				start_frame: last.start_frame,
+				start_s: round(last.start_frame / fs, 6),
+				samples: n,
+				decimation: 1,
+				step_s: 1 / fs,
+				channels: hch,
+				windows: { force: imp.force_window, exponential: imp.exponential_window ? { tau_s: imp.exponential_window.tau_s, end: imp.exponential_window.end } : null },
+				force_spectrum: { frequency_hz: f, unit: `${dofs.references[0]?.unit ?? ''}^2/Hz`, values: fsv, tip_drop_db: rep.tip_drop_db }
+			};
+		} else if (impact) out.hit = null;
 		if (!impact && avg > 0) {
-			out.reference_spectra = {
+			out.references = {
 				frequency_hz: f,
-				unit: `${dofs.references[0]?.unit ?? ''}²/Hz`,
-				references: dofs.references.map((_, qi) => ({ reference: qi, values: Float32Array.from(f, (x) => 0.02 * (1 + 0.3 * qi) * (1 + (scatter * 2) * (noise() - 0.5)) * (1 / (1 + (x / hi) ** 8))) }))
+				averages: avg,
+				autospectra: dofs.references.map((q, qi) => ({ index: q.index, unit: `${q.unit}^2/Hz`, values: Float32Array.from(f, (x) => 0.02 * (1 + 0.3 * qi) * (1 + (scatter * 2) * (noise() - 0.5)) * (1 / (1 + (x / hi) ** 8))) }))
 			};
 		}
 		return out;
@@ -601,8 +628,10 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 		return run;
 	}
 
-	function needLive(verb: string): Run {
+	/** A live run; a verb that starts something new is refused `ending` once an end or an abort is asked. */
+	function needLive(verb: string, starts = false): Run {
 		const r = need();
+		if (starts && r.ending) refuse('ending', `The test is ending: ${verb} starts nothing new after an end or an abort.`);
 		if (r.state === 'configured') refuse('not_live', `${verb} waits for the test to start.`);
 		if (r.state === 'finished') refuse('run_finished', `The test has ended; ${verb.toLowerCase()} does not apply.`);
 		if (r.state === 'starting' || r.state === 'stopping') refuse('wrong_state', `${verb} does not apply while the test is ${r.state}.`, { state: r.state });
@@ -674,7 +703,8 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 					end: null,
 					drivePhase: 'idle',
 					log: [],
-					rand: rng(runCount * 977 + 11)
+					rand: rng(runCount * 977 + 11),
+					ending: false
 				};
 				note(run, 'configure', `Set up: ${config.mode} mode, ${res.plan.length} ${res.plan.length === 1 ? 'point' : 'points'}, ${res.check.averages} averages.`);
 				emit();
@@ -715,12 +745,12 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			},
 			'modal_test.arm': (_p, conn) => {
 				host.own(conn);
-				const r = needLive('Arm');
+				const r = needLive('Arm', true);
 				needImpact(r, 'Arm');
-				if (r.state === 'armed') refuse('already', 'The test is already armed.');
+				if (r.state === 'armed' || r.state === 'arming') refuse('already', 'The test is already armed.');
 				if (r.state === 'point_done') refuse('point_done', 'This point has its hits: move to the next point, or undo one.');
 				if (r.state === 'captured') refuse('wrong_state', 'Accept or reject the captured hit first.', { state: r.state });
-				r.state = 'armed';
+				r.state = 'arming';
 				r.clock = 0;
 				note(r, 'arm', `Armed at point ${r.point + 1}.`);
 				emit();
@@ -730,7 +760,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				host.own(conn);
 				const r = needLive('Disarm');
 				needImpact(r, 'Disarm');
-				if (r.state !== 'armed') refuse('wrong_state', 'The test is not armed.', { state: r.state });
+				if (r.state !== 'armed' && r.state !== 'arming') refuse('wrong_state', 'The test is not armed.', { state: r.state });
 				r.state = 'idle';
 				note(r, 'arm', 'Disarmed.');
 				emit();
@@ -738,7 +768,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			},
 			'modal_test.accept': (_p, conn) => {
 				host.own(conn);
-				const r = needLive('Accept');
+				const r = needLive('Accept', true);
 				needImpact(r, 'Accept');
 				const h = latestHere(r);
 				if (!h) refuse('no_hit', 'No hit at this point to accept.');
@@ -763,7 +793,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				h.status = 'rejected';
 				h.reason = 'operator';
 				note(r, 'operator', `Hit ${h.n} rejected by the operator.`);
-				if (r.state === 'captured' || r.state === 'point_done' || was === 'accepted') r.state = 'armed';
+				if (r.state === 'captured' || r.state === 'point_done' || was === 'accepted') r.state = 'arming';
 				emit();
 				return answer(r);
 			},
@@ -774,6 +804,18 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				if (!h) refuse('nothing_to_undo', 'Nothing accepted at this point to undo.');
 				h.status = 'undone';
 				note(r, 'operator', `${r.config.mode === 'impact' ? 'Hit' : 'Frame'} ${h.n} undone.`);
+				if (r.state === 'point_done') r.state = 'idle';
+				emit();
+				return answer(r);
+			},
+			'modal_test.clear_point': (_p, conn) => {
+				host.own(conn);
+				const r = needLive('Clear Point');
+				if (r.state === 'measuring' || r.state === 'captured') refuse('busy', r.state === 'measuring' ? 'Stop driving before clearing the point.' : 'Accept or reject the captured hit first.', { state: r.state });
+				const taken = r.hits.filter((x) => x.point === r.point && x.status === 'accepted');
+				if (!taken.length) refuse('nothing_to_undo', 'Nothing accepted at this point to clear.');
+				for (const h of taken) h.status = 'undone';
+				note(r, 'operator', `Point ${r.point + 1} cleared: ${taken.length} taken out.`);
 				if (r.state === 'point_done') r.state = 'idle';
 				emit();
 				return answer(r);
@@ -791,7 +833,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			},
 			'modal_test.drive_start': (_p, conn) => {
 				host.own(conn);
-				const r = needLive('Start Driving');
+				const r = needLive('Start Driving', true);
 				if (r.config.mode !== 'shaker') refuse('not_in_mode', 'Start Driving is a shaker verb; this test is an impact test.', { mode: r.config.mode });
 				if (r.state === 'measuring') refuse('already', 'The shakers are already driving.');
 				if (r.state === 'point_done') refuse('point_done', 'This point has its frames: move to the next point, or undo.');
@@ -814,7 +856,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			},
 			'modal_test.sim_hit': (params, conn) => {
 				host.own(conn);
-				const r = needLive('Simulated Hit');
+				const r = needLive('Simulated Hit', true);
 				needImpact(r, 'Simulated Hit');
 				if (r.station.class !== 'sim') refuse('not_simulated', 'A simulated hit needs the simulator station.');
 				const kind = params.kind;
@@ -825,6 +867,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			'modal_test.end': () => {
 				const r = need();
 				if (!isLive()) refuse('not_live', 'The test is not running.');
+				r.ending = true;
 				if (r.state !== 'stopping') {
 					r.state = 'stopping';
 					r.drivePhase = r.config.mode === 'shaker' ? 'stopping' : 'idle';
@@ -837,6 +880,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 			'modal_test.abort': () => {
 				const r = need();
 				if (!isLive()) refuse('not_live', 'The test is not running.');
+				r.ending = true;
 				finish(r, 'aborted', 'Aborted by the operator.');
 				return stateOf(r);
 			},
@@ -845,7 +889,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				const r = need();
 				if (r.state !== 'finished') refuse('wrong_state', 'A new test starts from an ended one.', { state: r.state });
 				const id = `modal-test-${String(++runCount).padStart(4, '0')}`;
-				run = { ...r, id, folder: host.recordFolder?.(id) ?? `runs/${id}`, state: 'configured', point: 0, hits: [], seq: 0, nextKind: null, clock: 0, t: 0, target: null, end: null, drivePhase: 'idle', log: [] };
+				run = { ...r, id, folder: host.recordFolder?.(id) ?? `runs/${id}`, state: 'configured', point: 0, hits: [], seq: 0, nextKind: null, clock: 0, t: 0, target: null, end: null, drivePhase: 'idle', log: [], ending: false };
 				note(run, 'configure', 'A new test from the same setup.');
 				emit();
 				return stateOf(run);

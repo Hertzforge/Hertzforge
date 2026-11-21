@@ -41,7 +41,7 @@
 			<div><dt>Estimator</dt><dd>{c.estimator}</dd></div>
 			<div><dt>Plan</dt><dd class="num" data-testid="mt-summary-points">{c.points.length} {c.points.length === 1 ? 'point' : 'points'}, {c.references.length} {c.references.length === 1 ? 'reference' : 'references'}, {c.responses.length} {c.responses.length === 1 ? 'response' : 'responses'}</dd></div>
 			{#if c.impact}
-				<div><dt>Trigger</dt><dd class="num">{num(c.impact.trigger.level, c.impact.trigger.unit)}, {c.impact.trigger.pretrigger_frames} samples before</dd></div>
+				<div><dt>Trigger</dt><dd class="num">{num(c.impact.trigger.level, c.impact.trigger.unit)}, {c.impact.trigger.polarity} hammer, {c.impact.trigger.pretrigger_frames} samples before</dd></div>
 				<div><dt>Checks</dt><dd>Overload {c.impact.checks.overload}; double hit {c.impact.checks.double_hit}; tip over {num(c.impact.checks.tip_warn_db, 'dB')}{c.impact.checks.target ? `; target ${num(c.impact.checks.target.peak, c.impact.checks.target.unit)} within ${num(c.impact.checks.target.tolerance_pct)}%, never rejects` : ''}</dd></div>
 				{#if c.impact.exponential_window}<div><dt>Exponential window</dt><dd class="num">tau {num(c.impact.exponential_window.tau_s, 's')}</dd></div>{/if}
 			{/if}

@@ -5,7 +5,8 @@
  * The run bar's verbs: Apply Setup, Start (the station opens and the test is ready at its first
  * point), New Run, Stop (the controlled end: in shaker mode the shared stop ramp) and Abort. Stop
  * and Abort need no control; everything else does. The Measure screen's own verbs (Arm, Accept,
- * Reject, Undo, Previous, Next, Start and Stop Driving, Use This Hit as the Target, End Test) are
+ * Reject, Undo, Clear Point, Previous, Next, Start and Stop Driving, Use This Hit as the Target,
+ * End Test) are
  * gated here too. Every rule is the control service's: a verb offered here can still be refused
  * there, and the screen shows the refusal in the service's words.
  */
@@ -24,7 +25,7 @@ export interface ModalVerbContext {
 }
 
 /** A test is live from its start until it has finished. */
-export const MODAL_LIVE_STATES: ModalRunState[] = ['starting', 'idle', 'armed', 'captured', 'measuring', 'stopping', 'point_done'];
+export const MODAL_LIVE_STATES: ModalRunState[] = ['starting', 'idle', 'arming', 'armed', 'captured', 'measuring', 'stopping', 'point_done'];
 
 export function modalIsLive(run: { state: ModalRunState } | null | undefined): boolean {
 	return !!run && MODAL_LIVE_STATES.includes(run.state);
@@ -72,7 +73,7 @@ export function modalPrimary(ctx: ModalVerbContext): ActionId | null {
 	}
 }
 
-export type ModalVerb = 'arm' | 'disarm' | 'accept' | 'reject' | 'undo' | 'next' | 'previous' | 'target' | 'drive_start' | 'drive_stop' | 'end';
+export type ModalVerb = 'arm' | 'disarm' | 'accept' | 'reject' | 'undo' | 'clear' | 'next' | 'previous' | 'target' | 'drive_start' | 'drive_stop' | 'end';
 
 /** The Measure screen's verbs. */
 export function modalMeasureVerbs(ctx: ModalVerbContext): Record<ModalVerb, ActionState> {
@@ -91,14 +92,16 @@ export function modalMeasureVerbs(ctx: ModalVerbContext): Record<ModalVerb, Acti
 	const accept = gate(impact, 'accept the hit', settled ?? noHit ?? (latest?.status === 'accepted' ? 'This hit is already accepted.' : latest?.status === 'undone' ? 'This hit was undone.' : null));
 	const reject = gate(impact, 'reject the hit', settled ?? noHit ?? (latest?.status === 'rejected' ? 'This hit is already rejected.' : latest?.status === 'undone' ? 'This hit was undone.' : null));
 	const undo = gate(live, 'undo', settled ?? ((r?.counts.point.accepted ?? 0) > 0 ? null : `Nothing accepted at this point to undo.`));
+	// Clear Point takes every accepted average of this point out; not while a hit waits or the shakers average
+	const clear = gate(live, 'clear the point', settled ?? (state === 'measuring' ? 'Stop driving first.' : state === 'captured' ? 'Accept or reject the hit first.' : (r?.counts.point.accepted ?? 0) > 0 ? null : 'Nothing accepted at this point to clear.'));
 	const moving = settled ?? (state === 'measuring' ? 'Stop driving first.' : null);
 	const next = gate(live, 'move to the next point', moving);
 	const previous = gate(live, 'move to the previous point', moving);
-	const arm = gate(impact && state !== 'armed', 'arm', settled ?? (state === 'point_done' ? 'This point has its hits: move to the next point, or undo one.' : state === 'captured' ? 'Accept or reject the hit first.' : null));
-	const disarm = gate(impact && state === 'armed', 'disarm', null);
+	const arm = gate(impact && state !== 'armed' && state !== 'arming', 'arm', settled ?? (state === 'point_done' ? 'This point has its hits: move to the next point, or undo one.' : state === 'captured' ? 'Accept or reject the hit first.' : null));
+	const disarm = gate(impact && (state === 'armed' || state === 'arming'), 'disarm', null);
 	const target = gate(impact, 'set the target', settled ?? (latest?.report || latest?.peak !== undefined ? null : 'Take a hit first.'));
 	const drive_start = gate(shaker && state !== 'measuring', 'start driving', settled ?? (state === 'point_done' ? 'This point has its frames: move to the next point, or undo.' : null));
 	const drive_stop = gate(shaker && state === 'measuring', 'stop driving', null);
 	const end = gate(live, 'end the test', state === 'stopping' ? 'The test is already ending.' : null, false);
-	return { arm, disarm, accept, reject, undo, next, previous, target, drive_start, drive_stop, end };
+	return { arm, disarm, accept, reject, undo, clear, next, previous, target, drive_start, drive_stop, end };
 }

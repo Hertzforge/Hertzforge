@@ -205,13 +205,42 @@ describe('the Modal Test store', () => {
 		expect(await modal.verb('drive_start')).toBe(true);
 		await until(() => (modal.now?.counts.point.accepted ?? 0) >= 2);
 		expect(modal.now?.counts.unit).toBe('frames');
-		await until(() => modal.live?.reference_spectra?.references.length === 2);
+		await until(() => modal.live?.references?.autospectra.length === 2);
+		expect(modal.live?.references?.autospectra.map((a) => a.index)).toEqual([1, 4]);
 		await until(() => modal.now?.state === 'point_done', 15000);
 		expect(modal.now?.counts.point).toMatchObject({ accepted: 4, asked: 4 });
 		expect(await modal.stop()).toBe(true);
 		await until(() => modal.now?.state === 'finished');
 		expect(modal.now?.end?.outcome).toBe('ended');
 		expect(workspaceForRun('modal_test')).toBe('modal');
+	});
+
+	it('modal test arms through arming, draws the own block of the hit with its windows, clears a point and refuses what starts after an end', async () => {
+		const { modal } = await impactLive('auto', 3);
+		await modal.simHit('double');
+		expect(await modal.verb('arm')).toBe(true);
+		expect(modal.now?.state).toBe('arming');
+		expect(modal.verbs.disarm.enabled).toBe(true);
+		await until(() => (modal.now?.hits.length ?? 0) === 1);
+		const d = modal.now?.latest?.report?.double_hit;
+		expect(d && d.peak > 0 && d.ratio > 0).toBe(true);
+		await until(() => modal.live?.hit?.seq === modal.now?.latest?.seq);
+		expect(modal.live?.hit?.channels.map((c) => c.role)).toEqual(['reference', ...modal.now!.point_dofs.responses.map(() => 'response')]);
+		expect(modal.live?.hit?.windows.force).toEqual(modal.runCheck?.impact?.force_window);
+		expect(modal.live?.hit?.force_spectrum.tip_drop_db).toBe(modal.now?.latest?.report?.tip_drop_db);
+		await modal.simHit('clean');
+		await until(() => (modal.now?.counts.point.accepted ?? 0) === 1);
+		await until(() => modal.now?.state === 'armed');
+		expect(await modal.verb('disarm')).toBe(true);
+		expect(modal.verbs.clear.enabled).toBe(true);
+		expect(await modal.verb('clear')).toBe(true);
+		expect(modal.now?.counts.point.accepted).toBe(0);
+		expect(modal.now?.hits.filter((h) => h.status === 'undone')).toHaveLength(1);
+		expect(modal.verbs.clear.enabled).toBe(false);
+		// once an end is asked nothing new starts: the service's refusal, in the screen's words
+		await modal.control.request('modal_test.end');
+		const err = (await modal.control.request('modal_test.arm').catch((e: unknown) => e)) as { reason?: string };
+		expect(['ending', 'run_finished']).toContain(err.reason);
 	});
 
 	it('modal test refuses an observer the operator verbs and lets it end the test', async () => {

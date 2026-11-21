@@ -59,6 +59,14 @@
 				<NumberField id="mt-dbl" label="Double hit over" unit="% of peak" step={1} min={0} max={100} bind:value={i.double_hit_pct} errors={errs('impact.double_hit_pct')} disabled={locked} testid="mt-double" help="A later impact over this share of the peak rejects the hit." />
 				<NumberField id="mt-tip" label="Tip warning over" unit="dB" step={1} min={0} bind:value={i.tip_warn_db} errors={errs('impact.tip_warn_db')} disabled={locked} testid="mt-tip" help="The force spectrum's drop across the band that flags the tip as too soft." />
 			</div>
+			<div class="pol">
+				<span class="lbl" id="mt-pol-l">Hammer polarity</span>
+				<div class="aq-seg" role="radiogroup" aria-labelledby="mt-pol-l">
+					<button type="button" role="radio" aria-checked={i.polarity === 'positive'} disabled={locked} onclick={() => (i.polarity = 'positive')} data-testid="mt-polarity-positive">Positive</button>
+					<button type="button" role="radio" aria-checked={i.polarity === 'negative'} disabled={locked} onclick={() => (i.polarity = 'negative')} data-testid="mt-polarity-negative">Negative</button>
+				</div>
+				<p class="help" data-testid="mt-watches">{ci?.trigger.watches ? `The trigger watches ${ci.trigger.watches}.` : 'The sign of the hammer\'s force: the trigger, the peak and the double hit are judged in it. A hammer whose gauge reads negative on impact is Negative.'}</p>
+			</div>
 		</section>
 
 		<section class="aq-panel" aria-labelledby="mt-acc" data-testid="mt-accept">
@@ -173,6 +181,15 @@
 </div>
 
 <style>
+	.pol {
+		margin-top: var(--sp-3);
+	}
+
+	.pol .lbl {
+		display: block;
+		margin-bottom: var(--sp-1);
+	}
+
 	.stack {
 		display: flex;
 		flex-direction: column;

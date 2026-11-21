@@ -7,9 +7,9 @@
  * windows in samples, the exponential window's time constant and the damping it adds, the FRFs,
  * the coherence. The shell sends the operator's choices and draws what comes back.
  *
- * Members marked "when the service sends it" are members the screen reads once the service sends
- * them (the latest hit's own block, the channel each trace is, the force spectrum and the
- * reference autospectra); the screen shows what it has and says what it lacks without them.
+ * The live frame names every trace's row, role and unit, carries the latest hit's own block with
+ * the windows it was taken with and its force spectrum (impact), and the reference autospectra
+ * as the average builds (shaker).
  */
 import type { DataSource, ReportItem, StationClass } from './types';
 
@@ -39,9 +39,13 @@ export interface ModalPoint {
 /** The points as a list, or filled by a start, a step and a count. */
 export type ModalPoints = ModalPoint[] | { start?: number; step?: number; count: number };
 
+/** The hammer's sign: the trigger watches the force rising through the level in it. */
+export type ModalPolarity = 'positive' | 'negative';
+
 export interface ModalImpactConfig {
 	/** The trigger level, percent of the hammer row's range. */
 	trigger_level_pct?: number;
+	polarity?: ModalPolarity;
 	/** Percent of the block before the trigger. */
 	pretrigger_pct?: number;
 	holdoff_blocks?: number;
@@ -105,7 +109,8 @@ export interface ModalRowDof {
 
 export interface ModalCheckImpact {
 	drives: string;
-	trigger: { level: number; unit: string; pretrigger_frames: number };
+	/** `level` is signed, in the hammer's polarity; `watches` says what the trigger watches, in words. */
+	trigger: { level: number; unit: string; polarity: ModalPolarity; watches: string; pretrigger_frames: number };
 	holdoff_blocks: number;
 	accept: ModalAcceptMode;
 	auto_advance: boolean;
@@ -182,9 +187,9 @@ export interface ModalTestInvalidDetail {
 
 // --- the state -------------------------------------------------------------------------------
 
-export type ModalRunState = 'none' | 'configured' | 'starting' | 'idle' | 'armed' | 'captured' | 'measuring' | 'stopping' | 'point_done' | 'finished';
+export type ModalRunState = 'none' | 'configured' | 'starting' | 'idle' | 'arming' | 'armed' | 'captured' | 'measuring' | 'stopping' | 'point_done' | 'finished';
 export type ModalDrivePhase = 'idle' | 'waiting' | 'ramping' | 'driving' | 'stopping' | 'zeroed';
-export type ModalOutcome = 'ended' | 'aborted' | 'response_abort' | 'drive_underrun' | 'drive_ceiling' | 'source_failed' | 'input_overload' | 'loop_faulted' | 'loop_panicked' | 'arm_refused';
+export type ModalOutcome = 'ended' | 'aborted' | 'response_abort' | 'drive_underrun' | 'drive_ceiling' | 'source_failed' | 'input_overload' | 'loop_faulted' | 'loop_panicked' | 'run_panicked' | 'run_not_started' | 'arm_refused';
 export type ModalTileStatus = 'pending' | 'accepted' | 'rejected' | 'undone';
 export type ModalRejectReason = 'overload' | 'double_hit' | 'operator';
 export type ModalTargetVerdict = 'high' | 'low' | 'on_target';
@@ -222,9 +227,10 @@ export interface ModalHitReport {
 	peak_frame: number;
 	/** The overloaded channels: 0 the reference, 1 + k response k. */
 	overloaded: number[];
-	/** The second impact: its frame and its peak over the main peak. */
-	double_hit: { frame: number; ratio: number } | null;
-	tip_drop_db: number;
+	/** The second impact: its top's frame from the block's start, its value and its ratio to the peak. */
+	double_hit: { frame: number; peak: number; ratio: number } | null;
+	/** Null when the spectrum at the band's top is zero (an unbounded drop). */
+	tip_drop_db: number | null;
 	tip_warning: boolean;
 	/** Per response: true when it showed no response, null when not judged. */
 	no_response: (boolean | null)[];
@@ -239,10 +245,10 @@ export interface ModalHitReport {
 	target_verdict?: ModalTargetVerdict;
 }
 
-/** The latest hit: its tile, its point and its report. */
+/** The latest hit: its tile, its point and its report (impact; a shaker frame's has neither). */
 export interface ModalLatest extends ModalTile {
-	point: number;
-	report: ModalHitReport | null;
+	point?: number;
+	report?: ModalHitReport | null;
 }
 
 export interface ModalTestEnd {
@@ -288,11 +294,11 @@ export const MODAL_HIT_KINDS: readonly ModalHitKind[] = ['clean', 'double', 'ove
 
 // --- the live frame --------------------------------------------------------------------------
 
-export type ModalTraceRole = 'reference' | 'response' | 'drive';
+export type ModalTraceRole = 'reference' | 'response' | 'monitor' | 'drive';
 
 export interface ModalTrace {
 	values: Float32Array | number[];
-	/** The row's table index, its role and unit, when the service sends them. */
+	/** The row's table index, its role and unit. */
 	index?: number;
 	role?: ModalTraceRole;
 	unit?: string;
@@ -311,12 +317,38 @@ export interface ModalTestLive {
 		pairs: { response: number; reference: number; magnitude: Float32Array | number[]; phase_deg: Float32Array | number[] }[];
 		coherence: { response: number; values: Float32Array | number[] }[];
 	};
-	/** The latest hit's own block from its first frame, when the service sends it. */
-	hit?: { seq: number; point: number; rate_hz: number; channels: ModalTrace[] } | null;
-	/** The latest hit's force autospectrum, when the service sends it. */
-	force_spectrum?: { frequency_hz: Float32Array | number[]; values: Float32Array | number[]; unit: string } | null;
-	/** The reference autospectra as the average builds (shaker), when the service sends them. */
-	reference_spectra?: { frequency_hz: Float32Array | number[]; unit: string; references: { reference: number; values: Float32Array | number[] }[] } | null;
+	/** Impact: the latest hit's own block (null until a hit is taken). */
+	hit?: ModalLiveHit | null;
+	/** Shaker: each reference's autospectrum in the present average. */
+	references?: ModalLiveReferences;
+}
+
+/** The latest hit's own block, references then responses, from the block's start. */
+export interface ModalLiveHit {
+	point: number;
+	n: number;
+	seq: number;
+	start_frame: number;
+	start_s: number;
+	/** The block's length in samples; the values may be fewer when decimated. */
+	samples: number;
+	/** 1: every sample; otherwise each interval of `decimation` samples sends its two extremes. */
+	decimation: number;
+	/** The time between the values sent. */
+	step_s: number;
+	channels: ModalTrace[];
+	/** The windows it was taken with, in samples from the block's start; null when off. */
+	windows: {
+		force: { pre_frames: number; width_frames: number; fall_frames: number } | null;
+		exponential: { tau_s: number; end: number } | null;
+	};
+	force_spectrum: { frequency_hz: Float32Array | number[]; unit: string; values: Float32Array | number[]; tip_drop_db: number | null };
+}
+
+export interface ModalLiveReferences {
+	frequency_hz: Float32Array | number[];
+	averages: number;
+	autospectra: { index?: number; unit?: string; values: Float32Array | number[] }[];
 }
 
 // --- the log ---------------------------------------------------------------------------------
@@ -359,4 +391,5 @@ export type ModalRefusalReason =
 	| 'rate_mismatch'
 	| 'already'
 	| 'no_such_point'
-	| 'nothing_to_undo';
+	| 'nothing_to_undo'
+	| 'ending';

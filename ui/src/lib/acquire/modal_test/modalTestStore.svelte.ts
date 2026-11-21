@@ -107,6 +107,7 @@ const VERB_METHOD: Record<Exclude<ModalVerb, 'end'>, string> = {
 	accept: 'modal_test.accept',
 	reject: 'modal_test.reject',
 	undo: 'modal_test.undo',
+	clear: 'modal_test.clear_point',
 	next: 'modal_test.next',
 	previous: 'modal_test.previous',
 	target: 'modal_test.target_from_hit',
@@ -120,6 +121,7 @@ const VERB_WORDS: Record<ModalVerb, string> = {
 	accept: 'Accept',
 	reject: 'Reject',
 	undo: 'Undo',
+	clear: 'Clear Point',
 	next: 'Next Point',
 	previous: 'Previous Point',
 	target: 'Use This Hit as the Target',
@@ -689,7 +691,7 @@ export class ModalTestStore {
 		if (a === 'arm') {
 			const s = this.now?.state;
 			if (this.now?.mode !== 'impact') return null;
-			return s === 'armed' ? 'disarm' : 'arm';
+			return s === 'armed' || s === 'arming' ? 'disarm' : 'arm';
 		}
 		return a;
 	}

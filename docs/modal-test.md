@@ -74,19 +74,27 @@ before the test starts.
 4. **Set the trigger and the checks.** In Impact: the trigger level, as a percent of the hammer
    row's range; the pretrigger, the part of the block kept before the trigger; the holdoff, the
    blocks after a hit before the next can trigger; the double hit threshold; and the tip warning.
-   Choose **Automatic** or **Manual** accept, and the windows (see Windows).
+   Set **Hammer polarity** to the sign the force gauge reads on impact: the trigger watches the
+   force rising through the level in that sign, and the peak and the double hit are judged in it.
+   Once the setup is checked, the section says in the control service's words what the trigger
+   watches. Choose **Automatic** or **Manual** accept, and the windows (see Windows).
 5. **Set a force target, if you want one.** **Flag each hit against a target peak** with a peak
    and a tolerance in percent. A hit outside it is flagged High or Low with its percent; it is
    never rejected for that.
 6. **Proceed to Run, then Start.** The station opens and the counter shows "0 of 5" at the first
    point.
-7. **Hit the structure.** Each hit is drawn: the force and the response in time, with the force
-   window, and the force spectrum. Its tile says Accepted, Rejected or Waiting, with its peak, its
-   flags and its reason. In automatic mode, an overload or a double hit is rejected and any other
-   hit accepted; in manual mode, each hit waits for you.
+7. **Arm, then hit the structure.** **Space** arms. The screen says **Arming** until the
+   pre-trigger has filled, then **Waiting for Hit**: hit only then, since the trigger is live only
+   once a whole pre-trigger is in hand. The test arms again by itself after each hit and hold-off,
+   through Arming each time. Each hit is drawn: the force and the response in time, with the
+   windows over them, and the force spectrum. Its tile says Accepted, Rejected or Waiting, with
+   its peak, its flags and its reason. In automatic mode, an overload or a double hit is rejected
+   and any other hit accepted; in manual mode, each hit waits for you.
 8. **Accept or reject.** Press **Enter** or **A** to accept the latest hit, **Backspace** or **R**
    to reject it, **U** to undo the last accepted one. In automatic mode these override the
-   service's verdict on the latest hit until the next one lands.
+   service's verdict on the latest hit until the next one lands. **Clear Point** takes every
+   accepted hit of the point out at once and opens the point again; it asks first, and the tiles
+   stay, marked undone.
 9. **Move on.** When the counter reaches "5 of 5", the point's FRF and coherence are saved. Press
    the **Right arrow** for the next point and the **Left arrow** for the previous one, or click a
    point in the list. With **Move to the next point when a point has its hits** on, the test moves
@@ -106,10 +114,13 @@ Every count on the screen (the counter, the tiles, the points measured) is the c
 own: the screen keeps no count of its own. On the simulator, **Simulated Hit** makes the next hit
 clean, double or overloaded, to try the checks without a hammer.
 
-<!-- Depends on the control service sending the hit's own block and the force spectrum with each hit. -->
-The force plot shows the latest hit's own block. The force spectrum shows how much of the band the
-tip reaches: a spectrum that falls by more than the tip warning across the band is flagged, and a
-harder tip reaches higher.
+The force and response plots show the latest hit's own block, from its first sample, with the
+windows it was taken with drawn over them: the force window over the force, and the exponential
+window over both. A double hit's second impact is marked on the force trace where the control
+service found it, and said in words with its size against the peak. The force spectrum shows how
+much of the band the tip reaches, with the tip's roll-off, the drop from the spectrum's largest
+value to its value at the band's top: a drop over the tip warning is flagged, and a harder tip
+reaches higher.
 
 ## Shaker
 
@@ -118,14 +129,16 @@ own drive row. Choose **Shaker** in Mode & Acquisition. In the Shaker section, a
 each shaker (drive rows are added in Station & Channels), its level, the source and the drive
 ceiling. On the Measure screen, **Start Driving** ramps the drive up and averages frames until the
 point has its averages; the drive then ramps down, 40 dB over 3 s, and goes to zero. **Stop
-Driving** stops it sooner.
-<!-- Depends on the control service sending the reference autospectra in the live frame. -->
+Driving** part way through a point is a pause: the frames taken stay, and **Start Driving** goes
+on with the same average. **U** takes the latest frame out, and **Clear Point** every frame of
+the point.
+
 While the shakers drive, the Measure screen draws the forces, the responses and the drives in
 time, the reference autospectra, and the FRF with its phase and coherence as the average builds.
 
 | Source | What it plays | Analysis window | Several shakers |
 |---|---|---|---|
-| Random | A new random record every frame, overlapped by 0 or 50% | Hann | Yes |
+| Random | A new random record every frame, overlapped by 0, 50 or 75% | Hann | Yes |
 | Burst Random | Random for part of each frame (the burst), then silence, so the response dies out inside the frame | None | Yes |
 | Pseudo Random | One random frame, repeated | None | No |
 | Periodic Random | A new periodic record each frame, played after the delay frames so the response is steady | None | Yes |
@@ -174,8 +187,12 @@ the others need none.
 Each hit is checked before it is counted:
 
 - **Overload.** Any channel at 98% of its range or more, with the channel named.
-- **Double hit.** A second force over the double hit threshold, as a percent of the peak, after
-  the first pulse has fallen below 5% of its peak.
+- **Double hit.** A second impact after the first pulse has fallen below 5% of its peak, judged
+  in the hammer's polarity: a lobe of the force in the hammer's sign whose top is over the
+  threshold and larger than the opposite lobe just before it. The threshold is the larger of the
+  double hit percent of the peak and six times the noise before the trigger, so ringing, an
+  undershoot of the other sign and noise are not double hits. A second impact after the force
+  window still is.
 - **No response.** A response that does not rise well above its level before the trigger is
   flagged. Without a pretrigger this is not judged, and the check warns.
 - **Tip.** The force spectrum's drop from its largest value to the band's top line, against the
@@ -206,7 +223,12 @@ exponential window's added damping.
   at once.
 - In shaker mode, an input row past one of its abort limits, an input overload on a row with abort
   limits, a sample over the drive ceiling, a drive not made in time and a failure of the drive
-  source end the run with the drive at zero.
+  source end the run with the drive at zero; a failed source zeroes the drive on the very next
+  sample.
+- An internal error in the test, or a test that could not begin, ends the run with the emergency
+  stop. The end card says which, and what was kept: every point measured before it.
+- Once End Test or Abort is asked, nothing new starts: Arm, Accept, Start Driving and a simulated
+  hit are refused, and the screen says the test is ending.
 
 ## What a Run Saves
 

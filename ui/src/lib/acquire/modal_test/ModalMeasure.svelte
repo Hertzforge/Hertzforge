@@ -3,10 +3,11 @@
 	 * The Measure screen, read at arm's length with a hammer in one hand: the point list with the
 	 * selected point marked and Previous and Next; the state in large words; the counter of accepted
 	 * hits against the averages asked, the rejected beside it, and the dataset's totals; a tile for
-	 * every hit at this point; the latest hit's force and response with the force window over them
-	 * and a second impact marked; the force target's High or Low flag with the service's percent and
-	 * a force-level bar with the target band; the force spectrum; the FRF magnitude, phase and
-	 * coherence as the average builds; and large Accept and Reject buttons with their keys. In
+	 * every hit at this point; the latest hit's own block, force and response, with the force window
+	 * and the exponential window it was taken with over them and a second impact marked; the force target's High or Low flag with the service's percent and
+	 * a force-level bar with the target band; the force spectrum with the tip's roll-off; the FRF magnitude, phase and
+	 * coherence as the average builds; large Accept and Reject buttons with their keys; and Clear Point,
+	 * which asks first. In
 	 * shaker mode: Start and Stop Driving, the traces, the reference autospectra, the FRF and the
 	 * frame counter. Every count, flag and percent is the control service's; this screen draws them.
 	 *
@@ -24,8 +25,8 @@
 	import { MODAL_KEY_WORDS } from './modalTestKeys';
 	import type { ModalTestStore } from './modalTestStore.svelte';
 	import type { ModalVerb } from './modalTestVerbs';
-	import { forceSpectrumView, frfViews, hitViews, referenceSpectraView, roleView, dofName } from './modalTestViews';
-	import { counterWords, MODAL_DRIVE_PHASE_WORDS, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
+	import { forceSpectrumView, frfViews, hitViews, referenceSpectraView, roleView, dofName, secondImpactWords } from './modalTestViews';
+	import { counterWords, MODAL_DRIVE_PHASE_WORDS, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, refusalWords, modalStateHint, modalStateWords, num, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 	interface Props {
 		modal: ModalTestStore;
@@ -49,7 +50,9 @@
 	const end = $derived(s?.state === 'finished' ? s.end : null);
 	const record = $derived(modal.record);
 
-	const hit = $derived(impact ? hitViews(live, latest, check?.impact, dofs, modal.shown.response) : null);
+	const hit = $derived(impact ? hitViews(live, latest, dofs, modal.shown.response) : null);
+	const second = $derived(secondImpactWords(latest?.report?.double_hit, live?.time.rate_hz ?? 0, unit));
+	const tipDrop = $derived(live?.hit?.force_spectrum.tip_drop_db ?? latest?.report?.tip_drop_db ?? null);
 	const frf = $derived(frfViews(live, dofs, modal.shown.response, modal.shown.reference));
 	const fspec = $derived(impact ? forceSpectrumView(live) : null);
 	const refSpectra = $derived(!impact ? referenceSpectraView(live, dofs) : null);
@@ -103,8 +106,21 @@
 		if (modal.onKey(e)) e.preventDefault();
 	}
 
+	/** Clear Point asks first: it takes every accepted average of the point out. */
+	let clearing = $state(false);
+	$effect(() => {
+		// a new point, or nothing left to clear, closes the question
+		void s?.point;
+		if (!verbs.clear.enabled) clearing = false;
+	});
+	function confirmClear(e: Event) {
+		(e.currentTarget as HTMLElement | null)?.blur();
+		clearing = false;
+		void modal.verb('clear');
+	}
+
 	const SIM_WORDS: Record<ModalHitKind, string> = { clean: 'Clean', double: 'Double', overload: 'Overload' };
-	const armVerb = $derived<ModalVerb>(s?.state === 'armed' ? 'disarm' : 'arm');
+	const armVerb = $derived<ModalVerb>(s?.state === 'armed' || s?.state === 'arming' ? 'disarm' : 'arm');
 </script>
 
 <svelte:window {onkeydown} />
@@ -116,6 +132,23 @@
 			<span class="word">{label}</span>
 			{#if keys}<span class="keys">{keys}</span>{/if}
 		</button>
+	{/if}
+{/snippet}
+
+{#snippet clearPoint()}
+	{@const g = verbs.clear}
+	{#if g.visible}
+		{#if clearing}
+			<div class="ask" role="alertdialog" aria-labelledby="mt-clear-q" data-testid="mt-clear-ask">
+				<p id="mt-clear-q">Take all {s?.counts.point.accepted ?? 0} accepted {impact ? (s?.counts.point.accepted === 1 ? 'hit' : 'hits') : s?.counts.point.accepted === 1 ? 'frame' : 'frames'} at point {(s?.point ?? 0) + 1} out? The point opens again; its tiles stay, marked undone.</p>
+				<div class="row2">
+					<button class="btn danger" onclick={confirmClear} data-testid="mt-clear-yes">Clear Point</button>
+					<button class="btn ghost" onclick={(e) => { (e.currentTarget as HTMLElement).blur(); clearing = false; }} data-testid="mt-clear-no">Keep Them</button>
+				</div>
+			</div>
+		{:else}
+			<button class="btn ghost clear" class:off={!g.enabled} aria-disabled={!g.enabled} title={g.reason ?? 'Take every accepted average of this point out'} onclick={(e) => { (e.currentTarget as HTMLElement).blur(); if (g.enabled) clearing = true; }} data-testid="mt-clear">Clear Point</button>
+		{/if}
 	{/if}
 {/snippet}
 
@@ -174,6 +207,20 @@
 			</ol>
 		</section>
 
+		<section class="panel keys" aria-labelledby="mt-keys">
+			<h2 id="mt-keys">Keys</h2>
+			<dl>
+				{#if impact}
+					<div><dt>{MODAL_KEY_WORDS.accept}</dt><dd>Accept the hit</dd></div>
+					<div><dt>{MODAL_KEY_WORDS.reject}</dt><dd>Reject the hit</dd></div>
+				{/if}
+				<div><dt>{MODAL_KEY_WORDS.undo}</dt><dd>Undo the last accepted</dd></div>
+				<div><dt>{MODAL_KEY_WORDS.previous}, {MODAL_KEY_WORDS.next}</dt><dd>Change point</dd></div>
+				{#if impact}<div><dt>{MODAL_KEY_WORDS.arm}</dt><dd>Arm or disarm</dd></div>{/if}
+			</dl>
+			<p class="hint">Not while a text field has the focus.</p>
+		</section>
+
 		<div class="endtest">{@render verbButton('end', 'End Test', null)}</div>
 	</aside>
 
@@ -198,24 +245,23 @@
 			{#if impact}
 				<div class="plot" data-testid="mt-force-plot">
 					{#if hit?.force}
-						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.window} marker={hit.second} />
+						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.forceRegions} marker={hit.second} />
 					{:else}<p class="empty">The force is drawn once a hit lands.</p>{/if}
-					{#if latest?.double_hit}<span class="pflag double" data-testid="mt-double-flag">Double Hit{hit?.second !== null && hit?.second !== undefined ? `: second impact at ${num(hit.second, 's')}` : ''}</span>{/if}
+					{#if latest?.double_hit}<span class="pflag double" data-testid="mt-double-flag">Double Hit{second ? `: ${second}` : ''}</span>{/if}
 					{#if latest?.overload}<span class="pflag overload" data-testid="mt-overload-flag">Overload</span>{/if}
-					{#if hit && hit.force && !hit.ownBlock}<span class="pnote">The most recent frames: the windows are drawn on a hit's own block.</span>{/if}
 				</div>
 				<div class="plot" data-testid="mt-response-plot">
-					{#if hit?.response}<SpectrumPane view={hit.response} live minHeight={150} readout={false} copyButton={false} regions={hit.window} marker={hit.second} />{:else}<p class="empty">The response is drawn once a hit lands.</p>{/if}
+					{#if hit?.response}<SpectrumPane view={hit.response} live minHeight={150} readout={false} copyButton={false} regions={hit.responseRegions} marker={hit.second} />{:else}<p class="empty">The response is drawn once a hit lands.</p>{/if}
 				</div>
 				<div class="plot" data-testid="mt-fspec-plot">
-					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once the service sends it with a hit.</p>{/if}
-					{#if latest?.tip_warning}<span class="pflag tip" data-testid="mt-tip-flag">Tip: the force falls {num(latest.report?.tip_drop_db)} dB across the band. A harder tip reaches higher.</span>{/if}
+					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once a hit lands.</p>{/if}
+					{#if latest?.tip_warning}<span class="pflag tip" data-testid="mt-tip-flag">Tip: the force falls {num(tipDrop)} dB across the band. A harder tip reaches higher.</span>{/if}
 				</div>
 			{:else}
 				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
 				<div class="plot">{#if respTraces}<SpectrumPane view={respTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The responses are drawn while the shakers drive.</p>{/if}</div>
 				<div class="plot">{#if driveTraces}<SpectrumPane view={driveTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The drives are drawn while the shakers drive.</p>{/if}</div>
-				<div class="plot" data-testid="mt-refspec-plot">{#if refSpectra}<SpectrumPane view={refSpectra} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The reference autospectra are drawn once the service sends them.</p>{/if}</div>
+				<div class="plot" data-testid="mt-refspec-plot">{#if refSpectra}<SpectrumPane view={refSpectra} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The reference autospectra are drawn as the average builds.</p>{/if}</div>
 			{/if}
 			<div class="plot" data-testid="mt-frf-plot">{#if frf.magnitude}<SpectrumPane view={frf.magnitude} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The FRF is drawn after the first accepted {impact ? 'hit' : 'frame'}.</p>{/if}</div>
 			<div class="plot">{#if frf.phase}<SpectrumPane view={frf.phase} live minHeight={150} readout={false} copyButton={false} yFixed={[-180, 180]} />{:else}<p class="empty">The phase is drawn with the FRF.</p>{/if}</div>
@@ -242,6 +288,7 @@
 		{#if end}
 			<section class="panel endline {outcomeTone(end.outcome)}" data-testid="mt-end" data-outcome={end.outcome}>
 				<h2 class="outcome">{MODAL_OUTCOME_WORDS[end.outcome] ?? end.outcome}</h2>
+				{#if MODAL_OUTCOME_HELP[end.outcome]}<p class="help" data-testid="mt-end-help">{MODAL_OUTCOME_HELP[end.outcome]}</p>{/if}
 				<p class="hint">{end.message}</p>
 				{#if record}<RunRecordLine {record} ended />{/if}
 				{#if record && opener}<RunOpenActions {record} {opener} />{/if}
@@ -258,9 +305,11 @@
 					{@render verbButton('undo', 'Undo', MODAL_KEY_WORDS.undo)}
 					{@render verbButton(armVerb, armVerb === 'arm' ? 'Arm' : 'Disarm', MODAL_KEY_WORDS.arm)}
 				</div>
-				{#if modal.verbRefusal}<p class="refused" role="alert" data-testid="mt-refusal">{modal.verbRefusal.message}</p>{/if}
+				{@render clearPoint()}
+				{#if modal.verbRefusal}<p class="refused" role="alert" data-testid="mt-refusal" data-reason={modal.verbRefusal.reason}>{refusalWords(modal.verbRefusal)}</p>{/if}
 				<ul class="report">
 					{#each reportLines(latest?.report, unit) as line, i (i)}<li>{line}</li>{/each}
+					{#if second}<li data-testid="mt-second-words">{second}</li>{/if}
 				</ul>
 			</section>
 
@@ -301,7 +350,8 @@
 					{@render verbButton('drive_stop', 'Stop Driving', null)}
 					{@render verbButton('undo', 'Undo', MODAL_KEY_WORDS.undo)}
 				</div>
-				{#if modal.verbRefusal}<p class="refused" role="alert" data-testid="mt-refusal">{modal.verbRefusal.message}</p>{/if}
+				{@render clearPoint()}
+				{#if modal.verbRefusal}<p class="refused" role="alert" data-testid="mt-refusal" data-reason={modal.verbRefusal.reason}>{refusalWords(modal.verbRefusal)}</p>{/if}
 				{#if check?.shaker}
 					<ul class="report">
 						<li>{check.shaker.drives.length} {check.shaker.drives.length === 1 ? 'shaker' : 'shakers'}, {check.estimator}.</li>
@@ -312,19 +362,6 @@
 			</section>
 		{/if}
 
-		<section class="panel keys" aria-labelledby="mt-keys">
-			<h2 id="mt-keys">Keys</h2>
-			<dl>
-				{#if impact}
-					<div><dt>{MODAL_KEY_WORDS.accept}</dt><dd>Accept the hit</dd></div>
-					<div><dt>{MODAL_KEY_WORDS.reject}</dt><dd>Reject the hit</dd></div>
-				{/if}
-				<div><dt>{MODAL_KEY_WORDS.undo}</dt><dd>Undo the last accepted</dd></div>
-				<div><dt>{MODAL_KEY_WORDS.previous}, {MODAL_KEY_WORDS.next}</dt><dd>Change point</dd></div>
-				{#if impact}<div><dt>{MODAL_KEY_WORDS.arm}</dt><dd>Arm or disarm</dd></div>{/if}
-			</dl>
-			<p class="hint">Not while a text field has the focus.</p>
-		</section>
 
 	</aside>
 </div>
@@ -664,14 +701,6 @@
 		text-align: center;
 	}
 
-	.pnote {
-		position: absolute;
-		left: 8px;
-		bottom: 4px;
-		font-size: var(--text-2xs);
-		color: var(--text-3);
-	}
-
 	.empty {
 		margin: auto;
 		padding: var(--sp-3);
@@ -874,6 +903,29 @@
 	.keys dd {
 		margin: 0;
 		color: var(--text-2);
+	}
+
+	.ask {
+		margin-top: var(--sp-2);
+		padding: var(--sp-2);
+		border: 1px solid var(--status-warn);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
+		color: var(--text-1);
+	}
+
+	.btn.clear {
+		margin-top: var(--sp-2);
+	}
+
+	.btn.clear.off {
+		opacity: 0.5;
+	}
+
+	.endline .help {
+		margin: var(--sp-1) 0;
+		font-size: var(--text-sm);
+		color: var(--text-1);
 	}
 
 	.endline .outcome {

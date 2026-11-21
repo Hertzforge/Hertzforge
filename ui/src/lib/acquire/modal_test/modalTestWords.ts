@@ -16,6 +16,8 @@ export function modalStateWords(state: ModalRunState | null | undefined, mode: '
 			return 'Starting';
 		case 'idle':
 			return mode === 'shaker' ? 'Ready to Drive' : 'Ready';
+		case 'arming':
+			return 'Arming';
 		case 'armed':
 			return 'Waiting for Hit';
 		case 'captured':
@@ -42,6 +44,8 @@ export function modalStateHint(state: ModalRunState | null | undefined, mode: 'i
 			return 'The station is opening.';
 		case 'idle':
 			return mode === 'shaker' ? 'Start Driving to measure this point.' : 'Arm (Space) to take hits at this point.';
+		case 'arming':
+			return 'The trigger goes live once the pre-trigger has filled: hit when this says Waiting for Hit.';
 		case 'armed':
 			return accept === 'manual' ? 'Hit the structure. Each hit waits for you to accept or reject it.' : 'Hit the structure. Each hit is judged as it lands; override it with the keys until the next one.';
 		case 'captured':
@@ -68,6 +72,8 @@ export function chipState(state: ModalRunState | null | undefined): 'unconfigure
 		case 'stopping':
 		case 'finished':
 			return state;
+		case 'arming':
+			return 'armed';
 		case 'idle':
 		case 'captured':
 		case 'measuring':
@@ -94,6 +100,7 @@ export const MODAL_PHASE_WORDS: Record<string, string> = {
 	configured: 'Configured',
 	starting: 'Starting',
 	idle: 'Ready',
+	arming: 'Arming',
 	armed: 'Waiting for hit',
 	captured: 'Captured',
 	measuring: 'Driving',
@@ -121,8 +128,23 @@ export const MODAL_OUTCOME_WORDS: Record<ModalOutcome, string> = {
 	input_overload: 'Input Overload',
 	loop_faulted: 'Control Loop Fault',
 	loop_panicked: 'Control Loop Failure',
+	run_panicked: 'The Test Stopped on an Internal Error',
+	run_not_started: 'The Test Could Not Start',
 	arm_refused: 'Start Refused'
 };
+
+/** What an outcome that is no one's choice means for the person at the structure, under its title. */
+export const MODAL_OUTCOME_HELP: Partial<Record<ModalOutcome, string>> = {
+	source_failed: 'The shaker drive stopped being made, so the drive went to zero on the next sample with the emergency stop. Every point measured before it is saved.',
+	run_panicked: 'The test stopped on an internal error and the drive went to zero with the emergency stop. Every point measured before it is saved. The message below says what failed.',
+	run_not_started: 'The test could not begin, so the station was stopped and closed. Nothing was measured. Start the test again.'
+};
+
+/** A refusal of a Measure verb in words: the service's own, except where the screen can say it plainer. */
+export function refusalWords(r: { reason?: string | null; message: string }): string {
+	if (r.reason === 'ending') return 'The test is ending: nothing new starts after End Test or Abort.';
+	return r.message;
+}
 
 export const REJECT_WORDS: Record<ModalRejectReason, string> = {
 	overload: 'Overload',
@@ -222,9 +244,9 @@ export const HIT_WARNING_WORDS: Record<string, string> = {
 export function reportLines(r: ModalHitReport | null | undefined, unit: string): string[] {
 	if (!r) return [];
 	const out: string[] = [`Peak force ${num(r.peak, unit)}.`];
-	if (r.double_hit) out.push(`Double hit: a second impact at ${num(r.double_hit.ratio * 100)}% of the peak.`);
+	if (r.double_hit) out.push(`Double hit: a second impact of ${num(r.double_hit.peak, unit)}, ${num(r.double_hit.ratio * 100)}% of the peak.`);
 	if (r.overloaded.length) out.push(`Overload on ${r.overloaded.map((k) => (k === 0 ? 'the force' : `response ${k}`)).join(', ')}.`);
-	out.push(`Force spectrum falls ${num(r.tip_drop_db)} dB across the band${r.tip_warning ? ', more than the tip limit' : ''}.`);
+	out.push(r.tip_drop_db === null ? 'The force spectrum is zero at the band top.' : `Force spectrum falls ${num(r.tip_drop_db)} dB across the band${r.tip_warning ? ', more than the tip limit' : ''}.`);
 	if (r.no_response.some((x) => x === true)) out.push(HIT_WARNING_WORDS.no_response);
 	if (r.force_window_cut) out.push(HIT_WARNING_WORDS.force_window_cuts_pulse);
 	return out;

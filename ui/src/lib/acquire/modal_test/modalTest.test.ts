@@ -4,13 +4,13 @@
  * configuration it sends, where a service finding lands, and the traces by role.
  */
 import { describe, expect, it } from 'vitest';
-import type { ModalCounts, ModalLatest, ModalTestRun, ModalTile } from '$lib/protocol/modal_test';
+import type { ModalCounts, ModalLatest, ModalTestLive, ModalTestRun, ModalTile } from '$lib/protocol/modal_test';
 import type { ChannelRow } from '$lib/protocol/types';
 import { MODAL_KEY_WORDS, modalKeyAction, takesTyping, type KeyLike } from './modalTestKeys';
 import { defaultModalSetup, fromModalConfig, localErrors, modalItemKey, modalRows, modalSectionOf, modalSections, parsePoints, pointsText, toModalConfig } from './modalTestSetup';
 import { modalBarActions, modalMeasureVerbs, modalPrimary, type ModalVerbContext } from './modalTestVerbs';
-import { tracesOf } from './modalTestViews';
-import { counterWords, num, pct, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
+import { exponentialWeights, forceSpectrumView, forceWindowWeights, hitViews, referenceSpectraView, secondImpactWords, tracesOf } from './modalTestViews';
+import { counterWords, MODAL_OUTCOME_HELP, MODAL_OUTCOME_WORDS, modalStateHint, modalStateWords, num, pct, refusalWords, reportLines, targetFlag, tileWords, verdictWords } from './modalTestWords';
 
 const el = (tagName: string, extra: Record<string, unknown> = {}) => ({ tagName, getAttribute: (k: string) => (extra[k] as string) ?? null, ...extra }) as unknown as EventTarget;
 const key = (k: string, more: Partial<KeyLike> = {}): KeyLike => ({ key: k, target: el('BODY'), ...more });
@@ -125,10 +125,10 @@ describe('modal test counter, tiles and flags', () => {
 		expect(verdictWords(l({ status: 'rejected', reason: 'overload' }))).toBe('Hit 3 Rejected: Overload');
 		expect(verdictWords(l({ status: 'pending' }))).toBe('Hit 3 Captured: Accept or Reject');
 		expect(verdictWords(l({ status: 'accepted' }), 'frames')).toBe('Frame 3 Accepted');
-		const lines = reportLines({ peak: 210, double_hit: { ratio: 0.12, frame: 40 }, overloaded: [0, 2], tip_drop_db: 24, tip_warning: true, no_response: [false, true], force_window_cut: false } as never, 'N');
+		const lines = reportLines({ peak: 210, double_hit: { ratio: 0.12, peak: 25.2, frame: 40 }, overloaded: [0, 2], tip_drop_db: 24, tip_warning: true, no_response: [false, true], force_window_cut: false } as never, 'N');
 		expect(lines).toEqual([
 			'Peak force 210 N.',
-			'Double hit: a second impact at 12% of the peak.',
+			'Double hit: a second impact of 25.2 N, 12% of the peak.',
 			'Overload on the force, response 2.',
 			'Force spectrum falls 24 dB across the band, more than the tip limit.',
 			'A response stayed inside its noise: check the sensor and its cable.'
@@ -152,6 +152,8 @@ describe('modal test verbs', () => {
 		expect([idle.arm.enabled, idle.disarm.visible, idle.drive_start.visible, idle.accept.reason]).toEqual([true, false, false, 'No hit at this point yet.']);
 		const armed = modalMeasureVerbs(ctx({}, { state: 'armed' }));
 		expect([armed.arm.visible, armed.disarm.enabled]).toEqual([false, true]);
+		const arming = modalMeasureVerbs(ctx({}, { state: 'arming' }));
+		expect([arming.arm.visible, arming.disarm.enabled]).toEqual([false, true]);
 		const done = modalMeasureVerbs(ctx({}, { state: 'point_done', counts: counts(5, 0) }));
 		expect([done.arm.enabled, done.next.enabled, done.undo.enabled]).toEqual([false, true, true]);
 		const shaking = modalMeasureVerbs(ctx({}, { state: 'measuring', mode: 'shaker' }));
@@ -229,5 +231,70 @@ describe('modal test traces', () => {
 		expect(tracesOf(ch, 'reference', dofs).map((c) => c.values[0])).toEqual([20]);
 		expect(tracesOf(ch, 'response', dofs).map((c) => c.values[0])).toEqual([10, 50]);
 		expect(tracesOf(ch, 'drive', dofs).map((c) => c.values[0])).toEqual([99]);
+	});
+});
+
+describe('modal test after review', () => {
+	it('modal test states: Arming first, Waiting for Hit only once the service says armed', () => {
+		expect(modalStateWords('arming', 'impact')).toBe('Arming');
+		expect(modalStateWords('armed', 'impact')).toBe('Waiting for Hit');
+		expect(modalStateHint('arming', 'impact', 'auto')).toMatch(/pre-trigger/);
+	});
+
+	it('modal test clear point: its own verb, not while a hit waits or the shakers drive, and only with something to clear', () => {
+		expect(modalMeasureVerbs(ctx({}, { state: 'idle', counts: counts(2, 0) })).clear.enabled).toBe(true);
+		expect(modalMeasureVerbs(ctx({}, { state: 'idle', counts: counts(0, 0) })).clear.reason).toBe('Nothing accepted at this point to clear.');
+		expect(modalMeasureVerbs(ctx({}, { state: 'captured', counts: counts(2, 0) })).clear.reason).toBe('Accept or reject the hit first.');
+		expect(modalMeasureVerbs(ctx({}, { state: 'measuring', mode: 'shaker', counts: counts(2, 0) })).clear.reason).toBe('Stop driving first.');
+	});
+
+	it('modal test outcomes and the ending refusal in words for the person at the structure', () => {
+		for (const o of ['run_panicked', 'run_not_started', 'source_failed'] as const) {
+			expect(MODAL_OUTCOME_WORDS[o]).toBeTruthy();
+			expect(MODAL_OUTCOME_HELP[o]).toMatch(/\.$/);
+		}
+		expect(refusalWords({ reason: 'ending', message: 'refused: ending' })).toBe('The test is ending: nothing new starts after End Test or Abort.');
+		expect(refusalWords({ reason: 'busy', message: 'A hit waits.' })).toBe('A hit waits.');
+	});
+
+	it('modal test second impact: where and how large, from the service report', () => {
+		expect(secondImpactWords({ frame: 512, peak: 7.5, ratio: 0.41 }, 1024, 'lbf')).toBe('Second impact at 0.5 s into the block, 7.5 lbf: 41% of the peak.');
+		expect(secondImpactWords(null, 1024, 'lbf')).toBeNull();
+	});
+
+	it('modal test windows: drawn from the counts and tau the hit was taken with', () => {
+		const w = forceWindowWeights({ pre_frames: 2, width_frames: 3, fall_frames: 2 }, 8);
+		expect(w).toEqual([1, 1, 1, 1, 1, 1, 0.5, 0]);
+		const e = exponentialWeights(0.5, 2, 3);
+		expect(e[0]).toBe(1);
+		expect(e[2]).toBeCloseTo(Math.exp(-2), 12);
+	});
+
+	it('modal test live hit: the own block, the windows over it, the second impact and the force spectrum', () => {
+		const dofs = { references: [{ index: 1, node: 1, direction: 'Z+', unit: 'lbf' }], responses: [{ index: 2, node: 4, direction: 'Z+', unit: 'g' }] };
+		const live = {
+			run_id: 'r',
+			state: 'armed',
+			point: 0,
+			time: { rate_hz: 1024, channels: [] },
+			frf: { frequency_hz: [], averages: 0, pairs: [], coherence: [] },
+			hit: {
+				point: 0, n: 2, seq: 4, start_frame: 1536, start_s: 1.5, samples: 4, decimation: 1, step_s: 1 / 1024,
+				channels: [{ index: 1, role: 'reference', unit: 'lbf', values: [0, 9, 1, 0] }, { index: 2, role: 'response', unit: 'g', values: [0, 1, -1, 0] }],
+				windows: { force: { pre_frames: 1, width_frames: 2, fall_frames: 1 }, exponential: { tau_s: 0.125, end: 0.0625 } },
+				force_spectrum: { frequency_hz: [0, 2, 4, 6], unit: 'lbf^2/Hz', values: [1, 1, 0.5, 0.1], tip_drop_db: 9.5 }
+			}
+		} as unknown as ModalTestLive;
+		const latest = { ...tile(), seq: 4, point: 0, n: 2, report: { double_hit: { frame: 2, peak: 3, ratio: 0.33 } } } as unknown as ModalLatest;
+		const v = hitViews(live, latest, dofs, 0);
+		expect(v.force?.y.unit).toBe('lbf');
+		expect(v.force?.series[0].x[1]).toBeCloseTo(1 / 1024, 12);
+		expect(v.forceRegions.map((r) => r.level)).toEqual([0, 1]);
+		expect(v.responseRegions).toHaveLength(1);
+		expect(v.second).toBeCloseTo(2 / 1024, 12);
+		expect(forceSpectrumView(live)?.readouts?.[0].text).toBe('9.5 dB to the band top');
+		expect(hitViews({ ...live, hit: null } as ModalTestLive, latest, dofs, 0).force).toBeNull();
+		const shaker = { ...live, hit: undefined, references: { frequency_hz: [1, 2], averages: 3, autospectra: [{ index: 1, unit: 'lbf^2/Hz', values: [1, 2] }] } } as unknown as ModalTestLive;
+		expect(referenceSpectraView(shaker, dofs)?.series[0].name).toBe('1Z+ (row 1)');
 	});
 });
