@@ -169,13 +169,14 @@ SWITCH_INTERVAL = 0.001
 
 
 
-def _preview_copy(project: Any, name: str) -> Any:
-    """A project holding only a copy of geometry `name`, for an operation to act on while
+def _preview_copy(project: Any, *names: str) -> Any:
+    """A project holding only copies of the objects `names`, for an operation to act on while
     its form is typed: nothing it does reaches the project or its journal."""
     from hertzforge import Project
 
     scratch = Project('preview')
-    scratch.add(name, copy.deepcopy(project[name]))
+    for name in dict.fromkeys(names):
+        scratch.add(name, copy.deepcopy(project[name]))
     return scratch
 
 
@@ -479,7 +480,9 @@ class Connection:
             if params.get('preview') and not op.previews:
                 raise bad_request(f'{op.id} does not preview')
             if params.get('preview'):
-                scratch = _preview_copy(project, values['geometry'])
+                scratch = _preview_copy(project, *(
+                    values[p.name] for p in op.params
+                    if (p.kinds or p.verb) and values.get(p.name) in project))
                 return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
             before, journaled = list(project), len(project.journal)
             self.running_op, self.cancel_asked = op.id, False

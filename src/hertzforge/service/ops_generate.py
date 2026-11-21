@@ -383,7 +383,10 @@ def synthesize_modal_frfs(project: Any, params: dict[str, Any]) -> list[dict]:
     beside the set (`Project.synthesize_modal_frfs`, `core.modal_frf`).
     Drawn as a waterfall, with what the pane gives: the modes, the line
     spacing, the lines, the Nyquist frequency, the highest mode and how many
-    modes are above the Nyquist frequency, which are kept."""
+    modes are above the Nyquist frequency, which are kept. It previews, so
+    the line spacing a sample rate and frame give is read while they are
+    typed. The modes are the ones picked under the set in the tree, every
+    one when the set is selected whole (`action_table.PICKED_MODES`)."""
     from hertzforge.core.modal_frf import above_nyquist, frequency_lines
 
     name = params['source']
@@ -1037,7 +1040,7 @@ OPERATIONS = (
                 'mode. Expand to Physical Responses with a channel table gives the FRFs '
                 'between its channels.',
         params=(MODAL_SET, MODAL_RATE, MODAL_FRAME, QUANTITY, MODES),
-        outputs=('waterfall', 'reading'), run=synthesize_modal_frfs),
+        outputs=('waterfall', 'reading'), run=synthesize_modal_frfs, previews=True),
     Operation(
         id='project.sweep_rate', title='Sweep Rate', workspace='sine',
         summary='One tone of a sine specification against typed modes, each a frequency and '

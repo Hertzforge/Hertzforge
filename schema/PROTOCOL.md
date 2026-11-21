@@ -593,7 +593,7 @@ in the param `values` names for that axis, and what `adds` (optional) gives for 
 in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters. A `slide` with `"in_display":true` takes the length as dragged, in the view's unit, since its `op` takes it as a length typed in the display system; the view then has no `to_si`.
 
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
-`"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
+`"preview": true` runs it on copies of the objects it takes (a geometry, a shape set) and answers `{"views"}`, with no `project`.
 Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
 operation without `previews` is a `bad_request`, and nothing runs.
 
