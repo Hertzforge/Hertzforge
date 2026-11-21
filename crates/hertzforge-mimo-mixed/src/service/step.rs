@@ -73,6 +73,12 @@ pub enum StepTrip {
         /// The drive's index.
         drive: usize,
     },
+    /// The random part's ring ran dry for a control tick of frames in all
+    /// (each dry frame played no random part and was recorded at gain 0).
+    RandomUnderrun {
+        /// Dry frames so far.
+        frames: u64,
+    },
     /// A control or limit channel's input reached its overload level.
     Overload {
         /// The channel's index in the table.
@@ -530,9 +536,15 @@ impl MimoMixedStep {
         let lev = self.level.next();
         let rg = self.rand_ramp.next();
         let stop = self.stop.next();
-        if !self.ring.pop(&mut self.rnd) {
+        let dry = !self.ring.pop(&mut self.rnd);
+        if dry {
             self.underruns += 1;
             self.rnd.fill(0.0);
+            if self.underruns >= self.tick_frames {
+                self.latch(StepTrip::RandomUnderrun {
+                    frames: self.underruns,
+                });
+            }
         }
         let g = lev * rg;
         for j in 0..m {
@@ -569,7 +581,9 @@ impl MimoMixedStep {
             r.residual.extend_from_slice(&self.res[..q]);
             r.raw.extend_from_slice(&self.ch[..q]);
             r.drive.extend_from_slice(&self.d[..m]);
-            r.gain.push(g * stop);
+            // A dry frame carried no random part: gain 0, so the floor's
+            // estimate never reads it as steady.
+            r.gain.push(if dry { 0.0 } else { g * stop });
             for j in 0..m {
                 let x = g * stop * self.rnd[j];
                 r.rand_sq[j] += x * x;

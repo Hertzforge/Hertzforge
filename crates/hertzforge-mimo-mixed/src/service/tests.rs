@@ -552,3 +552,50 @@ fn mimo_mixed_a_drive_frame_not_finite_trips_and_plays_zero() {
     assert_eq!(worst, 0.0);
     assert!(pr.step.stopped());
 }
+
+/// Requirement: a frame the random part's ring has none for plays no random
+/// part and is recorded at gain 0 (so the floor's estimate does not read it
+/// as a steady segment); a dry spell under a control tick of frames goes
+/// on, and the run trips `random_underrun` once the dry frames reach a
+/// tick in all.
+#[test]
+fn mimo_mixed_a_dry_ring_is_recorded_at_gain_zero_then_trips() {
+    let mut pr = probe();
+    let m = pr.step.m;
+    let tick = pr.step.tick_frames as usize;
+    let _ = play(&mut pr, 2);
+    assert!(pr.step.trip.is_none(), "{:?}", pr.step.trip);
+    let input = vec![0.0f32; BLOCK * pr.n_in];
+    let mut out = Vec::new();
+    // A spell of tick / 2 dry frames.
+    let short = tick / 2;
+    pr.step.ring.clear();
+    pr.step.records.clear();
+    pr.step.ring.push(&vec![0.01; (BLOCK - short) * m]);
+    pr.step.process(&input, BLOCK, &mut out);
+    let gains = pr.step.records.gain.clone();
+    let dry_gain = gains[BLOCK - short..]
+        .iter()
+        .fold(0.0f64, |a, g| a.max(g.abs()));
+    println!(
+        "{short} dry frames: underruns {}, largest gain recorded on them {dry_gain}, trip {:?}",
+        pr.step.underruns, pr.step.trip
+    );
+    assert_eq!(pr.step.underruns as usize, short);
+    assert!(gains[..BLOCK - short].iter().all(|g| *g > 0.0));
+    assert_eq!(dry_gain, 0.0, "a dry frame recorded at the random gain");
+    assert!(pr.step.trip.is_none(), "{:?}", pr.step.trip);
+    // The rest of a tick dry.
+    pr.step.ring.clear();
+    pr.step.records.clear();
+    pr.step.process(&input, BLOCK, &mut out);
+    let trip = pr.step.trip.clone();
+    println!(
+        "then a dry block: underruns {}, trip {trip:?}",
+        pr.step.underruns
+    );
+    match trip {
+        Some(StepTrip::RandomUnderrun { frames }) => assert_eq!(frames as usize, tick),
+        other => panic!("no underrun trip: {other:?}"),
+    }
+}

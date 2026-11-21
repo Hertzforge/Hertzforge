@@ -552,6 +552,7 @@ hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_an_error_mid_run_stops
 hertzforge-mimo-mixed  test:mimo_mixed_safety  mimo_mixed_the_identification_level_steps_ramp_out_and_in
 hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_drive_frame_not_finite_trips_and_plays_zero
 hertzforge-mimo-mixed  test:mimo_mixed_config  mimo_mixed_forecast_refuses_a_tone_the_model_cannot_drive
+hertzforge-mimo-mixed  lib  service::tests::mimo_mixed_a_dry_ring_is_recorded_at_gain_zero_then_trips
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_fixed_tones_on_floor
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_narrowband_fixed

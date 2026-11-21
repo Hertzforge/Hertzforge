@@ -1509,6 +1509,14 @@ impl MimoMixedService {
                 drive: Some(*drive),
                 words: format!("drive {drive}'s demanded sum was not a number; it played 0"),
             },
+            StepTrip::RandomUnderrun { frames } => RunEnd {
+                name: "random_underrun",
+                aborted: true,
+                part: None,
+                control: None,
+                drive: None,
+                words: format!("the random drive ran dry for {frames} frames in all"),
+            },
             StepTrip::Overload {
                 channel_index,
                 value,
