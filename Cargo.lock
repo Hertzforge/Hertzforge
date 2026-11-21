@@ -1292,6 +1292,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-mixed"
+version = "0.1.20"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-dsp",
+ "hertzforge-mimo-random",
+ "hertzforge-mixed",
+ "hertzforge-random",
+ "hertzforge-reference",
+ "hertzforge-sdm",
+ "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-mimo-random"
 version = "0.1.20"
 dependencies = [

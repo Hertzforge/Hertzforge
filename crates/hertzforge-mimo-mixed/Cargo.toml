@@ -1,0 +1,43 @@
+[package]
+name = "hertzforge-mimo-mixed"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# MIMO Mixed Mode: sine tones and narrowband random on a broadband random
+# floor, on several shakers controlled together at several control points.
+#
+# This crate's default build is pure: the configuration and its validation
+# (`config`), the matrix floor estimate with per-line pause (`estimate`), the
+# per-frame line exclusion (`exclusion`), what a paused line shows the floor
+# law (`fill`), the narrowband statements, classification and band laws
+# (`band`), the multi-drive tone bank and residual (`tone`), the shared drive
+# budget and its ceiling rules (`budget`) and the setup prediction
+# (`predict`). It reuses single-output Mixed Mode's parts model, schedules and
+# helpers, MIMO Random's estimation conventions and guards, and the SDM
+# crate's linear algebra, by dependency.
+#
+# The RUN SERVICE will live behind the `service` feature; the feature is an
+# empty placeholder until the engine is built.
+[dependencies]
+# Single-output Mixed Mode's parts model, clock and helpers sit outside its
+# `service` feature.
+hertzforge-mixed = { path = "../hertzforge-mixed", default-features = false }
+# Estimation, drive and limit settings, guards (pure modules of the crate).
+hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
+# Random's level schedule, capture rules and metadata live behind its
+# `service` feature, so the default features are taken.
+hertzforge-random.workspace = true
+hertzforge-sdm.workspace = true
+hertzforge-dsp.workspace = true
+hertzforge-reference.workspace = true
+hertzforge-breakpoints.workspace = true
+hertzforge-shaker-db.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+
+[features]
+default = []
+# The run service, not built yet.
+service = []
