@@ -354,14 +354,18 @@ def _clicks(code: int) -> tuple[int, str]:
 
 def _add_settings(geometry: Any, family: str) -> list[dict[str, Any]]:
     """What Add mode asks beside the clicks: the type of the family to make, and the
-    element group it goes in, of the groups that hold that family or nothing yet."""
+    element group it goes in, of the groups that hold that family, or hold nothing yet and
+    were made for it or for no family (`Geometry.group_family`)."""
     from hertzforge.core.geometry import ELEMENT_TYPES, element_family
 
     held: dict[int, set[str]] = {int(g): set() for g in geometry.group_id}
     for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
         held.setdefault(int(group), set()).add(element_family(int(code)))
+    made_for = geometry.group_family
     groups = [{'value': int(g), 'label': _group_label(geometry, k)}
-              for k, g in enumerate(geometry.group_id) if held[int(g)] <= {family}]
+              for k, g in enumerate(geometry.group_id)
+              if held[int(g)] == {family}
+              or (not held[int(g)] and made_for.get(int(g), family) == family)]
     return [
         {'param': 'type', 'label': 'Type',
          # each type says how many clicks make one, so the view counts them as it is picked

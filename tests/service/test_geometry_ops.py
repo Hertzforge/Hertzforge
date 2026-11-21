@@ -927,3 +927,15 @@ def test_a_groups_family_follows_it_and_is_saved(tmp_path):
     assert geometry.group_family == {}
     native.save(geometry, path)
     assert native.load(path).group_family == {}, 'a file with none reads back with none'
+
+
+def test_add_mode_offers_an_empty_group_only_for_the_family_it_was_made_for(project, validate):
+    run(project, 'project.add_element_group', name='Struts', family='beams')
+    run(project, 'project.add_element_group', name='Skins', family='quads')
+    run(project, 'project.add_element_group', name='Open')
+    labels = {}
+    for family in ('quads', 'beams'):
+        drawn, _table = _edited(project, {'kind': 'family', 'id': family}, validate)
+        labels[family] = [o['label'] for o in drawn['pick']['settings'][1]['options']]
+    assert labels['quads'] == ['First or new', 'element group 1', 'Skins', 'Open']
+    assert labels['beams'] == ['First or new', 'Struts', 'Open']
