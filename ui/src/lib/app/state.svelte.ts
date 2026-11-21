@@ -501,6 +501,8 @@ class AnalyzeState {
 		// a form that applies as it goes is filled in full and opens all the same
 		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
+		// a preview that is quick and asks nothing is shown as the form opens
+		if (this.formOpen && op.commits && op.opens_previewed) await this.run(true);
 	}
 
 	/** A row's operation, filled from the selection, with a format the object can be written in. */

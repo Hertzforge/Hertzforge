@@ -97,9 +97,16 @@ def test_a_sensors_size_is_typed_then_its_models_then_guessed_then_measured():
     assert found['40'].sized_by == 'measured' and found['40'].size == pytest.approx(17.1 * MM, abs=2e-4)
     assert found['40'].table_model.startswith('Block 17.') and found['40'].length is None
     assert (found['11'].shape, found['11'].sized_by) == ('Cylinder', 'measured')
-    assert found['11'].size == pytest.approx(8 * MM, rel=1e-5) == found['11'].length
+    # the can's length: twice its top from the middle of its side's points, 6.4 mm for a true
+    # 6 mm, since its side was measured from 0.2 to 0.7 of its height
+    frame, center = truth['11']
+    middle = float(np.mean((features['11_c'] - center) @ frame[2]))
+    assert found['11'].size == pytest.approx(8 * MM, rel=1e-5)
+    assert found['11'].length == pytest.approx(2 * (3 * MM - middle), rel=1e-6)
+    assert found['11'].length == pytest.approx(6.42 * MM, abs=0.01 * MM)
     assert any('sensor 40: its side is taken as the least it can be' in note for note in notes)
-    assert any('sensor 11: its length is not measured' in note for note in notes)
+    assert any('sensor 11: its length is taken as twice how far its top is from the middle of '
+               "its side's points, 6.4 mm" in note for note in notes)
     # a model named: its size, and a larger model moves the node
     geometry, _table, placed, _notes = assemble(fits, 'mm', choices={'31': {'model': 'pcb 356a02'}})
     one = by(placed)['31']
@@ -164,13 +171,13 @@ def test_a_project_creates_them_linked_and_the_drawing_agrees():
     project = Project()
     project.add('Probed', _geometry_of(features))
     assert project.set_sensor('Probed', 11, length=height) == {'length': height}
-    project.set_sensor('Probed', '40', size=19.0 * MM)
+    project.set_sensor('Probed', '40', length=19.0 * MM)
     made = project.create_sensors('Probed')
     assert (made['geometry'], made['channels']) == ('Probed Sensors Geometry',
                                                     'Probed Sensors Channels')
     assert any('sensor 50 is left out' in note for note in made['notes'])
     assert project.journal[-3:] == ["project.set_sensor('Probed', 11, length=0.006)",
-                                    "project.set_sensor('Probed', '40', size=0.019)",
+                                    "project.set_sensor('Probed', '40', length=0.019)",
                                     "project.create_sensors('Probed')"]
     assert project.object_groups[-1]['members'] == [made['geometry'], made['channels']]
     geometry = project[made['geometry']]
@@ -211,15 +218,25 @@ def test_a_sensors_choices_are_set_taken_back_and_saved(tmp_path):
     features, _truth, _height = _features()
     project = Project()
     project.add('Probed', _geometry_of(features))
-    assert project.set_sensor('Probed', 31, node=131, size=0.012) == {'node': 131, 'size': 0.012}
-    # naming a model takes back the size typed before it, so the model's own is used
+    # a cube's length is its side, kept as its size, and given back as it was typed
+    assert project.set_sensor('Probed', 31, node=131, length=0.012) == {'node': 131, 'length': 0.012}
+    assert project['Probed'].sensor_choices['31'] == {'node': 131, 'size': 0.012}
+    # naming a model takes back the length typed before it, so the model's own is used
     assert project.set_sensor('Probed', 31, model='356A02') == {'node': 131, 'model': '356A02'}
-    assert project.set_sensor('Probed', 31, model='356A02', size=0.013)['size'] == 0.013
-    assert project.set_sensor('Probed', 31, node=None, model='', size=None) == {}
+    assert project.set_sensor('Probed', 31, model='356A02', length=0.013)['length'] == 0.013
+    assert project.set_sensor('Probed', 31, node=None, model='', length=None) == {}
     assert project['Probed'].sensor_choices == {}
-    project.set_sensor('Probed', 40, size=0.019)
+    # a can's diameter is its size and its length its length
+    assert project.set_sensor('Probed', 11, diameter=0.009, length=0.007) == {
+        'diameter': 0.009, 'length': 0.007}
+    assert project['Probed'].sensor_choices['11'] == {'size': 0.009, 'length': 0.007}
+    assert project.set_sensor('Probed', 11, model='352A24') == {'model': '352A24'}
+    project.set_sensor('Probed', 11, model='')
+    project.set_sensor('Probed', 40, length=0.019)
     for given, said in (({'node': 0}, 'whole number above 0'), ({'node': 2.5}, 'whole number'),
-                        ({'size': -1.0}, 'a size is a length above 0'),
+                        ({'length': -1.0}, 'a length is a length above 0'),
+                        ({'diameter': 0.01}, 'a cube has no diameter'),
+                        ({'size': 0.01}, "a sensor's size is not chosen"),
                         ({'color': 'red'}, "a sensor's color is not chosen")):
         with pytest.raises(ValueError, match=said):
             project.set_sensor('Probed', 31, **given)
