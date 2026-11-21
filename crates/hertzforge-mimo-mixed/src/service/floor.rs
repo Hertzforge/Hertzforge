@@ -81,6 +81,7 @@ impl MimoMixedService {
         let df = self.df;
         let mut s = HermitianStack::zeros(lines, m);
         let mut uses: Vec<Vec<bool>> = Vec::with_capacity(self.bands.len());
+        let mut unplaced: Vec<(String, String)> = Vec::new();
         for b in &mut self.bands {
             uses.push(vec![false; m]);
             let used = uses.last_mut().expect("pushed");
@@ -101,8 +102,12 @@ impl MimoMixedService {
                 declared: crate::band::DriveDeclared::Increment,
                 capped: false,
             };
-            let Ok(placed) = place_band_drive(&out, &wo) else {
-                continue;
+            let placed = match place_band_drive(&out, &wo) {
+                Ok(p) => p,
+                Err(e) => {
+                    unplaced.push((b.id.clone(), e.0));
+                    continue;
+                }
             };
             let r2 = b.ramp * b.ramp;
             for o in 0..mfe.offsets() {
@@ -140,6 +145,18 @@ impl MimoMixedService {
         for (b, used) in self.bands.iter_mut().zip(&uses) {
             let ceiling = used.iter().zip(&cut).any(|(u, f)| *u && *f < 1.0);
             b.limiting = ceiling || b.cap_bound;
+        }
+        // A band that could not be placed plays nothing: the run ends on it,
+        // named.
+        for (id, why) in unplaced {
+            self.abort_with(RunEnd {
+                name: "law_fault",
+                aborted: true,
+                part: Some(id.clone()),
+                control: None,
+                drive: None,
+                words: format!("band {id}'s drive could not be placed: {why}"),
+            });
         }
         for l in 0..lines {
             for r in 0..m {
@@ -974,7 +991,18 @@ impl MimoMixedService {
             match called {
                 None => {}
                 Some(Ok(Ok(out))) => {
-                    if out.drive.lines() == offs && out.drive.n() == m {
+                    if let Some(why) = band_output_fault(&out.drive, offs, m) {
+                        trip.get_or_insert(RunEnd {
+                            name: "law_fault",
+                            aborted: true,
+                            part: Some(id.clone()),
+                            control: None,
+                            drive: None,
+                            words: format!(
+                                "the band law of {id} gave a drive it cannot play: {why}"
+                            ),
+                        });
+                    } else {
                         // MIMO Random's change cap, in the band's frame
                         // against its drive in force; a cut rise marks the
                         // band limiting (the ceilings mark it too, at
@@ -1057,4 +1085,23 @@ impl MimoMixedService {
             self.abort_with(t);
         }
     }
+}
+
+/// Why a band law's drive cannot be played, if it cannot: its shape not the
+/// band's (`offs` offsets of `m` drives), or an offset not finite or not
+/// positive semi-definite (the checks [`place_band_drive`] makes).
+pub(crate) fn band_output_fault(d: &HermitianStack, offs: usize, m: usize) -> Option<String> {
+    if d.lines() != offs || d.n() != m {
+        return Some(format!(
+            "{} offsets of {} drives, not {offs} of {m}",
+            d.lines(),
+            d.n()
+        ));
+    }
+    let out = crate::band::BandLoopOutput {
+        drive: d.clone(),
+        declared: crate::band::DriveDeclared::Increment,
+        capped: false,
+    };
+    place_band_drive(&out, &vec![1.0; offs]).err().map(|e| e.0)
 }

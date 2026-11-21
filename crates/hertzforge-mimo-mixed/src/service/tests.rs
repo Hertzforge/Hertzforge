@@ -599,3 +599,105 @@ fn mimo_mixed_a_dry_ring_is_recorded_at_gain_zero_then_trips() {
         other => panic!("no underrun trip: {other:?}"),
     }
 }
+
+/// Requirement: the kinematic monitor judges every frame of a block, a
+/// block longer than its scratch too (in pieces of the scratch). A block of
+/// 5000 frames, past the probe's 4096-frame scratch, with channel 1 at 1 g
+/// against its 0.5 g abort from frame 4500 on (past the scratch) trips
+/// `Kinematic` naming channel 1; such a block used to be skipped whole, so
+/// nothing tripped.
+#[test]
+fn mimo_mixed_the_kinematic_monitor_judges_a_block_past_its_scratch() {
+    let mut pr = probe();
+    let n_in = pr.n_in;
+    let mut t = hertzforge_channel_table::ChannelTable::default_with_channels(n_in);
+    t.channels[0].abort.accel_g = Some(0.5);
+    pr.step.kin = Some(hertzforge_random::service::engine::KinematicMonitor::new(
+        &t, FS, 5.0, 1, 5.0,
+    ));
+    // The probe's step is built for blocks of up to 4096 frames.
+    let (frames, scratch) = (5000, 4096);
+    assert!(frames > scratch);
+    let mut input = vec![0.0f32; frames * n_in];
+    for f in 4500..frames {
+        input[f * n_in] = 1.0;
+    }
+    let mut out = Vec::new();
+    pr.feed(frames);
+    pr.step.process(&input, frames, &mut out);
+    let trip = pr.step.trip.clone();
+    println!("{frames} frames, scratch {scratch} frames: trip {trip:?}");
+    assert!(
+        matches!(
+            trip,
+            Some(StepTrip::Kinematic {
+                channel_index: 1,
+                ..
+            })
+        ),
+        "{trip:?}"
+    );
+}
+
+/// Requirement: a band law's drive the service cannot play is named, not
+/// dropped: one of the wrong shape, one not finite and one not positive
+/// semi-definite each give the reason (the band loop then ends the run
+/// `law_fault` naming the band); a usable drive gives none.
+#[test]
+fn mimo_mixed_a_band_drive_that_cannot_play_is_named() {
+    use super::floor::band_output_fault;
+    let (offs, m) = (5, 2);
+    let mut good = HermitianStack::zeros(offs, m);
+    for o in 0..offs {
+        good.set(o, 0, 0, C64::new(1e-3, 0.0));
+        good.set(o, 1, 1, C64::new(1e-3, 0.0));
+    }
+    assert_eq!(band_output_fault(&good, offs, m), None);
+    let shape = band_output_fault(&HermitianStack::zeros(offs - 1, m), offs, m);
+    let mut nan = good.clone();
+    nan.set(2, 0, 0, C64::new(f64::NAN, 0.0));
+    let nan = band_output_fault(&nan, offs, m);
+    let mut neg = good.clone();
+    neg.set(3, 1, 1, C64::new(-1e-3, 0.0));
+    let neg = band_output_fault(&neg, offs, m);
+    println!("shape: {shape:?}\nnot finite: {nan:?}\nnot semi-definite: {neg:?}");
+    assert!(shape.is_some_and(|w| w.contains("4 offsets")));
+    assert!(nan.is_some_and(|w| w.contains("non-finite")));
+    assert!(neg.is_some_and(|w| w.contains("semi-definite")));
+}
+
+/// Requirement: a tone is judged at the line it is at, not where it
+/// started: once the line differs from the one its judging was worked out
+/// at (here the record of that line is moved off, as a tone that moved
+/// leaves it), the judging is worked out again from the reference and the
+/// floor at the tone's line. The floor raised from 1e-9 to 1e-5 under the
+/// tone triples the reading's predicted scatter.
+#[test]
+fn mimo_mixed_a_tone_is_judged_at_the_line_it_is_at() {
+    let mut pr = probe();
+    let _ = play(&mut pr, 64);
+    let line = pr.step.tones[0].judged_line;
+    let before = pr.step.tones[0].judging[0];
+    assert!(pr.step.trip.is_none(), "{:?}", pr.step.trip);
+    pr.step.floor_diag.fill(1e-5);
+    pr.step.tones[0].judged_line = usize::MAX;
+    let _ = play(&mut pr, 4);
+    let tc = &pr.step.tones[0];
+    let want = tone_judging(
+        tc.reference[line].norm(),
+        1e-5,
+        (3.0, 3.0),
+        (60.0, 60.0),
+        pr.step.bank.bn_hz(),
+    );
+    println!(
+        "line {line}: judged at {} now; before {before:?}\nnow {:?}",
+        tc.judged_line, tc.judging[0]
+    );
+    assert_eq!(tc.judged_line, line);
+    assert_eq!(tc.judging[0], want);
+    assert!(
+        want.sigma_db > 2.0 * before.sigma_db,
+        "{want:?} against {before:?}"
+    );
+}

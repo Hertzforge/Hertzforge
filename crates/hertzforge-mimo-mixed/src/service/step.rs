@@ -14,7 +14,7 @@
 
 use super::records::{LawRecord, RecordRole};
 use crate::budget::{headroom, CeilingRule};
-use crate::tone::{tone_readable, Ramp, ToneBank, ToneJudging};
+use crate::tone::{tone_judging, tone_readable, Ramp, ToneBank, ToneJudging};
 use hertzforge_engine::ProcessStep;
 use hertzforge_mimo_sine::guards::{cap_drives, first_drive_scale, DivergenceWatch};
 use hertzforge_mimo_sine::law::{LawValues, MimoSineLaw};
@@ -268,8 +268,14 @@ pub(crate) struct ToneCtl {
     /// the tracker's delay and the judging average, so a tone stays marked
     /// that long after the ceiling last held it.
     pub(crate) limited_s: f64,
-    /// Per control.
+    /// Per control, worked out at the tone's line (again whenever the
+    /// tone moves to another line).
     pub(crate) judging: Vec<ToneJudging>,
+    /// Per control: its alarm and abort bands as stated, dB, before the
+    /// judging widens them to the reading's scatter.
+    pub(crate) tol_db: Vec<((f64, f64), (f64, f64))>,
+    /// The line the judging was worked out at.
+    pub(crate) judged_line: usize,
     pub(crate) ms: Vec<f64>,
     pub(crate) err_db: Vec<f64>,
     pub(crate) alarm: Vec<bool>,
@@ -843,6 +849,11 @@ impl MimoMixedStep {
                     continue;
                 }
                 Ok(()) => {
+                    // Of the law's outputs the drive is played and `faulted`
+                    // is not relied on (as MIMO Sine's core). Its request to
+                    // hold or slow the sweep and its notched reference are
+                    // not acted on: the part clock never slows for a tone,
+                    // and every tone is judged against its own reference.
                     let tc = &mut self.tones[k];
                     tc.misses = 0;
                     for (pv, o) in self.prop.iter_mut().zip(&tc.out.drive) {
@@ -942,6 +953,22 @@ impl MimoMixedStep {
         let n = self.n;
         let lines = self.lines;
         let bn = self.bank.bn_hz();
+        // The judging follows the tone: the reference and the floor under
+        // it differ line to line, and with them the reading's scatter.
+        if self.tones[k].judged_line != line {
+            let tc = &mut self.tones[k];
+            for i in 0..n.min(tc.judging.len()).min(tc.tol_db.len()) {
+                let (alarm, abort) = tc.tol_db[i];
+                tc.judging[i] = tone_judging(
+                    tc.reference[i * lines + line].norm(),
+                    self.floor_diag[line * n + i],
+                    alarm,
+                    abort,
+                    bn,
+                );
+            }
+            tc.judged_line = line;
+        }
         for i in 0..n {
             let target = self.tones[k].reference[i * lines + line].norm() * lam;
             if target <= 0.0 {
@@ -1031,17 +1058,20 @@ impl ProcessStep for MimoMixedStep {
         }
         let mut kin_trip = None;
         if let Some(kin) = self.kin.as_mut() {
-            self.kin_scratch.clear();
+            // Every frame judged: a block past the scratch is fed in pieces
+            // of whole frames (the monitor's state runs frame to frame).
             let take = (n_frames * n_in).min(input.len());
-            if self.kin_scratch.capacity() >= take {
-                self.kin_scratch
-                    .extend(input[..take].iter().map(|&v| v as f64));
+            let piece = (self.kin_scratch.capacity() / n_in).max(1) * n_in;
+            for chunk in input[..take].chunks(piece) {
+                self.kin_scratch.clear();
+                self.kin_scratch.extend(chunk.iter().map(|&v| v as f64));
                 if let Some(t) = kin.feed(&self.kin_scratch) {
                     kin_trip = Some(StepTrip::Kinematic {
                         channel_index: t.channel_index,
                         value: t.value,
                         limit: t.limit,
                     });
+                    break;
                 }
             }
         }
