@@ -165,7 +165,7 @@
 											{#each labels as l, k (k)}
 												<tr>
 													<td>{l}</td>
-													<td>
+													<td class="wide">
 														{#if b.statement.kind === 'raise'}
 															<NumberField compact id="mmix-{table}-{i}-db-{k}" label="{b.name} at {l}, raise" unit="dB" step={1} bind:value={b.statement.db[k]} errors={E[`${key(i)}.statement.${k}`]} disabled={locked} testid="mmix-{table}-{i}-db-{k}" />
 														{:else}
@@ -269,6 +269,11 @@
 
 	.pt :global(.nf.compact) {
 		width: 7.5em;
+	}
+
+	/* an added level in g²/Hz: the unit takes half the cell, so the cell is wider */
+	.pt .wide :global(.nf.compact) {
+		width: 10em;
 	}
 
 	.summary {
