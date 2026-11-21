@@ -408,14 +408,18 @@ Views with `marks` share the nodes marked. A `shape3d` with `marks` (`{"link"}`,
 marks the node clicked, Cmd (Ctrl) or Shift adding to or taking from the ones marked, a click on
 nothing or Escape clearing them, unless the view has a `pick`, whose clicks are its own. A `table`
 with `marks` (`{"link","column"}`) marks the rows selected, each by its cell in `column`, the
-node's id. What is marked in one view with a `link` is drawn marked in every other with the same
+node's or element's id; Cmd (Ctrl)-click adds a row to the ones marked or takes it from them, as
+in the view, and Delete removes the rows marked. What is marked in one view with a `link` is drawn marked in every other with the same
 one: the rows of the table highlighted and scrolled to, the nodes ringed in the view. The marks
 are the shell's and no operation reads them. A `shape3d` may also carry `mark_sets`, things
 marked by where they are and not by a click in the view: each `{"link","ids"}` with `rows`, the
 rows of `nodes` id k rings (an element's nodes), or `"frames":true`, id k being the k-th of
-`frames` and ringed at its origin (a coordinate system). The tree's rows for them mark with the
-same `link`: the view of a geometry's Coordinate systems part, and of element groups picked, whose
-listed elements are the ones sent. A geometry's nodes have `marks`: the table and the view
+`frames` and ringed at its origin (a coordinate system); `faces` and `edges`, flat rows of `nodes`
+for id k, fill its triangles and draw its sides over the model and through it (an element alone).
+The tree's rows for them mark with the same `link`: the view of a geometry's Coordinate systems
+part, and of element groups picked, whose listed elements are the ones sent. An element table of
+`project.view_entities` marks its rows with the same link, and its view's set holds the table's
+elements, the first 10,000, with their faces and edges; past that the view's `note` says so. A geometry's nodes have `marks`: the table and the view
 of `project.view_entities` for nodes, and the view the Nodes part shows.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:

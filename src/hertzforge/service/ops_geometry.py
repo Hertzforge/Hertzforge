@@ -263,9 +263,9 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
         edit['remove'] = {'op': 'project.delete_entities',
                           'params': {'geometry': name, 'kind': kind, **part}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
-    if name is not None and kind == 'nodes':
-        # its rows and the nodes of the view beside it are marked together
-        table['marks'] = {'link': part_link('nodes', name), 'column': 0}
+    if name is not None and kind in ('nodes', 'elements'):
+        # its rows and the nodes or elements of the view beside it are marked together
+        table['marks'] = {'link': part_link(kind, name), 'column': 0}
     if name is not None and kind == 'coordinate_systems':
         # the row picked is the system the arrows and rings in the view are on
         table['select'] = {'op': 'project.view_entities',
@@ -324,7 +324,35 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
         drawn['pick'] = pick
     if kind == 'nodes':
         drawn['marks'] = {'link': part_link('nodes', name)}
+    if kind == 'elements':
+        drawn['mark_sets'] = [_table_element_marks(name, geometry, **part)]
+        if len(drawn['mark_sets'][0]['ids']) == MARKED_ELEMENTS:
+            drawn['note'] = (f'Rows after the first {MARKED_ELEMENTS} are not highlighted '
+                             'in the view.')
     return [drawn, entity_table(geometry, kind, title, name, **part)]
+
+
+#: the most elements of an element table the 3-D view beside it highlights
+MARKED_ELEMENTS = 10_000
+
+
+def _table_element_marks(name: str, geometry: Any, family: str = '', groups: str = ''
+                         ) -> dict[str, Any]:
+    """The elements of an element table as the view beside it highlights the ones whose
+    rows are selected: each element's id, the rows of its nodes (ringed), and its faces and
+    edges (`mesh.element_highlights`), for the table's first `MARKED_ELEMENTS` rows."""
+    from .mesh import element_highlights
+
+    picked = picked_rows(geometry, 'elements', family, groups)
+    elements = np.arange(len(geometry.elem_id)) if picked is None else picked
+    elements = elements[:MARKED_ELEMENTS]
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    faces, edges = element_highlights(geometry, elements)
+    return {'link': part_link('elements', name),
+            'ids': [int(geometry.elem_id[element]) for element in elements],
+            'rows': [[rows[int(node)] for node in geometry.elem_conn[element]
+                      if int(node) in rows] for element in elements],
+            'faces': faces, 'edges': edges}
 
 
 def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:

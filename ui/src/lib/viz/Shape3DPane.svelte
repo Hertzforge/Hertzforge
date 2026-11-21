@@ -84,7 +84,7 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, stillFramed, idList, markedBy, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedShapes, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
 	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
 	import { linearColors, span as pointSpan } from './points';
@@ -402,6 +402,8 @@
 		}
 		return places;
 	});
+	/** The triangles and edges, as rows of `view.nodes`, of the elements marked with a table's rows or the tree. */
+	const setShapes = $derived(markedShapes(view.mark_sets ?? [], marked));
 	/** The DOF labels over the canvas, redrawn each frame the view moves. */
 	let labelsSvg: SVGSVGElement;
 	/** Where each label sits in the model: its arrow's free end, a little past it. */
@@ -560,6 +562,9 @@
 	let otherOn: Points | null = null;
 	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
+	/** The faces and edges of the elements marked (`mark_sets` with `faces` and `edges`), drawn over the model. */
+	let lit: Mesh | null = null;
+	let litEdges: LineSegments | null = null;
 	const materials: Material[] = [];
 	/**
 	 * The deflection's two parts, and for the surface's colors: the largest travel at the scale
@@ -784,6 +789,8 @@
 		if (outline) (outline.material as LineMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
+		if (lit) (lit.material as MeshBasicMaterial).color = new Color(cssVar('--blue-2'));
+		if (litEdges) (litEdges.material as LineBasicMaterial).color = new Color(cssVar('--blue-2'));
 		// beside a second set of places, the ones a click picks wear the accent
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
@@ -1093,6 +1100,24 @@
 			marks.renderOrder = 5;
 			marks.frustumCulled = false;
 			scene.add(marks);
+		}
+		if (view.mark_sets?.some((set) => set.faces || set.edges)) {
+			// over the model and through it, so an element inside a solid shows when its row is selected
+			const at = new BufferAttribute(view.nodes, 3);
+			const faces = new BufferGeometry();
+			faces.setAttribute('position', at);
+			faces.setIndex([]);
+			lit = new Mesh(faces, plain(new MeshBasicMaterial({ side: DoubleSide, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false })));
+			lit.renderOrder = 4;
+			lit.frustumCulled = false;
+			scene.add(lit);
+			const lines = new BufferGeometry();
+			lines.setAttribute('position', at);
+			lines.setIndex([]);
+			litEdges = new LineSegments(lines, plain(new LineBasicMaterial({ depthTest: false })));
+			litEdges.renderOrder = 4;
+			litEdges.frustumCulled = false;
+			scene.add(litEdges);
 		}
 
 		// A headlight that follows the camera keeps shading even while orbiting.
@@ -1501,6 +1526,8 @@
 		otherOn?.geometry.dispose();
 		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
+		lit?.geometry.dispose();
+		litEdges?.geometry.dispose();
 		overlayGeometry?.dispose();
 		overlayOutline?.geometry.dispose();
 		overlayEdges?.geometry.dispose();
@@ -1519,6 +1546,13 @@
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
 		xyz.set(setPlaces, 3 * rows.length);
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
+		dirty = true;
+	});
+	$effect(() => {
+		const { faces, edges } = setShapes;
+		if (!renderer || !lit || !litEdges) return;
+		lit.geometry.setIndex(faces);
+		litEdges.geometry.setIndex(edges);
 		dirty = true;
 	});
 

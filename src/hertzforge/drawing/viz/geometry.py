@@ -60,6 +60,22 @@ def display_points(geometry: Geometry,
             axis_unit_text(geometry, unit_system))
 
 
+def element_shapes(code: int, conn: Sequence[int]) -> tuple[list[list[int]], list[list[int]]]:
+    """(polygons, lines) one element is drawn by on its own, as its nodes: a face
+    element its corner nodes (`face_corners`), a solid every face of its cell
+    (`solid_faces`), a line element its first two nodes, a point element nothing.
+    `element_cells` draws every element from these, and the 3-D view highlights one
+    element by them."""
+    render = ELEMENT_TYPES[code][2]
+    if render == 'face':
+        return [list(conn[:face_corners(code)])], []
+    if render == 'volume':
+        return [[conn[k] for k in face] for face in solid_faces(len(conn))], []
+    if render == 'line':
+        return [], [list(conn[:2])]
+    return [], []
+
+
 def element_cells(geometry: Geometry,
                   indices: Sequence[int] | None = None,
                   separate_skins: bool = False) -> tuple:
@@ -108,23 +124,24 @@ def element_cells(geometry: Geometry,
     for i in (range(len(geometry.elem_conn)) if indices is None else indices):
         code, color = int(geometry.elem_type[i]), int(geometry.elem_color[i])
         conn = geometry.elem_conn[i]
-        _name, _nnodes, render = ELEMENT_TYPES[code]
+        render = ELEMENT_TYPES[code][2]
+        polygons, segments = element_shapes(code, conn)
         if render == 'face':
-            faces.setdefault(color, []).append(rows(conn[:face_corners(code)]))
+            faces.setdefault(color, []).extend(rows(face) for face in polygons)
         elif render == 'volume':
             # a solid draws as its skin: the faces of its cells that no
             # other cell of the color shares (2026-09-30; a polyline
             # through every corner drew the mesh's insides as a tangle)
             skin = skins.setdefault(color, {})
-            for face in solid_faces(len(conn)):
-                corners = rows([conn[k] for k in face])
+            for face in polygons:
+                corners = rows(face)
                 key = tuple(sorted(corners))
                 if key in skin:
                     del skin[key]
                 else:
                     skin[key] = corners
         elif render == 'line':
-            lines.setdefault(color, []).append(rows(conn[:2]))
+            lines.setdefault(color, []).extend(rows(pair) for pair in segments)
         elif render == 'point':
             points.setdefault(color, []).extend(rows(conn))
     if separate_skins:

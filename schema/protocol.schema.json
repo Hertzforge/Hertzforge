@@ -313,7 +313,9 @@
               "link": {"type": "string"},
               "ids": {"type": "array", "items": {"type": "integer"}},
               "rows": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
-              "frames": {"type": "boolean"}
+              "frames": {"type": "boolean"},
+              "faces": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "edges": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}}
             }
           }
         },
