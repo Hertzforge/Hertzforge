@@ -203,6 +203,20 @@ export class MimoMixedStore {
 		return this.acq.rows;
 	}
 
+	/** The channels a run's streams would hold: every enabled input and drive of the table being edited. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
+	}
+
+	/** The sample rate the run asks for, for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.estimation.fs_hz;
+	}
+
+	get tableFiles() {
+		return this.acq.tableFiles;
+	}
+
 	get isLive(): boolean {
 		return mmixIsLive(this.status);
 	}
