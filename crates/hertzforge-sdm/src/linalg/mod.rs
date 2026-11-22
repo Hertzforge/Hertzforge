@@ -1069,6 +1069,51 @@ pub fn h1_frf(
     Ok(out)
 }
 
+/// The part of `m` in the drive directions [`h1_frf`] drops, per line
+/// `m (I - P)`, where `P = V_k V_k^H` projects onto the eigenvectors of `G_xx`
+/// whose inverse factor under `reg` is not zero (the same eigendecomposition and
+/// factors as [`h1_frf`]). `m` is responses by drives on the same lines as `g_xx`.
+///
+/// [`h1_frf`] is exactly zero in a dropped direction: the drive did not excite it,
+/// so it says nothing there, and zero is not a measurement. `h1_frf + this` is the
+/// estimate in the excited directions and `m` in the others. Also returns the
+/// number of directions dropped per line; on a line with none the part is exactly
+/// zero.
+pub fn h1_unexcited_part(
+    g_xx: &HermitianStack,
+    reg: Regularization,
+    m: &MatrixStack,
+) -> Result<(MatrixStack, Vec<usize>), LinalgError> {
+    reg.check()?;
+    let (lines, c, d) = check_identification(m, g_xx)?;
+    let mut w = EighWork::new(d);
+    let mut out = MatrixStack::zeros(lines, c, d);
+    let mut dropped = vec![0usize; lines];
+    let mut mv = vec![C64::new(0.0, 0.0); c];
+    for line in 0..lines {
+        w.solve(g_xx, line, "h1_unexcited_part")?;
+        let f = hermitian_inverse_factors(&w.values(), reg);
+        let ml = m.line(line);
+        let o = out.line_mut(line);
+        for (j, fj) in f.iter().enumerate() {
+            if *fj != 0.0 {
+                continue;
+            }
+            dropped[line] += 1;
+            // (m v_j) v_j^H for each dropped eigenvector v_j.
+            for (i, x) in mv.iter_mut().enumerate() {
+                *x = (0..d).map(|k| ml[i * d + k] * w.u[(k, j)]).sum();
+            }
+            for (i, x) in mv.iter().enumerate() {
+                for k in 0..d {
+                    o[i * d + k] += *x * w.u[(k, j)].conj();
+                }
+            }
+        }
+    }
+    Ok((out, dropped))
+}
+
 /// Multiple coherence of each control on all drives, per line:
 /// `gamma_i^2 = (G_yx G_xx^+ G_yx^H)_ii / G_yy,ii`, clamped to `[0, 1]`, and 0 where
 /// `G_yy,ii` is not positive. Line-major, `lines * controls` values. `g_yy` is
