@@ -299,8 +299,16 @@ def test_several_data_objects_of_one_type_share_a_stage(plate, validate):
     finally:
         project.remove(twin)
     others = [n for n, o in project.items() if projects.kind_of(o) == 'time_history' and n != history]
+    # on other sample times, still one abscissa quantity: drawn together, each on its own times
     apart = shown(plate, history, others[0], validate=validate)
-    assert [v['view'] for v in apart['views']] == ['waterfall', 'waterfall'], 'abscissas differ: each alone'
+    (stage,) = apart['views']
+    assert stage['title'] == f'{history} + {others[0]}'
+    # one quantity, as each draws alone; the force records are left out and said to be
+    count = sum(len(shown(plate, name)['views'][0]['records']) for name in (history, others[0]))
+    assert len(stage['records']) == count, apart['note']
+    assert 'records of another quantity left out' in apart['note']
+    assert stage['records'][0].startswith(f'{history}: ')
+    assert stage['records'][-1].startswith(f'{others[0]}: ')
     mixed = shown(plate, history, named(plate, 'frf'), validate=validate)
     assert len(mixed['views']) == 2, 'not one type: each alone'
 
@@ -894,3 +902,74 @@ def test_a_psd_is_drawn_flat_across_its_bins_on_the_2d_plot_too(validate):
     other = projects.show(held, {'objects': ['Response'], 'records': {}, 'part': None,
                                  'prefs': {'flat': True}})
     assert all(line.get('shape', 'line') == 'line' for line in other['views'][0]['series'])
+
+
+def _runs():
+    """Two acceleration densities on different lines, a force density and a silent one."""
+    held = projects.new({'title': 'Together'})
+    coarse, fine = np.arange(10.0, 210.0, 10.0), np.arange(5.0, 205.0, 5.0)
+    held.project.add('Run 1', Psd(coarse, np.vstack([np.full(coarse.size, 0.01),
+                                                     np.full(coarse.size, 0.02)]),
+                                  ['1X+', '2Y+'], ordinate_dim='acceleration', ordinate_unit='g'))
+    held.project.add('Run 2', Psd(fine, np.vstack([np.full(fine.size, 0.03),
+                                                   np.full(fine.size, 0.04)]),
+                                  ['1X+', '2Y+'], ordinate_dim='acceleration', ordinate_unit='g'))
+    held.project.add('Force', Psd(coarse, np.full((1, coarse.size), 5.0), ['9Z+'],
+                                  ordinate_dim='force', ordinate_unit='N'))
+    held.project.add('Silent', Psd(coarse, np.zeros((1, coarse.size)), ['1X+'],
+                                   ordinate_dim='acceleration', ordinate_unit='g'))
+    return held
+
+
+def test_records_picked_in_two_data_objects_are_drawn_together(validate):
+    held = _runs()
+    picks = {'Run 1': [0], 'Run 2': [1]}
+    out = shown(held, 'Run 1', 'Run 2', records=picks, validate=validate)
+    (stage,) = out['views']
+    assert stage['view'] == 'waterfall' and stage['title'] == 'Run 1 + Run 2'
+    assert stage['records'] == ['Run 1: 1X+', 'Run 2: 2Y+'], 'the records picked, named by object'
+    assert '2 objects on one stage' in out['note']
+    flat = shown(held, 'Run 1', 'Run 2', records=picks, prefs={'flat': True}, validate=validate)
+    (plot,) = flat['views']
+    assert [line['name'] for line in plot['series']] == ['Run 1: 1X+', 'Run 2: 2Y+']
+    # each on its own lines: nothing is interpolated onto the other's
+    assert len(plot['series'][0]['y']) == 20 and len(plot['series'][1]['y']) == 40
+    assert np.allclose(plot['series'][1]['y'], 0.04)
+    assert plot['y']['label'] == 'PSD' and '2 objects on one plot' in flat['note']
+
+
+def test_whole_densities_the_overlay_cannot_pair_are_drawn_together(validate):
+    held = _runs()
+    out = shown(held, 'Run 1', 'Run 2', validate=validate)
+    (stage,) = out['views']
+    assert stage['view'] == 'waterfall' and len(stage['records']) == 4, 'different lines'
+
+
+def test_records_that_share_no_axis_are_each_drawn_alone(validate):
+    held = _runs()
+    out = shown(held, 'Run 1', 'Force', records={'Run 1': [0], 'Force': [0]}, validate=validate)
+    assert [len(view['records']) for view in out['views']] == [1, 1]
+    assert 'each object on its own' in out['note']
+    three = shown(held, 'Run 1', 'Run 2', 'Force', records={'Run 1': [1]}, validate=validate)
+    (stage,) = three['views']
+    assert stage['records'] == ['Run 1: 2Y+', 'Run 2: 1X+', 'Run 2: 2Y+']
+    assert 'Force left out: not on the axis of Run 1' in three['note']
+
+
+def test_a_silent_record_still_draws_beside_the_other(validate):
+    held = _runs()
+    out = shown(held, 'Run 1', 'Silent', records={'Run 1': [0], 'Silent': [0]}, validate=validate)
+    (stage,) = out['views']
+    assert stage['records'] == ['Run 1: 1X+', 'Silent: 1X+']
+
+
+def test_the_action_table_names_the_view_picks_make(validate):
+    from hertzforge.service import action_table
+
+    held = _runs()
+    project = held.project
+    assert action_table.defaults(project, ['psd', 'psd'], ['Run 1', 'Run 2']) == ['Overlay']
+    assert action_table.defaults(project, ['psd', 'psd'], ['Run 1', 'Run 2'],
+                                 {'Run 1': [0]}) == ['Stack']
+    assert action_table.defaults(project, ['psd', 'psd'], ['Run 1', 'Force'],
+                                 {'Run 1': [0]}) == []
