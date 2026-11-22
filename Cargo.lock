@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-mixed"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "hertzforge-breakpoints",
  "hertzforge-channel-table",
@@ -1318,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-mixed-laws"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-hal",

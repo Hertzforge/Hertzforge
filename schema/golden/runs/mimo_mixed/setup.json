@@ -783,7 +783,7 @@
           "source": "inline in the configuration",
           "source_sha256": null,
           "created_unix_secs": 0,
-          "tool": "hertzforge-reference 0.1.20",
+          "tool": "hertzforge-reference 0.0.0",
           "conjugated_on_import": null,
           "assumptions": [],
           "repair": null

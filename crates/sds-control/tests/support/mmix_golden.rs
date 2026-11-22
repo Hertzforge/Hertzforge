@@ -126,8 +126,8 @@ fn zero_call_times(bin: Vec<u8>, side: &Value) -> Vec<u8> {
     out
 }
 
-/// A folder's files normalized: the wall times, the run's unique identity and the
-/// build fixed, the laws' call times zeroed, each stream cut to its first
+/// A folder's files normalized: the wall times, the run's unique identity, the
+/// build and the reference's tool version fixed, the laws' call times zeroed, each stream cut to its first
 /// [`CUT_FRAMES`] frames and saying so.
 pub fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
@@ -160,6 +160,17 @@ pub fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {
                     &mut v,
                     &["build"],
                     json!({"version": "0.0.0", "commit": "0".repeat(40), "dirty": false}),
+                );
+                pretty(&v)
+            }
+            // The reference built from the configuration is stamped with the
+            // tool's version, which moves with every release.
+            "setup.json" => {
+                let mut v: Value = serde_json::from_slice(&bytes).unwrap();
+                set(
+                    &mut v,
+                    &["resolved", "controller", "reference", "provenance", "tool"],
+                    json!("hertzforge-reference 0.0.0"),
                 );
                 pretty(&v)
             }
