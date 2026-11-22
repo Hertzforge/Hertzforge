@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { Box3, PerspectiveCamera, Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
 import { FILL, fitDistance, homePose } from './fit';
+import { StageCamera } from './projection';
 
 /** The box's corners on screen, as fractions of the half-width and half-height. */
 function onScreen(box: Box3, dir: Vector3, up: Vector3, aspect: number) {
 	const centre = box.getCenter(new Vector3());
-	const camera = new PerspectiveCamera(32, aspect, 0.001, 1000);
+	const camera = new StageCamera(32, aspect, 0.001, 1000);
 	camera.position.copy(centre).addScaledVector(dir, fitDistance(box, centre, dir, up, 32, aspect));
 	camera.up.copy(up);
+	camera.lookedAt.copy(centre);
 	camera.lookAt(centre);
 	camera.updateMatrixWorld();
+	camera.updateProjectionMatrix();
 	let x = 0;
 	let y = 0;
 	for (let k = 0; k < 8; k++) {

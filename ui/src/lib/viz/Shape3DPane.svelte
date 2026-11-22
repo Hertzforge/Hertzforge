@@ -1,7 +1,5 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
-	/** Perspective or parallel projection, one choice for every 3-D view of a model, kept until the app closes. */
-	let lastPerspective = true;
 	/**
 	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
 	 * another object or a part, clicking away or an edit drawing the model again opens where
@@ -73,7 +71,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets, triadScene, TRIAD_HALF } from './arrows';
+	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { fixedWideLines, wideLines } from './wideLines';
@@ -220,26 +218,13 @@
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
 
-	/** Drawn in perspective; off, in parallel projection, the scene the size it was at what the camera looks at. */
-	let perspective = $state(lastPerspective);
-	function togglePerspective() {
-		perspective = !perspective;
-		lastPerspective = perspective;
-		if (!renderer) return;
-		camera.setParallel(!perspective);
-		dirty = true;
-	}
-
 	/**
 	 * A press on a face of the cube at the orientation axes turns the view to look straight at
 	 * that face, and goes no further: the camera does not start a drag on it and nothing is picked.
 	 */
 	function pressCube(e: PointerEvent) {
 		if (e.button !== 0 || !triad || !orientation || !renderer) return;
-		const box = triad.getBoundingClientRect();
-		if (!box.width || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) return;
-		orientation.look(camera.quaternion);
-		const face = orientation.faceAt(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2);
+		const face = cubeFaceUnder(orientation, triad.getBoundingClientRect(), camera.quaternion, e.clientX, e.clientY);
 		if (!face) return;
 		e.stopPropagation();
 		e.preventDefault();
@@ -608,7 +593,7 @@
 	let fitBox = new Box3();
 	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
 	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect, camera.parallel);
+		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
 	}
 	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
@@ -848,7 +833,6 @@
 
 		scene = new Scene();
 		camera = new StageCamera(32, 1, 0.001, 1000);
-		camera.setParallel(!perspective);
 		camera.up.copy(homePose().up);
 
 		// Geometry: one position buffer shared by the surface, outline and ghosts.
@@ -1236,51 +1220,7 @@
 		dirty = true;
 	}
 
-	/** The orientation axes as solid arrows, drawn into the canvas where their letters sit. */
-	function drawTriad() {
-		if (!triad || !orientation || !renderer) return;
-		const canvas = renderer.domElement.getBoundingClientRect();
-		const box = triad.getBoundingClientRect();
-		if (!canvas.width || !canvas.height || !box.width) return;
-		// the canvas may be drawn at another size than it shows at
-		const size = renderer.getSize(new Vector2());
-		const sx = size.x / canvas.width;
-		const sy = size.y / canvas.height;
-		const x = (box.left - canvas.left) * sx;
-		const y = (canvas.bottom - box.bottom) * sy;
-		orientation.look(camera.quaternion);
-		const auto = renderer.autoClear;
-		renderer.autoClear = false;
-		renderer.setViewport(x, y, box.width * sx, box.height * sy);
-		renderer.setScissor(x, y, box.width * sx, box.height * sy);
-		renderer.setScissorTest(true);
-		renderer.clearDepth();
-		renderer.render(orientation.scene, orientation.camera);
-		renderer.setScissorTest(false);
-		renderer.setViewport(0, 0, size.x, size.y);
-		renderer.autoClear = auto;
-	}
-
 	const tmp = new Vector3();
-	const inv = new Quaternion();
-	/** How far along an axis its letter sits, in the picture's 48 units. */
-	const LETTER = (24 / TRIAD_HALF) * 1.2;
-	function updateTriad() {
-		if (!triad) return;
-		inv.copy(camera.quaternion).invert();
-		const axes: [string, Vector3][] = [
-			['x', new Vector3(1, 0, 0)],
-			['y', new Vector3(0, 1, 0)],
-			['z', new Vector3(0, 0, 1)]
-		];
-		for (const [name, v] of axes) {
-			tmp.copy(v).applyQuaternion(inv);
-			const label = triad.querySelector<SVGTextElement>(`text.${name}`);
-			label?.setAttribute('x', (24 + tmp.x * LETTER).toFixed(1));
-			label?.setAttribute('y', (24 - tmp.y * LETTER + 3).toFixed(1));
-		}
-	}
-
 	const corner = new Vector3();
 	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
 	/** Past this many arrows the labels are not written: they would cover the model. */
@@ -1414,8 +1354,10 @@
 		}
 		dirty = false;
 		renderer.render(scene, camera);
-		drawTriad();
-		updateTriad();
+		if (triad && orientation) {
+			drawViewCube(renderer, orientation, triad, camera.quaternion);
+			placeCubeLetters(triad, camera.quaternion);
+		}
 		updateAxes();
 		updateLabels();
 		updateNumbers();
@@ -1933,7 +1875,6 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
-			<button class="btn sm toggle" data-testid="shape3d-perspective" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
 				<button class="btn sm toggle" data-testid="shape3d-node-numbers-toggle" class:on={numbersShown} aria-pressed={numbersShown} onclick={toggleNodeNumbers} title="Node numbers: each node's number beside it, once few enough are in the picture to read">Node Numbers</button>
@@ -2022,7 +1963,7 @@
 
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="72" height="72" aria-hidden="true" data-testid="shape3d-triad">
-				<!-- the letters only: the arrows are solids drawn into the canvas behind them (`drawTriad`), in the gimbal's colors: X red, Y green, Z blue -->
+				<!-- the letters only: the arrows are solids drawn into the canvas behind them (`drawViewCube`), in the gimbal's colors: X red, Y green, Z blue -->
 				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
 				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
 				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
