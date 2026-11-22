@@ -571,3 +571,8 @@ hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_transport_de
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_a_tone_law_that_misses_its_level_fails_the_check
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_limit_channel
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_a_floor_law_that_overdrives_fails_the_check
+
+# MIMO Mixed Mode through the control service with imported laws: a Sim run whose law
+# files run as WebAssembly on their wall-clock budgets (an imported tone law went over its
+# budget in the parallel pass on a shared runner and the run ended law_fault)
+sds-control  test:mimo_mixed_protocol  mimo_mixed_imported_laws_for_each_role_run_on_the_simulator
