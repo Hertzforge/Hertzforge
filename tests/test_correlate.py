@@ -429,6 +429,47 @@ def test_a_models_dofs_are_parsed_once_however_often_it_is_projected():
     assert fem_shapes.coordinate.reads == 1
 
 
+def test_a_copy_keeps_the_parse_and_leaves_the_lookup_to_be_built_again():
+    """A preview runs on copies, and a model's DOF lookup is as large as its DOFs: it is not
+    copied, while the parse, a few arrays, is."""
+    shapes = _set(['1X+', '1Y-', '2Z+'])
+    shapes.covers('1X+')
+    parsed = shapes._parsed_dofs()
+    copied = copy.deepcopy(shapes)
+    assert not hasattr(copied, '_lookup_kept') and copied.covers('1Y+')
+    assert all(np.array_equal(a, b) for a, b in zip(copied._parsed_kept[2], parsed))
+    copied.coordinate = _Counted(copied.coordinate)
+    copied._parsed_kept = (copied.coordinate, len(copied.coordinate), copied._parsed_kept[2])
+    copied._parsed_dofs()
+    assert copied.coordinate.reads == 0
+
+
+def test_an_expanded_set_is_drawn_on_the_models_parse():
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    expanded, _report = expand_shapes(test_shapes, test_geometry, fem_shapes, fem_geometry)
+    assert expanded._parsed_dofs() is fem_shapes._parsed_dofs()
+
+
+def test_a_set_is_drawn_from_the_dofs_it_keeps_parsed():
+    """Drawing a model's modes, each time the picks change, reads its DOFs once and then
+    draws from the parse it keeps; given as a list, the DOFs are read each time."""
+    from hertzforge.service.mesh import drawn_mesh
+    from hertzforge.service.mode_pairs import translations
+
+    fem_geometry, fem_shapes = _fem()
+    rows = drawn_mesh(fem_geometry)[0]
+    fem_shapes.coordinate = _Counted(fem_shapes.coordinate)
+    first = translations(fem_geometry, fem_shapes, fem_shapes.shape_matrix, rows)
+    again = translations(fem_geometry, fem_shapes, fem_shapes.shape_matrix, rows)
+    assert fem_shapes.coordinate.reads == 1
+    listed = translations(fem_geometry, fem_shapes.coordinate, fem_shapes.shape_matrix, rows)
+    assert fem_shapes.coordinate.reads == 2
+    assert np.array_equal(first, again) and np.array_equal(first, listed)
+
+
 def test_the_set_with_uniaxial_nodes_is_the_one_projected_onto():
     """A node measured along one axis has no whole motion to sample at
     another set's DOFs, so the other set is projected onto it, whichever

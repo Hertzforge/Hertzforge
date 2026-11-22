@@ -17,12 +17,19 @@ def translations(geometry: Any, dofs: Any, values: np.ndarray,
     """One value per DOF as a translation per drawn node, [N, 3], or
     [modes, N, 3] for a matrix of `values` with a row per mode, complex
     when the values are. Nodes with no measured DOF stay where they are.
-    The DOFs are parsed once for all the modes."""
+    The DOFs are parsed once for all the modes; `dofs` given as a shape set
+    are its own, parsed once for as long as it keeps them
+    (`ShapeSet._parsed_dofs`)."""
     from scipy.sparse import csr_array
 
+    from hertzforge.core.shapes import ShapeSet
     from hertzforge.deform import dof_directions
 
-    dof_rows, dof_vectors, dof_used = dof_directions(geometry, dofs)
+    if isinstance(dofs, ShapeSet):
+        dof_rows, dof_vectors, dof_used = dof_directions(geometry, dofs.coordinate,
+                                                         parsed=dofs._parsed_dofs())
+    else:
+        dof_rows, dof_vectors, dof_used = dof_directions(geometry, dofs)
     values = np.asarray(values)[..., dof_used]
     kept = np.asarray(rows)
     # [used DOFs, 3 * drawn nodes]: each DOF's unit vector on its node, so one product spreads every mode
@@ -59,16 +66,16 @@ def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: 
 
     drawn, triangles, lines = drawn_mesh(geometry)
     nodes = np.asarray(geometry.node_xyz, dtype=float)[drawn]
-    moved = translations(geometry, rows.coordinate, rows.shape_matrix[row_modes], drawn)
+    moved = translations(geometry, rows, rows.shape_matrix[row_modes], drawn)
     extra: dict[str, Any] = {}
     defined = geometry.units_defined
     if column_geometry is None:
         over = (moved if columns is rows and column_modes == row_modes else
-                translations(geometry, columns.coordinate, columns.shape_matrix[column_modes],
+                translations(geometry, columns, columns.shape_matrix[column_modes],
                              drawn))
     else:
         there, its_triangles, its_lines = drawn_mesh(column_geometry)
-        over = translations(column_geometry, columns.coordinate,
+        over = translations(column_geometry, columns,
                             columns.shape_matrix[column_modes], there)
         first, second = len(drawn), len(there)
         # each set's shapes on its own nodes, at rest on the other's

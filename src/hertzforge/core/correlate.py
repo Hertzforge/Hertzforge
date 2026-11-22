@@ -339,6 +339,10 @@ def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
         comment=['expanded to model DOFs'] * test_shapes.num_shapes,
         mass_unit=test_shapes.mass_unit,
         unscaled=getattr(test_shapes, 'unscaled', False))
+    if expanded.coordinate == fem_shapes.coordinate:
+        # the model's DOFs, already parsed: drawing the expanded set does not parse them again
+        expanded._parsed_kept = (expanded.coordinate, len(expanded.coordinate),
+                                 fem_shapes._parsed_dofs())
     report = {**report, 'modes': modes, 'condition': float(np.linalg.cond(phi_a)),
               'residual': [float(r) for r in residual]}
     return expanded, report

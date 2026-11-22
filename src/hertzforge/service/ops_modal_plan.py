@@ -140,7 +140,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
     nodes = np.vstack([points, xyz[seat_rows], tips])
     shown = [v.mode(m + 1, float(shapes.frequency[m]),
                     float(shapes.damping[m]) if shapes.damping[m] > 0 else None,
-                    np.real(translations(geometry, shapes.coordinate,
+                    np.real(translations(geometry, shapes,
                                           shapes.shape_matrix[m], rows)))
              for m in modes]
     extra: dict[str, Any] = {}

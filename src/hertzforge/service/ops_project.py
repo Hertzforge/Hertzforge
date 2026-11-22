@@ -325,7 +325,7 @@ def _shapes_drawn(title: str, shapes: Any, geometry: Any,
     """Modes on a geometry, whether or not the shape set is in the project."""
     rows, triangles, lines = drawn_mesh(geometry)
     picked = list(modes) if modes else list(range(shapes.num_shapes))
-    moved = translations(geometry, shapes.coordinate, shapes.shape_matrix[picked], rows)
+    moved = translations(geometry, shapes, shapes.shape_matrix[picked], rows)
     modes = [v.mode(k + 1, float(shapes.frequency[k]), float(shapes.damping[k]), moved[i])
              for i, k in enumerate(picked)]
     return v.shape3d(title,

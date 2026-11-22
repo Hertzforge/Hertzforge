@@ -9726,7 +9726,7 @@ class Project(dict):
                 # a derived object that will not share its source's
                 # geometry still belongs in the project; the link is
                 # the claim that failed, not the result
-                test.delete_modes([k for k in range(test.num_shapes) if k not in picked])
+                pass
         if recipe is not None:
             verb, params = recipe
             self.provenance[added] = {

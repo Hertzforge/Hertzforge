@@ -1010,6 +1010,14 @@ class ShapeSet:
             label += f', {self.damping[i] * 100:.3g}% damping'
         return label
 
+    def __getstate__(self) -> dict[str, Any]:
+        # a copy, or a preview of an operation on one, leaves out the DOF lookup it can build
+        # again: for a model of hundreds of thousands of DOFs it is a dictionary as large, and
+        # copying it took longer than building it. The parsed DOFs are arrays and are kept
+        state = dict(self.__dict__)
+        state.pop('_lookup_kept', None)
+        return state
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ShapeSet):
             return NotImplemented
