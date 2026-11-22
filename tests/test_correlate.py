@@ -378,6 +378,42 @@ def test_nodes_measured_in_fewer_than_three_directions_are_counted():
     assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '1RX+', 'M1'])) == 0
 
 
+class _Counted(list):
+    """A DOF list that counts how often it is read through."""
+
+    reads = 0
+
+    def __iter__(self):
+        self.reads += 1
+        return super().__iter__()
+
+
+def test_the_count_is_read_once_per_dof_list():
+    """A model's set holds hundreds of thousands of DOFs, and a selection asks this of it many
+    times: the DOFs are read once, and again only when the set holds another list."""
+    from hertzforge.core.correlate import partial_nodes
+
+    shapes = _set(['1X+', '1Y+', '1Z+', '2Z+'])
+    shapes.coordinate = _Counted(shapes.coordinate)
+    assert [partial_nodes(shapes) for _ in range(3)] == [1, 1, 1]
+    assert shapes.coordinate.reads == 1
+    shapes.coordinate = _Counted(['1X+', '1Y+', '1Z+', '2Z+', '3X+'])
+    assert partial_nodes(shapes) == 2 and shapes.coordinate.reads == 1
+    shapes.coordinate.append('3Y+')
+    assert partial_nodes(shapes) == 2 and shapes.coordinate.reads == 2
+
+
+def test_the_dof_lookup_is_built_once_per_dof_list():
+    shapes = _set(['1X+', '1Y-', '2Z+'])
+    shapes.coordinate = _Counted(shapes.coordinate)
+    assert all(shapes.covers('1Y+') for _ in range(3)) and not shapes.covers('2X+')
+    assert shapes.coordinate.reads == 1
+    shapes.coordinate.append('2X+')
+    assert shapes.covers('2X+') and shapes.coordinate.reads == 2
+    shapes.coordinate = _Counted(['3Z+'])
+    assert shapes.covers('3Z-') and not shapes.covers('1X+')
+
+
 def test_the_set_with_uniaxial_nodes_is_the_one_projected_onto():
     """A node measured along one axis has no whole motion to sample at
     another set's DOFs, so the other set is projected onto it, whichever
