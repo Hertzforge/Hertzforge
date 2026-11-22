@@ -15,8 +15,9 @@ a time history played back sample by sample; an FRF's or a spectrum's
 operating deflection shape at its loudest line; a PSD's envelope); a
 channel table on a geometry marks its channels; two shape sets give their
 MAC; a measurement beside its requirement gives the comparison's spectra;
-two PSDs overlay. Anything else shows each object on its own, and the note
-says what was left out.
+two PSDs overlay. Data objects on one abscissa (frequency, time) are drawn
+together to be compared, the records picked in each when any are. Anything
+else shows each object on its own, and the note says what was left out.
 """
 
 from __future__ import annotations
@@ -625,73 +626,109 @@ def _faced(views: list[dict], obj: Any) -> None:
                 view['facing'] = 'top'
 
 
-#: how many records a cross-object stage stacks before standing down: the
-#: stack copies the rows drawn, and two whole surveys would be gigabytes
+#: how many records a cross-object view draws before standing down: two whole
+#: surveys together are thousands of curves, and each object is then shown alone
 STACK_LIMIT = 500
 
 
-def _stacked(project: Any, names: list[str], prefs: dict[str, Any]
-             ) -> tuple[list[dict], list[str]] | None:
-    """Several data objects of one type on one stage: the same concrete type and the same abscissa,
-    their records stacked into one object for the drawing only. Nothing
-    is merged or stored, so the merge rules' refusals (duplicate pairs,
-    mixed capture counts) do not apply: they protect stored objects from
-    telling false stories, and a drawing tells none. None otherwise, and
-    the caller shows each on its own."""
-    from .waterfalls import waterfall_view
+def _picked_records(data: Any, picks: list[int]) -> list[int]:
+    """The records of `data` picked in the tree, or all of them when none is."""
+    picked = sorted({int(i) for i in picks if 0 <= int(i) < int(data.num_records)})
+    return picked or list(range(int(data.num_records)))
+
+
+def _picked_data(project: Any, names: list[str], records: dict[str, list[int]]) -> bool:
+    """Whether records are picked in a selection of several objects, all of them data:
+    what `_together` compares."""
+    return (len(names) > 1 and all(_is_data(project[name]) for name in names)
+            and any(records.get(name) for name in names))
+
+
+def _together(project: Any, names: list[str], records: dict[str, list[int]],
+              prefs: dict[str, Any]) -> tuple[list[dict], list[str]] | None:
+    """Data objects on one abscissa drawn together to be compared: the
+    records picked in each (all of an object picked whole) on one stage, or
+    on one flat plot with `prefs['flat']`, each curve named by its object.
+    The objects need not be one type or share their abscissa values, only
+    its quantity (frequency, time). An object whose values do not share the
+    first's axis (another quantity or unit) is left out, and the note says
+    so. Nothing is merged or stored. None when fewer than two of the objects
+    can be drawn this way, or they hold more than `STACK_LIMIT` records
+    together, and the caller shows each on its own."""
+    import hertzforge as hz
+    from hertzforge.drawing.viz.waterfall import drawn_span, waterfall_arrays
+
+    from .ops_project import _curve, _limit_lines
+    from .waterfalls import axes
 
     objects = [project[name] for name in names]
     if len(objects) < 2 or not all(_is_data(obj) for obj in objects):
         return None
-    first = objects[0]
-    if any(type(obj) is not type(first) for obj in objects):
+    if len({obj.abscissa_dim for obj in objects}) != 1:
         return None
-    if any(not np.array_equal(obj.abscissa, first.abscissa) for obj in objects[1:]):
+    chosen = [_picked_records(obj, records.get(name, [])) for name, obj in zip(names, objects,
+                                                                                 strict=True)]
+    if sum(len(picks) for picks in chosen) > STACK_LIMIT:
         return None
-    if sum(int(obj.num_records) for obj in objects) > STACK_LIMIT:
+    component, flat = prefs['component'], bool(prefs['flat'])
+    first: Any = None
+    x_axis: dict = {}
+    z_axis: dict = {}
+    z_labels: list[str] = []
+    drawn_from: list[str] = []
+    apart: list[str] = []
+    other = paged = 0
+    lines: list[dict] = []
+    labels: list[str] = []
+    curves: list[tuple[Any, Any]] = []
+    for name, data, picks in zip(names, objects, chosen, strict=True):
+        arrays = waterfall_arrays(data, picks, unit_system=hz.SI, exponents=False,
+                                  component=component)
+        if not arrays['drawn']:
+            apart.append(name)
+            continue
+        x, z = axes(data, arrays['drawn'][0], component, arrays)
+        if first is None:
+            first, x_axis, z_axis = data, x, z
+        elif (x['label'], x['unit'], z['unit']) != (x_axis['label'], x_axis['unit'],
+                                                    z_axis['unit']):
+            apart.append(name)
+            continue
+        drawn_from.append(name)
+        if z['label'] not in z_labels:
+            z_labels.append(z['label'])
+        other += len(arrays['left_out'])
+        paged += len(picks) - len(arrays['left_out']) - len(arrays['drawn'])
+        for record, (cx, cz) in zip(arrays['drawn'], arrays['curves'], strict=True):
+            label = f'{name}: {data.record_label(record)}'
+            if flat:
+                lines.append(_curve(label, 'measured', data, cx, cz, component))
+            else:
+                labels.append(label)
+                curves.append((cx, cz))
+        if flat and prefs['limits'] and component == 'magnitude':
+            lines += [{**line, 'name': f'{name}: {line["name"]}'}
+                      for line in _limit_lines(data, arrays['drawn'])]
+    if len(drawn_from) < 2:
         return None
-    referenced = first.reference_dof is not None
-    rows: list[Any] = []
-    resp: list[str] = []
-    ref: list[str] = []
-    dims: list[str] = []
-    units: list[Any] = []
-    runits: list[Any] = []
-    hints: list[Any] = []
-    for data in objects:
-        ordinate = np.asarray(data.ordinate)
-        n = int(data.num_records)
-        for i in range(n):
-            rows.append(ordinate[i])
-            resp.append(data.response_dof[i])
-            if referenced:
-                ref.append(data.reference_dof[i])
-            dims.append(data.ordinate_dim[i])
-            units.append((data.ordinate_unit or [None] * n)[i])
-            runits.append((data.reference_unit or [None] * n)[i])
-            hints.append((data.dimension_hint or [None] * n)[i])
-    stacked = type(first)(first.abscissa, np.asarray(rows), response_dof=resp,
-                          reference_dof=ref if referenced else None, ordinate_dim=dims,
-                          ordinate_unit=units, reference_unit=runits, dimension_hint=hints)
-    title = ' + '.join(dict.fromkeys(names))
-    note = f'{len(objects)} objects on one stage'
-    if prefs['flat']:
-        import hertzforge as hz
-        from hertzforge.drawing.viz.waterfall import waterfall_arrays
-
-        from .waterfalls import axes
-
-        records = list(range(int(stacked.num_records)))
-        arrays = waterfall_arrays(stacked, records, unit_system=hz.SI, exponents=False,
-                                  component=prefs['component'])
-        lines = [v.series(stacked.record_label(r), 'measured', x, y)
-                 for r, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True)]
-        return [v.spectrum(title, *axes(stacked, arrays['drawn'][0], prefs['component'], arrays),
-                           lines)], [note]
-    view = waterfall_view(title, stacked, component=prefs['component'])
+    z_axis = {**z_axis, 'label': ' / '.join(z_labels)}
+    title = ' + '.join(dict.fromkeys(drawn_from))
+    notes = [f'{len(drawn_from)} objects on one {"plot" if flat else "stage"}']
+    if apart:
+        notes.append(f'{", ".join(apart)} left out: not on the axis of {drawn_from[0]}')
+    if other:
+        notes.append(f'{other} record{"s" * (other != 1)} of another quantity left out')
+    if paged:
+        notes.append(f'{paged} record{"s" * (paged != 1)} past the first page left out')
+    if flat:
+        return [v.spectrum(title, x_axis, z_axis, lines)], notes
+    limits = getattr(first, 'ordinate_limits', None)
+    signed = component != 'magnitude' and any(obj.ordinate.dtype.kind == 'c' for obj in objects)
+    view = v.waterfall(title, x_axis, z_axis, labels, curves, drawn_span(curves),
+                       z_range=None if limits is None or z_axis['scale'] == 'log' or signed
+                       else limits)
     _faced([view], first)
-    return [view], [note]
-
+    return [view], notes
 
 def _column(data: Any, picks: list[int]) -> list[int] | None:
     """The picked records as one CPSD reference column, or None: a column
@@ -1312,8 +1349,13 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
             return _run(project, 'project.replication_waveforms', history=measured,
                         reference=transient), []
     if all(type(o) is Psd for o in (a, b)):
-        return _run(project, 'project.psd_overlay', first=first, second=second), []
-    return _stacked(project, [first, second], {**PREFS, **(prefs or {})})
+        try:
+            return _run(project, 'project.psd_overlay', first=first, second=second), []
+        except ProtocolError:
+            # two densities on different lines, or with no channel in common, have no
+            # channel-by-channel overlay; they are still drawn together
+            pass
+    return _together(project, [first, second], records, {**PREFS, **(prefs or {})})
 
 
 def _compared(project: Any, objects: list[str], prefs: dict[str, Any]
@@ -1460,8 +1502,14 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     prefs = {**PREFS, **(prefs or {})}
     notes: list[str] = []
     views: list[dict] = []
+    picked_data = _picked_data(project, objects, records)
     try:
-        if len(objects) == 2:
+        if picked_data:
+            # records picked across data objects are what is compared: no reading of the
+            # whole objects (an overlay of every shared channel, a check against a
+            # specification) stands in for them
+            views, notes = _together(project, objects, records, prefs) or ([], [])
+        elif len(objects) == 2:
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
@@ -1473,10 +1521,10 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             compared = _compared(project, objects, prefs)
             if compared is not None:
                 views, notes = compared
-        if len(objects) > 2 and not views:
-            stacked = _stacked(project, objects, prefs)
-            if stacked is not None:
-                views, notes = stacked
+        if len(objects) > 2 and not views and not picked_data:
+            together = _together(project, objects, records, prefs)
+            if together is not None:
+                views, notes = together
         if not views:
             for name in objects:
                 more, said = _alone(project, name, records.get(name, []), prefs)

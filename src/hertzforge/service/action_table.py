@@ -40,7 +40,7 @@ JOINT: dict[tuple[str, str], tuple[str, ...]] = {
     ('psd', 'psd'): ('Overlay',),
 }
 
-#: data objects of one type drawn on one stage (`show._stacked`)
+#: data objects of one type drawn together (`show._together`)
 STACKED = frozenset(('time_history', 'frf', 'coherence', 'multiple_coherence', 'spectrum', 'srs',
                      'specification', 'shock_specification', 'transient_specification'))
 
@@ -278,9 +278,17 @@ def _takes_anything(op: Operation) -> bool:
     return op.id not in _ONE_TYPE and any(len(p.kinds) >= _ANY for p in _object_params(op))
 
 
-def defaults(project: Any, kinds: list[str], names: list[str]) -> list[str]:
+def defaults(project: Any, kinds: list[str], names: list[str],
+             records: dict[str, list[int]] | None = None) -> list[str]:
     """What `show` draws by itself for objects of `kinds`. `names` are the
-    objects, when they exist, for what depends on the object itself."""
+    objects, when they exist, for what depends on the object itself, and
+    `records` the records picked in them: picked across data objects, they
+    are drawn together in place of any reading of the whole objects."""
+    if records and len(names) == len(kinds) > 1:
+        from .show import PREFS, _picked_data, _together
+
+        if _picked_data(project, names, records):
+            return ['Stack'] if _together(project, names, records, PREFS) else []
     if len(kinds) == 1:
         kind = kinds[0]
         if kind == 'shape_set':
@@ -515,7 +523,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
 
     names = [c[0] for c in chosen]
     kinds = [c[1] for c in chosen]
-    rows = [_row(f'show.{verb.lower()}', verb, 'default') for verb in defaults(project, kinds, names)]
+    rows = [_row(f'show.{verb.lower()}', verb, 'default')
+            for verb in defaults(project, kinds, names, records)]
     if kinds == ['shape_set']:
         rows += _shape_views(project, names[0])
     if kinds == ['frf'] or sorted(kinds) == ['frf', 'shape_set']:

@@ -755,7 +755,10 @@ data object, `complex` for complex frequency data). A frequency axis is made lin
 plot itself, as the stage's is. A
 `shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,
 so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
-the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD
+the map, `top`). Data objects on one abscissa quantity (frequency, time) show together, on one stage or
+one flat plot, each curve named `object: record`: the records picked in each when any are picked,
+in place of any reading of the whole objects, and every record of an object picked whole. An object
+whose values do not share the first's axis is left out, and `note` says so. A CPSD
 on a geometry shows its principal shape, or the shape relative to one reference when one column of its
 grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC and, on a
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
