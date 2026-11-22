@@ -774,8 +774,10 @@ def _none_matched(first: str, second: str, homes: Any, error: Any
 
 
 def _mac(project: Any, first: str, second: str, geometry: str | None,
-         prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
-    """Two shape sets: their MAC, each axis ticked by its own frequencies,
+         prefs: dict[str, Any], records: dict[str, list[int]] | None = None
+         ) -> tuple[list[dict], list[str]]:
+    """Two shape sets: their MAC, of the modes picked under each (every mode
+    of a set picked whole), each axis ticked by its own frequencies,
     and on a geometry the stage the matrix selects a pair on, the column
     mode overlaid on the row mode (`mode_pairs.paired`). Sets on two
     geometries compare after projection onto the first's DOFs
@@ -785,11 +787,14 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     as `matched`."""
     from hertzforge.core.correlate import NoNodeMatched
 
-    from .mode_pairs import paired
+    from .mode_pairs import matched_cells, mode_axis, paired, picked_modes
 
+    records = records or {}
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
         raise refused(f'{first if not rows.num_shapes else second} has no modes')
+    row_modes = picked_modes(rows, records.get(first))
+    column_modes = picked_modes(columns, records.get(second))
     homes = project.geometry_for(first), project.geometry_for(second)
     apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
     notes: list[str] = []
@@ -797,12 +802,15 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     # (`Project.set_projection`): the MAC is drawn the way Project sets it
     if apart and prefs.get('projection'):
         try:
-            views = _run(project, 'project.projection_overlay', first=first, second=second)
+            views = _run(project, 'project.projection_overlay', first=first, second=second,
+                         first_modes=_runs(records.get(first) or []),
+                         second_modes=_runs(records.get(second) or []))
         except ProtocolError as error:
             if not isinstance(error.__cause__, NoNodeMatched):
                 raise
             # nothing to animate: answered as the comparison answers it, with how far off
-            return _mac(project, first, second, geometry, {**prefs, 'projection': False})
+            return _mac(project, first, second, geometry, {**prefs, 'projection': False},
+                        records)
     else:
         from hertzforge.core.shapes import cross_mac
 
@@ -816,19 +824,17 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             return _none_matched(first, second, homes, error)
         except ValueError as error:
             raise refused(str(error)) from None
-
-        def axis(name: str, shapes: Any) -> dict:
-            return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
-
+        # the whole matrix is computed and the picked rows and columns read from it: a
+        # pair's MAC does not depend on which other modes are compared
+        values = np.asarray(values)[np.ix_(row_modes, column_modes)]
         title = (f'Auto-MAC of {first}' if first == second
                  else f'MAC of {first} Against {second}')
-        matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
-                          (0.0, 1.0))
+        matrix = v.matrix(title, mode_axis(first, rows, row_modes),
+                          mode_axis(second, columns, column_modes), values, 'MAC', (0.0, 1.0))
         if apart:
             # each set on its own geometry, the second's laid over the first's
-            views = paired(homes[0][1], matrix, rows, range(rows.num_shapes), columns,
-                           range(columns.num_shapes), column_geometry=homes[1][1],
-                           compared=(ours, theirs))
+            views = paired(homes[0][1], matrix, rows, row_modes, columns, column_modes,
+                           column_geometry=homes[1][1], compared=(ours, theirs))
             notes.append(f'the MAC with {said}; {first} drawn on '
                          f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
                          'the projection')
@@ -840,10 +846,13 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
                     report, homes[0][1].units_defined and homes[1][1].units_defined)))
         else:
             views = paired(None if geometry is None else project[geometry], matrix, rows,
-                           range(rows.num_shapes), columns, range(columns.num_shapes))
+                           row_modes, columns, column_modes)
+    for name, shapes, modes in ((first, rows, row_modes), (second, columns, column_modes)):
+        if len(modes) < shapes.num_shapes and not (name == second and first == second):
+            notes.append(f'{len(modes)} of the {shapes.num_shapes} modes of {name}')
     found = _matched(project, first, second)
     if found is not None:
-        views[0]['matched'] = [[int(a), int(b)] for a, b in found[1].pairs]
+        views[0]['matched'] = matched_cells(found[1].pairs, row_modes, column_modes)
         notes.append(f'{len(found[1].pairs)} pairs matched in {found[0]}')
     return views, notes
 
@@ -1328,7 +1337,7 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         return None
     if isinstance(a, ShapeSet) and isinstance(b, ShapeSet):
         return _mac(project, first, second, _geometry_for(project, first),
-                    {**PREFS, **(prefs or {})})
+                    {**PREFS, **(prefs or {})}, records)
     frf_name, set_name = of(Frf), of(ShapeSet)
     if frf_name is not None and set_name is not None:
         return _resynthesis(project, frf_name, set_name, records, {**PREFS, **(prefs or {})})

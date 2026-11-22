@@ -319,6 +319,7 @@ surface with its cone of influence as two walls.
 {"view":"matrix","title":"...",
  "rows":{"label":"Identified","ticks":["439.2 Hz","647.2 Hz",...]},     one tick per row
  "columns":{"label":"FE model","ticks":["439.2 Hz",...]},              one tick per column
+   ("indices":[0, 2, ...] on either axis, optional: each row's or column's item in its object)
  "values":{"$array":.. f32 [R,C]},          row r, column c
  "value_label":"MAC",
  "value_range":[0, 1]}                      the color scale, pinned
@@ -336,6 +337,11 @@ c's shape with row r's, since a real mode is defined only up to its sign and a c
 rotation. Clicking cell (r, c) shows mode r with overlay c drawn over it, rotated by that angle and
 in one flat color, scaled to the same amplitude; the playback and the camera carry on through a
 click.
+
+An axis that shows some of an object's items, such as the modes picked under each shape set, says
+which with `indices`, each row's or column's index in its object from 0. A pick on the grid is sent
+by those indices (Add Matches numbers a pair by its modes, not its cell), and `matched` names cells
+by position on the grid as drawn.
 
 **`heatmap`** (rows of values against frequency, such as MIMO Random's error per control)
 
@@ -760,8 +766,8 @@ one flat plot, each curve named `object: record`: the records picked in each whe
 in place of any reading of the whole objects, and every record of an object picked whole. An object
 whose values do not share the first's axis is left out, and `note` says so. A CPSD
 on a geometry shows its principal shape, or the shape relative to one reference when one column of its
-grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC and, on a
-geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
+grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC, of the modes picked
+under each when any are, and, on a geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
 projected onto. Whose nodes are matched to whose DOFs, and how far a test node may be from the

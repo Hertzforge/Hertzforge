@@ -3933,6 +3933,7 @@ class Project(dict):
 
     def transform(self, source: Any, shapes: Any, *,
                   records: Sequence[int] | None = None,
+                  modes: Sequence[int] | None = None,
                   name: str | None = None) -> str:
         """Transform a record's channels through a shape set to modal
         coordinates (Transform to Modal Coordinates), one record per mode
@@ -3960,6 +3961,9 @@ class Project(dict):
         records : sequence of int, optional
             Which of the record's channels to use, the ones picked in
             the tree. All of them when omitted.
+        modes : sequence of int, optional
+            Which of the set's modes to transform to, by index from
+            zero, the ones picked in the tree. Every mode when omitted.
         name : str, optional
             What to call the result. Defaults to the record's name
             followed by 'Modal Coordinates'.
@@ -3975,11 +3979,14 @@ class Project(dict):
         source, shapes = self.name_of(source), self.name_of(shapes)
         data, shape_set = self._transform_pair(source, shapes)
         picked = None if records is None else [int(i) for i in records]
-        result, report = to_modal(data, shape_set, picked)
+        chosen = None if modes is None else sorted({int(k) for k in modes})
+        result, report = to_modal(data, shape_set.kept(chosen), picked)
         result.transform_report = report
         params = {'shapes': shapes}
         if picked is not None:
             params['records'] = picked
+        if chosen is not None:
+            params['modes'] = chosen
         return self._derive(source, result,
                             name or f'{source} Modal Coordinates',
                             recipe=('transform', params))
@@ -6504,6 +6511,7 @@ class Project(dict):
 
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
+                           modes: Iterable[int] | None = None,
                            tolerance: float = 0.02,
                            distance: float | None = None,
                            name: str | None = None) -> str:
@@ -6539,6 +6547,9 @@ class Project(dict):
             Rows of the channel table `onto` (0-based, the table's
             order) whose DOFs are the target. Rows with no node or
             direction are skipped. Every row when omitted.
+        modes : iterable of int, optional
+            The source's modes to project, by index from zero, such as
+            the ones picked in the tree. Every mode when omitted.
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the Basis
             geometry's extent (the largest distance of a node from the
@@ -6562,6 +6573,10 @@ class Project(dict):
         """
         projected, basis_name, named = self._projected(
             source, onto, channels=channels, tolerance=tolerance, distance=distance)
+        if modes is not None:
+            report = projected.projection_report
+            projected = projected.kept(list(modes))
+            projected.projection_report = report
         return self._derive(basis_name, projected, name or named)
 
     def projected(self, source: str, onto: str, *, tolerance: float = 0.02,
@@ -6673,6 +6688,8 @@ class Project(dict):
                     pairs: Iterable[tuple[int, int]] | None = None,
                     macs: Iterable[float] | None = None,
                     threshold: float = 0.7,
+                    first_modes: Iterable[int] | None = None,
+                    second_modes: Iterable[int] | None = None,
                     name: str = 'Matched Modes') -> str:
         """Save matched mode pairs as an object (the comparison screen's +
         button).
@@ -6699,6 +6716,10 @@ class Project(dict):
             when omitted.
         threshold : float, default 0.7
             The lowest MAC an automatic pairing may have.
+        first_modes, second_modes : iterable of int, optional
+            The modes of each set an automatic pairing may use, by index
+            from zero, such as the ones picked in the tree. Every mode
+            when omitted.
         name : str, default 'Matched Modes'
             What to call the result.
 
@@ -6717,9 +6738,12 @@ class Project(dict):
             # a mode of zero on the shared DOFs has no MAC, and is nobody's match
             matrix = np.nan_to_num(self.comparison_mac(first, second))
             if pairs is None:
-                pairs = [(row, int(np.argmax(matrix[row])))
-                         for row in range(matrix.shape[0])
-                         if matrix[row].max() >= threshold]
+                from .core.shapes import picked_modes
+
+                rows = picked_modes(self[first], first_modes)
+                columns = np.array(picked_modes(self[second], second_modes))
+                pairs = [(row, int(columns[np.argmax(matrix[row, columns])]))
+                         for row in rows if matrix[row, columns].max() >= threshold]
             pairs = [(int(row), int(column)) for row, column in pairs]
             # the displayed comparison's own values, which a
             # name-matched recompute would not reproduce
@@ -7155,6 +7179,7 @@ class Project(dict):
                            path: str | os.PathLike, *,
                            maximum_frequency: float | None = None,
                            rigid_frequency: float = 1.0,
+                           modes: Sequence[int] | None = None,
                            unit_system: Any = None) -> Any:
         """Write a shape set at a channel table's channels as a modal
         state-space model, the file Rattlesnake's state-space virtual
@@ -7180,6 +7205,9 @@ class Project(dict):
         rigid_frequency : float, default 1.0
             Modes below this frequency, in Hz, are moved up to it, so a
             rigid-body mode does not drift through a long run.
+        modes : sequence of int, optional
+            The set's modes to put in the model, by index from zero,
+            such as the ones picked in the tree. Every mode when omitted.
         unit_system : UnitSystem or str, optional
             The units for a channel whose unit cell is blank, or the
             name of one of `units.SYSTEMS`. SI when omitted.
@@ -7218,7 +7246,7 @@ class Project(dict):
             if unit_system not in SYSTEMS:
                 raise ValueError(f'no unit system is named {unit_system!r}')
             unit_system = SYSTEMS[unit_system]
-        model = state_space_model(self[set_name], self[table_name],
+        model = state_space_model(self[set_name].kept(modes), self[table_name],
                                   maximum_frequency=maximum_frequency,
                                   rigid_frequency=rigid_frequency,
                                   unit_system=unit_system)

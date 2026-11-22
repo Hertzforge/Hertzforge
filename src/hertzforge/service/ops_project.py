@@ -15,7 +15,7 @@ from hertzforge.core.rigid import INERTIA_TERMS, MassProperties, rigid_body_shap
 from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
-from .mode_pairs import translations
+from .mode_pairs import FIRST_MODES, SECOND_MODES, translations
 from .op_progress import hook
 from .parsing import parse_optional_picks, parse_picks
 from .protocol import refused
@@ -705,8 +705,10 @@ def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
         if not isinstance(project[onto], ShapeSet):
             raise refused(f'only a shape set is projected the other way; {onto} is not one')
         source, onto = onto, source
+    # the modes are the projected set's: the ones picked under it, every one when blank
+    modes = parse_optional_picks(params.get('modes', ''), project[source].num_shapes, 'mode')
     try:
-        added = project.project_onto_basis(source, onto=onto,
+        added = project.project_onto_basis(source, onto=onto, modes=modes,
                                            distance=params['distance'] or None)
     except NoNodeMatched as error:
         defined = project.geometry_for(source)[1].units_defined
@@ -733,7 +735,7 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
     """The MAC of `first`'s modes against `second`'s (`mac`), limited to
     the `row_modes` and `column_modes` picked (indices from 0) when
     given, its axes ticked with those modes' frequencies."""
-    from .mode_pairs import paired
+    from .mode_pairs import mode_axis, paired, picked_modes
 
     rows, columns = project[first], project[second]
     if not rows.num_shapes or not columns.num_shapes:
@@ -742,16 +744,12 @@ def mac_views(project: Any, first: str, second: str, row_modes: list[int] | None
         values = rows.auto_mac() if first == second else project.comparison_mac(first, second)
     except ValueError as error:
         raise refused(str(error)) from None
-    row_modes = list(row_modes) if row_modes else list(range(rows.num_shapes))
-    column_modes = list(column_modes) if column_modes else list(range(columns.num_shapes))
+    row_modes = picked_modes(rows, row_modes)
+    column_modes = picked_modes(columns, column_modes)
     values = np.asarray(values)[np.ix_(row_modes, column_modes)]
-
-    def axis(name: str, shapes: Any, modes: list[int]) -> dict:
-        return {'label': name, 'ticks': [f'{shapes.frequency[k]:.1f} Hz' for k in modes]}
-
     title = f'Auto-MAC of {first}' if first == second else f'MAC of {first} Against {second}'
-    matrix = v.matrix(title, axis(first, rows, row_modes), axis(second, columns, column_modes),
-                      values, 'MAC', (0.0, 1.0))
+    matrix = v.matrix(title, mode_axis(first, rows, row_modes),
+                      mode_axis(second, columns, column_modes), values, 'MAC', (0.0, 1.0))
     geometry = _geometry(project)
     return paired(None if geometry is None else project[geometry], matrix, rows, row_modes,
                   columns, column_modes)
@@ -761,9 +759,15 @@ def mac(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.mac`: the Modal Assurance Criterion of one shape set's
     modes against another's (`Project.comparison_mac`, so across two
     geometries after projection, as the selection and Match Modes read it),
-    or a set against itself. With a geometry the matrix selects the pair it
-    shows, the column mode overlaid on the row mode."""
-    return mac_views(project, params['first'], params['second'])
+    or a set against itself, of the modes picked under each (every mode when
+    none is). With a geometry the matrix selects the pair it shows, the
+    column mode overlaid on the row mode."""
+    from .mode_pairs import modes_param
+
+    first, second = params['first'], params['second']
+    return mac_views(project, first, second,
+                     modes_param(project[first], params.get('first_modes', '')),
+                     modes_param(project[second], params.get('second_modes', '')))
 
 
 def mode_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -788,11 +792,31 @@ def _derives(verb: str, title: str, summary: str, params: tuple = (),
                      run=_verb(verb, **fixed))
 
 
+#: the modes of a shape set an action reads, filled from what is picked under the set in the
+#: tree (`action_table.PICKED_MODES`): blank for every mode
+PICKED_SET_MODES = Param('modes', 'Modes (blank: all)', 'string', default='')
+
+
+def transform(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.transform`: the records picked under the source through the
+    modes picked under the shape set (`Project.transform`), every record
+    or mode of an object picked whole."""
+    source, shapes = params['source'], params['shapes']
+    records = parse_optional_picks(params.get('records', ''), project[source].num_records,
+                                   'record')
+    modes = parse_optional_picks(params.get('modes', ''), project[shapes].num_shapes, 'mode')
+    return _derived(project, lambda: project.transform(source, shapes, records=records,
+                                                       modes=modes))
+
+
 MODAL_VERB_OPERATIONS = (
-    _derives('transform', 'Transform to Modal Coordinates',
-             'A record\'s channels through a shape set to modal coordinates, one '
-             'record per mode; with a geometry\'s rigid-body shapes this is the '
-             'virtual point transformation.', (PARTNER,), workspace='modal'),
+    Operation(
+        id='project.transform', title='Transform to Modal Coordinates', workspace='modal',
+        summary='A record\'s channels through a shape set to modal coordinates, one record '
+                'per mode; with a geometry\'s rigid-body shapes this is the virtual point '
+                'transformation.',
+        params=(_source('transform'), PARTNER, RECORDS, PICKED_SET_MODES),
+        outputs=('waterfall',), run=transform),
     Operation(
         id='project.expand', title='Expand to Physical Responses', workspace='modal',
         summary='Modal responses back through the shape set they were transformed through, '
@@ -835,7 +859,8 @@ MODAL_VERB_OPERATIONS = (
         summary='A shape set sampled at another set\'s DOFs, at a channel table\'s '
                 'sensors, or at every node of another geometry, by the nearest node '
                 'within the tolerance and its direction.',
-        params=(_source('project_onto_basis', 'Shape set'), ONTO, DIRECTION, MATCH),
+        params=(_source('project_onto_basis', 'Shape set'), ONTO, DIRECTION, MATCH,
+                PICKED_SET_MODES),
         outputs=('shape3d', 'reading'), run=onto_basis, previews=True),
     Operation(
         id='project.expand_modes', title='Expand to Model DOFs', workspace='modal',
@@ -1024,7 +1049,8 @@ OPERATIONS = (
         id='project.mac', title='MAC', workspace='modal',
         summary='One shape set\'s modes against another\'s, or a set against '
                 'itself; with a geometry, a cell shows that pair overlaid.',
-        params=(FIRST, SECOND), outputs=('matrix', 'shape3d'), run=mac),
+        params=(FIRST, SECOND, FIRST_MODES, SECOND_MODES), outputs=('matrix', 'shape3d'),
+        run=mac),
     Operation(
         id='project.mode_shapes', title='Mode Shapes', workspace='modal',
         summary='A shape set\'s modes on a geometry, one translation per node.',

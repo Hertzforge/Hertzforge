@@ -68,6 +68,8 @@ describe('picking squares', () => {
 		expect(togglePick([a, b], b, true)).toEqual({ picks: [a], active: a });
 		expect(togglePick([a], a, true)).toEqual({ picks: [], active: null });
 		expect(pairsText([a, b])).toBe('1,1; 2,3');
+		// a grid of some modes names each square by its modes, not its place on the grid
+		expect(pairsText([a, b], [2, 5], [0, 4, 7])).toBe('3,1; 6,8');
 	});
 });
 

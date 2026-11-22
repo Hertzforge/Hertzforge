@@ -99,9 +99,33 @@ LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
 #: in the tree and left off the form.
 PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
 PICKED_ONE = frozenset({'record', 'drawn'})
-#: the actions whose `modes` are the modes picked under their shape set, named by the param
-#: that holds the set: every mode when the set is selected whole
-PICKED_MODES = {'project.synthesize_modal_frfs': 'source'}
+#: the actions that read the modes picked under a shape set: each param they are filled into,
+#: and the param that names the set. Blank, for every mode, when the set is selected whole
+_TWO_SETS = {'first_modes': 'first', 'second_modes': 'second'}
+PICKED_MODES = {'project.synthesize_modal_frfs': {'modes': 'source'},
+                'project.transform': {'modes': 'shapes'},
+                'project.project_onto_basis': {'modes': 'source'},
+                'project.expand_modes': {'modes': 'source', 'basis': 'onto'},
+                'project.export_state_space': {'modes': 'shapes'},
+                'project.project_onto_channels': {'modes': 'source'},
+                'project.compute_modal_responses': {'modes': 'shapes'},
+                'project.match_modes': _TWO_SETS,
+                'project.projection_overlay': _TWO_SETS,
+                'project.mac': _TWO_SETS}
+
+#: the actions that take a shape set whole whatever is picked under it, and why: every other
+#: action that takes a shape set reads the modes picked (`PICKED_MODES`)
+WHOLE_SETS = {
+    'project.set_projection': 'it maps the DOFs of two sets onto each other, which modes do '
+                              'not change',
+    'project.expand': 'the modes it expands through are the ones its modal records name, and '
+                      'those records are what is picked',
+    'project.add_matches': 'it is sent the squares picked on the MAC, named by their modes',
+    'project.place': 'it moves the object itself',
+    'project.set_role': 'it gives the object itself a role',
+    'project.merge': 'it joins whole objects into one',
+    'project.save_as': 'an object is written whole, so the file opens as the object it was',
+}
 
 #: the rows that read a geometry's nodes, off until it has some
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
@@ -561,19 +585,19 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if op.id in NEEDS_NODES and not project[fill['geometry']].num_nodes:
             rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
             continue
-        picks = [records.get(name, []) for name in fill.values()]
+        # the modes picked under a set fill its own params (`PICKED_MODES`, after the rows
+        # below settle which set is which); the records, channels or rows are another
+        # object's
+        sets = set(PICKED_MODES.get(op.id, {}).values())
+        picks = [records.get(name, []) for key, name in fill.items() if key not in sets]
         # an action runs on what is picked in the tree: the channels, records or rows it
         # would have asked for by number are the ones picked under the object, every one
         # of them when the object is selected whole, and its form has no field for them
         # (Brandon, 2026-11-17)
         picked = next((r for r in picks if r), [])
-        unasked = []
+        unasked = list(PICKED_MODES.get(op.id, {}))
         for param in op.params:
-            if param.name == 'modes' and op.id in PICKED_MODES:
-                modes = records.get(fill[PICKED_MODES[op.id]], [])
-                fill['modes'] = _runs(modes) if modes else ''
-                unasked.append('modes')
-            elif param.name in PICKED_LISTS and param.type == 'string':
+            if param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
                 unasked.append(param.name)
             elif param.name in PICKED_ONE and param.type == 'integer':
@@ -686,13 +710,6 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                                                 distance_only=True)})
                 more['omit'] = [*more.get('omit', []), 'direction', 'distance']
                 more['verb'] = 'Reduce' if method == 'reduction' else 'Expand'
-                if method == 'expansion':
-                    # the modes it expands and the modes it expands through are the ones
-                    # picked under each set, every one of a set picked whole
-                    for param, held in (('modes', source), ('basis', onto)):
-                        picked = records.get(held, [])
-                        fill[param] = _runs(picked) if picked else ''
-                    more['omit'] += ['modes', 'basis']
             elif op.id == 'project.project_onto_basis':
                 more['omit'] = [*more.get('omit', []), 'direction']
             why = mapping_why(project, fill['source'], fill['onto'], method) if (
@@ -700,6 +717,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             if why:
                 rows.append(_op_row(op, why, fill=fill))
                 continue
+        for param, held in PICKED_MODES.get(op.id, {}).items():
+            # the modes picked under the set the param reads, every one of a set picked whole
+            modes = records.get(fill.get(held), [])
+            fill[param] = _runs(modes) if modes else ''
         if op.id in MATCHED and 'distance' not in more.get('omit', ()):
             fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:

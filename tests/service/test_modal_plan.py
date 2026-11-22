@@ -186,6 +186,22 @@ def test_the_model_previews_at_the_drive_points_and_writes_its_file(plate, valid
     assert spectrum['y']['unit'] == '(m/s²)/N'
 
 
+def test_the_model_holds_the_modes_picked(plate, tmp_path):
+    """Modes picked under the set are the model's: the preview, the file and the count."""
+    shapes = fitted(plate)
+    path = tmp_path / 'two'
+    (spectrum, reading) = run(plate, 'project.export_state_space', shapes=shapes,
+                              table='Channel Table', path=str(path), modes='1, 3')
+    rows = {row['label']: row['value'] for row in reading['rows']}
+    assert rows['Modes'] == '2 of 4'
+    assert np.load(tmp_path / 'two.npz')['A'].shape == (4, 4)
+    assert spectrum['series'][1]['name'].endswith('every mode picked')
+    # the preview, which writes nothing, is of the same modes
+    (_spectrum, preview) = run(plate, 'project.export_state_space', shapes=shapes,
+                               table='Channel Table', modes='1, 3')
+    assert {row['label']: row['value'] for row in preview['rows']}['Modes'] == '2 of 4'
+
+
 def test_a_preview_writes_nothing_and_what_the_model_cannot_be_is_refused(plate, tmp_path):
     shapes = fitted(plate)
     (_spectrum, reading) = run(plate, 'project.export_state_space', shapes=shapes,

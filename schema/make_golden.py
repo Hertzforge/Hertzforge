@@ -6799,7 +6799,8 @@ def main() -> None:
         'type': 'response', 'id': 10,
         'result': {'views': [
             {'view': 'matrix', 'title': 'Two Sets',
-             'rows': {'label': 'Identified', 'ticks': ['10.0 Hz', '20.0 Hz', '31.0 Hz']},
+             'rows': {'label': 'Identified', 'ticks': ['10.0 Hz', '20.0 Hz', '31.0 Hz'],
+                      'indices': [0, 2, 3]},
              'columns': {'label': 'FE model', 'ticks': ['10.1 Hz', '30.5 Hz']},
              'values': {'$array': 'm'}, 'value_label': 'MAC', 'value_range': [0.0, 1.0]},
         ]},

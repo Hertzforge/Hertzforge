@@ -23,7 +23,7 @@ import numpy as np
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh
-from .mode_pairs import paired, translations
+from .mode_pairs import FIRST_MODES, SECOND_MODES, mode_axis, modes_param, paired, translations
 from .op_progress import hook
 from .ops_model import _family, _groups
 from .ops_project import MATCH as TOLERANCE
@@ -326,6 +326,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- Export State-Space Model -----------------------------------------------------
 
 STATE_SHAPES = Param('shapes', 'Shape set', 'enum', options_from='objects:shape_set')
+#: filled from the modes picked under the set (`action_table.PICKED_MODES`)
+STATE_MODES = Param('modes', 'Modes (blank: all)', 'string', default='')
 TABLE = Param('table', 'Channel table', 'enum', options_from='objects:channel_table')
 MAXIMUM = Param('maximum', 'Maximum (0 keeps every mode)', 'number', default=0.0, unit='Hz',
                 min=0.0, step=100.0)
@@ -345,12 +347,17 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
     drive point's FRF from the model's own matrices, beside the whole
     set's synthesized FRF dashed (`ShapeSet.synthesize_frf`), and the
     pane's rows. Given a file, the model is written there
-    (`Project.export_state_space`); a blank unit cell takes SI's unit."""
+    (`Project.export_state_space`); a blank unit cell takes SI's unit. The
+    model holds the modes picked under the set, every mode of a set picked
+    whole; the table is taken whole, since the file matches it row for
+    row."""
     from hertzforge.core.state_space import OUTPUT_POWER, state_space_model
     from hertzforge.units import si_factor
 
     set_name, table_name = params['shapes'], params['table']
-    shapes, table = project[set_name], project[table_name]
+    whole, table = project[set_name], project[table_name]
+    modes = parse_optional_picks(params.get('modes', ''), whole.num_shapes, 'mode')
+    shapes = whole.kept(modes)
     maximum = float(params['maximum']) or None
     rigid = float(params['rigid'])
     path = os.path.expanduser(params['path'].strip())
@@ -364,10 +371,10 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
         if path:
             model = project.export_state_space(set_name, table_name, path,
                                                maximum_frequency=maximum,
-                                               rigid_frequency=rigid)
+                                               rigid_frequency=rigid, modes=modes)
     except (ValueError, TypeError, OSError) as error:
         raise refused(str(error)) from None
-    rows = [v.row('Modes', f'{len(model.mode_frequency)} of {shapes.num_shapes}', None, 'info'),
+    rows = [v.row('Modes', f'{len(model.mode_frequency)} of {whole.num_shapes}', None, 'info'),
             v.row('Moved up', float(model.lifted), '', 'info'),
             v.row('Left out', float(model.dropped), '', 'info'),
             v.row('Inputs', float(len(model.input_dof)), '', 'info'),
@@ -401,7 +408,8 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
         series.append(v.series(f'{label}, model', 'measured', lines, np.abs(h[:, row, k]) * si))
         full = shapes.synthesize_frf(lines, [dofs[row]], [model.input_dof[k]],
                                      power=OUTPUT_POWER[kinds[row]])[0]
-        series.append(v.series(f'{label}, every mode', 'reference', lines, np.abs(full),
+        series.append(v.series(f'{label}, every mode' if modes is None else
+                               f'{label}, every mode picked', 'reference', lines, np.abs(full),
                                follows=len(series) - 1))
     units = {unit_text(f'{kinds[row]}/force') for row, _k in pairs}
     view = v.spectrum(f'{set_name} model at the drive points', v.axis('Frequency', 'Hz', 'linear'),
@@ -436,12 +444,15 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     of a channel table, by the nearest node and its direction
     (`Project.project_onto_basis` with `channels`), with the node match
     tolerance its dialog asks for. The set is added, drawn on the
-    table's geometry, beside what the projection matched."""
+    table's geometry, beside what the projection matched. The rows are the
+    ones picked under the table and the modes the ones picked under the set,
+    every one of an object picked whole."""
     source, table = params['source'], params['table']
     count = len(project[table].dof_strings())
     rows = parse_optional_picks(params['rows'], count, 'row')
+    modes = parse_optional_picks(params.get('modes', ''), project[source].num_shapes, 'mode')
     try:
-        added = project.project_onto_basis(source, onto=table, channels=rows,
+        added = project.project_onto_basis(source, onto=table, channels=rows, modes=modes,
                                            distance=params['distance'] or None)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
@@ -482,16 +493,17 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     flipped = project.projection_of(first, second)[0] == first
     basis = theirs if flipped else home
     moved = 'reduced'
-
-    def axis(name: str, shapes: Any) -> dict:
-        return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
-
+    # the modes picked under each set: read from the whole matrix, since a pair's MAC does not
+    # depend on which other modes are compared
+    row_modes = modes_param(rows, params.get('first_modes', ''))
+    column_modes = modes_param(columns, params.get('second_modes', ''))
+    values = np.asarray(values)[np.ix_(row_modes, column_modes)]
     matrix = v.matrix(f'MAC of {first} Against {second} on {basis[0]}',
-                      axis(f'{first}, {moved}' if flipped else first, rows),
-                      axis(second if flipped else f'{second}, {moved}', columns),
+                      mode_axis(f'{first}, {moved}' if flipped else first, rows, row_modes),
+                      mode_axis(second if flipped else f'{second}, {moved}', columns,
+                                column_modes),
                       values, 'MAC', (0.0, 1.0))
-    views = paired(basis[1], matrix, rows, range(rows.num_shapes), columns,
-                   range(columns.num_shapes))
+    views = paired(basis[1], matrix, rows, row_modes, columns, column_modes)
     return [*views, v.reading(said, _report_rows(report, basis[1].units_defined))]
 
 
@@ -511,20 +523,20 @@ OPERATIONS = (
         summary='A shape set at a channel table\'s channels as the modal state-space model '
                 'Rattlesnake\'s state-space hardware loads, previewed at the drive points and '
                 'written to a .npz when a file is named.',
-        params=(STATE_SHAPES, TABLE, MAXIMUM, RIGID, PATH), outputs=('spectrum', 'reading'),
-        run=export_state_space),
+        params=(STATE_SHAPES, TABLE, MAXIMUM, RIGID, PATH, STATE_MODES),
+        outputs=('spectrum', 'reading'), run=export_state_space),
     Operation(
         id='project.project_onto_channels', title='Project onto Picked Channels',
         workspace='modal',
         summary='A shape set sampled at some rows of a channel table, numbered from 1 as its '
                 'table shows them, by the nearest node and its direction; added to the project.',
-        params=(PROJECTED, TABLE, ROWS, TOLERANCE), outputs=('shape3d', 'reading'),
+        params=(PROJECTED, TABLE, ROWS, TOLERANCE, STATE_MODES), outputs=('shape3d', 'reading'),
         run=project_onto_channels),
     Operation(
         id='project.projection_overlay', title='Animate the Projection', workspace='modal',
         summary='Two shape sets on two geometries, one projected onto the other\'s DOFs as '
                 'Project sets it, their MAC, and a pair drawn on the geometry projected onto, '
                 'the projected mode over the other.',
-        params=(BASIS, OTHER), outputs=('matrix', 'shape3d', 'reading'),
-        run=projection_overlay),
+        params=(BASIS, OTHER, FIRST_MODES, SECOND_MODES),
+        outputs=('matrix', 'shape3d', 'reading'), run=projection_overlay),
 )

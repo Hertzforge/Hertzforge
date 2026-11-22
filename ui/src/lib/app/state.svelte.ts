@@ -716,7 +716,7 @@ class AnalyzeState {
 		const done = await this.app.project.act('Adding matches', 'project.add_matches', {
 			first: m.rows.label,
 			second: m.columns.label.replace(/, projected$/, ''),
-			pairs: pairsText(this.picks)
+			pairs: pairsText(this.picks, m.rows.indices, m.columns.indices)
 		});
 		if (done) void this.showSelection();
 	}

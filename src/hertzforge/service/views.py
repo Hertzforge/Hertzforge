@@ -349,13 +349,19 @@ def matrix(title: str, rows: dict[str, Any], columns: dict[str, Any],
            value_range: tuple[float, float]) -> dict[str, Any]:
     """A `matrix` view: one value per (row, column) cell, f32 [R, C], drawn
     as a colored grid. `rows` and `columns` are each `{"label", "ticks"}`,
-    one tick per row or column. `value_range` pins the color scale, so two
+    one tick per row or column, and `"indices"` when the axis shows some of
+    an object's items: each row's or column's index in the object, which a
+    pick on the grid names it by. `value_range` pins the color scale, so two
     matrices of the same quantity read alike."""
     values = np.ascontiguousarray(values, np.float32)
-    return {'view': 'matrix', 'title': title,
-            'rows': {'label': rows['label'], 'ticks': list(rows['ticks'])},
-            'columns': {'label': columns['label'],
-                        'ticks': list(columns['ticks'])},
+
+    def axis(given: dict[str, Any]) -> dict[str, Any]:
+        out = {'label': given['label'], 'ticks': list(given['ticks'])}
+        if given.get('indices') is not None:
+            out['indices'] = [int(i) for i in given['indices']]
+        return out
+
+    return {'view': 'matrix', 'title': title, 'rows': axis(rows), 'columns': axis(columns),
             'values': values.reshape(len(rows['ticks']), len(columns['ticks'])),
             'value_label': value_label,
             'value_range': [float(value_range[0]), float(value_range[1])]}

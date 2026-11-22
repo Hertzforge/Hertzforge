@@ -145,9 +145,16 @@ export function togglePick(
 	return { picks: [...picks, cell], active: cell };
 }
 
-/** The picked pairs as `project.add_matches` takes them: row,column numbered from 1. */
-export function pairsText(picks: { row: number; column: number }[]): string {
-	return picks.map((p) => `${p.row + 1},${p.column + 1}`).join('; ');
+/**
+ * The picked pairs as `project.add_matches` takes them: row mode,column mode numbered from 1.
+ * A grid of some of each set's modes names each row and column's mode by its axis's `indices`.
+ */
+export function pairsText(
+	picks: { row: number; column: number }[],
+	rows?: number[],
+	columns?: number[]
+): string {
+	return picks.map((p) => `${(rows?.[p.row] ?? p.row) + 1},${(columns?.[p.column] ?? p.column) + 1}`).join('; ');
 }
 
 /**

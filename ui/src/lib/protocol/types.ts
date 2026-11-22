@@ -447,8 +447,9 @@ export interface StageExceed {
 export interface MatrixView {
 	view: 'matrix';
 	title: string;
-	rows: { label: string; ticks: string[] };
-	columns: { label: string; ticks: string[] };
+	/** `indices`, when the axis shows some of an object's items: each row's index in the object. */
+	rows: { label: string; ticks: string[]; indices?: number[] };
+	columns: { label: string; ticks: string[]; indices?: number[] };
 	/** f32 [R, C], row-major: row r, column c is values[r * C + c]. */
 	values: Float32Array;
 	value_label: string;

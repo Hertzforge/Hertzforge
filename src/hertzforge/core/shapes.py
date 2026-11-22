@@ -887,6 +887,37 @@ class ShapeSet:
         self.comment = [self.comment[i] for i in keep]
         self.description = [self.description[i] for i in keep]
 
+    def kept(self, modes: Sequence[int] | None) -> ShapeSet:
+        """A copy holding only `modes`, in the set's order and once each;
+        the set itself when `modes` is None. The modes picked in the tree
+        are what an action reads.
+
+        Parameters
+        ----------
+        modes : sequence of int or None
+            Which modes to keep, by zero-based index.
+
+        Returns
+        -------
+        ShapeSet
+            The copy, or the set itself for None.
+
+        Raises
+        ------
+        ValueError
+            For a mode the set does not have, or an empty `modes`
+            (`picked_modes`).
+        """
+        from copy import deepcopy
+
+        if modes is None:
+            return self
+        chosen = set(picked_modes(self, modes))
+        copy = deepcopy(self)
+        if len(chosen) < self.num_shapes:
+            copy.delete_modes([k for k in range(self.num_shapes) if k not in chosen])
+        return copy
+
     @property
     def num_shapes(self) -> int:
         """How many mode shapes the set holds."""
@@ -1113,3 +1144,27 @@ def synthesize_overlay(shapes: ShapeSet, frf: Any,
     used = modes if modes is not None else range(shapes.num_shapes)
     overlay.mode_frequencies = [float(shapes.frequency[m]) for m in used]
     return overlay
+
+
+def picked_modes(shapes: ShapeSet, modes: Sequence[int] | None) -> list[int]:
+    """The modes asked for, by index from zero, sorted and once each;
+    every mode when `modes` is None.
+
+    Raises
+    ------
+    ValueError
+        If the set has no modes, a mode is not in it, or none is asked
+        for.
+    """
+    if shapes.num_shapes == 0:
+        raise ValueError('the set has no modes')
+    if modes is None:
+        return list(range(shapes.num_shapes))
+    chosen = sorted({int(k) for k in modes})
+    outside = [k + 1 for k in chosen if not 0 <= k < shapes.num_shapes]
+    if outside:
+        raise ValueError(f'the set has {shapes.num_shapes} modes; mode '
+                         f'{outside[0]} is not one of them')
+    if not chosen:
+        raise ValueError('no modes are picked')
+    return chosen

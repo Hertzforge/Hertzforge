@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from . import views as v
+from .descriptors import Param
 from .mesh import drawn_mesh
 
 
@@ -101,6 +102,52 @@ def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: 
     return v.shape3d(title, 'm' if defined else 'undefined', nodes, modes,
                      triangles=triangles, lines=lines, overlays=overlays,
                      overlay_phase=phase, **extra)
+
+
+#: the modes of each of two sets an action compares, filled from what is picked under each in
+#: the tree (`action_table.PICKED_MODES`): blank for every mode
+FIRST_MODES = Param('first_modes', 'Modes of the first set (blank: all)', 'string', default='')
+SECOND_MODES = Param('second_modes', 'Modes of the second set (blank: all)', 'string',
+                     default='')
+
+
+def modes_param(shapes: Any, text: str) -> list[int]:
+    """The modes a `FIRST_MODES`-like param names, by index from 0: every
+    mode when it is blank."""
+    from .parsing import parse_optional_picks
+
+    picks = parse_optional_picks(text, shapes.num_shapes, 'mode')
+    return picked_modes(shapes, picks)
+
+
+def picked_modes(shapes: Any, picks: Any) -> list[int]:
+    """The modes picked under a shape set, by index from 0, in the set's
+    order and once each; every mode when none is picked."""
+    from hertzforge.core.shapes import picked_modes as chosen
+
+    from .protocol import refused
+
+    try:
+        return chosen(shapes, list(picks) if picks else None)
+    except ValueError as error:
+        raise refused(str(error)) from None
+
+
+def mode_axis(label: str, shapes: Any, modes: list[int]) -> dict:
+    """A MAC axis of the `modes` of `shapes`: each ticked by its frequency,
+    with its index in the set, which a picked square is named by."""
+    return {'label': label, 'ticks': [f'{shapes.frequency[k]:.1f} Hz' for k in modes],
+            'indices': list(modes)}
+
+
+def matched_cells(pairs: Any, row_modes: list[int], column_modes: list[int]) -> list[list[int]]:
+    """Matched (row mode, column mode) pairs as the cells of a MAC of
+    `row_modes` against `column_modes` that hold them; a pair with a mode
+    not on the grid is not drawn."""
+    rows = {mode: i for i, mode in enumerate(row_modes)}
+    columns = {mode: j for j, mode in enumerate(column_modes)}
+    return [[rows[int(a)], columns[int(b)]] for a, b in pairs
+            if int(a) in rows and int(b) in columns]
 
 
 def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
