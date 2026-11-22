@@ -8,6 +8,7 @@
 //! pseudo-inverse through its regularized SVD ([`hertzforge_sdm::linalg::pinv`]).
 //! These allocate; nothing here is called per frame.
 
+use hertzforge_mimo_random::pool;
 use hertzforge_sdm::linalg::{self, LinalgError, Regularization};
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
 
@@ -323,6 +324,48 @@ pub fn log_euclidean(a: &CMat, b: &CMat, t: f64) -> Result<CMat, LinalgError> {
     expm(&la.scaled(1.0 - t).add(&lb.scaled(t)))
 }
 
+/// The drive's factor the synthesizer plays, on the band's lines: per line the
+/// principal square root `G^1/2 = V diag(sqrt(max(lambda, 0))) V^H`, so
+/// `L L^H = G` (zero outside the band).
+///
+/// Any `L U` with `U` unitary has the same spectral matrix, but the random
+/// waveform synthesized from it is a different realization. The eigen square
+/// root `V diag(sqrt(lambda))` depends on the sign (phase) the
+/// eigendecomposition gives each eigenvector, and that sign can flip on a
+/// last-bit change of `G` (another platform's maths library, a different
+/// rounding), so the same run would play a different waveform from that loop
+/// on. The principal root is a function of `G` alone: each eigenvector's
+/// phase cancels in `v v^H`, as does the basis of an eigenspace of equal
+/// eigenvalues, so a rounding-level change of `G` moves it by a
+/// rounding-level amount.
+pub fn drive_factor(g: &HermitianStack, band: (usize, usize)) -> Result<MatrixStack, LinalgError> {
+    let n = g.n();
+    let band = (band.0.min(g.lines()), band.1.min(g.lines()));
+    let parts = pool::par_map(band, |r| -> Result<MatrixStack, LinalgError> {
+        let e = linalg::eigh(&pool::sub_herm(g, r.clone()))?;
+        let mut out = MatrixStack::zeros(r.len(), n, n);
+        for k in 0..r.len() {
+            let v = e.vectors.line(k);
+            let dst = out.line_mut(k);
+            for j in 0..n {
+                let root = e.values[k * n + j].max(0.0).sqrt();
+                if root == 0.0 {
+                    continue;
+                }
+                for row in 0..n {
+                    let a = v[row * n + j] * root;
+                    for col in 0..n {
+                        dst[row * n + col] += a * v[col * n + j].conj();
+                    }
+                }
+            }
+        }
+        Ok(out)
+    });
+    let parts = parts.into_iter().collect::<Result<Vec<_>, _>>()?;
+    Ok(pool::join_mat(g.lines(), n, n, band, parts))
+}
+
 /// The model `H` on a grid at frequency `f_hz`, linear between the two lines
 /// either side (clamped at the grid's ends).
 pub fn model_at(h: &MatrixStack, df_hz: f64, f_hz: f64) -> CMat {
@@ -364,6 +407,94 @@ mod tests {
         assert!(back.sub(&b).max_abs() < 1e-12, "{back:?}");
         let (lo, _) = x.eig_range().unwrap();
         assert!(lo > 0.0);
+    }
+
+    /// One 4 by 4 line from packed upper-triangle values.
+    fn line_of(packed: &[(f64, f64)]) -> HermitianStack {
+        let data = packed.iter().map(|&(re, im)| c(re, im)).collect();
+        HermitianStack::from_packed(1, 4, data).unwrap()
+    }
+
+    fn factor_moved(a: &HermitianStack, b: &HermitianStack) -> f64 {
+        let fa = drive_factor(a, (0, a.lines())).unwrap();
+        let fb = drive_factor(b, (0, b.lines())).unwrap();
+        let top = fa.data().iter().map(|x| x.norm()).fold(0.0f64, f64::max);
+        let d = fa
+            .data()
+            .iter()
+            .zip(fb.data())
+            .map(|(x, y)| (x - y).norm())
+            .fold(0.0f64, f64::max);
+        d / top
+    }
+
+    /// The drive factor is a function of the drive matrix: a last-bit change
+    /// of the matrix (what another platform's maths library leaves) moves it
+    /// by a rounding-level amount. The first pair is a line of the golden
+    /// run's drive (line 24 at its last floor loop) and the same line with
+    /// every entry moved by at most 2e-15 relative: the eigen square root
+    /// flips the sign of two of its columns between them (a different random
+    /// waveform from that loop on, the same spectral matrix). The second is
+    /// the identification's drive, equal and uncorrelated on every drive,
+    /// where every basis is an eigenbasis.
+    #[test]
+    fn mimo_mixed_the_drive_factor_does_not_hang_on_eigenvector_signs() {
+        let a = line_of(&[
+            (3.1512697864075514e-5, 0.0),
+            (1.0947744463344861e-5, 1.0028332602725128e-6),
+            (2.8493146152133063e-5, -1.279793512275862e-6),
+            (4.140930292783741e-6, 1.6294189553189071e-6),
+            (3.439898093664831e-5, 0.0),
+            (8.301751713371063e-6, 1.025943327392408e-6),
+            (7.56894475653139e-6, 2.5892104574900355e-6),
+            (5.112572749109801e-5, 0.0),
+            (4.911494847210334e-7, 3.893690653291987e-6),
+            (8.838652000008497e-6, 0.0),
+        ]);
+        let b = line_of(&[
+            (3.151269786407555e-5, 0.0),
+            (1.0947744463344883e-5, 1.0028332602725148e-6),
+            (2.8493146152133005e-5, -1.2797935122758596e-6),
+            (4.1409302927837365e-6, 1.6294189553189054e-6),
+            (3.439898093664831e-5, 0.0),
+            (8.301751713371072e-6, 1.0259433273924091e-6),
+            (7.568944756531405e-6, 2.5892104574900406e-6),
+            (5.112572749109796e-5, 0.0),
+            (4.911494847210334e-7, 3.893690653291987e-6),
+            (8.83865200000848e-6, 0.0),
+        ]);
+        let moved = factor_moved(&a, &b);
+        assert!(
+            moved < 1e-12,
+            "the factor moved {moved:e} of its largest entry"
+        );
+        // Still a factor of the drive: L L^H = G.
+        let f = drive_factor(&a, (0, 1)).unwrap();
+        let l = CMat::from_stack(&f, 0);
+        let g = CMat::from_hermitian(&a, 0);
+        let back = l.mul(&l.adjoint());
+        assert!(back.sub(&g).max_abs() < 1e-12 * g.max_abs(), "{back:?}");
+
+        let level = 1.1e-5;
+        let mut eye = Vec::new();
+        let mut nudged = Vec::new();
+        for r in 0..4 {
+            for col in r..4 {
+                let v = if r == col { level } else { 0.0 };
+                eye.push((v, 0.0));
+                let k = ((r * 3 + col) % 5) as f64 - 2.0;
+                nudged.push(if r == col {
+                    (v * (1.0 + k * 1e-15), 0.0)
+                } else {
+                    (k * 1e-15 * level, 0.0)
+                });
+            }
+        }
+        let moved = factor_moved(&line_of(&eye), &line_of(&nudged));
+        assert!(
+            moved < 1e-12,
+            "the factor moved {moved:e} of its largest entry"
+        );
     }
 
     #[test]

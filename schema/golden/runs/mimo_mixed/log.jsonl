@@ -17,19 +17,20 @@
 {"seq":16,"at_unix":1794240016.25,"frame":36352,"kind":"level","text":"level -6 dB","data":{"event":"level","level_db":-6.0,"t_s":0.25}}
 {"seq":17,"at_unix":1794240017.25,"frame":36352,"kind":"part","text":"band b1 in","data":{"event":"part_in","part":"b1","folded":true,"t_s":0.25}}
 {"seq":18,"at_unix":1794240018.25,"frame":39424,"kind":"alarm","text":"band b1 outside its alarm band at controls [1, 2, 3, 4]","data":{"event":"alarm","part":"b1","controls":[1,2,3,4],"t_s":1.0}}
-{"seq":19,"at_unix":1794240019.25,"frame":45568,"kind":"alarm","text":"band b1 back inside its alarm band","data":{"event":"alarm_cleared","part":"b1","controls":[],"t_s":2.5}}
-{"seq":20,"at_unix":1794240020.25,"frame":53760,"kind":"note","text":"4.38 s: Level -3.00 dB.","data":{"source":"controller"}}
-{"seq":21,"at_unix":1794240021.25,"frame":53760,"kind":"note","text":"4.38 s: The floor is equalized; the parts come in.","data":{"source":"controller"}}
-{"seq":22,"at_unix":1794240022.25,"frame":53760,"kind":"state","text":"floor only to engaged","data":{"from":"floor_only","to":"engaged","state":"running"}}
-{"seq":23,"at_unix":1794240023.25,"frame":53760,"kind":"floor","text":"the floor is equalized","data":{"event":"floor_equalized","t_s":4.5}}
-{"seq":24,"at_unix":1794240024.25,"frame":53760,"kind":"part","text":"tone t1 in","data":{"event":"part_in","part":"t1","t_s":4.5}}
-{"seq":25,"at_unix":1794240025.25,"frame":54784,"kind":"level","text":"level -3 dB","data":{"event":"level","level_db":-3.0,"t_s":4.75}}
-{"seq":26,"at_unix":1794240026.25,"frame":61952,"kind":"note","text":"6.38 s: Level 0.00 dB.","data":{"source":"controller"}}
-{"seq":27,"at_unix":1794240027.25,"frame":61952,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
-{"seq":28,"at_unix":1794240028.25,"frame":62976,"kind":"level","text":"level 0 dB","data":{"event":"level","level_db":0.0,"t_s":6.75}}
-{"seq":29,"at_unix":1794240029.25,"frame":76288,"kind":"note","text":"9.88 s: Ending: completed (the schedule ran to its end)","data":{"source":"controller"}}
-{"seq":30,"at_unix":1794240030.25,"frame":76288,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
-{"seq":31,"at_unix":1794240031.25,"frame":78336,"kind":"part","text":"tone t1 out","data":{"event":"part_out","part":"t1","t_s":10.5}}
-{"seq":32,"at_unix":1794240032.25,"frame":79872,"kind":"note","text":"10.88 s: Ended: completed (the schedule ran to its end)","data":{"source":"controller"}}
-{"seq":33,"at_unix":1794240033.25,"frame":79872,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
-{"seq":34,"at_unix":1794240034.25,"frame":79872,"kind":"stop","text":"Test complete: the schedule finished and every part ramped down with the controlled stop.","data":{"event":"stop","outcome":"completed","end":{"outcome":"completed","name":"completed","message":"Test complete: the schedule finished and every part ramped down with the controlled stop.","at_s":10.75,"level_db":0,"part":null,"control":null,"drive":null,"ramp_s":0.875}}}
+{"seq":19,"at_unix":1794240019.25,"frame":43520,"kind":"note","text":"1.88 s: Level -3.00 dB.","data":{"source":"controller"}}
+{"seq":20,"at_unix":1794240020.25,"frame":43520,"kind":"note","text":"1.88 s: The floor is equalized; the parts come in.","data":{"source":"controller"}}
+{"seq":21,"at_unix":1794240021.25,"frame":43520,"kind":"state","text":"floor only to engaged","data":{"from":"floor_only","to":"engaged","state":"running"}}
+{"seq":22,"at_unix":1794240022.25,"frame":43520,"kind":"floor","text":"the floor is equalized","data":{"event":"floor_equalized","t_s":2.0}}
+{"seq":23,"at_unix":1794240023.25,"frame":43520,"kind":"part","text":"tone t1 in","data":{"event":"part_in","part":"t1","t_s":2.0}}
+{"seq":24,"at_unix":1794240024.25,"frame":44544,"kind":"level","text":"level -3 dB","data":{"event":"level","level_db":-3.0,"t_s":2.25}}
+{"seq":25,"at_unix":1794240025.25,"frame":47616,"kind":"alarm","text":"band b1 back inside its alarm band","data":{"event":"alarm_cleared","part":"b1","controls":[],"t_s":3.0}}
+{"seq":26,"at_unix":1794240026.25,"frame":51712,"kind":"note","text":"3.88 s: Level 0.00 dB.","data":{"source":"controller"}}
+{"seq":27,"at_unix":1794240027.25,"frame":51712,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":28,"at_unix":1794240028.25,"frame":52736,"kind":"level","text":"level 0 dB","data":{"event":"level","level_db":0.0,"t_s":4.25}}
+{"seq":29,"at_unix":1794240029.25,"frame":62976,"kind":"floor","text":"the floor is equalized","data":{"event":"floor_equalized","t_s":6.75}}
+{"seq":30,"at_unix":1794240030.25,"frame":66048,"kind":"note","text":"7.38 s: Ending: completed (the schedule ran to its end)","data":{"source":"controller"}}
+{"seq":31,"at_unix":1794240031.25,"frame":66048,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
+{"seq":32,"at_unix":1794240032.25,"frame":68096,"kind":"part","text":"tone t1 out","data":{"event":"part_out","part":"t1","t_s":8.0}}
+{"seq":33,"at_unix":1794240033.25,"frame":69632,"kind":"note","text":"8.38 s: Ended: completed (the schedule ran to its end)","data":{"source":"controller"}}
+{"seq":34,"at_unix":1794240034.25,"frame":69632,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
+{"seq":35,"at_unix":1794240035.25,"frame":69632,"kind":"stop","text":"Test complete: the schedule finished and every part ramped down with the controlled stop.","data":{"event":"stop","outcome":"completed","end":{"outcome":"completed","name":"completed","message":"Test complete: the schedule finished and every part ramped down with the controlled stop.","at_s":8.25,"level_db":0,"part":null,"control":null,"drive":null,"ramp_s":0.875}}}

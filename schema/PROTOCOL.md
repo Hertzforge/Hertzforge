@@ -4786,7 +4786,9 @@ down; one still live twice its stop ramp later (at least ten seconds) is aborted
   floor's rms at the level, a tone's peak amplitude), `measured`, `error_db` and `alarm`; a
   band's rows give `error_db` alone, its added level against the stated.
 - `drives`: one row per drive. `random_rms_v` is the random part's rms alone (the floor and the
-  bands, without the tones). `peak_v` is the largest magnitude played in the last chunk and
+  bands, without the tones) over the last whole window of the estimate's frame length, the window
+  the rms abort (`drive_vrms`) judges; zero before the first whole window and once the run has
+  ended. `peak_v` is the largest magnitude played in the last chunk and
   `random_peak_v` the peak held over the last second. `tone_sum_v` is the tones' summed amplitude
   in force. Then come the peak `ceiling_v`, the peak `abort_vpk` the run aborts at (`drive_vpk`;
   the configured value before the run plays), the headroom to the ceiling (`headroom_v`,

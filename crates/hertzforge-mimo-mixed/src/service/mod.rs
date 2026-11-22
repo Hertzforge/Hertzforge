@@ -364,7 +364,9 @@ pub struct BandStatus {
 /// One drive's line in the status.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct DriveStatus {
-    /// The random part's rms in the last chunk, volts.
+    /// The random part's rms over the last whole window of the estimate's
+    /// frame length, the window the rms abort judges; volts. Zero before the
+    /// first whole window and once the run has ended.
     pub random_rms_v: f64,
     /// The largest magnitude played in the last chunk, volts.
     pub peak_v: f64,
@@ -549,7 +551,7 @@ pub struct MimoMixedService {
     pub(crate) rung: usize,
     pub(crate) phase_at_s: f64,
     pub(crate) t_s: f64,
-    pub(crate) chunk_rms: Vec<f64>,
+    pub(crate) window_rms: Vec<f64>,
     pub(crate) chunk_peak: Vec<f64>,
     // Records.
     pub(crate) run_dir: Option<PathBuf>,
@@ -772,7 +774,7 @@ impl MimoMixedService {
             rung: 0,
             phase_at_s: 0.0,
             t_s: 0.0,
-            chunk_rms: Vec::new(),
+            window_rms: Vec::new(),
             chunk_peak: Vec::new(),
             run_dir: None,
             law_writer: None,
@@ -1311,6 +1313,7 @@ impl MimoMixedService {
         self.parked = true;
         self.note(format!("Ended: {} ({})", end.name, end.words));
         self.flush_law_records();
+        self.window_rms.fill(0.0);
         self.end = Some(end);
         self.state = MimoMixedState::Ended;
         self.phase = MimoMixedPhase::Stopping;
@@ -2054,7 +2057,7 @@ impl MimoMixedService {
                         .sum()
                 });
                 DriveStatus {
-                    random_rms_v: self.chunk_rms.get(j).copied().unwrap_or(0.0),
+                    random_rms_v: self.window_rms.get(j).copied().unwrap_or(0.0),
                     peak_v: self.chunk_peak.get(j).copied().unwrap_or(0.0),
                     tone_sum_v,
                     abort_vpk: self

@@ -11,7 +11,6 @@ use crate::exclusion::{band_span_over_frame, frame_mask_default_guard, ToneSpan}
 use crate::fill::FillInput;
 use hertzforge_mimo_random::guards;
 use hertzforge_mimo_random::law::{guarded_call, Miss};
-use hertzforge_mimo_random::pool;
 use hertzforge_random::service::engine::DriveFactor;
 use hertzforge_sdm::law::{MimoLoopInputs, MimoLoopOutputs};
 
@@ -168,13 +167,16 @@ impl MimoMixedService {
         Some(s)
     }
 
-    /// Rebuild the drive factor from the drive in force.
+    /// Rebuild the drive factor from the drive in force: its principal square
+    /// root ([`crate::mat::drive_factor`]), so the waveform played is a
+    /// function of the drive matrix alone, not of the signs the
+    /// eigendecomposition gives its eigenvectors.
     fn build_factor(&mut self) -> Result<(), MimoMixedError> {
         let Some(s) = self.total_drive() else {
             return Ok(());
         };
         let m = self.cfg.m();
-        let l = pool::sqrt_factor(&s, self.band)
+        let l = crate::mat::drive_factor(&s, self.band)
             .map_err(|e| MimoMixedError::Law(format!("the drive's factor: {e}")))?;
         let mut f = DriveFactor::zeros(self.lines, m, m);
         for line in self.band.0..self.band.1 {
@@ -266,12 +268,6 @@ impl MimoMixedService {
                 peak[j] = peak[j].max(step.records.drive[f * m + j].abs());
             }
         }
-        self.chunk_rms = step
-            .records
-            .rand_sq
-            .iter()
-            .map(|s| (s / frames.max(1) as f64).sqrt())
-            .collect();
         self.chunk_peak = peak;
         for (w, s) in step.rms_window.0.iter_mut().zip(&step.records.rand_sq) {
             *w += s;
@@ -371,6 +367,10 @@ impl MimoMixedService {
         let rms: Vec<f64> = s.rms_window.0.iter().map(|x| (x / frames).sqrt()).collect();
         s.rms_window.0.fill(0.0);
         s.rms_window.1 = 0;
+        // What the status shows is what is judged here: a shorter stretch
+        // reads the envelope of a drive that is mostly a few low lines, not
+        // its rms.
+        self.window_rms.clone_from(&rms);
         for (j, r) in rms.iter().enumerate() {
             let d = &self.cfg.drives[j];
             let at = d.to_spec().abort_level_vrms();

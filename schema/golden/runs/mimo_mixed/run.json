@@ -127,6 +127,10 @@
       "kind": "mimo_mixed_drive_spectra"
     },
     {
+      "name": "control_trace",
+      "kind": "mimo_mixed_control"
+    },
+    {
       "name": "tone_levels",
       "kind": "mimo_mixed_tones"
     },
@@ -137,10 +141,6 @@
     {
       "name": "drive_levels",
       "kind": "mimo_mixed_drives"
-    },
-    {
-      "name": "control_trace",
-      "kind": "mimo_mixed_control"
     }
   ],
   "complete": true
