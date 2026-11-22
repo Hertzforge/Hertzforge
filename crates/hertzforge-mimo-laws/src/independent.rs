@@ -2077,7 +2077,7 @@ impl BuiltinMimoLaw for NearlyIndependentLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "nearly independent drives",
-            version: "1.1.0",
+            version: "1.2.0",
             author: "Hertzforge; refinements by N. Hunter",
             summary: "Keeps the specified autospectra and takes each pair's coherence and phase \
                       from the response that independent drives would produce: the drive \
@@ -2130,6 +2130,7 @@ impl BuiltinMimoLaw for NearlyIndependentLaw {
                 diag_kept(),
                 diag_correction(),
                 diag_clamped(),
+                crate::support::diag_held(),
                 DiagDecl {
                     help: "How many drives' independent levels the plain solve made negative \
                            on each line when the reference was formed at the seed, before the \

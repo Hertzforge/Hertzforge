@@ -573,7 +573,7 @@ MIMO_SETUP = {
     'backend': {'kind': 'sim'},
 }
 
-MIMO_LAW_REF = {'id': 'pinv_closed', 'name': 'pseudo-inverse, closed loop', 'version': '1.0.0',
+MIMO_LAW_REF = {'id': 'pinv_closed', 'name': 'pseudo-inverse, closed loop', 'version': '1.1.0',
                 'sha256': None}
 
 MIMO_SHAPE = {'controls': 2, 'drives': 2, 'space': 'physical', 'dofs': None, 'shape': 'square',
@@ -635,7 +635,7 @@ LAW_PINV_CLOSED = {'id': 'pinv_closed',
      'world': 'mimo',
      'builtin': True,
      'name': 'pseudo-inverse, closed loop',
-     'version': '1.0.0',
+     'version': '1.1.0',
      'author': 'Hertzforge',
      'summary': 'Starts from the regularized pseudo-inverse drive, then each loop corrects a '
                 "lower-triangular factor of the reference from the measured error (Smallwood's "
@@ -743,6 +743,15 @@ LAW_PINV_CLOSED = {'id': 'pinv_closed',
                       'unit': '',
                       'help': 'Diagonal elements of the reference factor whose correction this '
                               'loop was held to the per-loop limit, over all lines.',
+                      'layout': 'scalar'},
+                     {'key': 'held_rows',
+                      'label': 'Held factor rows',
+                      'unit': '',
+                      'help': 'Rows of the reference factor held this loop against wind-up, over '
+                              'all lines: a source whose response is below -15 dB of what its row '
+                              'commands, kept from growing, or a row brought down to 10 dB over '
+                              'its target. Rows held loop after loop are directions the FRF '
+                              'estimate holds and the structure does not follow.',
                       'layout': 'scalar'}],
      'shapes': ['square', 'more_controls_than_drives', 'fewer_controls_than_drives'],
      'needs': []}
