@@ -624,9 +624,33 @@ class ShapeSet:
         self.description = [self.description[i] for i in order]
 
     def _dof_lookup(self):
-        """{base DOF: (column, sign)} — '101X-' is minus the '101X+' column."""
-        return {base: (i, sign) for i, (base, sign) in
-                enumerate(_split_sign(dof) for dof in self.coordinate)}
+        """{base DOF: (column, sign)} — '101X-' is minus the '101X+' column.
+        Callers read it and never change it."""
+        # a model's set holds hundreds of thousands of DOFs, and one selection looks them up
+        # many times (what the set can be expanded with, what it can be transformed by), so
+        # the lookup is kept with the set while its DOF list is the same one
+        held = self.coordinate
+        kept = getattr(self, '_lookup_kept', None)
+        if kept is not None and kept[0] is held and kept[1] == len(held):
+            return kept[2]
+        lookup = {base: (i, sign) for i, (base, sign) in
+                  enumerate(_split_sign(dof) for dof in held)}
+        self._lookup_kept = (held, len(held), lookup)
+        return lookup
+
+    def _parsed_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Each DOF's node, axis and sign (`deform.parse_dofs`), kept with the set while its
+        DOF list is the same one: a model's set holds hundreds of thousands of DOFs, and
+        a projection onto a test's DOFs reads them each time the modes picked change."""
+        from ..deform import parse_dofs
+
+        held = self.coordinate
+        kept = getattr(self, '_parsed_kept', None)
+        if kept is not None and kept[0] is held and kept[1] == len(held):
+            return kept[2]
+        parsed = parse_dofs(held)
+        self._parsed_kept = (held, len(held), parsed)
+        return parsed
 
     def auto_mac(self) -> np.ndarray:
         """The MAC of every mode against every other mode; the diagonal is 1."""
@@ -985,6 +1009,14 @@ class ShapeSet:
         if self.damping[i]:
             label += f', {self.damping[i] * 100:.3g}% damping'
         return label
+
+    def __getstate__(self) -> dict[str, Any]:
+        # a copy, or a preview of an operation on one, leaves out the DOF lookup it can build
+        # again: for a model of hundreds of thousands of DOFs it is a dictionary as large, and
+        # copying it took longer than building it. The parsed DOFs are arrays and are kept
+        state = dict(self.__dict__)
+        state.pop('_lookup_kept', None)
+        return state
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ShapeSet):

@@ -290,7 +290,7 @@
 													{/if}
 												</div>
 											{:else}
-												<div class="line"><span class="twist blank"></span><span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span></div>
+												<div class="line" class:nested={row.depth > 0}><span class="twist blank"></span><span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span></div>
 											{/if}
 										{/if}
 									</td>

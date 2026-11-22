@@ -1,6 +1,7 @@
 """A shape set picked with a geometry it does not belong on is not drawn there by DOF number:
-the view shows the projection Project would make onto that geometry, or why it cannot be
-made, and the table offers Project and the objects' own acts, not the set's."""
+the view shows the reduction onto that geometry's nodes, or why it cannot be made, and the
+table offers DOF Mapping with Reduce under it and the objects' own acts, not the set's.
+Expanding needs a model's modes, so it is offered with the model's set, not its geometry."""
 
 from __future__ import annotations
 
@@ -49,41 +50,61 @@ def test_a_set_that_can_go_onto_the_geometry_shows_what_reduce_would_add(validat
         assert reading['title'] == 'FEM Shapes at the DOFs of Test Geometry: what Reduce would add'
         assert {row['label']: row['value'] for row in reading['rows']}['Nodes matched'] == '2 of 2'
         offered = _offered(project, names)
-        assert 'project.project_onto_basis' in offered
+        assert offered[:2] == ['project.set_projection', 'project.project_onto_basis']
+        rows = {row['id']: row for row in action_table(project, names, {})['columns'][0]['rows']}
+        assert rows['project.project_onto_basis']['under'] == 'project.set_projection'
+        assert 'project.expand_modes' not in offered
         assert 'show.animate' not in offered and 'project.synthesize_modal_frfs' not in offered
         assert 'self.link' in offered
     assert list(project) == before, 'nothing is added by looking'
 
 
-def test_a_set_that_cannot_reduce_onto_it_shows_what_expand_would_add(validate):
-    """The test set holds one direction at each node: it cannot go onto the cube's nodes, but
-    it expands to them through the cube's modes, linked to that geometry."""
+def test_dof_mapping_beside_a_geometry_goes_one_way_and_asks_only_the_distance():
+    project = _project()
+    rows = {row['id']: row for row in
+            action_table(project, ['Test Geometry', 'FEM Shapes'], {})['columns'][0]['rows']}
+    mapping = rows['project.set_projection']
+    assert (mapping['fill']['first'], mapping['fill']['second']) == ('FEM Shapes',
+                                                                     'Test Geometry')
+    assert mapping['fill']['direction'] == 'named'
+    assert 'direction' in mapping['omit'] and 'labels' not in mapping
+
+
+def test_dof_mapping_on_a_geometry_draws_and_keeps_the_reduction(validate):
     from .conftest import wire_views
+    from .test_projection_distance import _project_op
 
     project = _project()
-    out = show(project, ['Test Shapes', 'FEM Geometry'], {}, None)
-    wire_views(out['views'], validate)
-    stage, reading = out['views']
-    assert stage['title'] == 'Node matches: FEM Shapes onto Test Shapes'
-    assert reading['title'] == ('Test Shapes expanded to the DOFs of FEM Geometry through FEM '
-                                'Shapes: what Expand would add')
+    views = _project_op(project, op='project.set_projection', first='FEM Shapes',
+                        second='Test Geometry', direction='named', distance=0.5)
+    wire_views(views, validate)
+    assert [view['title'] for view in views] == [
+        'Node matches: FEM Shapes onto Test Geometry',
+        'FEM Shapes at the DOFs of Test Geometry']
+    assert project.projection_of('FEM Shapes', 'Test Geometry')[2] == 0.5
+    (_stage, reading) = show(project, ['FEM Shapes', 'Test Geometry'], {}, None)['views']
+    assert {row['label']: row['value'] for row in reading['rows']}['Match limit'] == 0.5
+
+
+def test_a_set_that_cannot_reduce_onto_it_says_why_and_what_to_pick_to_expand():
+    """The test set holds one direction at each node: it cannot go onto the cube's nodes, and
+    expanding it to them needs the cube's modes picked with it."""
+    project = _project()
+    (reading,) = show(project, ['Test Shapes', 'FEM Geometry'], {}, None)['views']
+    assert reading['title'] == 'Test Shapes cannot be reduced onto FEM Geometry'
     said = {row['label']: row['value'] for row in reading['rows']}
     assert said['Not reduced'] == 'Test Shapes has 2 nodes measured in fewer than three directions'
-    assert said['Model modes used'] == 2.0
-    offered = _offered(project, ['Test Shapes', 'FEM Geometry'])
-    assert 'project.expand_modes' in offered and 'project.project_onto_basis' not in offered
-    assert 'show.animate' not in offered and 'self.link' in offered
+    assert said['Not expanded'] == ('FEM Geometry holds no modes to expand through; pick Test '
+                                    'Shapes with FEM Shapes to expand through its modes')
+    assert _offered(project, ['Test Shapes', 'FEM Geometry']) == ['self.link', 'self.copy']
 
 
-def test_neither_way_says_why():
+def test_with_no_set_to_expand_through_none_is_named():
     project = _project()
     project.add('Bare', copy.deepcopy(project['FEM Geometry']))
     (reading,) = show(project, ['Test Shapes', 'Bare'], {}, None)['views']
-    assert reading['title'] == 'Test Shapes cannot be reduced or expanded onto Bare'
     said = {row['label']: row['value'] for row in reading['rows']}
-    assert said['Not reduced'] == 'Test Shapes has 2 nodes measured in fewer than three directions'
-    assert said['Not expanded'] == ('no shape set linked to Bare holds the whole motion to '
-                                    'expand through')
+    assert said['Not expanded'] == 'Bare holds no modes to expand through'
     assert _offered(project, ['Test Shapes', 'Bare']) == ['self.link', 'self.copy']
 
 

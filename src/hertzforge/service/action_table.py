@@ -84,8 +84,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'plan_instrumentation': (('shape_set',), 'It needs a mode above 0 Hz on a geometry with elements'),
     'create_sensors': (('geometry',), 'It holds no points measured on accelerometers'),
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
-    'expand_modes': (('shape_set',), ("It needs a model's shape set, or its geometry, to "
-                                      'expand through')),
+    'expand_modes': (('shape_set',), "It needs a model's shape set to expand through"),
     'synthesize_modal_frfs': (('shape_set',), 'It needs real modes'),
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
 }
@@ -354,8 +353,9 @@ NESTS: dict[str, tuple[str, ...]] = {
     'project.sensors': ('project.set_sensor_model', 'project.calibration_check'),
     'project.set_control': ('project.add_controller_settings',
                             'project.remove_controller_settings'),
-    # two shape sets on two geometries: what reads how they are projected is under Project,
-    # which sets it, as the spectra are under Averaging (Brandon, 2026-11-21)
+    # two shape sets on two geometries, or a shape set and a geometry it is not on: what
+    # reads how they are brought onto common DOFs is under DOF Mapping, which sets it, as the
+    # spectra are under Averaging (Brandon, 2026-11-21)
     'project.set_projection': ('show.mac', 'project.projection_overlay', 'project.match_modes',
                                'project.add_matches', 'project.project_onto_basis',
                                'project.expand_modes'),
@@ -647,31 +647,51 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             more['omit'] = [*more.get('omit', []), 'mate']
         if op.id == 'project.set_projection':
             fill.update(_projection_fill(project, fill))
-            more['labels'] = {'mapping': _mapping_words(project, fill['first'], fill['second'])}
+            words = _direction_words(project, fill['first'], fill['second'])
+            if len(words) > 1:
+                more['labels'] = {'direction': words}
+            else:
+                # one way can be made: there is nothing to choose, so nothing is asked
+                more['omit'] = [*more.get('omit', []), 'direction']
         if op.id in ('project.project_onto_basis', 'project.expand_modes'):
             from hertzforge.core.geometry import Geometry
             from hertzforge.core.shapes import ShapeSet
             from hertzforge.project import mapping_why
 
             method = 'reduction' if op.id == 'project.project_onto_basis' else 'expansion'
-            if isinstance(project[fill['onto']], ShapeSet):
-                # two sets go the way DOF Mapping maps them, and ask nothing: they add the set
+            if op.id == 'project.project_onto_basis' and isinstance(project[fill['onto']],
+                                                                    Geometry):
+                # onto a geometry's nodes at the distance DOF Mapping keeps, asking nothing
+                fill.update(_projection_fill(project, {'first': fill['source'],
+                                                       'second': fill['onto']},
+                                             distance_only=True))
+                more['omit'] = [*more.get('omit', []), 'direction', 'distance']
+                more['verb'] = 'Reduce'
+            elif isinstance(project[fill['onto']], ShapeSet):
+                # two sets go the way DOF Mapping maps them, and ask nothing: Reduce takes the
+                # set whose nodes are matched at the other's DOFs, and Expand fits the other
+                # there with its modes
                 source, onto = _mapped(project, fill['source'], fill['onto'], method)
                 fill.update({'source': source, 'onto': onto,
                              **_projection_fill(project, {'first': source, 'second': onto},
                                                 distance_only=True)})
                 more['omit'] = [*more.get('omit', []), 'direction', 'distance']
                 more['verb'] = 'Reduce' if method == 'reduction' else 'Expand'
+                if method == 'expansion':
+                    # the modes it expands and the modes it expands through are the ones
+                    # picked under each set, every one of a set picked whole
+                    for param, held in (('modes', source), ('basis', onto)):
+                        picked = records.get(held, [])
+                        fill[param] = _runs(picked) if picked else ''
+                    more['omit'] += ['modes', 'basis']
             elif op.id == 'project.project_onto_basis':
                 more['omit'] = [*more.get('omit', []), 'direction']
-                if isinstance(project[fill['onto']], Geometry):
-                    more['verb'] = 'Reduce'
             why = mapping_why(project, fill['source'], fill['onto'], method) if (
                 method == 'expansion' or isinstance(project[fill['onto']], ShapeSet)) else ''
             if why:
                 rows.append(_op_row(op, why, fill=fill))
                 continue
-        if op.id in MATCHED:
+        if op.id in MATCHED and 'distance' not in more.get('omit', ()):
             fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:
             more['live'] = True
@@ -686,11 +706,13 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
 
         shapes, geometry = sorted(names, key=lambda n: kinds[names.index(n)] != 'shape_set')
         if drawn_elsewhere(project, shapes, geometry):
-            # a geometry the set does not belong on is not its stage: it is projected onto
-            # it, and the set's own acts and a drawing by DOF number are not offered with it.
-            # Link says they go together, after which it is the set's stage again
+            # a geometry the set does not belong on is not its stage: the set is reduced onto
+            # its nodes under DOF Mapping, and the set's own acts and a drawing by DOF number
+            # are not offered with it. Expanding needs a model's modes, so it is offered with
+            # the model's set, not its geometry. Link says they go together, after which it
+            # is the set's stage again
             rows = [row for row in rows
-                    if row['id'] in ('project.project_onto_basis', 'project.expand_modes')]
+                    if row['id'] in ('project.set_projection', 'project.project_onto_basis')]
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
@@ -773,53 +795,51 @@ def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
 
 def _pair_why(project: Any, first: str, second: str) -> str:
     """Why two shape sets have no projection to set: one geometry between them, or none
-    (`project.projection_why`); '' when either can be projected onto the other."""
+    (`project.projection_why`); '' when either can be projected onto the other. A shape set
+    and a geometry by whether the set can be reduced onto its nodes."""
+    from hertzforge.core.geometry import Geometry
     from hertzforge.project import projection_why
 
+    if isinstance(project[second], Geometry):
+        return projection_why(project, first, second)
     ways = [projection_why(project, first, second), projection_why(project, second, first)]
     return '' if not all(ways) else ways[0]
 
 
-def _mapping_words(project: Any, first: str, second: str) -> dict[str, str]:
-    """DOF Mapping's four ways for two shape sets, worded after the sets, each that cannot
-    be made with why (`project.mapping_why`)."""
-    from hertzforge.project import mapping_why
-
-    from .ops_project import MAPPINGS
+def _direction_words(project: Any, first: str, second: str) -> dict[str, str]:
+    """DOF Mapping's ways for a pair, worded after it, only the ones that can be made
+    (`project.projection_why`): whose nodes are matched to whose DOFs. A shape set beside a
+    geometry goes one way, the set's nodes matched to the geometry's."""
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.project import projection_why
 
     out = {}
-    for key, (method, turned) in MAPPINGS.items():
-        a, b = (second, first) if turned else (first, second)
-        words = (f'Reduction: {a} at the DOFs of {b}' if method == 'reduction'
-                 else f'Expansion: {a} to the DOFs of {b}')
-        why = mapping_why(project, a, b, method)
-        out[key] = words + (f' (not possible: {why})' if why else '')
+    for key, (a, b) in (('named', (first, second)), ('reversed', (second, first))):
+        if isinstance(project[a], Geometry) or projection_why(project, a, b):
+            continue
+        at = 'nodes' if isinstance(project[b], Geometry) else 'DOFs'
+        out[key] = f'{a} at the {at} of {b}'
     return out
 
 
 def _mapped(project: Any, first: str, second: str, method: str) -> tuple[str, str]:
-    """(the set moved, the one whose DOFs it is brought to) for a reduction or an
-    expansion of two shape sets, as the pair's DOF mapping goes: the set it reduces is
-    the one expanded through, and the set it expands is the one reduced to."""
+    """(the set acted on, the other) for Reduce or Expand of two shape sets, as the pair's DOF
+    mapping goes: Reduce takes the set whose nodes are matched at the other's DOFs, and Expand
+    fits the other set at those DOFs and takes it to the first one's."""
     source, onto, _distance = project.projection_of(first, second)
-    if project.projection_method(first, second) == method:
-        return source, onto
-    return onto, source
+    return (source, onto) if method == 'reduction' else (onto, source)
 
 
 def _projection_fill(project: Any, fill: dict[str, str], distance_only: bool = False
                      ) -> dict[str, str]:
-    """Project's form for two shape sets as the pair is projected now
-    (`Project.projection_of`): the direction it goes, and the node match distance it keeps in
-    the display units, or 0 for 2 % of the target's size when it keeps none."""
+    """DOF Mapping's form for a pair as it is mapped now (`Project.projection_of`): whose
+    nodes are matched to whose DOFs, and the node match distance it keeps in the display
+    units, or 0 for 2 % of the target's size when it keeps none."""
     from . import display_units
 
     first, second = fill['first'], fill['second']
     source, _onto, distance = project.projection_of(first, second)
-    method = project.projection_method(first, second)
-    turned = 'named' if source == first else 'reversed'
-    out = {} if distance_only else {
-        'mapping': ('reduce_' if method == 'reduction' else 'expand_') + turned}
+    out = {} if distance_only else {'direction': 'named' if source == first else 'reversed'}
     if distance is None:
         return {**out, 'distance': '0'}
     defined = project.geometry_for(source)[1].units_defined
