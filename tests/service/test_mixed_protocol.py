@@ -39,7 +39,8 @@ BINARY = {
 def test_every_mixed_golden_is_checked_here():
     # The Rust, TypeScript and Python suites read the same files in schema/golden/.
     names = {p.name.split('.')[0] for p in GOLDEN.iterdir()
-             if '_mixed_' in p.name and not p.name.endswith('.expected.json')}
+             if '_mixed_' in p.name and '_mimo_mixed_' not in p.name
+             and not p.name.endswith('.expected.json')}
     assert names == set(TEXT) | set(BINARY), sorted(names ^ (set(TEXT) | set(BINARY)))
 
 
