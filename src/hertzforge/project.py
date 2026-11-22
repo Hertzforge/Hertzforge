@@ -6738,7 +6738,7 @@ class Project(dict):
             # a mode of zero on the shared DOFs has no MAC, and is nobody's match
             matrix = np.nan_to_num(self.comparison_mac(first, second))
             if pairs is None:
-                from .core.modal_frf import picked_modes
+                from .core.shapes import picked_modes
 
                 rows = picked_modes(self[first], first_modes)
                 columns = np.array(picked_modes(self[second], second_modes))

@@ -123,7 +123,7 @@ def modes_param(shapes: Any, text: str) -> list[int]:
 def picked_modes(shapes: Any, picks: Any) -> list[int]:
     """The modes picked under a shape set, by index from 0, in the set's
     order and once each; every mode when none is picked."""
-    from hertzforge.core.modal_frf import picked_modes as chosen
+    from hertzforge.core.shapes import picked_modes as chosen
 
     from .protocol import refused
 

@@ -48,7 +48,7 @@ import numpy as np
 from ..units import UNKNOWN
 from .data import Frf, channel_quantities
 from .modal_response import POWERS, QUANTITIES
-from .shapes import ShapeSet
+from .shapes import ShapeSet, picked_modes
 from .transform import TransformReport, _columns, _modal_dim, _physical_quantity, modal_dofs
 from .validate import modal_coordinate
 
@@ -85,30 +85,6 @@ def frequency_lines(sample_rate: float, frame_length: int) -> np.ndarray:
         raise ValueError('a frame needs two samples or more, '
                          f'not {frame_length}')
     return np.fft.rfftfreq(int(frame_length), 1.0 / float(sample_rate))
-
-
-def picked_modes(shapes: ShapeSet, modes: Sequence[int] | None) -> list[int]:
-    """The modes asked for, by index from zero, sorted and once each;
-    every mode when `modes` is None.
-
-    Raises
-    ------
-    ValueError
-        If the set has no modes, a mode is not in it, or none is asked
-        for.
-    """
-    if shapes.num_shapes == 0:
-        raise ValueError('the set has no modes')
-    if modes is None:
-        return list(range(shapes.num_shapes))
-    chosen = sorted({int(k) for k in modes})
-    outside = [k + 1 for k in chosen if not 0 <= k < shapes.num_shapes]
-    if outside:
-        raise ValueError(f'the set has {shapes.num_shapes} modes; mode '
-                         f'{outside[0]} is not one of them')
-    if not chosen:
-        raise ValueError('no modes are picked')
-    return chosen
 
 
 def synthesize_modal_frfs(shapes: ShapeSet, sample_rate: float,
