@@ -137,6 +137,22 @@ export interface SpectrumView {
 	readouts?: { label: string; text: string; status: Status }[];
 	/** The range of x the plot opens on, where that is not all of its data. */
 	x_home?: [number, number];
+	/** The request that drew the view, sent again with the x range shown when the plot is zoomed: its curves were thinned. */
+	span?: SpanSource;
+}
+
+/** A request the service answers with views, and which of them a zoomed plot takes its series from. */
+export interface SpanSource {
+	method: 'op.run' | 'project.show';
+	params: Record<string, unknown>;
+	view: number;
+}
+
+/** The part of x a zoomed plot shows, and the points it can draw across it. */
+export interface DrawingSpan {
+	low: number;
+	high: number;
+	points: number;
 }
 
 /** One set of a spectrum's series, by index, with readings that go with it. */

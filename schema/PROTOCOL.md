@@ -136,6 +136,29 @@ and each point stands for an interval of the original lines, `y` the largest val
 `y_min` the smallest. The shell draws the band between them (and with `steps`, each interval
 flat across its `edges`), so no peak or notch is lost to the decimation.
 
+`span` (optional) says how to draw the view again for part of x. A long trace is peak-thinned
+to a few thousand points, each slice's least and greatest sample (`decimate.peak_decimate`), so
+zoomed into a fraction of a second the plot would join those few points with straight lines that
+are not the record. The analysis service marks every spectrum in an answer that thinned a trace
+with the request that drew it: `method` (`op.run` or `project.show`), its `params` as the client
+sent them, and `view`, the view's index in that answer's `views`. When the plot's x range
+changes, the shell waits until it has been still for a moment, then sends that request again
+with `span`, `{"low","high","points"}`: the x range shown, in the view's x unit, and the points
+the plot can draw across it (two a pixel of its width, a least and a greatest sample for each).
+The service draws everything as before, except that each thinned trace keeps the samples from
+`low` to `high`, and the sample on either side, thinned to `points`, which is every sample once
+they are fewer, and the rest of the trace thinned as before. The shell takes the `series` of view
+`view` of the answer in place of the view's own, when they are as many and named alike, and goes
+back to the view's own when the plot is shown whole again. Nothing changes in the project: a run
+that added, removed or journaled anything is never marked, and `op.run` with `span` is a
+`bad_request` for an operation that `edits`, unless it is a `preview`, which runs on copies. A `span` whose `low` is not below `high`, or whose
+`points` is not a whole number from 2 to 65,536, is a `bad_request`.
+
+```
+ "span":{"method":"op.run","params":{"op":"project.plot","params":{"data":"Time History"}},
+         "view":0}
+```
+
 This is the drawing rule (`plot.drawing_shape`, `plot.bin_edges`); the analysis
 service takes it from there rather than restating it.
 
@@ -574,7 +597,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | Method | Params | Result |
 |---|---|---|
 | `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
-| `op.run` | `{"op","params":{...},"preview"?}` | `{"views":[view...],"project"}` |
+| `op.run` | `{"op","params":{...},"preview"?,"span"?}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` or `{"upload"}` | `{"project"}` |
 | `project.import` | `{"path"}` or `{"upload"}`, `"units"?` | `{"added":[name...],"project"}` |
@@ -595,7 +618,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.averaging` | `{"name","averaging"?}` | `{"regions","note"}` |
 | `project.entity_rows` | `{"geometry","kind","family"?,"groups"?,"start","count"}` | `{"rows"}`: more of an entity table that sent its first rows (its `more`) |
 | `project.mesh_size` | `{"geometry","solids","elements"}` (a Mesh form's values) | `{"value"}`: the element size those solids are likely to hold at, in the display units |
-| `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
+| `project.show` | `{"objects","records"?,"part"?,"prefs"?,"span"?}` | `{"title","views","note","offers"}` |
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |

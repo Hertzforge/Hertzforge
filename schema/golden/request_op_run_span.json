@@ -1,0 +1,17 @@
+{
+ "type": "request",
+ "id": 32,
+ "method": "op.run",
+ "params": {
+  "op": "project.plot",
+  "params": {
+   "data": "Time History",
+   "records": "1"
+  },
+  "span": {
+   "low": 0.34,
+   "high": 0.55,
+   "points": 2400
+  }
+ }
+}
