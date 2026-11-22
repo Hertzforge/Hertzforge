@@ -6557,6 +6557,44 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
+        projected, basis_name, named = self._projected(
+            source, onto, channels=channels, tolerance=tolerance, distance=distance)
+        return self._derive(basis_name, projected, name or named)
+
+    def projected(self, source: str, onto: str, *, tolerance: float = 0.02,
+                  distance: float | None = None) -> ShapeSet:
+        """The shape set `project_onto_basis` would add, without adding it:
+        `source` sampled at the DOFs of `onto` (a shape set, a channel
+        table or a geometry), its `projection_report` saying what matched.
+        What a view shows of a projection before one is made.
+
+        Parameters
+        ----------
+        source : str
+            The shape set to project.
+        onto : str
+            The shape set, channel table or geometry to project onto.
+        tolerance, distance : float, optional
+            As `project_onto_basis`.
+
+        Returns
+        -------
+        ShapeSet
+            The projected set.
+
+        Raises
+        ------
+        ValueError
+            As `project_onto_basis`; `core.correlate.NoNodeMatched`, with
+            its report, when no node is matched.
+        """
+        return self._projected(self.name_of(source), self.name_of(onto),
+                               tolerance=tolerance, distance=distance)[0]
+
+    def _projected(self, source, onto, *, channels=None, tolerance=0.02, distance=None,
+                   name=None):
+        """(the projected set, what it belongs with, its default name) for
+        `project_onto_basis` and `projected`."""
         from .core.correlate import project_shapes
 
         source = self.name_of(source)
@@ -6626,8 +6664,7 @@ class Project(dict):
         # how it was made travels with it: matched and dropped counts,
         # the worst distance accepted
         projected.projection_report = report
-        return self._derive(basis_name, projected,
-                            name or f'{source} @ Basis DOFs')
+        return projected, basis_name, name or f'{source} @ Basis DOFs'
 
     def match_modes(self, first: str, second: str, *,
                     pairs: Iterable[tuple[int, int]] | None = None,
@@ -10542,6 +10579,16 @@ def projection_why(project: Project, source: Any, onto: Any) -> str:
     if on_geometry and not home[1].num_nodes:
         return f'{onto} has no nodes'
     return _measured_why(project, source, onto)
+
+
+def drawn_elsewhere(project: Project, shapes: Any, geometry: Any) -> bool:
+    """Whether the shape set `shapes` belongs on a geometry other than
+    `geometry`, or on none (`Project.geometry_for`). Picked together, a
+    geometry the set does not belong on is not where its DOFs are, and
+    drawing the set there by DOF name would move nodes that only share a
+    number: it is projected onto that geometry instead, or said why not."""
+    found = project.geometry_for(shapes)
+    return found is None or found[1] is not project[project.name_of(geometry)]
 
 
 def _measured_why(project: Project, source: str, onto: str) -> str:

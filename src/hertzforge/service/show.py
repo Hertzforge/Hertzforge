@@ -1269,6 +1269,13 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         obj = project[other]
         picks = records.get(other, [])
         if isinstance(obj, ShapeSet):
+            from hertzforge.project import drawn_elsewhere
+
+            if drawn_elsewhere(project, other, geometry):
+                # not where the set's DOFs are: the projection onto it, not a drawing by number
+                from .ops_project import projection_views
+
+                return projection_views(project, other, geometry), []
             return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
         if isinstance(obj, ChannelTable):
             # the geometry alone; `_marks` draws the table's arrows over it

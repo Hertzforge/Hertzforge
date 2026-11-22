@@ -669,6 +669,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
         if edit is not None:
             rows = [edit, *(row for row in rows if row['id'] != 'project.edit_solid')]
+    if sorted(kinds) == ['geometry', 'shape_set'] and not where:
+        from hertzforge.project import drawn_elsewhere
+
+        shapes, geometry = sorted(names, key=lambda n: kinds[names.index(n)] != 'shape_set')
+        if drawn_elsewhere(project, shapes, geometry):
+            # a geometry the set does not belong on is not its stage: it is projected onto
+            # it, and the set's own acts and a drawing by DOF number are not offered with it.
+            # Link says they go together, after which it is the set's stage again
+            rows = [row for row in rows if row['id'] == 'project.project_onto_basis']
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
