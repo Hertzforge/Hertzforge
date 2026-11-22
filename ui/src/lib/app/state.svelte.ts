@@ -269,7 +269,11 @@ class AnalyzeState {
 	async showSelection(redraw = false, keepReading = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
-		if (!keepReading) {
+		// an open form that previews follows the selection itself (Expand, as modes are picked):
+		// its preview stays until the next one is drawn, or the form closes when the selection
+		// can no longer take it
+		const following = this.formOpen && this.reading !== null && this.reading === this.previewDrawn;
+		if (!keepReading && !following) {
 			this.reading = null;
 			this.readingId = null;
 		}

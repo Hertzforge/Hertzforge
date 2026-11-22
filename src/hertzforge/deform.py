@@ -152,7 +152,35 @@ def envelope_records(data: DataArray, records: Sequence[int] | None = None,
     return of_kind, quantity, len(initial) - len(kept), left_out
 
 
-def dof_directions(geometry: Geometry, dofs: Sequence[str]
+def parse_dofs(dofs: Sequence[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(node, axis, negative) for each DOF string, whatever geometry it is on.
+
+    `node` is the node number, -1 where the string names none; `axis` is
+    0, 1 or 2 for a translation along X, Y or Z and -1 for anything else
+    (a rotation, a modal coordinate); `negative` is whether the direction
+    ends in '-'. The rule is `core.data.parse_dof`'s: the leading digits
+    are the node, the rest the direction. The strings are parsed in one
+    pass of a regular expression over all of them, so a set of 400,000
+    DOFs takes a fraction of a second; parsed one at a time it took two
+    seconds.
+    """
+    if not len(dofs):
+        return (np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64),
+                np.empty(0, dtype=bool))
+    text = '\n'.join(str(dof).strip() for dof in dofs)
+    nodes = np.array(_NODE.findall(text))
+    rest = np.array(_REST.findall(text))
+    first = np.char.upper(rest.astype('U1'))
+    axis = np.full(len(rest), -1, dtype=np.int64)
+    for letter, k in AXES.items():
+        axis[first == letter] = k
+    # a number longer than any node id is no node of any geometry
+    length = np.char.str_len(nodes)
+    node = np.where((length > 0) & (length <= 18), nodes, '-1').astype(np.int64)
+    return node, axis, np.char.endswith(rest, '-')
+
+
+def dof_directions(geometry: Geometry, dofs: Sequence[str], parsed: tuple | None = None
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(rows, directions, used) for the DOFs this geometry can move.
 
@@ -161,27 +189,27 @@ def dof_directions(geometry: Geometry, dofs: Sequence[str]
     `dofs` of the ones kept. Rotational DOFs, DOFs that do not parse,
     and DOFs on nodes the geometry does not have are dropped.
 
-    The strings are parsed in one pass of a regular expression over all
-    of them (the rule of `core.data.parse_dof`: the leading digits are
-    the node, the rest the direction), so a set of 400,000 DOFs takes a
-    fraction of a second; parsed one at a time it took two seconds, and
-    a mode shape view parses the set once per mode.
+    `parsed` is `parse_dofs(dofs)` when the caller keeps it: a shape set
+    keeps its own (`ShapeSet._parsed_dofs`), so a model of hundreds of
+    thousands of DOFs is parsed once and not on every projection.
     """
     used = np.zeros(len(dofs), dtype=bool)
     if not len(dofs):
         return np.empty(0, dtype=np.int64), np.empty((0, 3)), used
-    parsed = _DOF.findall('\n'.join(str(dof).strip() for dof in dofs))
-    nodes = np.array([node for node, _ in parsed], dtype=object)
-    rest = np.array([direction for _, direction in parsed], dtype=object)
-    first = np.array([(d[:1] or ' ').upper() for d in rest])
-    axis = np.array([AXES.get(f, -1) for f in first], dtype=np.int64)
-    known = {int(node): row for row, node in enumerate(geometry.node_id)}
-    row = np.array([known.get(int(n), -1) if n else -1 for n in nodes], dtype=np.int64)
+    node, axis, negative = parse_dofs(dofs) if parsed is None else parsed
+    ids = np.asarray(geometry.node_id, dtype=np.int64)
+    order = np.argsort(ids, kind='stable')
+    ordered = ids[order]
+    row = np.full(len(node), -1, dtype=np.int64)
+    if len(ordered):
+        # the last of a node id given twice, as a lookup built in order keeps it
+        at = np.clip(np.searchsorted(ordered, node, side='right') - 1, 0, None)
+        row = np.where((node >= 0) & (ordered[at] == node), order[at], -1)
     used[:] = (axis >= 0) & (row >= 0)
     if not used.any():
         return np.empty(0, dtype=np.int64), np.empty((0, 3)), used
     rows = row[used]
-    sign = np.where([d.endswith('-') for d in rest[used]], -1.0, 1.0)
+    sign = np.where(negative[used], -1.0, 1.0)
     directions = np.zeros((len(rows), 3))
     directions[np.arange(len(rows)), axis[used]] = sign
     cs_rotation = _cs_rotations(geometry)
@@ -195,8 +223,9 @@ def dof_directions(geometry: Geometry, dofs: Sequence[str]
 
 
 #: one DOF string per line: its leading digits (the node, which may be
-#: absent) and the rest (the direction)
-_DOF = re.compile(r'^(\d*)(.*)$', re.MULTILINE)
+#: absent), and the rest (the direction)
+_NODE = re.compile(r'^(\d*)', re.MULTILINE)
+_REST = re.compile(r'^\d*(.*)$', re.MULTILINE)
 
 
 def _cs_rotations(geometry: Geometry) -> dict[int, np.ndarray]:

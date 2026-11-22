@@ -140,7 +140,7 @@ def _sensor_view(title: str, geometry: Any, shapes: Any, modes: list[int],
     nodes = np.vstack([points, xyz[seat_rows], tips])
     shown = [v.mode(m + 1, float(shapes.frequency[m]),
                     float(shapes.damping[m]) if shapes.damping[m] > 0 else None,
-                    np.real(translations(geometry, shapes.coordinate,
+                    np.real(translations(geometry, shapes,
                                           shapes.shape_matrix[m], rows)))
              for m in modes]
     extra: dict[str, Any] = {}
@@ -481,7 +481,7 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from error
     flipped = project.projection_of(first, second)[0] == first
     basis = theirs if flipped else home
-    moved = 'expanded' if project.projection_method(first, second) == 'expansion' else 'reduced'
+    moved = 'reduced'
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}

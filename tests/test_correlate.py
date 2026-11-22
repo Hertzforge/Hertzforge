@@ -414,6 +414,62 @@ def test_the_dof_lookup_is_built_once_per_dof_list():
     assert shapes.covers('3Z-') and not shapes.covers('1X+')
 
 
+def test_a_models_dofs_are_parsed_once_however_often_it_is_projected():
+    """A model's set holds hundreds of thousands of DOFs and Expand projects it each time the
+    modes picked change: its DOFs are parsed once, and again only for another list."""
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    fem_shapes.coordinate = _Counted(fem_shapes.coordinate)
+    first = project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry)[0]
+    again = project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry)[0]
+    assert fem_shapes.coordinate.reads == 1
+    assert np.array_equal(first.shape_matrix, again.shape_matrix)
+    fem_shapes.coordinate = _Counted(list(fem_shapes.coordinate))
+    project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry)
+    assert fem_shapes.coordinate.reads == 1
+
+
+def test_a_copy_keeps_the_parse_and_leaves_the_lookup_to_be_built_again():
+    """A preview runs on copies, and a model's DOF lookup is as large as its DOFs: it is not
+    copied, while the parse, a few arrays, is."""
+    shapes = _set(['1X+', '1Y-', '2Z+'])
+    shapes.covers('1X+')
+    parsed = shapes._parsed_dofs()
+    copied = copy.deepcopy(shapes)
+    assert not hasattr(copied, '_lookup_kept') and copied.covers('1Y+')
+    assert all(np.array_equal(a, b) for a, b in zip(copied._parsed_kept[2], parsed))
+    copied.coordinate = _Counted(copied.coordinate)
+    copied._parsed_kept = (copied.coordinate, len(copied.coordinate), copied._parsed_kept[2])
+    copied._parsed_dofs()
+    assert copied.coordinate.reads == 0
+
+
+def test_an_expanded_set_is_drawn_on_the_models_parse():
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    expanded, _report = expand_shapes(test_shapes, test_geometry, fem_shapes, fem_geometry)
+    assert expanded._parsed_dofs() is fem_shapes._parsed_dofs()
+
+
+def test_a_set_is_drawn_from_the_dofs_it_keeps_parsed():
+    """Drawing a model's modes, each time the picks change, reads its DOFs once and then
+    draws from the parse it keeps; given as a list, the DOFs are read each time."""
+    from hertzforge.service.mesh import drawn_mesh
+    from hertzforge.service.mode_pairs import translations
+
+    fem_geometry, fem_shapes = _fem()
+    rows = drawn_mesh(fem_geometry)[0]
+    fem_shapes.coordinate = _Counted(fem_shapes.coordinate)
+    first = translations(fem_geometry, fem_shapes, fem_shapes.shape_matrix, rows)
+    again = translations(fem_geometry, fem_shapes, fem_shapes.shape_matrix, rows)
+    assert fem_shapes.coordinate.reads == 1
+    listed = translations(fem_geometry, fem_shapes.coordinate, fem_shapes.shape_matrix, rows)
+    assert fem_shapes.coordinate.reads == 2
+    assert np.array_equal(first, again) and np.array_equal(first, listed)
+
+
 def test_the_set_with_uniaxial_nodes_is_the_one_projected_onto():
     """A node measured along one axis has no whole motion to sample at
     another set's DOFs, so the other set is projected onto it, whichever
@@ -623,7 +679,7 @@ def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
     project.set_projection('FEM Shapes', 'Modes B', source=other)
     assert project.projection_of('Modes B', 'FEM Shapes')[0] == other
     said = project.compared_sets('FEM Shapes', 'Modes B')[2]
-    assert said == f'{other} projected onto {chosen}: the direction set in Project'
+    assert said == f'{other} projected onto {chosen}: the direction set in DOF Mapping'
 
 
 @pytest.mark.parametrize(('first', 'second', 'given', 'refused'), [
@@ -634,10 +690,7 @@ def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
     ('FEM Shapes', 'FEM Geometry', {}, 'FEM Shapes is on FEM Geometry already'),
     ('FEM Shapes', 'Test Geometry', {'source': 'Test Geometry'},
      'Test Geometry is a geometry, with no modes to bring onto the DOFs of FEM Shapes'),
-    ('FEM Shapes', 'Test Geometry', {'method': 'expansion'},
-     'Test Geometry holds no modes to expand through$'),
-    ('Test Shapes', 'FEM Geometry', {'method': 'expansion'},
-     'FEM Geometry holds no modes to expand through; pick Test Shapes with FEM Shapes'),
+    ('Test Shapes', 'FEM Geometry', {}, 'Test Shapes has 2 nodes measured in fewer than three'),
     ('FEM Geometry', 'Test Geometry', {}, 'Test Geometry is not a shape set'),
     ('FEM Shapes', 'RC Channels', {}, 'RC Channels is not a shape set'),
 ])
@@ -658,7 +711,6 @@ def test_a_set_and_a_geometry_it_is_not_on_keep_a_reduction_onto_its_nodes():
     project.set_projection('Test Geometry', 'FEM Shapes', distance=0.004)
     assert project.projection_of('FEM Shapes', 'Test Geometry') == (
         'FEM Shapes', 'Test Geometry', 0.004)
-    assert project.projection_method('FEM Shapes', 'Test Geometry') == 'reduction'
     project.rename('Test Geometry', 'Bench')
     assert project.projection_of('FEM Shapes', 'Bench')[2] == 0.004
 
@@ -727,8 +779,7 @@ def test_a_test_set_in_the_models_span_expands_to_it_exactly(combination):
     fem_geometry, fem_shapes = _fem()
     test_geometry, test_shapes = _test_model()
     known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes, combination)
-    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry,
-                                     modes=[0, 1])
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry)
     assert list(expanded.coordinate) == list(fem_shapes.coordinate)
     assert np.allclose(expanded.shape_matrix,
                        np.asarray(combination) @ np.asarray(fem_shapes.shape_matrix))
@@ -747,7 +798,7 @@ def test_a_test_mode_outside_the_span_is_the_nearest_fit_and_says_how_far():
     test_geometry, test_shapes = _test_model()
     known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes,
                         [[1.0, 0.0], [1.0, 1.0]])
-    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry, modes=[0])
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry, basis=[0])
     phi = np.array([10.0, 21.0])  # mode 1 at the two test DOFs
     psi = np.asarray(known.shape_matrix)
     scale = psi @ phi / (phi @ phi)
@@ -767,17 +818,50 @@ def test_more_modes_than_test_dofs_are_refused():
     three = ShapeSet([10.0, 20.0, 30.0], [0.0] * 3, fem_shapes.coordinate,
                      np.vstack([fem_shapes.shape_matrix, np.ones(24)]))
     with pytest.raises(ValueError, match='3 model modes for 2 test DOFs matched'):
-        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[0, 1, 2])
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry)
     with pytest.raises(ValueError, match='the model has 3 modes; \\[5\\] are not among them'):
-        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[4])
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, basis=[4])
+    with pytest.raises(ValueError, match='no model mode to expand through: pick at least one'):
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, basis=[])
 
 
-def test_the_default_basis_is_the_band_up_to_one_and_a_half_times_the_test_capped_at_its_dofs():
-    from hertzforge.core.correlate import expansion_modes
+def test_expand_takes_the_modes_picked_of_each_set_and_every_one_of_a_set_left_out():
+    """The test modes expanded and the model modes they are fitted with are the ones named;
+    none named is every one, as a set picked whole is."""
+    project = _two_geometries()
+    known = _known_test(project['FEM Shapes'], project['FEM Geometry'],
+                        project['Test Geometry'], project['Test Shapes'],
+                        [[1.0, 2.0], [3.0, -1.0]])
+    project['Test Shapes'] = known
+    every = project.expanded('Test Shapes', 'FEM Shapes')
+    assert every.num_shapes == 2 and every.expansion_report['modes'] == [0, 1]
+    second = project.expanded('Test Shapes', 'FEM Shapes', modes=[1])
+    assert list(second.frequency) == [40.0]
+    assert np.allclose(second.shape_matrix, every.shape_matrix[1:])
+    one = project.expanded('Test Shapes', 'FEM Shapes', basis=[0])
+    assert one.expansion_report['modes'] == [0]
+    assert not np.allclose(one.shape_matrix, every.shape_matrix)
+    with pytest.raises(ValueError, match='Test Shapes has 2 modes; pick some of them, not \\[3\\]'):
+        project.expanded('Test Shapes', 'FEM Shapes', modes=[2])
 
-    fem = [0.0, 0.0, 100.0, 140.0, 160.0, 400.0]
-    assert expansion_modes(fem, [50.0, 100.0], 10) == [0, 1, 2, 3]
-    assert expansion_modes(fem, [50.0, 100.0], 3) == [0, 1, 2], 'the lowest, no more than DOFs'
-    assert expansion_modes([300.0, 100.0, 200.0], [100.0], 5) == [1], 'by frequency, not order'
-    assert expansion_modes([300.0, 100.0, 200.0], [10.0], 2) == [1, 2], \
-        'none in the band: the lowest, as many as the DOFs'
+
+def test_expand_matches_nodes_at_the_distance_the_mapping_keeps():
+    from hertzforge.core.correlate import NoNodeMatched
+
+    project = _two_geometries()
+    project.set_projection('FEM Shapes', 'Test Shapes', distance=1e-6)
+    with pytest.raises(NoNodeMatched):
+        project.expanded('Test Shapes', 'FEM Shapes')
+    assert project.expanded('Test Shapes', 'FEM Shapes', distance=0.01).num_shapes == 2
+
+
+def test_a_mapping_is_its_node_pairs_and_a_method_an_older_file_holds_is_not_read(tmp_path):
+    project = _two_geometries()
+    project.set_projection('FEM Shapes', 'Test Shapes', distance=0.004)
+    assert project.projection_records() == [{'first': 'FEM Shapes', 'second': 'Test Shapes',
+                                             'source': 'FEM Shapes', 'distance': 0.004}]
+    older = hertzforge.Project(projections=[{'first': 'FEM Shapes', 'second': 'Test Shapes',
+                                             'source': 'FEM Shapes', 'distance': None,
+                                             'method': 'expansion'}])
+    assert older.projections == {('FEM Shapes', 'Test Shapes'): {'source': 'FEM Shapes',
+                                                                 'distance': None}}

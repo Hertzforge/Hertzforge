@@ -237,15 +237,19 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     complex_shapes = np.iscomplexobj(fem_shapes.shape_matrix)
     values = np.empty((fem_shapes.num_shapes, len(keep)),
                       dtype=np.complex128 if complex_shapes else np.float64)
-    # the model's DOFs are parsed once for every mode: parsed per mode,
-    # 38 modes of a 350,000-DOF model took 23 s where this takes one
+    # the model's DOFs are parsed once for every mode, and kept with the set: parsed per
+    # mode, 38 modes of a 350,000-DOF model took 23 s; and each mode is summed only at the
+    # nodes matched, not over the whole mesh
     model_rows, model_directions, model_used = dof_directions(
-        fem_geometry, fem_shapes.coordinate)
+        fem_geometry, fem_shapes.coordinate, parsed=fem_shapes._parsed_dofs())
+    near = np.isin(model_rows, fem_rows)
+    model_rows, model_directions = model_rows[near], model_directions[near]
+    columns = np.flatnonzero(model_used)[near]
     for m in range(fem_shapes.num_shapes):
         displacement = np.zeros((fem_geometry.num_nodes, 3),
                                 dtype=values.dtype)
         if len(model_rows):
-            moved = np.asarray(fem_shapes.shape_matrix[m])[model_used]
+            moved = np.asarray(fem_shapes.shape_matrix[m])[columns]
             np.add.at(displacement, model_rows,
                       model_directions * moved[:, np.newaxis])
         sampled = displacement[fem_rows]
@@ -279,23 +283,9 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     return projected, report
 
 
-def expansion_modes(fem_frequencies: Any, test_frequencies: Any, dofs: int) -> list[int]:
-    """The model modes a SEREP expansion is built on when none are named: every mode up to
-    1.5 times the highest test frequency, rigid-body modes included, and no more of them
-    than the test DOFs matched, the lowest kept, since the fit needs at most as many modes
-    as DOFs. With no model mode in that band (a model far off the test), its lowest modes,
-    as many. Indices into the model's modes, in their order."""
-    fem = np.asarray(fem_frequencies, dtype=float)
-    test = np.asarray(test_frequencies, dtype=float)
-    top = 1.5 * float(test.max()) if test.size else np.inf
-    order = [int(k) for k in np.argsort(fem, kind='stable')]
-    picked = [k for k in order if fem[k] <= top] or order
-    return sorted(picked[:max(int(dofs), 0)])
-
-
 def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
                   fem_shapes: ShapeSet, fem_geometry: Geometry, *,
-                  modes: Any = None, tolerance: float = 0.02,
+                  basis: Any = None, tolerance: float = 0.02,
                   distance: float | None = None) -> tuple[ShapeSet, dict[str, Any]]:
     """`test_shapes` expanded to every DOF of `fem_shapes` through the model's modes
     (SEREP). The model's modes are reduced to the test DOFs (`project_shapes`, nearest
@@ -305,9 +295,9 @@ def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
     span of the modes used is recovered exactly; one that does not is the nearest
     combination, and its residual says how far off the fit is at the test DOFs.
 
-    `modes` are the model modes the fit is built on, indices into its modes; left out,
-    `expansion_modes`'. There may be no more of them than test DOFs matched: with more,
-    the fit is not unique.
+    `basis` are the model modes the fit is built on, indices into its modes; left out,
+    every one. There may be no more of them than test DOFs matched: with more, the fit
+    is not unique.
 
     Returns (shape_set, report): the expanded set, the test's frequencies and damping
     at the model's DOFs, and `project_shapes`' report with 'modes' (the model modes used),
@@ -315,7 +305,7 @@ def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
     apart) and 'residual' (each test mode's misfit at the test DOFs over its size).
 
     Raises ValueError as `project_shapes`, when a mode named is not the model's, when no
-    mode is used, or when more modes are used than test DOFs matched.
+    mode is named, or when more modes are named than test DOFs matched.
     """
     from .shapes import ShapeSet
 
@@ -324,19 +314,16 @@ def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
     kept = [str(dof) for dof in reduced.coordinate]
     where = {str(dof): k for k, dof in enumerate(test_shapes.coordinate)}
     psi = np.asarray(test_shapes.shape_matrix)[:, [where[dof] for dof in kept]]
-    if modes is None:
-        modes = expansion_modes(fem_shapes.frequency, test_shapes.frequency, len(kept))
-    modes = [int(k) for k in modes]
+    modes = list(range(fem_shapes.num_shapes)) if basis is None else [int(k) for k in basis]
     outside = [k for k in modes if not 0 <= k < fem_shapes.num_shapes]
     if outside:
         raise ValueError(f'the model has {fem_shapes.num_shapes} modes; '
                          f'{[k + 1 for k in outside]} are not among them')
     if not modes:
-        raise ValueError('no model mode to expand through: none is up to 1.5 times the '
-                         'highest test frequency, or no test DOF was matched')
+        raise ValueError('no model mode to expand through: pick at least one')
     if len(modes) > len(kept):
         raise ValueError(f'{len(modes)} model modes for {len(kept)} test DOFs matched: '
-                         'SEREP needs no more modes than DOFs')
+                         'SEREP needs no more modes than DOFs, so pick fewer model modes')
     phi_a = np.asarray(reduced.shape_matrix)[modes]
     fit = psi @ np.linalg.pinv(phi_a)
     misfit = psi - fit @ phi_a
@@ -352,6 +339,10 @@ def expand_shapes(test_shapes: ShapeSet, test_geometry: Geometry,
         comment=['expanded to model DOFs'] * test_shapes.num_shapes,
         mass_unit=test_shapes.mass_unit,
         unscaled=getattr(test_shapes, 'unscaled', False))
+    if expanded.coordinate == fem_shapes.coordinate:
+        # the model's DOFs, already parsed: drawing the expanded set does not parse them again
+        expanded._parsed_kept = (expanded.coordinate, len(expanded.coordinate),
+                                 fem_shapes._parsed_dofs())
     report = {**report, 'modes': modes, 'condition': float(np.linalg.cond(phi_a)),
               'residual': [float(r) for r in residual]}
     return expanded, report
