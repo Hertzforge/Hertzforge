@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { baseName, canDragOut, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops, startDragOut } from './files';
+import { baseName, canDragOut, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops, PIECE_BYTES, sendFile, startDragOut, type UploadPiece } from './files';
 
 const g = globalThis as Record<string, unknown>;
 
@@ -48,8 +48,8 @@ describe('in the desktop app', () => {
 				})
 			}
 		};
-		const got: (string[] | null)[] = [];
-		const stop = listenForDrops((paths) => got.push(paths));
+		const got: string[][] = [];
+		const stop = listenForDrops((paths) => got.push(paths), () => {});
 		await Promise.resolve();
 		handler!({ payload: { type: 'over' } });
 		handler!({ payload: { type: 'drop', paths: ['/a/modal.nc4'] } });
@@ -60,26 +60,30 @@ describe('in the desktop app', () => {
 });
 
 describe('in a browser', () => {
-	it('has no dialog, and a drop of files says it has no paths', async () => {
+	it('has no dialog, and a drop of files hands over the files themselves', async () => {
 		expect(hasNativeFiles()).toBe(false);
 		expect(await chooseFiles('open')).toBeNull();
 		const target = new EventTarget();
 		g.window = target;
-		const got: (string[] | null)[] = [];
-		const stop = listenForDrops((paths) => got.push(paths));
+		const got: File[][] = [];
+		const stop = listenForDrops(() => {
+			throw new Error('a browser has no paths');
+		}, (files) => got.push(files));
+		const file = new File([new Uint8Array([1, 2, 3])], 'modal.nc4');
 		const drop = (types: string[]) => {
-			const e = new Event('drop', { cancelable: true }) as Event & { dataTransfer: { types: string[] } };
-			e.dataTransfer = { types };
+			const e = new Event('drop', { cancelable: true }) as Event & { dataTransfer: { types: string[]; files: File[] } };
+			e.dataTransfer = { types, files: [file] };
 			target.dispatchEvent(e);
 			return e;
 		};
 		expect(drop(['text/plain']).defaultPrevented).toBe(false);
 		expect(got).toEqual([]);
 		expect(drop(['Files']).defaultPrevented).toBe(true);
-		expect(got).toEqual([null]);
+		expect(got).toEqual([[file]]);
 		stop();
 		drop(['Files']);
-		expect(got).toEqual([null]);
+		// stopped, a drop is no longer heard
+		expect(got).toEqual([[file]]);
 	});
 });
 
@@ -187,11 +191,50 @@ describe('dragging out of the window', () => {
 			}
 		};
 		await startDragOut(['/tmp/hertzforge-drag-x/b/Run.hforge'], 'Run.hforge');
-		const got: (string[] | null)[] = [];
-		listenForDrops((paths) => got.push(paths));
+		const got: string[][] = [];
+		listenForDrops((paths) => got.push(paths), () => {});
 		await Promise.resolve();
 		handler!({ payload: { type: 'drop', paths: ['/tmp/hertzforge-drag-x/b/Run.hforge'] } });
 		handler!({ payload: { type: 'drop', paths: ['/tmp/hertzforge-drag-x/b/Run.hforge', '/a/modal.nc4'] } });
 		expect(got).toEqual([['/a/modal.nc4']]);
+	});
+});
+
+describe('a file sent by its contents', () => {
+	it('goes in pieces, each at the offset the service has, under the upload the first started', async () => {
+		const bytes = new Uint8Array(2 * PIECE_BYTES + 5).map((_v, i) => i % 251);
+		const file = new File([bytes], 'random.nc4');
+		const pieces: UploadPiece[] = [];
+		const heard: number[] = [];
+		let held = 0;
+		const upload = await sendFile(
+			file,
+			async (piece) => {
+				pieces.push(piece);
+				held += piece.data.byteLength;
+				return { upload: 'u1', received: held };
+			},
+			(done) => heard.push(done)
+		);
+		expect(upload).toBe('u1');
+		expect(pieces.map((p) => [p.offset, p.data.byteLength, p.upload])).toEqual([
+			[0, PIECE_BYTES, undefined],
+			[PIECE_BYTES, PIECE_BYTES, 'u1'],
+			[2 * PIECE_BYTES, 5, 'u1']
+		]);
+		expect(pieces.every((p) => p.name === 'random.nc4' && p.size === bytes.length)).toBe(true);
+		expect(pieces[2].data[4]).toBe(bytes[bytes.length - 1]);
+		expect(heard).toEqual([PIECE_BYTES, 2 * PIECE_BYTES, bytes.length]);
+	});
+
+	it('sends an empty file as one empty piece, and names a folder it cannot read', async () => {
+		const pieces: UploadPiece[] = [];
+		await sendFile(new File([], 'empty.unv'), async (piece) => {
+			pieces.push(piece);
+			return { upload: 'u2', received: 0 };
+		});
+		expect(pieces.map((p) => p.data.byteLength)).toEqual([0]);
+		const folder = { name: 'run-7', size: 0, slice: () => ({ arrayBuffer: () => Promise.reject(new Error('NotFound')) }) } as unknown as File;
+		await expect(sendFile(folder, async () => ({ upload: 'u3', received: 0 }))).rejects.toThrow('run-7 cannot be read here: a browser sends files, not folders');
 	});
 });

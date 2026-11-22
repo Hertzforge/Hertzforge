@@ -408,6 +408,7 @@ fn decoding_matches_the_expected_json() {
         "response_waterfall",
         "response_matrix",
         "response_motion",
+        "request_upload",
     ] {
         let decoded = codec::decode(&read_bin(&format!("{name}.bin"))).unwrap();
         assert!(
@@ -444,6 +445,7 @@ fn decode_then_encode_round_trips_byte_for_byte() {
         "response_waterfall",
         "response_matrix",
         "response_motion",
+        "request_upload",
     ] {
         let bytes = read_bin(&format!("{name}.bin"));
         let order = codec::header_array_order(&bytes).unwrap();

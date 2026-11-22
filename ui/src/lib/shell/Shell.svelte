@@ -31,12 +31,12 @@
 		app.start();
 		const stopMenu = listenForFileMenu((act) => void app.project.fileAct(act as 'new' | 'open' | 'import' | 'save' | 'save-as'));
 		const stopUpdates = listenForUpdateMenu();
-		// files dropped anywhere on the window open or import by their paths (the desktop app)
-		const stopDrops = listenForDrops((paths) => {
-			if (paths) return void app.project.openPaths(paths);
-			app.go('signals');
-			app.project.error = 'A browser gives the shell a dropped file\'s contents but not its path. Drop files on the desktop app, or give the path under Project.';
-		});
+		// files dropped anywhere on the window open or import: by their paths in the desktop app,
+		// by their contents in a browser, which gives no path
+		const stopDrops = listenForDrops(
+			(paths) => void app.project.openPaths(paths),
+			(files) => void app.project.openFiles(files)
+		);
 		// files the app was asked to open (a double-clicked project, a run's run.json): opened
 		// once the analysis service has the project, as a drop opens them
 		const stopOpened = listenForOpenedFiles((paths) => (opening = [...opening, ...paths]));
