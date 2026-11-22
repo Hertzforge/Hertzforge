@@ -99,23 +99,38 @@ LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
 #: in the tree and left off the form.
 PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
 PICKED_ONE = frozenset({'record', 'drawn'})
-#: the actions that read the modes picked under a shape set: each param they are filled into,
-#: and the param that names the set. Blank, for every mode, when the set is selected whole
+#: the actions that read what is picked under more than one object, or under an object that
+#: is not the first one picked: each param filled with the picks (records, modes, rows, as
+#: '1-3, 7'), and the param that names the object they are picked under. Blank, for every
+#: item, when the object is selected whole. An action on one object that has a `records`,
+#: `channels` or `rows` param takes that object's picks without being listed here
 _TWO_SETS = {'first_modes': 'first', 'second_modes': 'second'}
-PICKED_MODES = {'project.synthesize_modal_frfs': {'modes': 'source'},
-                'project.transform': {'modes': 'shapes'},
-                'project.project_onto_basis': {'modes': 'source'},
-                'project.expand_modes': {'modes': 'source', 'basis': 'onto'},
-                'project.export_state_space': {'modes': 'shapes'},
-                'project.project_onto_channels': {'modes': 'source'},
-                'project.compute_modal_responses': {'modes': 'shapes'},
-                'project.match_modes': _TWO_SETS,
-                'project.projection_overlay': _TWO_SETS,
+PICKED = {'project.synthesize_modal_frfs': {'modes': 'source'},
+          'project.transform': {'modes': 'shapes'},
+          'project.project_onto_basis': {'modes': 'source'},
+          'project.expand_modes': {'modes': 'source', 'basis': 'onto'},
+          'project.export_state_space': {'modes': 'shapes'},
+          'project.project_onto_channels': {'modes': 'source', 'rows': 'table'},
+          'project.compute_modal_responses': {'modes': 'shapes', 'records': 'source'},
+          'project.plan_instrumentation': {'modes': 'source'},
+          'project.extract_sine': {'records': 'source'},
+          # one channel read against a reference: the measured object's record
+          'project.spec_chance': {'record': 'spectrum'},
+          'project.signature': {'record': 'before'},
+          'project.srs_points': {'record': 'srs'},
+          'project.replication_segments': {'record': 'history'},
+          'project.fatigue': {'record': 'source'},
+          'project.sine_distortion': {'record': 'history'},
+          'project.sine_frequency': {'record': 'history'},
+          'project.dwell': {'record': 'history'},
+          'project.mixed_mode': {'record': 'history'},
+          'project.match_modes': _TWO_SETS,
+          'project.projection_overlay': _TWO_SETS,
                 'project.mac': _TWO_SETS}
 
-#: the actions that take a shape set whole whatever is picked under it, and why: every other
-#: action that takes a shape set reads the modes picked (`PICKED_MODES`)
-WHOLE_SETS = {
+#: the actions that take an object whole whatever is picked under it, and why: every other
+#: action reads what is picked (`PICKED`, `PICKED_LISTS`)
+WHOLE = {
     'project.set_projection': 'it maps the DOFs of two sets onto each other, which modes do '
                               'not change',
     'project.expand': 'the modes it expands through are the ones its modal records name, and '
@@ -124,7 +139,47 @@ WHOLE_SETS = {
     'project.place': 'it moves the object itself',
     'project.set_role': 'it gives the object itself a role',
     'project.merge': 'it joins whole objects into one',
-    'project.save_as': 'an object is written whole, so the file opens as the object it was',
+    'project.convert_to_specification': 'it changes the object itself into a specification',
+    'project.convert_to_psd': 'it changes the object itself into a PSD',
+    'project.comparison_scale': 'it holds the level a run is compared at, which every '
+                                'channel of the run shares',
+    'project.sweep_rate': 'it reads a tone\'s path over time, which every channel of the '
+                          'sweep shares',
+    'project.sine_extraction': 'it is a setting of the record, which Extract Sine then reads '
+                               'the picked channels with',
+    'project.rigid_body_residual': 'it reads the transformation of the density, made from '
+                                   'every channel the transformation uses',
+    'project.reprocess_modal_test': 'it estimates the measurement\'s FRFs again from every '
+                                    'channel, its frames numbered by capture',
+    'project.draft_finding_from_requirement': 'it reads a row of the requirement\'s own '
+                                              'result table',
+    'project.report_prediction': 'a report block names its objects and reads them whole '
+                                 'each time the report is drawn',
+    'project.report_run_identity': 'it fills a field of the run itself',
+    'project.sensors': 'it is the sheet of every sensor the table holds',
+    'project.add_channels': 'it adds channels to the table',
+    'project.add_controller_settings': 'a controller column belongs to every row of the table',
+    'project.remove_controller_settings': 'a controller column belongs to every row of the '
+                                          'table',
+}
+
+#: the objects an action reads whole while it reads what is picked under the others, by the
+#: param that names each, and why
+_AT_ITS_CHANNEL = 'it is read at the channel of the record picked under the other'
+WHOLE_OBJECTS = {
+    'project.export_state_space': {'table': 'the file matches the table row for row'},
+    'project.project_onto_basis': {'onto': 'the DOFs projected onto are every DOF of the '
+                                           'target; Project onto Picked Channels takes the '
+                                           'rows picked under a channel table'},
+    'project.spec_chance': {'specification': _AT_ITS_CHANNEL},
+    'project.signature': {'after': _AT_ITS_CHANNEL},
+    'project.srs_points': {'requirement': _AT_ITS_CHANNEL},
+    'project.replication_segments': {'reference': _AT_ITS_CHANNEL},
+    'project.fatigue': {'test': _AT_ITS_CHANNEL},
+    'project.sine_distortion': {'specification': _AT_ITS_CHANNEL},
+    'project.sine_frequency': {'specification': _AT_ITS_CHANNEL},
+    'project.dwell': {'specification': _AT_ITS_CHANNEL},
+    'project.mixed_mode': {'floor': _AT_ITS_CHANNEL, 'specification': _AT_ITS_CHANNEL},
 }
 
 #: the rows that read a geometry's nodes, off until it has some
@@ -585,18 +640,24 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if op.id in NEEDS_NODES and not project[fill['geometry']].num_nodes:
             rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
             continue
-        # the modes picked under a set fill its own params (`PICKED_MODES`, after the rows
-        # below settle which set is which); the records, channels or rows are another
-        # object's
-        sets = set(PICKED_MODES.get(op.id, {}).values())
-        picks = [records.get(name, []) for key, name in fill.items() if key not in sets]
+        # what is picked under a listed object fills its own params (`PICKED`, and a
+        # `<object param>_records` param, `ops_project.picks_param`), after the rows below
+        # settle which object is which, and never another object's
+        explicit = {**PICKED.get(op.id, {}),
+                    **{p.name: p.name.removesuffix('_records') for p in op.params
+                       if p.name.endswith('_records')
+                       and p.name.removesuffix('_records') in fill}}
+        picks = [records.get(name, []) for key, name in fill.items()
+                 if key not in set(explicit.values())]
         # an action runs on what is picked in the tree: the channels, records or rows it
         # would have asked for by number are the ones picked under the object, every one
         # of them when the object is selected whole, and its form has no field for them
         # (Brandon, 2026-11-17)
         picked = next((r for r in picks if r), [])
-        unasked = list(PICKED_MODES.get(op.id, {}))
+        unasked = list(explicit)
         for param in op.params:
+            if param.name in explicit:
+                continue
             if param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
                 unasked.append(param.name)
@@ -717,10 +778,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             if why:
                 rows.append(_op_row(op, why, fill=fill))
                 continue
-        for param, held in PICKED_MODES.get(op.id, {}).items():
-            # the modes picked under the set the param reads, every one of a set picked whole
-            modes = records.get(fill.get(held), [])
-            fill[param] = _runs(modes) if modes else ''
+        for param, held in explicit.items():
+            # what is picked under the object the param reads, every item of one picked whole;
+            # a param that numbers one record takes the first picked
+            items = records.get(fill.get(held), [])
+            if param in PICKED_ONE:
+                if items:
+                    fill[param] = str(items[0] + 1)
+            else:
+                fill[param] = _runs(items) if items else ''
         if op.id in MATCHED and 'distance' not in more.get('omit', ()):
             fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:

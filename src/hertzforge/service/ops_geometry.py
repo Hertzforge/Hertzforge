@@ -30,7 +30,7 @@ from .descriptors import TREE_PICKS, Operation, Option, Param, Workspace
 from .mesh import drawn_mesh, element_colors
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
-from .parsing import each_picked, parse_id_runs
+from .parsing import each_picked, parse_id_runs, parse_optional_picks
 from .protocol import refused
 
 ANY = 'objects:' + '|'.join(SAVED_KINDS)
@@ -1465,11 +1465,29 @@ def rename_dof(project: Any, params: dict[str, Any]) -> list[dict]:
     and on every object derived from it (`Project.rename_dof`), the
     channel and not the point: with a quantity, only that channel at the
     DOF moves."""
+    from hertzforge.core.channel_table import ChannelTable
+
     name = params['source']
     old, new = params['old'].strip(), params['new'].strip()
+    quantity = params['measured'].strip().lower().replace(' ', '_') or None
+    obj = project[name]
+    count = len(obj.dof_strings()) if isinstance(obj, ChannelTable) else obj.num_records
+    picked = parse_optional_picks(params.get('source_records', ''), count, 'channel')
+    if picked is not None:
+        # the channel picked is the one renamed, the quantity it measures with it
+        if len(picked) > 1:
+            raise refused('one DOF is renamed at a time: pick one channel under '
+                          f'{name}')
+        if isinstance(obj, ChannelTable):
+            old = obj.dof_strings()[picked[0]]
+        else:
+            from hertzforge.core.data import channel_quantities
+
+            # the quantity its response channel measures, a density's or an FRF's included
+            old = str(obj.response_dof[picked[0]])
+            quantity = channel_quantities(obj.known_dim(picked[0]))[0]
     if not old or not new:
         raise refused('name the DOF as it is and the DOF to give it, such as 101Z+')
-    quantity = params['measured'].strip().lower().replace(' ', '_') or None
     try:
         changed = project.rename_dof(name, old, new, quantity)
     except (ValueError, TypeError) as error:
@@ -1741,7 +1759,9 @@ OPERATIONS = (
     _shared('project.rename_dof', 'Rename DOF',
              'A channel\'s DOF corrected on an object and on everything derived from it; '
              'with a quantity, only that channel at the DOF.',
-             (RENAME_SOURCE, OLD, RENAME_QUANTITY, NEW), ('table', 'reading'), rename_dof),
+             (RENAME_SOURCE, OLD, RENAME_QUANTITY, NEW,
+              Param('source_records', 'Records (blank: all)', 'string', default='')),
+             ('table', 'reading'), rename_dof),
     _shared('project.channel_table_view', 'Channel Table View',
              'A channel table in one control loop: its channels with that loop\'s Control '
              'column, or the loop\'s response or reference transformation.',

@@ -122,7 +122,10 @@ def test_each_object_goes_on_the_param_that_takes_it_whichever_was_picked_first(
     project.add('Spec', Specification(**_psd()))
     try:
         first = table(plate, 'Spec', 'Measured')[0]
-        assert row(first, 'RMS Error')['fill'] == {'spectrum': 'Measured', 'specification': 'Spec'}
+        # nothing picked under either: every record of each
+        assert row(first, 'RMS Error')['fill'] == {'spectrum': 'Measured', 'specification': 'Spec',
+                                                   'spectrum_records': '',
+                                                   'specification_records': ''}
         assert first['rows'][0]['verb'] == 'Compare' and first['rows'][0]['kind'] == 'default'
     finally:
         project.remove('Measured')
@@ -354,7 +357,7 @@ def test_export_lists_the_formats_of_the_object_it_was_reached_from(plate, valid
     name = named(plate, 'geometry')
     first = table(plate, name, validate=validate)[0]
     row = next(r for r in first['rows'] if r['id'] == 'project.save_as')
-    assert row['fill'] == {'object': name}
+    assert row['fill'] == {'object': name, 'object_records': ''}
     values = [f['value'] for f in row['formats']]
     assert values == ['hforge', *(e.name for e in exporters(plate.project[name]))]
     assert 'unv' in values and 'delimited' not in values and 'sdynpy_shapes' not in values

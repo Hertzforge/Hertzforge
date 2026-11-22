@@ -17,7 +17,7 @@ from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .op_progress import hook
-from .ops_project import COMPONENT
+from .ops_project import COMPONENT, picked_records, picks_param
 from .ops_sine_shock import _record
 from .ops_specify import (
     BREAKPOINTS,
@@ -565,10 +565,19 @@ def sine_profile(project: Any, params: dict[str, Any]) -> list[dict]:
     crossover and maximum read out."""
     from hertzforge.core.sine_profile import convert, interpolated, read_profile
 
+    from .ops_sine_shock import picked_dofs, sine_dofs
+
     name = params['specification']
     spec = project[name]
     tone = params['tone'].strip() or None
     control = params['control'].strip() or None
+    dofs = picked_dofs(spec, params.get('specification_records', ''))
+    if dofs is not None:
+        # the control channel picked under the specification is the one read
+        if len(dofs) > 1:
+            raise refused('a profile is read at one control channel: pick one under '
+                          f'{name}')
+        control = next(dof for dof in sine_dofs(spec) if dof in dofs)
     try:
         profile = read_profile(spec, tone, control,
                                slope_tolerance=params['slope_tolerance'])
@@ -665,7 +674,9 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     # a drive point of an FRF is a ratio of two quantities at one node and
     # axis, the accelerometer often mounted opposite the force (206X- over
     # 206X+); in a density, the same two are a cross term
-    records = [i for i in range(data.num_records)
+    # among the records picked, every record when none is
+    picked = picked_records(project, name, params.get('records', ''))
+    records = [i for i in (range(data.num_records) if picked is None else picked)
                if (autospectrum(data, i) if isinstance(data, Psd)
                    else same_axis(data.response_dof[i], data.reference_dof[i]))]
     if not records:
@@ -733,7 +744,8 @@ OPERATIONS = (
         summary='A sine tone read back as segments of constant displacement, velocity and '
                 'acceleration, every crossover checked. Blank tone and channel take the '
                 'first.',
-        params=(SINE, TONE, CONTROL, SLOPE, OWN_LEVEL), outputs=('spectrum', 'reading'),
+        params=(SINE, TONE, CONTROL, SLOPE, OWN_LEVEL, picks_param('specification')),
+        outputs=('spectrum', 'reading'),
         run=sine_profile),
     Operation(
         id='project.cmif', title='CMIF', workspace='modal',
@@ -744,5 +756,5 @@ OPERATIONS = (
         id='project.drive_points', title='Drive Points', workspace='modal',
         summary='Only the drive-point FRFs, response and reference at one node and '
                 'axis, either sign, or the autospectra of a cross-spectral matrix.',
-        params=(DIAGONAL, COMPONENT), outputs=('spectrum',), run=drive_points),
+        params=(DIAGONAL, COMPONENT, RECORDS), outputs=('spectrum',), run=drive_points),
 )

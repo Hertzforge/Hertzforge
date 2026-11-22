@@ -31,6 +31,10 @@ RUN_LOG = Param('run_log', 'Run log extract', 'enum', options_from='objects:run_
 SPECIFICATION = Param('specification', 'Specification', 'enum',
                       options_from='objects:specification')
 MEASURED_PSD = Param('measured', 'Measured', 'enum', options_from='objects:psd')
+#: the records picked under the measured PSD (`ops_project.picks_param`): the channels read
+MEASURED_PICKS = Param('measured_records', 'Records (blank: all)', 'string', default='')
+SPECIFICATION_PICKS = Param('specification_records', 'Records (blank: all)', 'string',
+                            default='')
 NUMBER = Param('number', 'Finding', 'string', default='')
 SEARCH = Param('search', 'Also look in', 'string', default='')
 
@@ -163,6 +167,20 @@ def _requirement_reading(project: Any, report: str, index: int) -> dict:
     return v.reading(f'Test requirement in {report}', rows)
 
 
+def _picked_dofs(project: Any, params: dict[str, Any]) -> list[str]:
+    """The DOFs of the records picked under the measured PSD and the
+    specification, in order and once each; none when both are picked
+    whole."""
+    from .ops_project import picked_records
+
+    dofs: list[str] = []
+    for of in ('measured', 'specification'):
+        name = params[of]
+        picked = picked_records(project, name, params.get(f'{of}_records', '')) or []
+        dofs += [str(project[name].response_dof[i]) for i in picked]
+    return list(dict.fromkeys(dofs))
+
+
 def report_requirement(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.report_requirement`: bind a test requirement to a run in a
     report (`Project.report_requirement`), one control band about the
@@ -171,7 +189,9 @@ def report_requirement(project: Any, params: dict[str, Any]) -> list[dict]:
     specification's own end; a tolerance or a duration left at 0 is not
     part of the requirement."""
     low, high = params['low'] or None, params['high'] or None
-    channels = params['dofs'].replace(',', ' ').split()
+    # the channels picked under the measured PSD or the specification, else the ones typed
+    channels = (_picked_dofs(project, params)
+                or params['dofs'].replace(',', ' ').split())
     index = _core(
         project.report_requirement, params['report'], params['specification'],
         params['measured'], params['document'],
@@ -258,8 +278,11 @@ def draft_finding_fact(project: Any, params: dict[str, Any]) -> list[dict]:
     number = _words(params['number'])
     if not number:
         raise refused('name the finding the draft is for, such as D-1')
+    picked = _picked_dofs(project, params)
+    if len(picked) > 1:
+        raise refused('a fact is read at one channel: pick one')
     text = _core(project.draft_finding_fact, name, number, params['measured'],
-                 params['specification'], _words(params['dof']) or None,
+                 params['specification'], (picked[0] if picked else _words(params['dof'])) or None,
                  limits=params['limits'])
     return [v.reading(f'Draft of {number}', [v.row('Draft', text, None, 'info')]),
             *_register(project, name)]
@@ -875,7 +898,7 @@ OPERATIONS = (
         summary='Bind a test requirement to a run, one control band about the specification, '
                 'and read each criterion met, not met or not judged. An edge, tolerance or '
                 'duration left at 0 is the specification\'s own or not part of it.',
-        params=(REPORT, SPECIFICATION, MEASURED_PSD,
+        params=(REPORT, MEASURED_PICKS, SPECIFICATION_PICKS, SPECIFICATION, MEASURED_PSD,
                 Param('document', 'Document', 'string', default=''),
                 Param('revision', 'Revision', 'string', default=''),
                 Param('clause', 'Tolerance clause', 'string', default=''),
@@ -919,7 +942,7 @@ OPERATIONS = (
         workspace='report',
         summary='Offer a finding a draft of its fact read off a measured PSD against a '
                 'specification\'s limits; the channel left empty is the finding\'s own.',
-        params=(REPORT, NUMBER, MEASURED_PSD, SPECIFICATION,
+        params=(REPORT, MEASURED_PICKS, SPECIFICATION_PICKS, NUMBER, MEASURED_PSD, SPECIFICATION,
                 Param('dof', 'Channel', 'string', default=''),
                 Param('limits', 'Limits', 'enum', default='abort', options=(
                     Option('abort', 'Abort limits'), Option('warning', 'Warning limits')))),

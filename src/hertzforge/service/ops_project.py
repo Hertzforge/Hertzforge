@@ -161,14 +161,17 @@ def compute_psds(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.compute_psds`: PSDs from a time history's averages, added
     to the project (`Project.compute_psds`)."""
     source = params['history']
-    return _derived(project, lambda: project.compute_psds(source))
+    records = picked_records(project, source, params.get('records', ''))
+    return _derived(project, lambda: project.compute_psds(source, records=records))
 
 
 def compute_frfs(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.compute_frfs`: FRFs from a time history, one for each
     response and drive, added to the project (`Project.compute_frfs`)."""
     source = params['history']
-    return _derived(project, lambda: project.compute_frfs(source, params['method']))
+    records = picked_records(project, source, params.get('records', ''))
+    return _derived(project, lambda: project.compute_frfs(source, params['method'],
+                                                          records=records))
 
 
 def _source(verb: str, label: str = 'Source') -> Param:
@@ -181,15 +184,56 @@ def _zero_is_unset(value: float) -> float | None:
     return float(value) or None
 
 
+def picked_dofs_of(obj: Any) -> list[str]:
+    """What the tree lists under an object that holds channels, in its
+    order, each by its DOF: a data object's records, a channel table's rows,
+    a sine object's control DOFs (`ops_sine_shock.sine_dofs`)."""
+    from hertzforge.core.channel_table import ChannelTable
+
+    if isinstance(obj, ChannelTable):
+        return list(obj.dof_strings())
+    if hasattr(obj, 'num_records'):
+        return [str(dof) for dof in obj.response_dof]
+    from .ops_sine_shock import sine_dofs
+
+    return sine_dofs(obj)
+
+
+def picked_records(project: Any, name: str, text: str) -> list[int] | None:
+    """The items of `name` a `records` param names ('1-3, 7', numbered
+    from 1: a data object's records, a shape set's modes, a channel
+    table's rows), None for every one when it is blank."""
+    obj = project[name]
+    count = obj.num_shapes if hasattr(obj, 'num_shapes') else len(picked_dofs_of(obj))
+    return parse_optional_picks(text, count, 'record')
+
+
+def picks_param(of: str) -> Param:
+    """The records picked under the object param `of` names, '1-3, 7' or
+    blank for every record: filled from the tree by its name,
+    `<of>_records` (`action_table`), and left off the form."""
+    return Param(f'{of}_records', 'Records (blank: all)', 'string', default='')
+
+
+def narrowed(project: Any, params: dict[str, Any], of: str) -> Any:
+    """The object param `of` names as an action reads it: the records its
+    `picks_param` names (`DataArray.kept`), every record when blank."""
+    name = params[of]
+    return project[name].kept(picked_records(project, name, params.get(f'{of}_records', '')))
+
+
 def _verb(verb: str, **fixed: Any) -> Any:
     """An operation's run that calls the core verb on `source` with the
     other params as its keywords, and draws what it added. A param named
-    in `fixed` is converted first: `fixed[name](value)`."""
+    in `fixed` is converted first: `fixed[name](value)`. `records`, the
+    ones picked under the source, is read against the source's count."""
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
         import inspect
 
         keywords = {name: fixed.get(name, lambda value: value)(value)
-                    for name, value in params.items() if name != 'source'}
+                    for name, value in params.items() if name not in ('source', 'records')}
+        if 'records' in params:
+            keywords['records'] = picked_records(project, params['source'], params['records'])
         call = getattr(project, verb)
         # a verb that reports its progress reports the operation's (`op_progress`)
         if 'progress' in inspect.signature(call).parameters:
@@ -227,7 +271,8 @@ def detect_shocks(project: Any, params: dict[str, Any]) -> list[dict]:
     source = params['source']
     _editable(project[source])
     try:
-        count = project.detect_shocks(source)
+        count = project.detect_shocks(
+            source, records=picked_records(project, source, params.get('records', '')))
     except ValueError as error:
         raise refused(str(error)) from None
     return [v.reading(f'Shocks on {source}', [
@@ -244,8 +289,9 @@ def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
     sine-level set added per tone. The project's one specification when
     none is picked."""
     try:
-        added = project.extract_sine(params['source'], params['specification'] or None,
-                                    progress=hook())
+        added = project.extract_sine(
+            params['source'], params['specification'] or None, progress=hook(),
+            records=picked_records(project, params['source'], params.get('records', '')))
     except ValueError as error:
         raise refused(str(error)) from None
     from .show import _sine
@@ -348,7 +394,9 @@ def fit_modes(project: Any, params: dict[str, Any]) -> list[dict]:
                       'above From')
     try:
         added = project.fit_modes(params['frf'], bounds=(low, high),
-                                  limit=params['count'])
+                                  limit=params['count'],
+                                  records=picked_records(project, params['frf'],
+                                                         params.get('records', '')))
     except ValueError as error:
         raise refused(str(error)) from None
     shapes = project[added]
@@ -784,16 +832,20 @@ def compute_spectra(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def _derives(verb: str, title: str, summary: str, params: tuple = (),
-             workspace: Workspace = 'signals', **fixed: Any) -> Operation:
+             workspace: Workspace = 'signals', picks: bool = True,
+             **fixed: Any) -> Operation:
     """A project operation that runs one core verb on an object it
-    applies to and draws what it added, offered in the module `workspace`."""
+    applies to and draws what it added, offered in the module `workspace`;
+    on the records picked under it, unless `picks` is False for a verb that
+    changes the object itself."""
     return Operation(id=f'project.{verb}', title=title, workspace=workspace, summary=summary,
-                     params=(_source(verb), *params), outputs=('waterfall',),
+                     params=(_source(verb), *params, *((RECORDS,) if picks else ())),
+                     outputs=('waterfall',),
                      run=_verb(verb, **fixed))
 
 
 #: the modes of a shape set an action reads, filled from what is picked under the set in the
-#: tree (`action_table.PICKED_MODES`): blank for every mode
+#: tree (`action_table.PICKED`): blank for every mode
 PICKED_SET_MODES = Param('modes', 'Modes (blank: all)', 'string', default='')
 
 
@@ -975,7 +1027,8 @@ VERB_OPERATIONS = (
                 'no window and no amplitude scaling, and averaged as a complex mean. A sine '
                 'of amplitude A on a line reads A times N over 2; the Amplitude Spectrum '
                 'reads amplitudes. The history\'s averaging is not read.',
-        params=(_source('compute_spectra'),), outputs=('waterfall',), run=compute_spectra),
+        params=(_source('compute_spectra'), RECORDS), outputs=('waterfall',),
+        run=compute_spectra),
     _derives('compute_cpsds', 'Compute CPSDs',
              'The cross-spectral matrix of a time history\'s channels, from '
              'its averages.', workspace='random'),
@@ -995,7 +1048,8 @@ VERB_OPERATIONS = (
              'A cross-spectral matrix repaired where no set of signals could '
              'have it.', (KEEP_DIAGONAL,), workspace='random'),
     _derives('convert_to_specification', 'Convert to Specification',
-             'A PSD read as a requirement, which a test is controlled to.', workspace='random'),
+             'A PSD read as a requirement, which a test is controlled to.', workspace='random',
+             picks=False),
     Operation(
         id='project.convert_to_psd', title='Convert to PSD', workspace='random',
         summary='A specification read as a PSD, its limits left out; one written at '
@@ -1006,13 +1060,13 @@ VERB_OPERATIONS = (
     Operation(
         id='project.detect_shocks', title='Detect Shocks', workspace='shock',
         summary='Mark the shocks in a time history, which Compute SRS reads.',
-        params=(_source('detect_shocks'),), outputs=('reading',),
+        params=(_source('detect_shocks'), RECORDS), outputs=('reading',),
         run=detect_shocks, edits=True),
     Operation(
         id='project.extract_sine', title='Extract Sine', workspace='sine',
         summary='The level of each tone of the project\'s sine specification '
                 'in a time history, as a sine-level set per tone.',
-        params=(_source('extract_sine'), SINE_SPECIFICATION), outputs=('waterfall',),
+        params=(_source('extract_sine'), SINE_SPECIFICATION, RECORDS), outputs=('waterfall',),
         run=extract_sine),
 )
 
@@ -1033,17 +1087,17 @@ OPERATIONS = (
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',
         summary='PSDs from a time history\'s averages, added to the project.',
-        params=(HISTORY,), outputs=('waterfall',), run=compute_psds),
+        params=(HISTORY, RECORDS), outputs=('waterfall',), run=compute_psds),
     Operation(
         id='project.compute_frfs', title='Compute FRFs', workspace='modal',
         summary='FRFs from a time history, one for each response and drive, '
                 'added to the project.',
-        params=(FRF_HISTORY, METHOD), outputs=('waterfall',), run=compute_frfs),
+        params=(FRF_HISTORY, METHOD, RECORDS), outputs=('waterfall',), run=compute_frfs),
     Operation(
         id='project.fit_modes', title='Fit Modes', workspace='modal',
         summary='Modes fitted to an FRF set within a band, added to the '
                 'project as a shape set and drawn on its geometry.',
-        params=(FRF, LOW, HIGH, COUNT), outputs=('shape3d', 'reading'),
+        params=(FRF, LOW, HIGH, COUNT, RECORDS), outputs=('shape3d', 'reading'),
         run=fit_modes),
     Operation(
         id='project.mac', title='MAC', workspace='modal',

@@ -19,8 +19,8 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .ops_compare import FIRST, SECOND, _loud_quiet, _refusing, _scale
-from .ops_project import PAGE
+from .ops_compare import FIRST, SECOND, TWO_PICKS, _loud_quiet, _refusing, _scale
+from .ops_project import PAGE, narrowed, picks_param
 from .protocol import refused
 from .waterfalls import axes, unit_text
 
@@ -181,7 +181,7 @@ def spec_stage(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.drawing.viz.waterfall import drawn_span, waterfall_arrays
 
     spec_name, name = params['specification'], params['spectrum']
-    spec = project[spec_name]
+    spec = narrowed(project, params, 'specification')
     dofs = [str(d) for d in spec.response_dof]
     autos = [i for i in range(spec.num_records) if autospectrum(spec, i)]
     if not autos:
@@ -196,7 +196,7 @@ def spec_stage(project: Any, params: dict[str, Any]) -> list[dict]:
     measured = None
     scale = 0
     if name:
-        measured = project[name]
+        measured = narrowed(project, params, 'spectrum')
         scale, _source = _scale(project, spec_name, name)
         pairs = [(label, j, i) for label, j, i in matched_records(spec, measured, autos)]
         if not pairs:
@@ -250,11 +250,13 @@ OPERATIONS = (
         id='project.paired_stage', title='Paired Stage', workspace='random',
         summary='Two densities in 3-D, channel by channel: overlaid, the louder colored by '
                 'level and the quieter in gray, or divided as signal to noise in dB.',
-        params=(FIRST, SECOND, PAIRED_MODE, PAGE), outputs=('waterfall',), run=paired_stage),
+        params=(FIRST, SECOND, PAIRED_MODE, PAGE, *TWO_PICKS), outputs=('waterfall',),
+        run=paired_stage),
     Operation(
         id='project.spec_stage', title='Specification Stage', workspace='random',
         summary='A specification\'s every channel in 3-D with its warning and abort bands; '
                 'with a measured PSD, each channel\'s measurement and the lines it went past '
                 'an abort limit.',
-        params=(SPECIFICATION, MEASURED), outputs=('waterfall',), run=spec_stage),
+        params=(SPECIFICATION, MEASURED, picks_param('specification'),
+                picks_param('spectrum')), outputs=('waterfall',), run=spec_stage),
 )

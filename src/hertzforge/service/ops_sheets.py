@@ -28,7 +28,7 @@ from hertzforge.core.sensor_catalog import CATALOG
 from . import views as v
 from .descriptors import TREE_PICKS, Operation, Option, Param
 from .ops_project import chosen_records
-from .parsing import each_picked, parse_id_runs, parse_numbers
+from .parsing import each_picked, parse_id_runs, parse_numbers, parse_optional_picks
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
@@ -271,7 +271,9 @@ def calibration_check(project: Any, params: dict[str, Any]) -> list[dict]:
         span = span_of(params['start'].strip() or None, params['end'].strip() or None)
         if span is None:
             raise ValueError('enter the first test day, YYYY-MM-DD')
-        result = check(project[name], span)
+        # the rows picked under the table, every row when none is
+        rows = parse_optional_picks(params.get('rows', ''), project[name].num_channels, 'row')
+        result = check(project[name], span, rows)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     status = {IN_DATE: 'pass', EXPIRED: 'fail', LAPSES: 'warn'}
@@ -931,7 +933,8 @@ OPERATIONS = (
         id='project.calibration_check', title='Calibration Dates', workspace='geometry',
         summary='Each sensor\'s calibration expiration against the test\'s first and last '
                 'day: in date, expired, lapsing during the test, or no date given.',
-        params=(TABLE, START, END), outputs=('table', 'reading'), run=calibration_check),
+        params=(TABLE, START, END, Param('rows', 'Rows (blank: all)', 'string', default='')),
+        outputs=('table', 'reading'), run=calibration_check),
     Operation(
         id='project.create_specification', title='Create Specification', workspace='specify',
         summary='A specification sheet at a channel table\'s control channels or picked rows, '

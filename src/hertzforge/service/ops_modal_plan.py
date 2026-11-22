@@ -326,7 +326,7 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- Export State-Space Model -----------------------------------------------------
 
 STATE_SHAPES = Param('shapes', 'Shape set', 'enum', options_from='objects:shape_set')
-#: filled from the modes picked under the set (`action_table.PICKED_MODES`)
+#: filled from the modes picked under the set (`action_table.PICKED`)
 STATE_MODES = Param('modes', 'Modes (blank: all)', 'string', default='')
 TABLE = Param('table', 'Channel table', 'enum', options_from='objects:channel_table')
 MAXIMUM = Param('maximum', 'Maximum (0 keeps every mode)', 'number', default=0.0, unit='Hz',
