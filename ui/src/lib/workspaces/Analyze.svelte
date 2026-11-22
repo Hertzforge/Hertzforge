@@ -324,7 +324,7 @@
 				</div>
 				<h3>Nothing Selected</h3>
 				<p>
-					{#if !a.onProject}Open a project or import a file; in the desktop app, drop it on the window. Example projects are on hertzforge.com.{:else}Select something in the project tree to see it here, or run a tool.{/if}
+					{#if !a.onProject}Open a project or import a file, or drop it on the window. Example projects are on hertzforge.com.{:else}Select something in the project tree to see it here, or run a tool.{/if}
 				</p>
 			</div>
 		{/if}

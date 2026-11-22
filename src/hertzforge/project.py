@@ -768,7 +768,7 @@ class Project(dict):
             added.append(self.add(f'{name} copy', copy.deepcopy(self[name])))
         return added
 
-    def import_file(self, path: str | os.PathLike,
+    def import_file(self, path: str | os.PathLike, *, received: bool = False,
                     **options: Any) -> list[str]:
         """Import a file into this project and return the names added.
 
@@ -796,6 +796,11 @@ class Project(dict):
         path : str or os.PathLike
             The file to read. The importer is chosen by content
             and extension.
+        received : bool, default False
+            The file is a copy whose original's location is not known,
+            such as a file a browser sent by its contents: the data
+            index records it by its name, size and SHA-256 with no
+            location, and no object is held by reference to it.
         **options
             Passed through to the importer.
 
@@ -809,6 +814,9 @@ class Project(dict):
         from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
         converted = run_folder.folder_of(path) is not None
+        if received and converted:
+            raise ValueError(f'{os.path.basename(str(path))} is a control run\'s; a run '
+                             'folder is opened or imported by its path')
         if converted:
             # a control run's folder is imported as the project file it
             # converts to, so a large stream is held by reference to it
@@ -818,10 +826,11 @@ class Project(dict):
         local = os.path.abspath(os.path.expanduser(str(path)))
         # a large object read from another .hforge stays there: the
         # project holds it by reference rather than as a second copy
+        # a received copy is not the file: nothing is held by reference to it
         large = ({name: kind for name, (kind, size)
                   in object_sizes(local).items()
                   if size >= REFERENCE_FROM_BYTES}
-                 if local.endswith('.hforge') else {})
+                 if local.endswith('.hforge') and not received else {})
         # the file's checksum before anything is added: a file that
         # cannot be hashed (gone since it was read) refuses the import
         # whole rather than leave objects the index cannot trace.
@@ -845,7 +854,7 @@ class Project(dict):
             self.data_index.adopt(result.data_index, mapping)
             if indexed:
                 self._index_import(local, result, list(mapping.values()),
-                                   checksum)
+                                   checksum, received)
             for old, new in mapping.items():
                 if old in result.references:
                     self.hold_by_reference(new, result.references[old])
@@ -889,7 +898,7 @@ class Project(dict):
             added = [self.add(display_name(type(result).__name__), result)]
             if large:
                 refer(added[0], '')
-        self._index_import(local, result, added, checksum)
+        self._index_import(local, result, added, checksum, received)
         # computed from the file's objects, not read from it, so the
         # index lists what the file holds and these follow it
         return added + self._transformed_on_import(added)
@@ -932,11 +941,12 @@ class Project(dict):
                 self.provenance[mapping.get(name, name)] = moved
 
     def _index_import(self, path: str, result: Any, added: Sequence[str],
-                      checksum: tuple[int, str]) -> IndexEntry:
+                      checksum: tuple[int, str], received: bool = False) -> IndexEntry:
         """Record an imported file in the data index: `result` is what
         the reader returned, `added` the names its objects took, and
         `checksum` the file's (size, SHA-256), taken before the objects
-        were added. The import's one implementation of the entry, for
+        were added; a `received` copy is recorded by its name, with no
+        location. The import's one implementation of the entry, for
         `import_file` and for the app's own import alike."""
         from .io import format_of
 
@@ -947,7 +957,8 @@ class Project(dict):
                          else {'': result})
         return self.data_index.add(
             path, said or 'nothing Hertzforge reads',
-            format=format_of(path), objects=added, checksum=checksum)
+            format=format_of(path), objects=added, checksum=checksum,
+            location='' if received else None)
 
     def remove(self, *names: str) -> None:
         """Delete objects and take them out of every object group.

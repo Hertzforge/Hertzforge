@@ -576,8 +576,9 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `catalog.list` | `{}` | `{"operations":[descriptor...]}` |
 | `op.run` | `{"op","params":{...},"preview"?}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
-| `project.open` | `{"path"}` | `{"project"}` |
-| `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
+| `project.open` | `{"path"}` or `{"upload"}` | `{"project"}` |
+| `project.import` | `{"path"}` or `{"upload"}`, `"units"?` | `{"added":[name...],"project"}` |
+| `project.upload` | `{"name","size","offset","data","upload"?}`, `data` a u8 array | `{"upload","received"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
 | `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
 | `op.cancel` | `{}` | `{"op"}` |
@@ -938,14 +939,32 @@ not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are
 
 **Projects.** Each connection has one project of its own, and it ends with the connection. A
 connection starts with an empty project titled "Project", so every operation has one to work on. A
-file reaches the service by its path on the service's machine; nothing is uploaded. `project.open`
+file reaches the service by its path on the service's machine, or, from a browser, which gives a
+dropped file's contents and name but never its path, by its contents (`project.upload`, below).
+`project.open`
 replaces the project with the one a `.hforge`, `.vdyn`, `.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`)
 file holds, or with a new project holding the object when the file holds one, as Save As writes
 them, and refuses any other file with a pointer to import it. A control run's folder (or the
 `run.json` in it, `docs/hforge-format.md`) opens as the project file it converts to,
 `<run name>.hforge` inside the folder, converted first when there is none or the run has changed
 since. A client asks before it opens over a
-project whose `modified` is true. `project.import` adds a file's
+project whose `modified` is true.
+
+`project.upload` sends a file by its contents, in pieces of at most 8 MiB (`data`, a u8 array, in a
+binary frame): the first piece, at `offset` 0 with no `upload`, names the file (`name`, its own name,
+not a path) and its `size` in bytes, and each later piece names the `upload` the first answered and
+comes at the offset `received` so far. Once every byte has come, `project.open` or `project.import`
+takes `{"upload"}` in place of `"path"`, and reads the service's copy. The copy is a file of this
+connection's own, under the file's own name, and goes when the connection closes (a project opened
+from one maps its large arrays from it); one a service left when it stopped first goes when a service
+next receives a file. The project indexes a received file by its name, size and
+SHA-256 with no location, holds nothing by reference to the copy, and journals the import by the
+file's name; a project opened from one has no file of its own (`file` is null) until it is saved. A
+control run's folder is opened or imported by its path, never sent. Refused: a piece at another
+offset than the bytes received, one that runs past `size`, a `name` that is a path, and an open or
+import of an upload not all received.
+
+`project.import` adds a file's
 objects to the project, a run folder's as its converted file's. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
 project came from; a `.vdyn` is opened but never written. `project.drag_out` writes the whole project (`"project": true`) or the objects `names` to files in a new temporary folder, for the desktop shell to drag out of the window, and answers their paths: the project as one `.hforge` named for its title, each object as a `.hforge` object named for itself. It is a copy: the project's `file` and `modified` are unchanged. `project.new` replaces the project with an

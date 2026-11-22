@@ -244,8 +244,15 @@ class DataIndex:
             role: str = 'referenced', source: str = 'import',
             objects: Iterable[str] = (),
             checksum: tuple[int, str] | None = None,
-            progress: Callable[[int, int], None] | None = None) -> IndexEntry:
+            progress: Callable[[int, int], None] | None = None,
+            location: str | None = None) -> IndexEntry:
         """Index the file at `path` and return its entry.
+
+        `location` is where the entry says the file is: `path` itself
+        when None, or '' when that is not known, as for a file a browser
+        sent by its contents (`Project.import_file`'s `received`). An entry
+        with no location is found again by its name in the folders
+        `verify` is given.
 
         The file is hashed (`digest`, with `progress`) unless `checksum`
         gives (size, SHA-256) already computed, for example on a worker
@@ -291,10 +298,13 @@ class DataIndex:
             size, sha = int(checksum[0]), str(checksum[1])
         if role == 'attached' and size <= TEXT_LIMIT:
             text = _text_of(path, sha)
-        made = IndexEntry(name, path, size, sha, holds.strip(), str(format),
+        recorded = path if location is None else location
+        made = IndexEntry(name, recorded, size, sha, holds.strip(), str(format),
                           role, source, tuple(objects), now(), text)
         for at, entry in enumerate(self.entries):
-            if entry.sha256 == sha and _same_file(entry.path, path):
+            same = (_same_file(entry.path, path) if location is None
+                    else (entry.path, entry.name) == (recorded, name))
+            if entry.sha256 == sha and same:
                 merged = tuple(dict.fromkeys((*entry.objects,
                                               *made.objects)))
                 self.entries[at] = replace(entry, objects=merged)

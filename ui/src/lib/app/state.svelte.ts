@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
-import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, sendFile, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { RunOpen } from '$lib/acquire/runOpen.svelte';
@@ -1795,6 +1795,43 @@ export class ProjectState {
 		const { opens, imports } = openingOrder(paths);
 		if (opens && !(await this.open(opens))) return;
 		await this.importPaths(imports);
+	}
+
+	/**
+	 * Open or import each file a browser dropped, as `openPaths` takes paths: each is sent by its
+	 * contents (`sendFile`) and the service reads its copy. Stops at the first refusal and says why.
+	 */
+	async openFiles(files: File[]): Promise<void> {
+		const opens = files.find((file) => isProjectFile(file.name)) ?? null;
+		if (opens) {
+			if (this.summary?.modified && !(await askToReplace(this.summary.title, opens.name))) return;
+			if (!(await this.received(opens, 'Opening', 'project.open'))) return;
+		}
+		for (const file of files) {
+			if (file !== opens && !(await this.received(file, 'Importing', 'project.import'))) return;
+		}
+	}
+
+	/** One dropped file sent by its contents, then opened or imported by its upload. */
+	private async received(file: File, doing: string, method: string): Promise<boolean> {
+		this.busy = `Sending ${file.name}`;
+		this.progress = null;
+		this.error = null;
+		let upload: string;
+		try {
+			upload = await sendFile(
+				file,
+				(piece) =>
+					this.app.analysis.request<{ upload: string; received: number }>('project.upload', piece, { timeoutMs: FILE_TIMEOUT_MS }),
+				(done, total) => (this.progress = { done, total, path: file.name })
+			);
+		} catch (err) {
+			this.error = message(err);
+			this.busy = null;
+			this.progress = null;
+			return false;
+		}
+		return this.call(`${doing} ${file.name}`, method, { upload });
 	}
 
 	/** Import each path into the open project, a project file's objects among them. */

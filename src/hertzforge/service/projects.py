@@ -199,12 +199,14 @@ def new(params: Mapping[str, Any]) -> OpenProject:
     return OpenProject(hz.Project(title.strip()))
 
 
-def open_file(params: Mapping[str, Any]) -> OpenProject:
+def open_file(params: Mapping[str, Any], received: bool = False) -> OpenProject:
     """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
     file holds, or a new project holding the object when the file holds
     one (Save As writes those formats for one object), or the project a
     control run's folder converts to (`Project.open`). Any other file is
-    refused with a pointer to import it."""
+    refused with a pointer to import it. A `received` file, one a browser
+    sent by its contents (`uploads`), is a copy: the project has no file
+    of its own until it is saved."""
     import hertzforge as hz
     from hertzforge.io.run_folder import folder_of
     from hertzforge.project import SingleObjectFile
@@ -217,12 +219,19 @@ def open_file(params: Mapping[str, Any]) -> OpenProject:
                       'project instead')
     if not os.path.exists(path):
         raise not_found(f'no file at {path}')
+    if received and folder_of(path) is not None:
+        raise refused(f'{os.path.basename(path)} is a control run\'s; a run folder is opened '
+                      'by its path')
     try:
         try:
-            return OpenProject(hz.Project.open(path))
+            project = hz.Project.open(path)
+            if received:
+                # saved, it is written where the person says, never over the copy
+                project.file = None
+            return OpenProject(project)
         except SingleObjectFile:
             project = hz.Project(os.path.splitext(os.path.basename(path))[0])
-            project.import_file(path)
+            project.import_file(path, received=received)
             return OpenProject(project, modified=True)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
@@ -233,17 +242,22 @@ PHOTO_FORMATS = ('.png', '.jpg', '.jpeg')
 
 
 def import_file(state: OpenProject | None, params: Mapping[str, Any],
-                progress: Callable[[int, int], None] | None = None
-                ) -> tuple[OpenProject, list[str]]:
+                progress: Callable[[int, int], None] | None = None,
+                received: bool = False) -> tuple[OpenProject, list[str]]:
     """`project.import`: the file's objects added to the open project, or
     to a new one when none is open; the project and the names added.
     `units` declares what the file does not state, as `import_file`'s
-    options (`length_unit`, `ordinate_unit` and the rest)."""
+    options (`length_unit`, `ordinate_unit` and the rest). A `received`
+    file is a copy a browser sent by its contents (`uploads`), indexed
+    with no location (`Project.import_file`)."""
     import hertzforge as hz
 
     path = _path(params, 'project.import')
+    # the journal names a received file as the person had it, to be imported from beside the
+    # script; the copy's own path is this service's and goes with the connection
+    named = os.path.basename(path) if received else path
     if os.path.splitext(path)[1].lower() in PHOTO_FORMATS:
-        return _import_photo(state, path)
+        return _import_photo(state, path, named)
     units = params.get('units', {})
     if not isinstance(units, Mapping) or not all(
             isinstance(key, str) and isinstance(value, str)
@@ -253,20 +267,22 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
     if state is None:
         state = OpenProject(hz.Project())
     project = state.project
-    call = ', '.join([repr(path)] + [f'{key}={value!r}'
-                                     for key, value in units.items()])
+    call = ', '.join([repr(named)] + [f'{key}={value!r}'
+                                      for key, value in units.items()])
     try:
         # journaled as the one call a script makes, without the progress
         # callable the service passes
         with project.journal_as(f'project.import_file({call})'):
-            added = project.import_file(path, progress=progress, **units)
+            added = project.import_file(path, progress=progress, received=received,
+                                        **units)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
     state.modified = True
     return state, added
 
 
-def _import_photo(state: OpenProject | None, path: str) -> tuple[OpenProject, list[str]]:
+def _import_photo(state: OpenProject | None, path: str,
+                  named: str | None = None) -> tuple[OpenProject, list[str]]:
     """A png or jpeg added to the project's Photos object, created on
     first use (`Photos()` is the replayable line; a photo is its bytes, so
     the file is added by its path). The Photos object is what was added."""
@@ -285,7 +301,7 @@ def _import_photo(state: OpenProject | None, path: str) -> tuple[OpenProject, li
         project[name].add_file(path)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
-    project.journal.append(f'project[{name!r}].add_file({path!r})')
+    project.journal.append(f'project[{name!r}].add_file({named or path!r})')
     state.modified = True
     return state, [name]
 

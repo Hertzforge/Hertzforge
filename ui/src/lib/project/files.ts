@@ -1,8 +1,9 @@
 /**
  * Files by path. In the desktop app (a Tauri window) the shell gets a dropped file's path and the
- * native dialogs; the service then reads the file where it is, and nothing is uploaded. In a
- * browser, which gives a dropped file's contents but never its path, the project panel takes a
- * typed path instead.
+ * native dialogs; the service then reads the file where it is, and nothing is sent. A browser
+ * gives a dropped file's contents and name but never its path, so a drop there sends the
+ * contents (`sendFile`, `project.upload`) and the service reads its copy; the project panel also
+ * takes a typed path.
  *
  * Tauri is reached through the globals a Tauri v2 window exposes with `withGlobalTauri`, so the
  * shell needs no Tauri package of its own and runs unchanged in a browser.
@@ -196,11 +197,11 @@ export async function pastedFiles(): Promise<string[]> {
 }
 
 /**
- * Call `onPaths` with the paths of files dropped on the window. In a browser a drop has no paths,
- * so `onPaths` gets null and the caller says to use the desktop app or type the path; the drop is
- * kept from opening the file in the page. Returns the function that stops listening.
+ * Call `onPaths` with the paths of files dropped on the window, in the desktop app. In a browser a
+ * drop has no paths, so `onFiles` gets the files themselves, to be sent by their contents, and the
+ * drop is kept from opening the file in the page. Returns the function that stops listening.
  */
-export function listenForDrops(onPaths: (paths: string[] | null) => void): () => void {
+export function listenForDrops(onPaths: (paths: string[]) => void, onFiles: (files: File[]) => void): () => void {
 	const webview = tauri()?.webview;
 	if (webview) {
 		let stop: (() => void) | null = null;
@@ -225,7 +226,7 @@ export function listenForDrops(onPaths: (paths: string[] | null) => void): () =>
 	const drop = (e: DragEvent) => {
 		if (!carriesFiles(e)) return;
 		e.preventDefault();
-		onPaths(null);
+		onFiles(Array.from(e.dataTransfer?.files ?? []));
 	};
 	window.addEventListener('dragover', over);
 	window.addEventListener('drop', drop);
@@ -233,6 +234,42 @@ export function listenForDrops(onPaths: (paths: string[] | null) => void): () =>
 		window.removeEventListener('dragover', over);
 		window.removeEventListener('drop', drop);
 	};
+}
+
+/** The most of a file one `project.upload` carries, under the service's frame limit. */
+export const PIECE_BYTES = 4 * 2 ** 20;
+
+/** What one `project.upload` sends: the file's name and size, and a piece of it at `offset`. */
+export type UploadPiece = { name: string; size: number; offset: number; data: Uint8Array; upload?: string };
+
+/**
+ * Send a file a browser gave by its contents, in pieces of `PIECE_BYTES`, through `send` (one
+ * `project.upload` each), and resolve with the upload's id, which `project.import` and
+ * `project.open` take in place of a path. `sent` hears the bytes sent so far. A folder, which a
+ * browser drops as a file it cannot read, is refused by name.
+ */
+export async function sendFile(
+	file: File,
+	send: (piece: UploadPiece) => Promise<{ upload: string; received: number }>,
+	sent: (done: number, total: number) => void = () => {}
+): Promise<string> {
+	let upload: string | undefined;
+	let offset = 0;
+	do {
+		let data: Uint8Array;
+		try {
+			data = new Uint8Array(await file.slice(offset, offset + PIECE_BYTES).arrayBuffer());
+		} catch {
+			throw new Error(`${file.name} cannot be read here: a browser sends files, not folders. Give a folder's path under Project.`);
+		}
+		const piece: UploadPiece = { name: file.name, size: file.size, offset, data };
+		if (upload) piece.upload = upload;
+		const got = await send(piece);
+		upload = got.upload;
+		offset = got.received;
+		sent(offset, file.size);
+	} while (offset < file.size);
+	return upload!;
 }
 
 /** A PDF chosen in the native open dialog (the one an issue was printed to), or null when cancelled. */

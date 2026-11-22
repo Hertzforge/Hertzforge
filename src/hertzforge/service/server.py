@@ -49,6 +49,7 @@ from . import (
     run_files,
     run_logs,
     table_files,
+    uploads,
     verbs,
 )
 from .descriptors import Operation, json_type
@@ -74,7 +75,8 @@ def _operations() -> tuple[Operation, ...]:
 OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
-PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
+PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.upload',
+                   'project.save',
                    'project.drag_out',
                    'project.retitle',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
@@ -324,6 +326,8 @@ class Connection:
         self.cancel_asked: bool = False
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
+        #: the files a browser sent by their contents (`project.upload`), until it goes
+        self.uploads: uploads.Uploads = uploads.Uploads()
 
     async def send(self, frame: str | bytes) -> None:
         """Send one frame, under the lock, so concurrent responses never
@@ -386,6 +390,17 @@ class Connection:
             self.cancel_asked = True
         return {'op': self.running_op}
 
+    def _received(self, params: Any, method: str) -> tuple[dict[str, Any], bool]:
+        """`params` with the file an `upload` names in place of `path`, and whether it was
+        one: a file a browser sent by its contents (`uploads`)."""
+        if 'upload' not in params:
+            return params, False
+        if 'path' in params:
+            raise bad_request(f'{method} takes a file by its "path" or by its "upload", not both')
+        upload = self.uploads.taken(params['upload'])
+        rest = {key: value for key, value in params.items() if key != 'upload'}
+        return {**rest, 'path': upload.path}, True
+
     async def project_request(self, method: str,
                               params: Any) -> dict[str, Any]:
         """Answer one `project.*` request on this connection's project, after
@@ -401,17 +416,22 @@ class Connection:
             self.project = await call(projects.new, params)
             self.fit = None
             return {'project': projects.summary(self.project)}
+        if method == 'project.upload':
+            _only(params, ('upload', 'name', 'size', 'offset', 'data'), method)
+            return await call(self.uploads.receive, params)
         if method == 'project.open':
-            _only(params, ('path',), method)
-            self.project = await call(projects.open_file, params)
+            _only(params, ('path', 'upload'), method)
+            params, received = self._received(params, method)
+            self.project = await call(projects.open_file, params, received)
             self.fit = None
             return {'project': projects.summary(self.project)}
         if method == 'project.import':
-            _only(params, ('path', 'units'), method)
+            _only(params, ('path', 'upload', 'units'), method)
+            params, received = self._received(params, method)
             path = params.get('path')
             report = self.progress(path) if isinstance(path, str) else None
             self.project, added = await call(projects.import_file, self.project,
-                                             params, report)
+                                             params, report, received)
             return {'added': added, 'project': projects.summary(self.project)}
         edits = {'project.rename': (projects.rename, ('name', 'to', 'index', *projects.SUB_ITEMS)),
                  'project.retitle': (projects.retitle, ('title',)),
@@ -701,6 +721,7 @@ class Connection:
             # the log's lock is released with the connection, so another
             # writer can take it
             self.run_log.close()
+            self.uploads.close()
 
     async def choose_files(self, params: Any) -> dict[str, Any]:
         """`files.choose`: the system's open or save dialog on this machine, and the

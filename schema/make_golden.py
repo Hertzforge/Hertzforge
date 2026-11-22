@@ -6808,6 +6808,15 @@ def main() -> None:
         'm': ('f32', [3, 2], [0.75, 0.125, 0.0, 0.25, 0.0625, 0.5]),
     })
 
+    # a request that carries an array: a piece of a file a browser sends by its contents, u8
+    write('request_upload', {
+        'type': 'request', 'id': 11, 'method': 'project.upload',
+        'params': {'name': 'modal.nc4', 'size': 13, 'offset': 8, 'upload': 'u1',
+                   'data': {'$array': 'p'}},
+    }, {
+        'p': ('u8', [5], [137, 72, 68, 70, 13]),
+    })
+
     # text frames: a hello and an error response, no arrays
     (HERE / 'hello.json').write_text(json.dumps(
         {'type': 'hello', 'protocol': 'sds/1', 'service': 'analysis', 'version': '0.1.0'}) + '\n')
