@@ -202,6 +202,8 @@ pub struct ShapeLaw {
     gains: Vec<Vec<f64>>,
     delays: Vec<f64>,
     state: Option<ShapeState>,
+    hold_db: Option<f64>,
+    holds: usize,
 }
 
 impl ShapeLaw {
@@ -239,6 +241,8 @@ impl ShapeLaw {
             inverse,
             reference,
             state: None,
+            hold_db: None,
+            holds: 0,
         })
     }
 
@@ -282,6 +286,20 @@ impl ShapeLaw {
             last_drive: None,
         });
         Ok(law)
+    }
+
+    /// The hold of `followed-hold`: on a repeat pulse (the next level equal to
+    /// this one) whose every SRS point of every control is within `hold_db`
+    /// of its target, the gains and delays are kept, so the same drive plays
+    /// again (the model provider still observes the pulse). `None`: off, the
+    /// default.
+    pub fn set_hold(&mut self, hold_db: Option<f64>) {
+        self.hold_db = hold_db;
+    }
+
+    /// How many pulses the hold has kept so far.
+    pub fn holds(&self) -> usize {
+        self.holds
     }
 
     /// Per control and SRS point, whether the stall diagnostic is raised (empty
@@ -489,7 +507,22 @@ impl LawSteps for ShapeLaw {
             self.inverse = regularized_inverse(&self.model, &self.mask, self.params.lambda_rel)?;
         }
 
+        let held = self.hold_db.is_some_and(|h| {
+            (inputs.next_level_db - inputs.level_db).abs() < 1e-9
+                && measured.iter().zip(&target.points).all(|(m, t)| {
+                    m.iter().zip(t).all(|(&mv, &tv)| {
+                        !(mv > 0.0 && tv > 0.0) || (20.0 * (tv / mv).log10()).abs() <= h
+                    })
+                })
+        });
+        if held {
+            self.holds += 1;
+        }
         let next = match self.params.anchor {
+            Anchor::Target if held => apply(
+                first_of_level_inverse.as_ref().unwrap_or(&self.inverse),
+                &self.shaped(),
+            ),
             Anchor::Target => {
                 for (g, r) in self.gains.iter_mut().zip(&ratios) {
                     for (gv, rv) in g.iter_mut().zip(r) {
@@ -553,6 +586,9 @@ impl LawSteps for ShapeLaw {
             ("drive_rms_full_level", rms_all(&drives) / s_next),
             ("lines_refreshed", refreshed as f64),
         ];
+        if self.hold_db.is_some() {
+            values.push(("held", f64::from(u8::from(held))));
+        }
         if self.state.is_some() {
             let extent = self.gain_extent_db();
             let clamp_db = self
