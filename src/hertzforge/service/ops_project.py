@@ -570,6 +570,41 @@ def node_matches(project: Any, source: str, onto: str, report: dict) -> dict:
                      points=points, segments=segments)
 
 
+def projection_views(project: Any, source: str, onto: str) -> list[dict]:
+    """A shape set and a geometry it does not belong on, picked together: the projection
+    Project would make onto that geometry at the default distance, drawn and read and not
+    added (`node_matches`); or, when it cannot be made, why, and which set could be
+    projected the other way (`project.projection_why`)."""
+    from hertzforge.core.correlate import NoNodeMatched
+    from hertzforge.core.shapes import ShapeSet
+    from hertzforge.project import projection_why
+
+    from .ops_modal_plan import _report_rows
+
+    why = projection_why(project, source, onto)
+    if why:
+        rows = [v.row('Not projected', why, None, 'warn')]
+        # the way that works: a set on that geometry onto this one
+        others = [name for name in project.object_group_of(onto) or ()
+                  if isinstance(project.get(name), ShapeSet)
+                  and not projection_why(project, name, source)]
+        if others:
+            rows.append(v.row('Instead', f'project {others[0]} onto {source}', None, 'info'))
+        rows.append(v.row('Drawn on it', 'no: its DOFs are not that geometry\'s nodes, so '
+                          'they are not drawn there by number; Link them if they go together',
+                          None, 'info'))
+        return [v.reading(f'{source} cannot be projected onto {onto}', rows)]
+    try:
+        report = project.projected(source, onto).projection_report
+        title = f'{source} projected onto {onto}: what Project would match'
+    except NoNodeMatched as error:
+        report = error.report
+        title = f'No node of {onto} matched {source} within the default distance'
+    defined = project.geometry_for(source)[1].units_defined
+    return [node_matches(project, source, onto, report),
+            v.reading(title, _report_rows(report, defined))]
+
+
 def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_projection`: how two shape sets on two geometries are projected when
     compared (`Project.set_projection`), kept as it is changed: the two geometries overlaid
