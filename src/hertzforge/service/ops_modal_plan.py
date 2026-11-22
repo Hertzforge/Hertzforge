@@ -481,7 +481,7 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from error
     flipped = project.projection_of(first, second)[0] == first
     basis = theirs if flipped else home
-    moved = 'expanded' if project.projection_method(first, second) == 'expansion' else 'reduced'
+    moved = 'reduced'
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}

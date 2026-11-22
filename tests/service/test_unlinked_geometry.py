@@ -59,18 +59,15 @@ def test_a_set_that_can_go_onto_the_geometry_shows_what_reduce_would_add(validat
     assert list(project) == before, 'nothing is added by looking'
 
 
-def test_dof_mapping_offers_the_two_ways_the_set_goes_and_says_why_expansion_cannot():
+def test_dof_mapping_beside_a_geometry_goes_one_way_and_asks_only_the_distance():
     project = _project()
     rows = {row['id']: row for row in
             action_table(project, ['Test Geometry', 'FEM Shapes'], {})['columns'][0]['rows']}
     mapping = rows['project.set_projection']
     assert (mapping['fill']['first'], mapping['fill']['second']) == ('FEM Shapes',
                                                                      'Test Geometry')
-    assert mapping['fill']['mapping'] == 'reduce_named'
-    assert mapping['labels'] == {'mapping': {
-        'reduce_named': 'Reduction: FEM Shapes at the nodes of Test Geometry',
-        'expand_named': 'Expansion: FEM Shapes to the DOFs of Test Geometry (not possible: '
-                        'Test Geometry holds no modes to expand through)'}}
+    assert mapping['fill']['direction'] == 'named'
+    assert 'direction' in mapping['omit'] and 'labels' not in mapping
 
 
 def test_dof_mapping_on_a_geometry_draws_and_keeps_the_reduction(validate):
@@ -79,7 +76,7 @@ def test_dof_mapping_on_a_geometry_draws_and_keeps_the_reduction(validate):
 
     project = _project()
     views = _project_op(project, op='project.set_projection', first='FEM Shapes',
-                        second='Test Geometry', mapping='reduce_named', distance=0.5)
+                        second='Test Geometry', direction='named', distance=0.5)
     wire_views(views, validate)
     assert [view['title'] for view in views] == [
         'Node matches: FEM Shapes onto Test Geometry',

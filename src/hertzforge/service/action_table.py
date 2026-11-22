@@ -647,7 +647,12 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             more['omit'] = [*more.get('omit', []), 'mate']
         if op.id == 'project.set_projection':
             fill.update(_projection_fill(project, fill))
-            more['labels'] = {'mapping': _mapping_words(project, fill['first'], fill['second'])}
+            words = _direction_words(project, fill['first'], fill['second'])
+            if len(words) > 1:
+                more['labels'] = {'direction': words}
+            else:
+                # one way can be made: there is nothing to choose, so nothing is asked
+                more['omit'] = [*more.get('omit', []), 'direction']
         if op.id in ('project.project_onto_basis', 'project.expand_modes'):
             from hertzforge.core.geometry import Geometry
             from hertzforge.core.shapes import ShapeSet
@@ -663,13 +668,22 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 more['omit'] = [*more.get('omit', []), 'direction', 'distance']
                 more['verb'] = 'Reduce'
             elif isinstance(project[fill['onto']], ShapeSet):
-                # two sets go the way DOF Mapping maps them, and ask nothing: they add the set
+                # two sets go the way DOF Mapping maps them, and ask nothing: Reduce takes the
+                # set whose nodes are matched at the other's DOFs, and Expand fits the other
+                # there with its modes
                 source, onto = _mapped(project, fill['source'], fill['onto'], method)
                 fill.update({'source': source, 'onto': onto,
                              **_projection_fill(project, {'first': source, 'second': onto},
                                                 distance_only=True)})
                 more['omit'] = [*more.get('omit', []), 'direction', 'distance']
                 more['verb'] = 'Reduce' if method == 'reduction' else 'Expand'
+                if method == 'expansion':
+                    # the modes it expands and the modes it expands through are the ones
+                    # picked under each set, every one of a set picked whole
+                    for param, held in (('modes', source), ('basis', onto)):
+                        picked = records.get(held, [])
+                        fill[param] = _runs(picked) if picked else ''
+                    more['omit'] += ['modes', 'basis']
             elif op.id == 'project.project_onto_basis':
                 more['omit'] = [*more.get('omit', []), 'direction']
             why = mapping_why(project, fill['source'], fill['onto'], method) if (
@@ -792,51 +806,40 @@ def _pair_why(project: Any, first: str, second: str) -> str:
     return '' if not all(ways) else ways[0]
 
 
-def _mapping_words(project: Any, first: str, second: str) -> dict[str, str]:
-    """DOF Mapping's four ways for two shape sets, worded after the sets, each that cannot
-    be made with why (`project.mapping_why`). For a shape set and a geometry, the two ways
-    the set goes: a geometry is never the one moved, so the row offers only those."""
+def _direction_words(project: Any, first: str, second: str) -> dict[str, str]:
+    """DOF Mapping's ways for a pair, worded after it, only the ones that can be made
+    (`project.projection_why`): whose nodes are matched to whose DOFs. A shape set beside a
+    geometry goes one way, the set's nodes matched to the geometry's."""
     from hertzforge.core.geometry import Geometry
-    from hertzforge.project import mapping_why
-
-    from .ops_project import MAPPINGS
+    from hertzforge.project import projection_why
 
     out = {}
-    for key, (method, turned) in MAPPINGS.items():
-        if turned and isinstance(project[second], Geometry):
+    for key, (a, b) in (('named', (first, second)), ('reversed', (second, first))):
+        if isinstance(project[a], Geometry) or projection_why(project, a, b):
             continue
-        a, b = (second, first) if turned else (first, second)
         at = 'nodes' if isinstance(project[b], Geometry) else 'DOFs'
-        words = (f'Reduction: {a} at the {at} of {b}' if method == 'reduction'
-                 else f'Expansion: {a} to the DOFs of {b}')
-        why = mapping_why(project, a, b, method)
-        out[key] = words + (f' (not possible: {why})' if why else '')
+        out[key] = f'{a} at the {at} of {b}'
     return out
 
 
 def _mapped(project: Any, first: str, second: str, method: str) -> tuple[str, str]:
-    """(the set moved, the one whose DOFs it is brought to) for a reduction or an
-    expansion of two shape sets, as the pair's DOF mapping goes: the set it reduces is
-    the one expanded through, and the set it expands is the one reduced to."""
+    """(the set acted on, the other) for Reduce or Expand of two shape sets, as the pair's DOF
+    mapping goes: Reduce takes the set whose nodes are matched at the other's DOFs, and Expand
+    fits the other set at those DOFs and takes it to the first one's."""
     source, onto, _distance = project.projection_of(first, second)
-    if project.projection_method(first, second) == method:
-        return source, onto
-    return onto, source
+    return (source, onto) if method == 'reduction' else (onto, source)
 
 
 def _projection_fill(project: Any, fill: dict[str, str], distance_only: bool = False
                      ) -> dict[str, str]:
-    """Project's form for two shape sets as the pair is projected now
-    (`Project.projection_of`): the direction it goes, and the node match distance it keeps in
-    the display units, or 0 for 2 % of the target's size when it keeps none."""
+    """DOF Mapping's form for a pair as it is mapped now (`Project.projection_of`): whose
+    nodes are matched to whose DOFs, and the node match distance it keeps in the display
+    units, or 0 for 2 % of the target's size when it keeps none."""
     from . import display_units
 
     first, second = fill['first'], fill['second']
     source, _onto, distance = project.projection_of(first, second)
-    method = project.projection_method(first, second)
-    turned = 'named' if source == first else 'reversed'
-    out = {} if distance_only else {
-        'mapping': ('reduce_' if method == 'reduction' else 'expand_') + turned}
+    out = {} if distance_only else {'direction': 'named' if source == first else 'reversed'}
     if distance is None:
         return {**out, 'distance': '0'}
     defined = project.geometry_for(source)[1].units_defined

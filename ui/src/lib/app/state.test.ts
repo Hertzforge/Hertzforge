@@ -98,6 +98,30 @@ describe('a form that previews', () => {
 		expect(a.reading).toBeNull();
 	});
 
+	it('keeps its preview on the stage while a new pick is taken, and drops it with the form', async () => {
+		const { app, a } = make();
+		const stub = app.analysis as unknown as { request: (method: string, params: Sent) => Promise<unknown> };
+		const answer = stub.request;
+		let offered = true;
+		Object.defineProperty(app.analysis, 'isOpen', { get: () => true });
+		stub.request = async (method, params) =>
+			method === 'project.actions' ? { table: { columns: [{ ...column, rows: offered ? [row(addBlock)] : [] }] } } : answer(method, params);
+		await a.perform(row(addBlock), column);
+		a.followPreview();
+		await rest();
+		const drawn = a.reading;
+		expect(said(a)).toBe('PREVIEW');
+		await a.showSelection();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(a.formOpen).toBe(true);
+		expect(a.reading).toBe(drawn);
+		offered = false;
+		await a.showSelection();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(a.formOpen).toBe(false);
+		expect(a.reading).toBeNull();
+	});
+
 	it('Back takes a preview off the stage', async () => {
 		const { a } = make();
 		await a.perform(row(addBlock), column);

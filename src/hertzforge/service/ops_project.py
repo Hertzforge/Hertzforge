@@ -17,7 +17,7 @@ from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .mode_pairs import translations
 from .op_progress import hook
-from .parsing import parse_picks
+from .parsing import parse_optional_picks, parse_picks
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, unit_text, waterfall_view
 
@@ -378,19 +378,21 @@ PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
 #: half its thickest plate (`Project.match_distance`), which the action table fills in
 MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
               default=0.0, unit='m', min=0.0, step=0.001, length=True)
-#: Project for two shape sets on two geometries, the setting every comparison of the pair
-#: reads: the two sets, which is projected onto the other, and how far a node may be
+#: DOF Mapping for two shape sets on two geometries, the setting every comparison of the pair
+#: reads: the two sets, whose nodes are matched to whose DOFs, and how far a node may be
 PAIR_FIRST = Param('first', 'First', 'enum', options_from='objects:shape_set')
 PAIR_SECOND = Param('second', 'Second', 'enum', options_from='objects:shape_set|geometry')
-#: the four ways two sets meet: a reduction or an expansion, the first moved onto the second's
-#: DOFs or the second onto the first's; the action table words each after the sets
-MAPPINGS = {'reduce_named': ('reduction', 0), 'reduce_reversed': ('reduction', 1),
-            'expand_named': ('expansion', 0), 'expand_reversed': ('expansion', 1)}
-PAIR_MAPPING = Param('mapping', 'Mapping', 'enum', default='reduce_named', options=(
-    Option('reduce_named', 'Reduction: First at the DOFs of Second'),
-    Option('reduce_reversed', 'Reduction: Second at the DOFs of First'),
-    Option('expand_named', 'Expansion: First to the DOFs of Second'),
-    Option('expand_reversed', 'Expansion: Second to the DOFs of First')))
+#: whose nodes are matched to whose DOFs: the first set's to the second's, or the other way.
+#: Asked only when both ways can be made (two sets that each hold every direction at every
+#: node); the action table words each way after the sets
+PAIR_DIRECTION = Param('direction', 'Matched', 'enum', default='named', options=(
+    Option('named', 'First at the DOFs of Second'),
+    Option('reversed', 'Second at the DOFs of First')))
+#: the modes Expand expands and the modes it expands through, the ones picked under each set
+#: in the tree, every one of a set picked whole
+EXPANDED_MODES = Param('modes', 'Test modes (blank: all)', 'string', default='')
+BASIS_MODES = Param('basis', 'Model modes (blank: all)', 'string', default='')
+EXPAND_KEEP = Param('keep', 'Add the expanded set (else show it)', 'boolean', default=False)
 #: which of two shape sets is projected onto the other: as `source` and `onto` name them, or
 #: the other way. The action table opens on the way that can be made, words each way after
 #: the sets, and says why the other cannot be made when it cannot (`project.projection_why`)
@@ -610,41 +612,35 @@ def projection_views(project: Any, source: str, onto: str) -> list[dict]:
             v.reading(title, _report_rows(report, defined))]
 
 
-def mapping_rows(report: dict, defined: bool, expansion: bool) -> list[dict]:
-    """What a DOF mapping matched, and for an expansion how well it fits: the model modes it
-    was built on, how well the test DOFs tell them apart, and the worst misfit at those
-    DOFs (`core.correlate.expand_shapes`)."""
+def expansion_rows(report: dict, defined: bool) -> list[dict]:
+    """What an expansion matched and how well it fits: the model modes it was built on, how
+    well the test DOFs tell them apart, and the worst misfit at those DOFs
+    (`core.correlate.expand_shapes`)."""
     from .ops_modal_plan import _report_rows
 
-    rows = _report_rows(report, defined)
-    if expansion and 'modes' in report:
-        condition = float(report['condition'])
-        worst = max(report['residual'], default=0.0)
-        rows += [v.row('Model modes used', float(len(report['modes'])), '', 'info'),
-                 v.row('Condition', condition, '', 'warn' if condition > 1e3 else 'info'),
-                 v.row('Worst misfit at the test DOFs', 100.0 * worst, '%',
-                       'warn' if worst > 0.1 else 'info')]
-    return rows
+    condition = float(report['condition'])
+    worst = max(report['residual'], default=0.0)
+    return [v.row('Model modes used', float(len(report['modes'])), '', 'info'),
+            v.row('Condition', condition, '', 'warn' if condition > 1e3 else 'info'),
+            v.row('Worst misfit at the test DOFs', 100.0 * worst, '%',
+                  'warn' if worst > 0.1 else 'info'),
+            *_report_rows(report, defined)]
 
 
 def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.set_projection`: DOF Mapping, how two shape sets on two geometries are brought
-    onto common DOFs when compared (`Project.set_projection`): a reduction, one set's modes
-    at the other's DOFs, or an expansion, one set expanded through the other's modes. Kept
-    as it is changed; the node pairs matched are drawn (`node_matches`) and read. The MAC,
-    the matches and the animated projection under it read what it keeps. For a shape set
-    and a geometry it is not on, the set's modes at the geometry's nodes, which Reduce
-    under it adds."""
+    """`project.set_projection`: DOF Mapping, how the DOFs of two shape sets on two geometries
+    are mapped onto each other (`Project.set_projection`): one set's nodes matched to the
+    other's DOFs within the distance. Kept as it is changed; the node pairs matched are drawn
+    (`node_matches`) and read. The comparisons, Reduce and Expand under it read what it keeps.
+    For a shape set and a geometry it is not on, the set's nodes matched to the geometry's."""
     from hertzforge.core.correlate import NoNodeMatched
     from hertzforge.core.geometry import Geometry
 
     first, second = params['first'], params['second']
-    method, turned = MAPPINGS[params['mapping']]
-    source, onto = (second, first) if turned else (first, second)
+    source, onto = (second, first) if params['direction'] == 'reversed' else (first, second)
     distance = params['distance'] or None
     try:
-        project.set_projection(first, second, source=source, method=method,
-                               distance=distance)
+        project.set_projection(first, second, source=source, distance=distance)
         report = (project.projected(source, onto, distance=distance).projection_report
                   if isinstance(project[onto], Geometry)
                   else project.compared_sets(first, second)[3])
@@ -652,31 +648,42 @@ def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
         report = error.report
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
-    # the nodes are matched model to test either way: the model's mesh, the test's nodes
-    model, test = (source, onto) if method == 'reduction' else (onto, source)
+    from .ops_modal_plan import _report_rows
+
     defined = project.geometry_for(source)[1].units_defined
-    said = 'at the DOFs of' if method == 'reduction' else 'expanded to the DOFs of'
-    return [node_matches(project, model, test, report),
-            v.reading(f'{source} {said} {onto}', mapping_rows(report, defined,
-                                                               method == 'expansion'))]
+    return [node_matches(project, source, onto, report),
+            v.reading(f'{source} at the DOFs of {onto}', _report_rows(report, defined))]
 
 
 def expand_modes(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.expand_modes`: Expand, a test's shape set expanded to a model's
-    DOFs through the model's modes (`Project.expand_modes`, SEREP), the model's set named.
-    The node pairs it rests on, how well it fits, and the set added on the model's
-    geometry."""
+    """`project.expand_modes`: Expand, a test's modes expanded to a model's DOFs through the
+    model's modes (`Project.expand_modes`, SEREP): the modes picked under each set, every one
+    of a set picked whole, at the distance the pair's DOF mapping keeps. It opens on what it
+    would add and shows it again as the picks change, so a model mode left out shows at once
+    what it did to the fit: the expanded modes on the model's geometry, how well they fit,
+    and what the node pairs matched. With `keep`, Apply, it adds the set, linked with the
+    model."""
     source, onto = params['source'], params['onto']
+    modes = parse_optional_picks(params['modes'], project[source].num_shapes, 'test mode')
+    basis = parse_optional_picks(params['basis'], project[onto].num_shapes, 'model mode')
+    distance = params['distance'] or None
     try:
-        added = project.expand_modes(source, onto=onto, distance=params['distance'] or None)
+        if params['keep']:
+            added = project.expand_modes(source, onto=onto, modes=modes, basis=basis,
+                                         distance=distance)
+            expanded, title = project[added], f'{added}: expanded'
+        else:
+            expanded = project.expanded(source, onto, modes=modes, basis=basis,
+                                        distance=distance)
+            title = f'{source} expanded through {onto}: what Apply would add'
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
-    report = project[added].expansion_report
-    found = project.geometry_for(added)
+    report = expanded.expansion_report
+    model = project.geometry_for(onto)
     defined = project.geometry_for(source)[1].units_defined
-    drawn = [_shape_view(project, added, found[0])] if found is not None else []
-    return [node_matches(project, onto, source, report),
-            v.reading(f'{added}: expanded', mapping_rows(report, defined, True)), *drawn]
+    # the node pairs are DOF Mapping's to draw; here they are read, beside how well it fits
+    return [_shapes_drawn(f'{source} expanded on {model[0]}', expanded, model[1]),
+            v.reading(title, expansion_rows(report, defined))]
 
 
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -812,14 +819,14 @@ MODAL_VERB_OPERATIONS = (
         outputs=('shape3d', 'reading'), run=solve_modes),
     Operation(
         id='project.set_projection', title='DOF Mapping', workspace='modal',
-        summary='How two shape sets on two geometries are brought onto common DOFs when they '
-                'are compared: a reduction, one set\'s modes at the other\'s DOFs, or an '
-                'expansion, one set expanded to the other\'s DOFs through the other\'s modes '
-                '(SEREP); and how far a node may be from the node it is matched to. The MAC, '
-                'the matches and the animated projection under it read it, and the project '
-                'keeps it. For a shape set and a geometry it is not on, the set\'s modes at '
-                'the geometry\'s nodes, which Reduce under it adds.',
-        params=(PAIR_FIRST, PAIR_SECOND, PAIR_MAPPING, MATCH),
+        summary='How the DOFs of two shape sets on two geometries are mapped onto each other: '
+                'each DOF of one matched to the nearest node of the other\'s geometry within '
+                'a distance, along its own direction. The MAC and the matches under it compare '
+                'the sets on those DOFs, Reduce takes one set\'s modes at them, and Expand '
+                'fits the other there and takes the fit to every DOF of the first; the project '
+                'keeps it. For a shape set and a geometry it is not on, the set\'s nodes '
+                'matched to the geometry\'s.',
+        params=(PAIR_FIRST, PAIR_SECOND, PAIR_DIRECTION, MATCH),
         # previewed as it opens and as it is typed, so the matches show before anything is kept
         outputs=('shape3d', 'reading'), run=set_projection, edits=True, previews=True),
     Operation(
@@ -832,13 +839,15 @@ MODAL_VERB_OPERATIONS = (
         outputs=('shape3d', 'reading'), run=onto_basis, previews=True),
     Operation(
         id='project.expand_modes', title='Expand to Model DOFs', workspace='modal',
-        summary='A test\'s shape set expanded to every DOF of a model through the model\'s '
-                'modes (SEREP): each test mode fitted at the test DOFs as a combination of '
-                'the model\'s modes, with how well it fits.',
+        summary='A test\'s modes expanded to every DOF of a model through the model\'s '
+                'modes (SEREP): each test mode picked fitted at the test DOFs as a combination '
+                'of the model modes picked, with how well it fits. Previewed as the picks '
+                'change.',
         params=(_source('expand_modes', 'Test shape set'),
                 Param('onto', 'Model shape set', 'enum', options_from='objects:shape_set'),
-                MATCH),
-        outputs=('shape3d', 'reading'), run=expand_modes),
+                EXPANDED_MODES, BASIS_MODES, MATCH, EXPAND_KEEP),
+        outputs=('shape3d', 'reading'), run=expand_modes, previews=True, commits='keep',
+        opens_previewed=True, edits_when=lambda params: params['keep']),
 )
 
 

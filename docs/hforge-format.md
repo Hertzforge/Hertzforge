@@ -91,21 +91,19 @@ root attributes:
                       "source_print", the digest of the source's values
                       when the fingerprint holds settings only; absent,
                       only the settings are compared
-    projections       optional JSON, how pairs of shape sets on two
-                      geometries, or a shape set and a geometry it is
-                      not on, are brought onto common DOFs, as DOF
-                      Mapping sets them: [{"first",
-                      "second", "source", "distance", "method"}, ...],
-                      "source" the set moved onto the other's DOFs,
-                      "method" "reduction" (its modes at the other's
-                      DOFs) or "expansion" (expanded through the
-                      other's modes, SEREP; absent reads as reduction)
-                      and "distance" the node match distance (meters,
-                      or the geometries' own units when theirs are not
-                      defined), or null for 2 % of the size of the
-                      geometry projected onto. Absent when none is set;
-                      a pair with none is reduced the way the sets'
-                      measured directions decide
+    projections       optional JSON, how the DOFs of pairs of shape
+                      sets on two geometries, or of a shape set and a
+                      geometry it is not on, are mapped onto each
+                      other, as DOF Mapping sets them: [{"first",
+                      "second", "source", "distance"}, ...], "source"
+                      the set whose nodes are matched to the other's
+                      DOFs and "distance" the node match distance
+                      (meters, or the geometries' own units when theirs
+                      are not defined), or null for 2 % of the size of
+                      the geometry matched to. Absent when none is set;
+                      a pair with none is mapped the way the sets'
+                      measured directions decide. A "method" a file
+                      written by an earlier version holds is not read
 
 A project whose data index holds anything also has one dataset at the
 root (absent otherwise):

@@ -638,6 +638,20 @@ class ShapeSet:
         self._lookup_kept = (held, len(held), lookup)
         return lookup
 
+    def _parsed_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Each DOF's node, axis and sign (`deform.parse_dofs`), kept with the set while its
+        DOF list is the same one: a model's set holds hundreds of thousands of DOFs, and
+        a projection onto a test's DOFs reads them each time the modes picked change."""
+        from ..deform import parse_dofs
+
+        held = self.coordinate
+        kept = getattr(self, '_parsed_kept', None)
+        if kept is not None and kept[0] is held and kept[1] == len(held):
+            return kept[2]
+        parsed = parse_dofs(held)
+        self._parsed_kept = (held, len(held), parsed)
+        return parsed
+
     def auto_mac(self) -> np.ndarray:
         """The MAC of every mode against every other mode; the diagonal is 1."""
         return mac_matrix(self.shape_matrix)
