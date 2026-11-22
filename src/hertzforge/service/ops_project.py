@@ -381,7 +381,7 @@ MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)
 #: Project for two shape sets on two geometries, the setting every comparison of the pair
 #: reads: the two sets, which is projected onto the other, and how far a node may be
 PAIR_FIRST = Param('first', 'First', 'enum', options_from='objects:shape_set')
-PAIR_SECOND = Param('second', 'Second', 'enum', options_from='objects:shape_set')
+PAIR_SECOND = Param('second', 'Second', 'enum', options_from='objects:shape_set|geometry')
 #: the four ways two sets meet: a reduction or an expansion, the first moved onto the second's
 #: DOFs or the second onto the first's; the action table words each after the sets
 MAPPINGS = {'reduce_named': ('reduction', 0), 'reduce_reversed': ('reduction', 1),
@@ -579,47 +579,32 @@ def node_matches(project: Any, source: str, onto: str, report: dict) -> dict:
 
 def projection_views(project: Any, source: str, onto: str) -> list[dict]:
     """A shape set and a geometry it does not belong on, picked together: what Reduce would
-    add, the set's modes at that geometry's nodes; or when it cannot reduce, what Expand
-    would, the set expanded through the shape set linked to that geometry; drawn and read
-    at the default distance and not added (`node_matches`). When neither can be made, why
-    not (`project.mapping_why`)."""
+    add, the set's modes at that geometry's nodes at the distance DOF Mapping keeps for the
+    pair, drawn and read and not added (`node_matches`); or why it cannot be reduced, and
+    for an expansion, which needs a model's modes, the set to pick it with
+    (`project.mapping_why`)."""
     from hertzforge.core.correlate import NoNodeMatched
-    from hertzforge.project import expansion_basis, mapping_why, projection_why
+    from hertzforge.project import mapping_why, projection_why
 
     from .ops_modal_plan import _report_rows
 
     why = projection_why(project, source, onto)
-    if why and not mapping_why(project, source, onto, 'expansion'):
-        basis = expansion_basis(project, source, onto)
-        try:
-            report = project.expanded(source, onto).expansion_report
-            title = (f'{source} expanded to the DOFs of {onto} through {basis}: what Expand '
-                     'would add')
-        except NoNodeMatched as error:
-            report = error.report
-            title = f'No node of {source} matched {onto} within the default distance'
-        except ValueError as error:
-            return [v.reading(f'{source} cannot be expanded onto {onto}',
-                              [v.row('Not expanded', str(error), None, 'warn')])]
-        defined = project.geometry_for(source)[1].units_defined
-        return [node_matches(project, basis, source, report),
-                v.reading(title, [v.row('Not reduced', why, None, 'info'),
-                                  *mapping_rows(report, defined, True)])]
     if why:
-        # neither way: no set linked to that geometry holds the motion to expand through
         rows = [v.row('Not reduced', why, None, 'warn'),
                 v.row('Not expanded', mapping_why(project, source, onto, 'expansion'), None,
-                      'warn')]
-        rows.append(v.row('Drawn on it', 'no: its DOFs are not that geometry\'s nodes, so '
-                          'they are not drawn there by number; Link them if they go together',
-                          None, 'info'))
-        return [v.reading(f'{source} cannot be reduced or expanded onto {onto}', rows)]
+                      'info'),
+                v.row('Drawn on it', 'no: its DOFs are not that geometry\'s nodes, so they '
+                      'are not drawn there by number; Link them if they go together', None,
+                      'info')]
+        return [v.reading(f'{source} cannot be reduced onto {onto}', rows)]
+    distance = project.projection_of(source, onto)[2]
     try:
-        report = project.projected(source, onto).projection_report
+        report = project.projected(source, onto, distance=distance).projection_report
         title = f'{source} at the DOFs of {onto}: what Reduce would add'
     except NoNodeMatched as error:
         report = error.report
-        title = f'No node of {onto} matched {source} within the default distance'
+        title = (f'No node of {onto} matched {source} within the '
+                 f'{"default " if distance is None else ""}distance')
     defined = project.geometry_for(source)[1].units_defined
     return [node_matches(project, source, onto, report),
             v.reading(title, _report_rows(report, defined))]
@@ -647,16 +632,22 @@ def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
     onto common DOFs when compared (`Project.set_projection`): a reduction, one set's modes
     at the other's DOFs, or an expansion, one set expanded through the other's modes. Kept
     as it is changed; the node pairs matched are drawn (`node_matches`) and read. The MAC,
-    the matches and the animated projection under it read what it keeps."""
+    the matches and the animated projection under it read what it keeps. For a shape set
+    and a geometry it is not on, the set's modes at the geometry's nodes, which Reduce
+    under it adds."""
     from hertzforge.core.correlate import NoNodeMatched
+    from hertzforge.core.geometry import Geometry
 
     first, second = params['first'], params['second']
     method, turned = MAPPINGS[params['mapping']]
     source, onto = (second, first) if turned else (first, second)
+    distance = params['distance'] or None
     try:
         project.set_projection(first, second, source=source, method=method,
-                               distance=params['distance'] or None)
-        report = project.compared_sets(first, second)[3]
+                               distance=distance)
+        report = (project.projected(source, onto, distance=distance).projection_report
+                  if isinstance(project[onto], Geometry)
+                  else project.compared_sets(first, second)[3])
     except NoNodeMatched as error:
         report = error.report
     except (ValueError, TypeError) as error:
@@ -672,13 +663,10 @@ def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def expand_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.expand_modes`: Expand, a test's shape set expanded to a model's
-    DOFs through the model's modes (`Project.expand_modes`, SEREP), the model's set named
-    or the one linked to the geometry named. The node pairs it rests on, how well it fits,
-    and the set added on the model's geometry."""
-    from hertzforge.project import expansion_basis
-
+    DOFs through the model's modes (`Project.expand_modes`, SEREP), the model's set named.
+    The node pairs it rests on, how well it fits, and the set added on the model's
+    geometry."""
     source, onto = params['source'], params['onto']
-    basis = expansion_basis(project, source, onto)
     try:
         added = project.expand_modes(source, onto=onto, distance=params['distance'] or None)
     except (ValueError, TypeError) as error:
@@ -687,7 +675,7 @@ def expand_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     found = project.geometry_for(added)
     defined = project.geometry_for(source)[1].units_defined
     drawn = [_shape_view(project, added, found[0])] if found is not None else []
-    return [node_matches(project, basis, source, report),
+    return [node_matches(project, onto, source, report),
             v.reading(f'{added}: expanded', mapping_rows(report, defined, True)), *drawn]
 
 
@@ -829,7 +817,8 @@ MODAL_VERB_OPERATIONS = (
                 'expansion, one set expanded to the other\'s DOFs through the other\'s modes '
                 '(SEREP); and how far a node may be from the node it is matched to. The MAC, '
                 'the matches and the animated projection under it read it, and the project '
-                'keeps it.',
+                'keeps it. For a shape set and a geometry it is not on, the set\'s modes at '
+                'the geometry\'s nodes, which Reduce under it adds.',
         params=(PAIR_FIRST, PAIR_SECOND, PAIR_MAPPING, MATCH),
         # previewed as it opens and as it is typed, so the matches show before anything is kept
         outputs=('shape3d', 'reading'), run=set_projection, edits=True, previews=True),
@@ -847,8 +836,8 @@ MODAL_VERB_OPERATIONS = (
                 'modes (SEREP): each test mode fitted at the test DOFs as a combination of '
                 'the model\'s modes, with how well it fits.',
         params=(_source('expand_modes', 'Test shape set'),
-                Param('onto', 'Model shape set or geometry', 'enum',
-                      options_from='objects:shape_set|geometry'), MATCH),
+                Param('onto', 'Model shape set', 'enum', options_from='objects:shape_set'),
+                MATCH),
         outputs=('shape3d', 'reading'), run=expand_modes),
 )
 

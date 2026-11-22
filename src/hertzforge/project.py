@@ -6837,21 +6837,29 @@ class Project(dict):
 
     def set_projection(self, first: str, second: str, *, source: str | None = None,
                        method: str = 'reduction', distance: float | None = None) -> None:
-        """Set how two shape sets on two geometries are projected when they
-        are compared (Project): which set is projected onto the other, and
-        how far its nodes may be from the nodes they are matched to. The
-        MAC, the matches, the animated projection and a Matched Modes
-        object of the pair all read it (`compared_sets`), and the project
-        file keeps it.
+        """Set how two shape sets on two geometries are brought onto common
+        DOFs when they are compared (DOF Mapping): which set is moved onto
+        the other's DOFs, how, and how far its nodes may be from the nodes
+        they are matched to. The MAC, the matches, the animated projection
+        and a Matched Modes object of the pair all read it
+        (`compared_sets`), and the project file keeps it.
+
+        A shape set and a geometry it is not on are a pair too: the set's
+        modes at the geometry's nodes, which Reduce adds
+        (`project_onto_basis`) at the distance kept. Only a reduction of
+        the set is made there, since a geometry holds no modes to expand
+        through.
 
         Parameters
         ----------
         first, second : str
-            The two shape sets, by name, in either order.
+            The two shape sets, or a shape set and a geometry, by name, in
+            either order.
         source : str, optional
             The set brought onto the other's DOFs, `first` or `second`.
             Left out, for a reduction the one `core.correlate.projection_order`
-            chooses, and for an expansion the other.
+            chooses, and for an expansion the other; beside a geometry, the
+            set.
         method : {'reduction', 'expansion'}, default 'reduction'
             How: `source`'s modes taken at the other's DOFs (a reduction,
             `core.correlate.project_shapes`), or `source`'s modes expanded to
@@ -6869,22 +6877,26 @@ class Project(dict):
         Raises
         ------
         TypeError
-            If either is not a shape set.
+            If either is not a shape set, or a geometry beside one.
         ValueError
             If the two are on one geometry, either has
             no geometry, `source` is neither of them or holds too little
-            motion to be projected onto the other (`projection_why`), or
-            `distance` is not above zero.
+            motion to be projected onto the other (`projection_why`), the
+            method cannot be made (`mapping_why`), or `distance` is not
+            above zero.
         """
         from .core.correlate import projection_order
 
         first, second = self.name_of(first), self.name_of(second)
+        geometry = next((n for n in (first, second) if isinstance(self[n], Geometry)), None)
         for name in (first, second):
-            if not isinstance(self[name], ShapeSet):
+            if not isinstance(self[name], ShapeSet) and name != geometry:
                 raise TypeError(f'{name} is not a shape set')
         if method not in ('reduction', 'expansion'):
             raise ValueError(f'the method is reduction or expansion, not {method!r}')
-        if source is None:
+        if source is None and geometry is not None:
+            source = second if geometry == first else first
+        elif source is None:
             flipped, _why = projection_order(self[first], self[second])
             source = (first if flipped else second) if method == 'reduction' else (
                 second if flipped else first)
@@ -6892,6 +6904,9 @@ class Project(dict):
         if source not in (first, second):
             raise ValueError(f'the set projected is {first} or {second}, not {source}')
         onto = second if source == first else first
+        if source == geometry:
+            raise ValueError(f'{source} is a geometry, with no modes to bring onto the DOFs '
+                             f'of {onto}')
         why = mapping_why(self, source, onto, method)
         if why:
             raise ValueError(f'{source} cannot be {"projected" if method == "reduction" else "expanded"} '
@@ -6908,11 +6923,13 @@ class Project(dict):
         distance or None for `match_distance`'s), as Project set it
         (`set_projection`), or else the way
         `core.correlate.projection_order` decides, with no distance.
+        For a shape set and a geometry, the set onto the geometry.
 
         Parameters
         ----------
         first, second : str
-            The two shape sets, by name, in either order.
+            The two shape sets, or a shape set and a geometry, by name, in
+            either order.
 
         Returns
         -------
@@ -6923,10 +6940,15 @@ class Project(dict):
         return source, onto, distance
 
     def _projection(self, first: str, second: str) -> tuple[str, str, float | None, str]:
-        """`projection_of` with why it goes that way."""
+        """`projection_of` with why it goes that way. Beside a geometry, the set is the
+        one moved."""
         from .core.correlate import projection_order
 
         held = self.projections.get(tuple(sorted((first, second))))
+        if isinstance(self[first], Geometry) or isinstance(self[second], Geometry):
+            source = second if isinstance(self[first], Geometry) else first
+            return (source, second if source == first else first,
+                    None if held is None else held['distance'], 'a geometry has no modes')
         flipped, why = projection_order(self[first], self[second])
         chosen = first if flipped else second
         if held is not None:
@@ -6971,8 +6993,7 @@ class Project(dict):
         source : str
             The shape set to expand, a test's.
         onto : str
-            The shape set to expand through, or a geometry, for the shape set
-            linked to it (`expansion_basis`).
+            The shape set to expand through.
         modes : sequence of int, optional
             The modes of `onto`'s set to expand through, indices from 0. Left
             out, `core.correlate.expansion_modes`'.
@@ -7008,7 +7029,7 @@ class Project(dict):
         source : str
             The test's shape set.
         onto : str
-            The model's shape set, or the geometry it is linked to.
+            The model's shape set.
         modes, tolerance, distance : optional
             As `expanded`.
         name : str, optional
@@ -7021,23 +7042,22 @@ class Project(dict):
             The name the result was added under, unique within the project.
         """
         source, onto = self.name_of(source), self.name_of(onto)
-        expanded, basis = self._expanded(source, onto, modes=modes, tolerance=tolerance,
-                                         distance=distance)
-        return self._derive(basis, expanded, name or f'{source} @ {basis}')
+        expanded = self._expanded(source, onto, modes=modes, tolerance=tolerance,
+                                  distance=distance)
+        return self._derive(onto, expanded, name or f'{source} @ {onto}')
 
     def _expanded(self, source, onto, *, modes=None, tolerance=0.02, distance=None):
-        """(the expanded set, the model set it was expanded through)."""
+        """`source` expanded through the model set `onto`."""
         from .core.correlate import expand_shapes
 
         why = mapping_why(self, source, onto, 'expansion')
         if why:
             raise ValueError(f'{source} cannot be expanded onto {onto}: {why}')
-        basis = expansion_basis(self, source, onto)
         expanded, report = expand_shapes(
-            self[source], self.geometry_for(source)[1], self[basis],
-            self.geometry_for(basis)[1], modes=modes, tolerance=tolerance, distance=distance)
+            self[source], self.geometry_for(source)[1], self[onto],
+            self.geometry_for(onto)[1], modes=modes, tolerance=tolerance, distance=distance)
         expanded.expansion_report = report
-        return expanded, basis
+        return expanded
 
     def match_distance(self, source: Any, onto: Any, *,
                        tolerance: float = 0.02) -> float | None:
@@ -10704,34 +10724,26 @@ def projection_why(project: Project, source: Any, onto: Any) -> str:
     return _measured_why(project, source, onto)
 
 
-def expansion_basis(project: Project, source: Any, onto: Any) -> str | None:
-    """The shape set `source` is expanded through onto `onto`: `onto` itself when it is
-    a shape set, or for a geometry the first shape set linked to it that holds the
-    whole motion to be reduced to `source`'s DOFs; None when there is none."""
-    source, onto = project.name_of(source), project.name_of(onto)
-    if isinstance(project[onto], ShapeSet):
-        return onto
-    if not isinstance(project[onto], Geometry):
-        return None
-    return next((name for name in project.object_group_of(onto) or ()
-                 if name != source and isinstance(project.get(name), ShapeSet)
-                 and not projection_why(project, name, source)), None)
-
-
 def mapping_why(project: Project, source: Any, onto: Any, method: str) -> str:
     """Why `source` cannot be brought onto the DOFs of `onto` by `method`; '' when it
     can. A reduction takes `source`'s modes at `onto`'s DOFs (`projection_why`); an
-    expansion fits `source` with the modes of `onto` (or of the shape set linked to the
-    geometry `onto`, `expansion_basis`), which must hold the whole motion at
-    `source`'s nodes."""
+    expansion fits `source` with the modes of the shape set `onto`, which must hold the
+    whole motion at `source`'s nodes. A geometry holds no modes to expand through, and
+    the set to expand through is the one picked, never one found by a link: the reason
+    names the set linked to the geometry that it could be picked with."""
     if method == 'reduction':
         return projection_why(project, source, onto)
     source, onto = project.name_of(source), project.name_of(onto)
-    basis = expansion_basis(project, source, onto)
-    if basis is None:
-        return (f'no shape set linked to {onto} holds the whole motion to expand through'
-                if isinstance(project[onto], Geometry) else f'{onto} is not a shape set')
-    return projection_why(project, basis, source)
+    if isinstance(project[onto], Geometry):
+        linked = next((name for name in project.object_group_of(onto) or ()
+                       if name != source and isinstance(project.get(name), ShapeSet)
+                       and not projection_why(project, name, source)), None)
+        return (f'{onto} holds no modes to expand through'
+                + (f'; pick {source} with {linked} to expand through its modes'
+                   if linked else ''))
+    if not isinstance(project[onto], ShapeSet):
+        return f'{onto} is not a shape set'
+    return projection_why(project, onto, source)
 
 
 def drawn_elsewhere(project: Project, shapes: Any, geometry: Any) -> bool:
@@ -10802,18 +10814,12 @@ def _set_and_table_apart(project, objects):
 
 
 def _expandable_pair(project, objects):
-    """A shape set and a set or geometry on another geometry, either way round, that one
-    can be expanded through (`mapping_why`)."""
-    if len(objects) != 2:
+    """Two shape sets on two geometries, one of which can be expanded through the
+    other (`mapping_why`)."""
+    if not _two_sets_on_two_geometries(project, objects):
         return False
     a, b = objects
-    pairs = [(a, b), (b, a)] if all(isinstance(x, ShapeSet) for x in objects) else [
-        (x, y) for x, y in ((a, b), (b, a))
-        if isinstance(x, ShapeSet) and isinstance(y, Geometry)]
-    return any(project.geometry_for(x) is not None
-               and (isinstance(y, Geometry) and project.geometry_for(x)[1] is not y
-                    or isinstance(y, ShapeSet) and _two_sets_on_two_geometries(project, [x, y]))
-               and not mapping_why(project, x, y, 'expansion') for x, y in pairs)
+    return any(not mapping_why(project, x, y, 'expansion') for x, y in ((a, b), (b, a)))
 
 
 def _set_and_geometry_apart(project, objects):
@@ -10892,7 +10898,7 @@ _SELECTION_APPLIES: tuple = (
     ('project_onto_basis', lambda p, o: (_two_sets_on_two_geometries(p, o)
                                          or _set_and_table_apart(p, o)
                                          or _set_and_geometry_apart(p, o))),
-    # a test's set expanded through a model's modes: the model's set, or its geometry
+    # a test's set expanded through a model's modes, the model's set picked with it
     ('expand_modes', lambda p, o: _expandable_pair(p, o)),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
         isinstance(x, ShapeSet) for x in o))),

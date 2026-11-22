@@ -845,7 +845,8 @@ display unit system (the server puts its name in), `si` for the stored values.
 object can be written in, `.hforge` first. The desktop app lists them as the save window's file types.
 
 **A row's own words.** A row may carry `labels`, `{param: {option value: words}}`, the words its
-form shows for a param's options in place of the descriptor's. Project for two shape sets on two
+form shows for a param's options in place of the descriptor's; the form offers only the options it
+names. Project for two shape sets on two
 geometries (DOF Mapping, `project.set_projection`, a form kept as it is changed) names each of its
 four `mapping`s after the sets, as "Reduction: A at the DOFs of B" or "Expansion: A to the DOFs of
 B", each that cannot be made followed by why in parentheses, and fills the pair's mapping as it
@@ -854,8 +855,10 @@ picked in, and its distance, `0` for 2 % of the target's size. The comparisons t
 listed under it: MAC, Animate Projection, Match Modes, Add Matches, Reduce
 (`project.project_onto_basis`) and Expand (`project.expand_modes`), the last two filled the way the
 mapping goes and asking nothing. A shape set picked with a geometry it does not belong on is offered
-Reduce onto that geometry's nodes, or Expand through the shape set linked to it, and its view shows
-what the one that can be made would add, or why neither can.
+DOF Mapping too, its `mapping` naming only the two ways the set goes: the reduction onto the
+geometry's nodes, and the expansion, which a geometry cannot give and which says which shape set
+to pick the set with instead. Reduce is under it,
+filled with the distance kept. Its view shows what Reduce would add, or why it cannot be made.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered

@@ -47,21 +47,29 @@ def _row(project, names, system=display_units.DEFAULT, op='project.project_onto_
     return next(row for row in table['columns'][0]['rows'] if row['id'] == op)
 
 
-def test_onto_a_geometry_the_row_opens_on_the_default_distance_in_the_display_units():
+def test_onto_a_geometry_dof_mapping_keeps_the_distance_reduce_uses_in_the_display_units():
+    """A shape set and a geometry it is not on: DOF Mapping holds the pair's distance, 0 for
+    the default until one is kept, and Reduce under it asks nothing and uses it."""
     project = _project()
-    default = project.match_distance('FEM Shapes', 'Test Geometry')
-    for system, scale in ((display_units.DEFAULT, 1.0), (MM, 1000.0)):
-        row = _row(project, ['FEM Shapes', 'Test Geometry'], system)
-        assert row['ready'], row
-        assert float(row['fill']['distance']) == pytest.approx(default * scale, rel=1e-3)
-    assert _row(project, ['FEM Shapes', 'Test Geometry'])['fill']['onto'] == 'Test Geometry'
+    names = ['FEM Shapes', 'Test Geometry']
+    for system in (display_units.DEFAULT, MM):
+        mapping = _row(project, names, system, op='project.set_projection')
+        reduce = _row(project, names, system)
+        assert mapping['ready'] and mapping['fill']['distance'] == '0'
+        assert reduce['under'] == 'project.set_projection' and reduce['fill']['distance'] == '0'
+        assert {'direction', 'distance'} <= set(reduce['omit'])
+    project.set_projection('Test Geometry', 'FEM Shapes', distance=0.004)
+    for system, said in ((display_units.DEFAULT, '0.004'), (MM, '4')):
+        assert _row(project, names, system, op='project.set_projection')['fill']['distance'] == said
+        assert _row(project, names, system)['fill']['distance'] == said
+    assert _row(project, names)['fill']['onto'] == 'Test Geometry'
 
 
-def test_an_undefined_geometry_opens_on_its_own_numbers():
+def test_an_undefined_geometry_keeps_its_own_numbers():
     project = _project(defined=False)
-    default = project.match_distance('FEM Shapes', 'Test Geometry')
-    row = _row(project, ['FEM Shapes', 'Test Geometry'], MM)
-    assert float(row['fill']['distance']) == pytest.approx(default, rel=1e-3)
+    project.set_projection('FEM Shapes', 'Test Geometry', distance=0.004)
+    row = _row(project, ['FEM Shapes', 'Test Geometry'], MM, op='project.set_projection')
+    assert row['fill']['distance'] == '0.004'
 
 
 def test_project_is_greyed_out_with_why_it_cannot_project():
@@ -151,11 +159,11 @@ def test_zero_projects_within_the_default(tmp_path):
     assert 'result' in answer, answer
 
 
-def _project_op(project, **given):
+def _project_op(project, op='project.project_onto_basis', **given):
     from hertzforge.service import projects
     from hertzforge.service.ops_project import MODAL_VERB_OPERATIONS
 
-    op = next(o for o in MODAL_VERB_OPERATIONS if o.id == 'project.project_onto_basis')
+    op = next(o for o in MODAL_VERB_OPERATIONS if o.id == op)
     values = op.resolve(given, objects={n: projects.kind_of(o) for n, o in project.items()},
                         verbs={n: projects.verbs_of(project, n) for n in project})
     return op.run(project, values)
@@ -400,7 +408,8 @@ def test_a_table_or_a_geometry_goes_one_way_and_is_not_asked():
         assert 'direction' in row['omit'] and 'labels' not in row
         assert 'direction' not in row['fill']
         assert row['verb'] == ('Reduce' if onto == 'Test Geometry' else 'Project')
-        assert 'under' not in row
+        assert row.get('under') == ('project.set_projection' if onto == 'Test Geometry'
+                                    else None)
     with pytest.raises(ProtocolError, match='only a shape set is projected the other way'):
         _project_op(project, source='FEM Shapes', onto='Channels', direction='reversed')
 
