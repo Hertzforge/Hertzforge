@@ -105,7 +105,7 @@ def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: 
 
 
 #: the modes of each of two sets an action compares, filled from what is picked under each in
-#: the tree (`action_table.PICKED_MODES`): blank for every mode
+#: the tree (`action_table.PICKED`): blank for every mode
 FIRST_MODES = Param('first_modes', 'Modes of the first set (blank: all)', 'string', default='')
 SECOND_MODES = Param('second_modes', 'Modes of the second set (blank: all)', 'string',
                      default='')

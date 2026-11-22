@@ -38,8 +38,11 @@ def kurtosis(project: Any, params: dict[str, Any]) -> list[dict]:
     is dimensionless."""
     from hertzforge.core.kurtosis import analyzed_span, channel_kurtosis
 
+    from .ops_project import narrowed
+
     name = params['history']
-    history = project[name]
+    # the channels picked, every channel when none is
+    history = narrowed(project, params, 'history')
     low, high = params['low'], params['high']
     if not low < high:
         raise refused(f'the band runs from its low edge up; {low:g} to {high:g} does not')
@@ -157,12 +160,16 @@ def resample_reading(project: Any, params: dict[str, Any]) -> list[dict]:
     return [view, v.reading(f'Resampling {name}, {reading.label}', rows)]
 
 
+#: the channels picked under the history (`ops_project.picks_param`)
+KURTOSIS_PICKS = Param('history_records', 'Records (blank: all)', 'string', default='')
+
+
 OPERATIONS = (
     Operation(
         id='project.kurtosis', title='Kurtosis', workspace='signals',
         summary='Each channel\'s kurtosis over the span its spectra are read from, judged '
                 'against a band: a Gaussian record reads 3.',
-        params=(HISTORY, LOW, HIGH), outputs=('reading',), run=kurtosis),
+        params=(HISTORY, LOW, HIGH, KURTOSIS_PICKS), outputs=('reading',), run=kurtosis),
     Operation(
         id='project.amplitude_spectrum', title='Amplitude Spectrum', workspace='signals',
         summary='The spectra of the channels of one quantity, scaled so a sine reads its peak '

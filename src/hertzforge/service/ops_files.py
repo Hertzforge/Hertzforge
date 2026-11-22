@@ -23,6 +23,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .parsing import parse_optional_picks
 from .projects import kind_of
 from .protocol import not_found, refused
 from .waterfalls import unit_text
@@ -206,6 +207,16 @@ def save_as(project: Any, params: dict[str, Any]) -> list[dict]:
 
     name, chosen = params['object'], params['format']
     obj = project[name]
+    # the records or modes picked under the object are the ones written, every one of an
+    # object picked whole
+    picked = None
+    if params.get('object_records', '').strip():
+        if not hasattr(obj, 'kept'):
+            raise refused(f'{name} is written whole: what is picked under it is not records '
+                          'or modes')
+        count = obj.num_shapes if kind_of(obj) == 'shape_set' else obj.num_records
+        picked = parse_optional_picks(params['object_records'], count, 'record')
+        obj = obj.kept(picked)
     if not params['path'].strip():
         raise refused('Save As needs a path to write to, on the analysis service\'s machine')
     path = os.path.abspath(os.path.expanduser(params['path'].strip()))
@@ -239,7 +250,8 @@ def save_as(project: Any, params: dict[str, Any]) -> list[dict]:
                               None, 'info'))
         system = _export_system(params.get('units'))
         try:
-            project.export(name, path, unit_system=system, format=chosen, **extras)
+            project.export(name, path, unit_system=system, format=chosen, records=picked,
+                           **extras)
         except (ValueError, OSError) as error:
             raise refused(str(error)) from None
         written = path
@@ -623,7 +635,9 @@ OPERATIONS = (
         summary='Write one object to a file on the service\'s machine, as a Hertzforge object '
                 'or in a format another tool reads; a format that cannot hold the object is '
                 'refused, naming those that can.',
-        params=(OBJECT, FORMAT, PATH, WRITTEN_IN, CREATOR), outputs=('reading',), run=save_as),
+        params=(OBJECT, FORMAT, PATH, WRITTEN_IN, CREATOR,
+                Param('object_records', 'Records (blank: all)', 'string', default='')),
+        outputs=('reading',), run=save_as),
     Operation(
         id='project.rattlesnake_preview', title='Preview a Rattlesnake Run',
         workspace='signals', everywhere=True,

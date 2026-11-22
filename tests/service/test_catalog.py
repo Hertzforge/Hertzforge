@@ -112,7 +112,7 @@ def test_resolve_fills_defaults_and_the_first_object():
     assert values == {'data': 'Noise', 'component': 'magnitude', 'page': 1, 'quantity': ''}
     values = OPS['project.compute_srs'].resolve({}, objects=OBJECTS, verbs=VERBS)
     assert values['source'] == 'Noise'
-    assert set(values) == {'source', 'per_octave', 'q', 'kind', 'low', 'high'}
+    assert set(values) == {'source', 'per_octave', 'q', 'kind', 'low', 'high', 'records'}
 
 
 @pytest.mark.parametrize('op, params, words', [

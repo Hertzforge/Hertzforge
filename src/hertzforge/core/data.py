@@ -830,6 +830,52 @@ class DataArray:
             self.reference_dof[i] = new
         return len(rows) + len(columns)
 
+    def kept(self, records: Sequence[int] | None) -> DataArray:
+        """A copy holding only `records`, in the object's order and once
+        each, with everything each record has (`delete_records` on the
+        copy); the object itself when `records` is None. The records
+        picked in the tree are what an action reads.
+
+        Only the rows kept are copied: the ordinate is sliced, and the
+        object itself is not changed.
+
+        Parameters
+        ----------
+        records : sequence of int or None
+            Which records to keep, by zero-based index.
+
+        Returns
+        -------
+        DataArray
+            The copy, of the object's own type, or the object itself
+            for None.
+
+        Raises
+        ------
+        ValueError
+            For an empty `records`.
+        IndexError
+            For a record the object does not have.
+        """
+        import copy
+
+        if records is None:
+            return self
+        chosen = {int(i) for i in records}
+        if not chosen:
+            raise ValueError('no record is picked')
+        bad = sorted(i for i in chosen if not 0 <= i < self.num_records)
+        if bad:
+            raise IndexError(f'{type(self).__name__} has {self.num_records} records; '
+                             f'no record {bad[0] + 1}')
+        held = copy.copy(self)
+        if hasattr(self, 'limits'):
+            # the limits are replaced name by name, and the original's must stay whole
+            held.limits = dict(self.limits)
+        if len(chosen) < self.num_records:
+            held.delete_records([i for i in range(self.num_records) if i not in chosen])
+        return held
+
     def delete_records(self, indices: Sequence[int] | None = None, *,
                        dof: str | Sequence[str] | None = None,
                        dim: str | Sequence[str] | None = None,

@@ -321,8 +321,11 @@ def _capital(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
-def check(table: Any, span: DateSpan) -> CalibrationCheck:
-    """Each channel of `table` (a `ChannelTable`) against `span`.
+def check(table: Any, span: DateSpan, rows: Sequence[int] | None = None
+          ) -> CalibrationCheck:
+    """Each channel of `table` (a `ChannelTable`) against `span`; with
+    `rows` (indices from zero, such as the rows picked in the tree), those
+    channels alone.
 
     Raises
     ------
@@ -341,7 +344,7 @@ def check(table: Any, span: DateSpan) -> CalibrationCheck:
         raise TypeError(f'the test dates are a DateSpan, not '
                         f'{type(span).__name__}')
     out = []
-    for row in range(table.num_channels):
+    for row in (range(table.num_channels) if rows is None else sorted({int(r) for r in rows})):
         expiration = _expiration(table, row)
         status, days = judge(expiration, span)
         key = _key(table, row)

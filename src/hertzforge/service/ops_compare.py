@@ -21,6 +21,7 @@ import numpy as np
 from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .ops_project import narrowed, picks_param
 from .parsing import parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, positive, quantity_of, sig, spec_line
@@ -107,7 +108,8 @@ def _compared(project: Any, params: dict[str, Any]) -> tuple[Any, Any, list, int
     from hertzforge.core.compliance import compare_all
 
     spec_name, name = params['specification'], params['spectrum']
-    spec, psd = project[spec_name], project[name]
+    # the records picked under each, every record of one picked whole
+    spec, psd = narrowed(project, params, 'specification'), narrowed(project, params, 'spectrum')
     scale, source = _scale(project, spec_name, name)
     rows = _refusing(compare_all, spec, psd, scale_db=scale)
     if not rows:
@@ -383,7 +385,7 @@ def spec_composite(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.multi_point import control_channels, multi_point
 
     spec_name, name = params['specification'], params['spectrum']
-    spec, psd = project[spec_name], project[name]
+    spec, psd = narrowed(project, params, 'specification'), narrowed(project, params, 'spectrum')
     found = project.channel_table_for(name)
     channels = _refusing(control_channels, spec, psd, None,
                          found[1] if found is not None else None)
@@ -486,7 +488,7 @@ def spec_rms(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.drawing.plot import pair_label
 
     name = params['specification']
-    spec = project[name]
+    spec = narrowed(project, params, 'specification')
     references = spec.reference_dof
     wanted = [i for i in range(spec.num_records) if autospectrum(spec, i)]
     if not wanted:
@@ -518,7 +520,7 @@ def _loud_quiet(project: Any, params: dict[str, Any]) -> tuple[tuple[str, Any], 
     """The two densities, louder first: the signal and the noise, by the
     rule the pair is read by (the higher mean density)."""
     _two(params, 'first', 'second')
-    a, b = ((params[key], project[params[key]]) for key in ('first', 'second'))
+    a, b = ((params[key], narrowed(project, params, key)) for key in ('first', 'second'))
     level = [float(np.nanmean(np.real(np.asarray(data.ordinate)))) for _n, data in (a, b)]
     return (a, b) if level[0] >= level[1] else (b, a)
 
@@ -735,7 +737,7 @@ def matrix_comparison(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.matrix_comparison import compare_matrix
 
     spec_name, name = params['specification'], params['cpsd']
-    spec, measured = project[spec_name], project[name]
+    spec, measured = narrowed(project, params, 'specification'), narrowed(project, params, 'cpsd')
     scale, source = _scale(project, spec_name, name)
     comparison = _refusing(compare_matrix, spec, measured,
                            coherence_tolerance=params['coherence_tolerance'],
@@ -839,7 +841,7 @@ def srs_error(project: Any, params: dict[str, Any]) -> list[dict]:
     if not low < high:
         raise refused(f'the band runs from its low edge up; {low:g} to {high:g} dB does not')
     spec_name, name = params['requirement'], params['srs']
-    found = _srs_rows(project[spec_name], project[name])
+    found = _srs_rows(narrowed(project, params, 'requirement'), narrowed(project, params, 'srs'))
     if not found:
         raise refused(f'{name} and {spec_name} have no channel in common to compare')
     events = sorted({row.event for row in found if row.event}, key=lambda b: (len(b), b))
@@ -1050,7 +1052,7 @@ def waveform_error(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.compliance import comparison_note
 
     run_name, ref_name = params['history'], params['reference']
-    run, reference = project[run_name], project[ref_name]
+    run, reference = narrowed(project, params, 'history'), narrowed(project, params, 'reference')
     if rep.averaging_for(run, reference) is None:
         raise refused('the record is shorter than one playing of the specification')
     found = rep.compare(run, reference, metrics=('waveform',))
@@ -1171,6 +1173,9 @@ def replication_segments(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- the operations ------------------------------------------------------------
 
 PAIR = (SPECTRUM, SPECIFICATION)
+#: the records picked under each of the pair, filled from the tree
+PAIR_PICKS = (picks_param('spectrum'), picks_param('specification'))
+TWO_PICKS = (picks_param('first'), picks_param('second'))
 
 OPERATIONS = (
     Operation(
@@ -1182,12 +1187,13 @@ OPERATIONS = (
         id='project.spec_rms_error', title='RMS Error', workspace='random',
         summary='How far each channel\'s RMS sits from the level its specification asks for, '
                 'in dB, against a floor and a ceiling.',
-        params=(*PAIR, ERROR_LOW, ERROR_HIGH), outputs=('reading',), run=spec_rms_error),
+        params=(*PAIR, ERROR_LOW, ERROR_HIGH, *PAIR_PICKS), outputs=('reading',),
+        run=spec_rms_error),
     Operation(
         id='project.spec_lines_out', title='Lines Out', workspace='random',
         summary='How much of each channel\'s band fell outside its abort limits, against a '
                 'ceiling.',
-        params=(*PAIR, LINES_CEILING), outputs=('reading',), run=spec_lines_out),
+        params=(*PAIR, LINES_CEILING, *PAIR_PICKS), outputs=('reading',), run=spec_lines_out),
     Operation(
         id='project.spec_chance', title='Chance', workspace='random',
         summary='One channel\'s miss from its target in dB, and the lines outside each band '
@@ -1198,7 +1204,8 @@ OPERATIONS = (
         id='project.spec_composite', title='Composite', workspace='random',
         summary='The control channels combined as the controller held them: the composite '
                 'against its band and each channel against its own.',
-        params=(*PAIR, STRATEGY, WEIGHTS, COMPOSITE_BAND, COMPOSITE_LOW, COMPOSITE_HIGH,
+        params=(*PAIR, *PAIR_PICKS, STRATEGY, WEIGHTS, COMPOSITE_BAND, COMPOSITE_LOW,
+                COMPOSITE_HIGH,
                 INDIVIDUAL_BAND, INDIVIDUAL_LOW, INDIVIDUAL_HIGH),
         outputs=('spectrum', 'reading'), run=spec_composite),
     Operation(
@@ -1210,22 +1217,25 @@ OPERATIONS = (
     Operation(
         id='project.spec_rms', title='Specification RMS', workspace='random',
         summary='The RMS level each channel of a specification asks for.',
-        params=(SPECIFICATION,), outputs=('reading',), run=spec_rms),
+        params=(SPECIFICATION, picks_param('specification')), outputs=('reading',),
+        run=spec_rms),
     Operation(
         id='project.psd_overlay', title='Overlaid', workspace='random',
         summary='Two densities drawn over each other, channel by channel, the louder solid '
                 'and the quieter dashed.',
-        params=(FIRST, SECOND), outputs=('spectrum',), run=psd_overlay),
+        params=(FIRST, SECOND, *TWO_PICKS), outputs=('spectrum',), run=psd_overlay),
     Operation(
         id='project.signal_to_noise', title='Signal to Noise (dB)', workspace='random',
         summary='The louder density over the quieter, line by line in dB: the louder less '
                 'the quieter, over the quieter.',
-        params=(FIRST, SECOND), outputs=('spectrum', 'reading'), run=signal_to_noise),
+        params=(FIRST, SECOND, *TWO_PICKS), outputs=('spectrum', 'reading'),
+        run=signal_to_noise),
     Operation(
         id='project.rms_signal_to_noise', title='RMS Signal to Noise', workspace='random',
         summary='Each channel\'s signal over its noise across the whole band, from the RMS '
                 'of the two densities, against a floor.',
-        params=(FIRST, SECOND, FLOOR), outputs=('reading',), run=rms_signal_to_noise),
+        params=(FIRST, SECOND, FLOOR, *TWO_PICKS), outputs=('reading',),
+        run=rms_signal_to_noise),
     Operation(
         id='project.signature', title='Signature', workspace='modal',
         summary='Two signatures of one article, before and after a test, compared mode by '
@@ -1236,7 +1246,8 @@ OPERATIONS = (
         id='project.matrix_comparison', title='Matrix', workspace='random',
         summary='A cross-spectral matrix judged whole against its specification: the levels '
                 'on the diagonal, each cross term\'s coherence above it and phase below it.',
-        params=(SPECIFICATION, CPSD, COHERENCE_TOLERANCE, PHASE_TOLERANCE, COHERENCE_FLOOR),
+        params=(SPECIFICATION, CPSD, COHERENCE_TOLERANCE, PHASE_TOLERANCE, COHERENCE_FLOOR,
+                picks_param('specification'), picks_param('cpsd')),
         outputs=('matrix', 'reading'), run=matrix_comparison),
     Operation(
         id='project.srs_spectra', title='Shock Spectra', workspace='shock',
@@ -1248,7 +1259,8 @@ OPERATIONS = (
         id='project.srs_error', title='SRS Error', workspace='shock',
         summary='How far each channel\'s shock spectrum sits from the one it had to meet, '
                 'RMS across the band in dB, against a floor and a ceiling.',
-        params=(SRS, REQUIREMENT, SRS_LOW, SRS_HIGH), outputs=('reading',), run=srs_error),
+        params=(SRS, REQUIREMENT, SRS_LOW, SRS_HIGH, picks_param('srs'),
+                picks_param('requirement')), outputs=('reading',), run=srs_error),
     Operation(
         id='project.srs_points', title='Points Rule', workspace='shock',
         summary='One shock spectrum against its requirement\'s tolerance band point by point: '
@@ -1266,7 +1278,8 @@ OPERATIONS = (
         id='project.waveform_error', title='Waveform Error', workspace='transient',
         summary='Every control channel\'s waveform error at every playing of the reference, '
                 'against a ceiling.',
-        params=(HISTORY, REFERENCE, WAVEFORM_CEILING), outputs=('reading',),
+        params=(HISTORY, REFERENCE, WAVEFORM_CEILING, picks_param('history'),
+                picks_param('reference')), outputs=('reading',),
         run=waveform_error),
     Operation(
         id='project.replication_segments', title='Segments', workspace='transient',

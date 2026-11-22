@@ -876,7 +876,12 @@ and the project's files. `fill` is the params to set from the selection. An acti
 the params that number an object's channels, records or rows are filled from the picks under it and
 named in `omit`, which keeps them off the form: a list (`records`, `channels`, `rows`) as `'1-3, 7'`,
 blank for the object whole; one number (`record`, `drawn`) as the first one picked; and `picked`, for
-an operation on one channel that is run on each of them, as that list or `"all"`.
+an operation on one channel that is run on each of them, as that list or `"all"`. An operation on more
+than one object has a list for each one it reads picks under: `<param>_records` for the object param
+`<param>` names (`spectrum_records`, `first_records`), and the modes of two shape sets as
+`first_modes` and `second_modes`. Each is filled from the picks under that object alone. An
+operation that reads an object whole whatever is picked under it says why in the service's own table
+(`action_table.WHOLE`, `WHOLE_OBJECTS`).
 
 The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is

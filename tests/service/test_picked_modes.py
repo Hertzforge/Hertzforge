@@ -1,7 +1,7 @@
 """An action on shape sets reads the modes picked under each set in the tree, every mode of a
 set picked whole: the MAC, Match Modes, Add Matches, Transform, Reduce and the rest
-(`action_table.PICKED_MODES`). An action that takes a set whole says why
-(`action_table.WHOLE_SETS`)."""
+(`action_table.PICKED`). That every action reads its picks or says why not is
+`test_picked_records`'s."""
 
 from __future__ import annotations
 
@@ -14,9 +14,8 @@ import pytest
 import hertzforge
 from hertzforge.core.data import TimeHistory
 from hertzforge.core.shapes import ShapeSet, cross_mac
-from hertzforge.service import action_table, projects
+from hertzforge.service import projects
 from hertzforge.service.protocol import ProtocolError
-from hertzforge.service.server import OPERATIONS
 from hertzforge.service.show import _run
 
 from .conftest import wire_views
@@ -200,23 +199,3 @@ def test_the_kept_set_is_a_copy_of_the_modes_in_order():
     assert a.kept(None) is a
     with pytest.raises(ValueError, match='no modes are picked'):
         a.kept([])
-
-
-def test_every_action_on_a_shape_set_reads_its_picks_or_says_why_not(state):
-    """The rule, enforced: an action that takes a shape set fills a param from the modes
-    picked under it, or is listed with the reason it takes the set whole."""
-    verbs = projects.verbs_of(state.project, 'A')
-    takes = [op.id for op in action_table._rows_of(OPERATIONS)
-             if any('shape_set' in p.kinds or (p.verb and p.verb in verbs)
-                    for p in op.params if p.kinds or p.verb)]
-    assert 'project.match_modes' in takes and 'project.transform' in takes
-    neither = [op for op in takes
-               if op not in action_table.PICKED_MODES and op not in action_table.WHOLE_SETS]
-    assert neither == []
-    both = set(action_table.PICKED_MODES) & set(action_table.WHOLE_SETS)
-    assert both == set()
-    # each param a set's picks fill is one the action has, and names a param holding a set
-    by_id = {op.id: op for op in OPERATIONS}
-    for op_id, fills in action_table.PICKED_MODES.items():
-        names = {p.name for p in by_id[op_id].params}
-        assert set(fills) <= names and set(fills.values()) <= names, op_id

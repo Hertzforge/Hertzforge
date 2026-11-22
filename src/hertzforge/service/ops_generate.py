@@ -25,6 +25,7 @@ from . import display_units, run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .op_progress import hook
+from .ops_project import RECORDS, narrowed, picked_dofs_of, picked_records, picks_param
 from .ops_sine_shock import (
     EDGE_WORDS,
     STROKE_RATINGS,
@@ -160,6 +161,11 @@ def generate_signal(project: Any, params: dict[str, Any]) -> list[dict]:
     name, kind = params['source'], params['kind']
     source = project[name]
     settings = _settings(source, params)
+    picked = picked_records(project, name, params.get('source_records', ''))
+    if picked is not None:
+        # the DOFs of the records picked under the source are the ones generated
+        listed = picked_dofs_of(source)
+        settings['dofs'] = list(dict.fromkeys(listed[i] for i in picked))
     added = _core(lambda: project.generate_signal(name, kind, **settings, progress=hook()))
     made = project[added]
     chosen = SignalSettings.from_dict(project.provenance[added]['params'])
@@ -386,7 +392,7 @@ def synthesize_modal_frfs(project: Any, params: dict[str, Any]) -> list[dict]:
     modes are above the Nyquist frequency, which are kept. It previews, so
     the line spacing a sample rate and frame give is read while they are
     typed. The modes are the ones picked under the set in the tree, every
-    one when the set is selected whole (`action_table.PICKED_MODES`)."""
+    one when the set is selected whole (`action_table.PICKED`)."""
     from hertzforge.core.modal_frf import above_nyquist, frequency_lines
 
     name = params['source']
@@ -731,8 +737,10 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     frf_name, spec_name = params['frf'], params['specification']
     ratings = {p.name: params[p.name] for p in STROKE_RATINGS if params[p.name]}
     shakers = _core(lambda: ShakerRating(**ratings)) if ratings else None
+    # the records picked under each, every record of one picked whole
     prediction = _core(lambda: predict_drives(
-        project[frf_name], project[spec_name], method=params['method'],
+        narrowed(project, params, 'frf'), narrowed(project, params, 'specification'),
+        method=params['method'],
         tolerance=params['tolerance'], weight=params['weight'],
         duration=params['duration'], drive_limit=params['drive_limit'] or None,
         shakers=shakers))
@@ -812,8 +820,10 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
 
     frf_name, spec_name = params['frf'], params['specification']
     profiles_name = params['profiles']
-    profiles = None if profiles_name == spec_name else project[profiles_name]
-    prediction = _core(lambda: predict_limits(project[frf_name], project[spec_name],
+    profiles = (None if profiles_name == spec_name
+                else narrowed(project, params, 'profiles'))
+    prediction = _core(lambda: predict_limits(narrowed(project, params, 'frf'),
+                                              narrowed(project, params, 'specification'),
                                               profiles, tolerance=params['tolerance']))
     run_logs.offer(project, 'limit', prediction, f'{spec_name} through {frf_name}')
     f = np.asarray(prediction.frequency, dtype=float)
@@ -899,7 +909,9 @@ def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.units import UNKNOWN
 
     name = params['data']
-    reading = _core(project[name].conditioning)
+    # the matrix the records picked make (`spectral_matrix`), every record when none is picked
+    records = picked_records(project, name, params.get('records', ''))
+    reading = _core(lambda: project[name].conditioning(records))
     f = np.asarray(reading.frequency, dtype=float)
     judged = reading.judged & (f > 0.0)
     unit = None if reading.dimension == UNKNOWN else unit_text(reading.dimension)
@@ -951,7 +963,8 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     the reading at one line as its pane gives it at the cursor. Make
     Realizable adds the repair."""
     name = params['data']
-    reading = _core(project[name].realizability)
+    records = picked_records(project, name, params.get('records', ''))
+    reading = _core(lambda: project[name].realizability(records))
     f = np.asarray(reading.frequency, dtype=float)
     judged = reading.judged & (f > 0.0)
     n = len(reading.channels)
@@ -1015,7 +1028,8 @@ OPERATIONS = (
                 'reference channels, added beside its source: random, burst random, '
                 'periodic random, an impulse, a classical pulse or a sine. Only the settings '
                 'its kind reads are used.',
-        params=(SIGNAL_SOURCE, KIND, SAMPLE_RATE, DURATION, FRAME, SEED, CROSS_TERMS, BURSTS,
+        params=(SIGNAL_SOURCE, picks_param('source'), KIND, SAMPLE_RATE, DURATION, FRAME, SEED,
+                CROSS_TERMS, BURSTS,
                 BURST, TAPER, PERIODS, REPEATS, BAND_LOW, BAND_HIGH, LEVEL, STARTS, PEAK,
                 WIDTH, SHAPE, PULSE, EDGE, TONE, DOFS),
         outputs=('spectrum', 'reading'), run=generate_signal),
@@ -1060,7 +1074,8 @@ OPERATIONS = (
         id='project.drive_prediction', title='Drive Prediction', workspace='specify',
         summary='The drives a specification asks for through an FRF\'s regularized inverse, '
                 'the response they make, and what they ask of the amplifiers and shakers.',
-        params=(PLANT, TARGET, INVERSE, TOLERANCE, WEIGHT, RUN, DRIVE_LIMIT,
+        params=(PLANT, TARGET, picks_param('frf'), picks_param('specification'), INVERSE,
+                TOLERANCE, WEIGHT, RUN, DRIVE_LIMIT,
                 *STROKE_RATINGS, RESPONSE),
         outputs=('spectrum', 'reading'), run=drive_prediction),
     Operation(
@@ -1068,16 +1083,17 @@ OPERATIONS = (
         summary='Where each limit channel would exceed its profile at full level, from a '
                 'transmissibility from the control channel, and the notch the controller '
                 'would cut in the control to hold it there.',
-        params=(TRANSMISSIBILITY, TARGET, PROFILES, PAIR),
+        params=(TRANSMISSIBILITY, TARGET, PROFILES, PAIR, picks_param('frf'),
+                picks_param('specification'), picks_param('profiles')),
         outputs=('spectrum', 'table', 'reading'), run=notch_prediction),
     Operation(
         id='project.conditioning', title='Conditioning', workspace='modal',
         summary='The singular values and condition number of an FRF from several references '
                 'or of a CPSD at every line, read at one frequency.',
-        params=(MATRIX, AT), outputs=('spectrum', 'reading'), run=conditioning),
+        params=(MATRIX, AT, RECORDS), outputs=('spectrum', 'reading'), run=conditioning),
     Operation(
         id='project.realizability', title='Realizability', workspace='random',
         summary='Whether any set of signals has a CPSD, line by line, from the eigenvalues of '
                 'its coherence matrix, read at one frequency.',
-        params=(CPSD, AT), outputs=('spectrum', 'reading'), run=realizability),
+        params=(CPSD, AT, RECORDS), outputs=('spectrum', 'reading'), run=realizability),
 )

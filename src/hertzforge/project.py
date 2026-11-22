@@ -2345,7 +2345,7 @@ class Project(dict):
                 out.append((verb, ' '.join(doc.split('\n\n', 1)[0].split())))
         return out
 
-    def compute_spectra(self, source: Any) -> str:
+    def compute_spectra(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Compute the raw spectra of a time history (Compute Spectra):
         each capture whole, unwindowed and unscaled (a sine of amplitude A
         on a line reads A*N/2), averaged as a complex mean
@@ -2355,6 +2355,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -2363,8 +2367,24 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self[source].compute_spectra(),
-                            f'{source} Spectra', recipe=('compute_spectra', {}))
+        return self._derive(source, self._picked(self[source], records).compute_spectra(),
+                            f'{source} Spectra',
+                            recipe=('compute_spectra', self._with_records({}, records)))
+
+    def _picked(self, data: Any, records: Sequence[int] | None) -> Any:
+        """`data` as an action reads it: the records picked in it
+        (`DataArray.kept`), every record when `records` is None. Raises
+        ValueError for a record it does not have."""
+        try:
+            return data.kept(None if records is None else [int(i) for i in records])
+        except IndexError as error:
+            raise ValueError(str(error)) from None
+
+    @staticmethod
+    def _with_records(params: dict[str, Any], records: Sequence[int] | None) -> dict[str, Any]:
+        """A recipe's params, with the records it read when some were picked, so a
+        refresh reads the same ones."""
+        return params if records is None else {**params, 'records': [int(i) for i in records]}
 
     def _framed(self, source: str) -> TimeHistory:
         """The history a density is computed from, its frames set first
@@ -2384,7 +2404,7 @@ class Project(dict):
             history.averaging = history.suggest_averaging()
         return history
 
-    def compute_psds(self, source: Any) -> str:
+    def compute_psds(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Compute PSDs from a time history's averages (Compute PSDs). A
         history of one capture with no averaging set has its frames
         detected and stored on it (`_framed`).
@@ -2393,6 +2413,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -2401,8 +2425,9 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self._framed(source).compute_psds(),
-                            f'{source} PSDs', recipe=('compute_psds', {}))
+        return self._derive(source, self._picked(self._framed(source), records).compute_psds(),
+                            f'{source} PSDs',
+                            recipe=('compute_psds', self._with_records({}, records)))
 
     def transform_responses(self, source: Any, environment: str,
                             table: Any = None) -> str:
@@ -3138,8 +3163,8 @@ class Project(dict):
         return time_caption(history, records, run=name, channel_table=table,
                             geometry=geometry, unit_system=unit_system)
 
-    def compute_octave(self, source: Any, per_octave: int | None = None
-                       ) -> str:
+    def compute_octave(self, source: Any, per_octave: int | None = None, *,
+                       records: Sequence[int] | None = None) -> str:
         """Integrate a spectrum onto proportional octave bands (Compute
         Octave Bands). A specification's warning and abort limits are
         banded the same way.
@@ -3153,6 +3178,10 @@ class Project(dict):
             The object to read, by name or as the object itself.
         per_octave : int, optional
             Bands per octave. Defaults to `core.octave.PER_OCTAVE`, 6.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3165,13 +3194,14 @@ class Project(dict):
         per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
         source = self.name_of(source)
         return self._derive(
-            source, self[source].to_octave(per_octave),
+            source, self._picked(self[source], records).to_octave(per_octave),
             f'{source} 1/{per_octave} Octave',
-            recipe=('compute_octave', {'per_octave': per_octave}))
+            recipe=('compute_octave', self._with_records({'per_octave': per_octave}, records)))
 
     def make_realizable(self, source: Any, *, name: str | None = None,
                         tolerance: float | None = None,
                         keep_diagonal: bool = True,
+                        records: Sequence[int] | None = None,
                         progress: Any = None) -> str:
         """Repair a cross-spectral matrix to the nearest realizable one
         (Make Realizable in the Realizability reading), and add the
@@ -3201,6 +3231,10 @@ class Project(dict):
         progress : callable, optional
             Called with ``(done, total)`` as the repair goes on. The
             app's progress bar uses it; a script can print it.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3222,7 +3256,7 @@ class Project(dict):
                      else float(tolerance))
         source = self.name_of(source)
         repaired, reading = made_realizable(
-            self[source], tolerance=tolerance, keep_diagonal=keep_diagonal,
+            self[source], records, tolerance=tolerance, keep_diagonal=keep_diagonal,
             progress=progress)
         if not reading.judged.any():
             raise ValueError(f'{source!r}: no line could be judged, so there '
@@ -3233,10 +3267,11 @@ class Project(dict):
                              'there is nothing to repair')
         return self._derive(
             source, repaired, name or f'{source} Realizable',
-            recipe=('make_realizable', {'tolerance': tolerance,
-                                        'keep_diagonal': bool(keep_diagonal)}))
+            recipe=('make_realizable', self._with_records(
+                {'tolerance': tolerance, 'keep_diagonal': bool(keep_diagonal)}, records)))
 
-    def compute_frfs(self, source: Any, method: str = 'Hv') -> str:
+    def compute_frfs(self, source: Any, method: str = 'Hv', *,
+                     records: Sequence[int] | None = None) -> str:
         """Compute frequency response functions from a time history
         (Compute FRFs), one for each response and drive, over the
         frames a PSD uses.
@@ -3256,6 +3291,10 @@ class Project(dict):
             The object to read, by name or as the object itself.
         method : str, default 'Hv'
             Which estimator: 'Hv', 'H1' or 'H2'.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3268,9 +3307,10 @@ class Project(dict):
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
-        return self._derive(source, history.compute_frfs(method=method),
+        return self._derive(source, self._picked(history, records).compute_frfs(method=method),
                             f'{source} {method} FRFs',
-                            recipe=('compute_frfs', {'method': method}))
+                            recipe=('compute_frfs',
+                                    self._with_records({'method': method}, records)))
 
     def reprocess_modal_test(self, source: Any, method: str = 'H1', *,
                              force: float | None = None,
@@ -3454,7 +3494,8 @@ class Project(dict):
         return source.read_partial_coherence(
             averaging=self.averaging_of(name))
 
-    def compute_multiple_coherence(self, source: Any) -> str:
+    def compute_multiple_coherence(self, source: Any, *,
+                                   records: Sequence[int] | None = None) -> str:
         """Compute the multiple coherence from a time history (Compute
         Multiple Coherence): how much of each response the drives
         account for.
@@ -3469,6 +3510,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3481,16 +3526,18 @@ class Project(dict):
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
-        return self._derive(source, history.compute_multiple_coherence(),
+        return self._derive(source, self._picked(history, records).compute_multiple_coherence(),
                             f'{source} Multiple Coherence',
-                            recipe=('compute_multiple_coherence', {}))
+                            recipe=('compute_multiple_coherence',
+                                    self._with_records({}, records)))
 
     def compute_srs(self, source: Any, *,
                     per_octave: int | None = None,
                     q: float | None = None,
                     kind: str = 'maximax',
                     low: float | None = None,
-                    high: float | None = None) -> str:
+                    high: float | None = None,
+                    records: Sequence[int] | None = None) -> str:
         """Compute shock response spectra from a time history's shocks
         (Compute SRS), one curve per channel per event.
 
@@ -3520,6 +3567,10 @@ class Project(dict):
             The natural-frequency band, in Hz, to reach a requirement's
             own. Default to the record's (`TimeHistory.srs_band`) and
             `srs_ceiling`.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3560,14 +3611,14 @@ class Project(dict):
         # the recipe like integrate's drift corner — a refresh after
         # the windows move recomputes at the same Q, spacing and kind
         return self._derive(source,
-                            history.compute_srs(
+                            self._picked(history, records).compute_srs(
                                 per_octave=per_octave, q=q, kind=kind,
                                 low=band.get('low'),
                                 high=band.get('high', self.srs_ceiling(source))),
                             f'{source} SRS',
-                            recipe=('compute_srs',
-                                    {'per_octave': per_octave,
-                                     'q': q, 'kind': kind, **band}))
+                            recipe=('compute_srs', self._with_records(
+                                {'per_octave': per_octave, 'q': q, 'kind': kind, **band},
+                                records)))
 
     def _check_srs_band(self, source: str, low: float | None,
                         high: float | None) -> None:
@@ -3649,7 +3700,7 @@ class Project(dict):
             current = made.get('source')
         return min(corners) if corners else None
 
-    def detect_shocks(self, source: Any) -> int:
+    def detect_shocks(self, source: Any, *, records: Sequence[int] | None = None) -> int:
         """Find the events in a time history and mark them on it (Detect
         in the shock view). Returns how many were found.
 
@@ -3664,6 +3715,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3677,10 +3732,11 @@ class Project(dict):
         from .core.shocks import find
 
         history = self[source]
-        history.shocks = find(history)
+        # the events are the history's, found in the channels picked
+        history.shocks = find(self._picked(history, records))
         return len(history.shocks or ())
 
-    def filter_data(self, source: Any) -> str:
+    def filter_data(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Filter a time history with its own filter settings (Apply
         Filter in the filter view), every channel at zero phase so the
         peaks stay where they are.
@@ -3696,6 +3752,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3707,12 +3767,13 @@ class Project(dict):
         history = self[source]
         if history.filtering is None:
             history.filtering = history.suggest_filtering()
-        return self._derive(source, history.filter(),
+        return self._derive(source, self._picked(history, records).filter(),
                             f'{source} Filtered',
-                            recipe=('filter_data', {}))
+                            recipe=('filter_data', self._with_records({}, records)))
 
     def resample(self, source: Any, rate: float, *, anti_alias: bool = True,
-                 order: int | None = None) -> str:
+                 order: int | None = None,
+                 records: Sequence[int] | None = None) -> str:
         """Take a time history to a lower sample rate (Apply Resample in
         the resample view) and add the result beside it.
 
@@ -3733,6 +3794,10 @@ class Project(dict):
         order : int, optional
             The anti-alias filter's design order,
             `core.resample.ORDER` when omitted.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3746,13 +3811,13 @@ class Project(dict):
         # apply (principle 13).
         source = self.name_of(source)
         history = self[source]
-        made = history.resample(float(rate), anti_alias=anti_alias,
-                                order=order)
+        made = self._picked(history, records).resample(float(rate), anti_alias=anti_alias,
+                                                       order=order)
         return self._derive(source, made, f'{source} at {rate:g} Hz',
-                            recipe=('resample', {
+                            recipe=('resample', self._with_records({
                                 'rate': float(rate),
                                 'anti_alias': bool(anti_alias),
-                                'order': order}))
+                                'order': order}, records)))
 
     def rescale(self, source: Any, factor: float | None = None, *,
                 recorded_sensitivity: float | None = None,
@@ -3824,7 +3889,7 @@ class Project(dict):
                             recipe=('rescale', {'factor': float(factor),
                                                 'records': kept}))
 
-    def truncate_data(self, source: Any) -> str:
+    def truncate_data(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Cut a time history to its truncation span (Apply Truncation in
         the truncate view): every channel between start and stop, on the
         record's original clock.
@@ -3839,6 +3904,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3850,11 +3919,12 @@ class Project(dict):
         history = self[source]
         if history.truncation is None:
             raise ValueError('no span set: Truncation sets one')
-        return self._derive(source, history.truncate(),
+        return self._derive(source, self._picked(history, records).truncate(),
                             f'{source} Truncated',
-                            recipe=('truncate_data', {}))
+                            recipe=('truncate_data', self._with_records({}, records)))
 
-    def integrate(self, source: Any, drift_corner: Any = ...) -> str:
+    def integrate(self, source: Any, drift_corner: Any = ..., *,
+                  records: Sequence[int] | None = None) -> str:
         """Integrate a time history once (Integrate): acceleration
         channels become velocity, and velocity channels become
         displacement.
@@ -3872,6 +3942,10 @@ class Project(dict):
             sensor bias does not become a ramp. ``...``, the default,
             uses `core.filters.DRIFT_CORNER` (2 Hz). None applies no
             high-pass, so any drift is kept.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3883,12 +3957,13 @@ class Project(dict):
 
         corner = DRIFT_CORNER if drift_corner is ... else drift_corner
         source = self.name_of(source)
-        result = self[source].integrate(corner)
+        result = self._picked(self[source], records).integrate(corner)
         return self._derive(source, result,
                             _motion_name(source, result, 'Integrated'),
-                            recipe=('integrate', {'drift_corner': corner}))
+                            recipe=('integrate',
+                                    self._with_records({'drift_corner': corner}, records)))
 
-    def differentiate(self, source: Any) -> str:
+    def differentiate(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Differentiate a time history once (Differentiate):
         displacement channels become velocity, and velocity channels
         become acceleration.
@@ -3897,6 +3972,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3905,12 +3984,12 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        result = self[source].differentiate()
+        result = self._picked(self[source], records).differentiate()
         return self._derive(source, result,
                             _motion_name(source, result, 'Differentiated'),
-                            recipe=('differentiate', {}))
+                            recipe=('differentiate', self._with_records({}, records)))
 
-    def compute_cpsds(self, source: Any) -> str:
+    def compute_cpsds(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Compute the full cross-spectral matrix from a time history's
         averages (Compute CPSDs), every channel against every channel. A
         history of one capture with no averaging set has its frames
@@ -3920,6 +3999,10 @@ class Project(dict):
         ----------
         source : str or object
             The object to read, by name or as the object itself.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -3928,8 +4011,9 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
-        return self._derive(source, self._framed(source).compute_cpsds(),
-                            f'{source} CPSDs', recipe=('compute_cpsds', {}))
+        return self._derive(source, self._picked(self._framed(source), records).compute_cpsds(),
+                            f'{source} CPSDs',
+                            recipe=('compute_cpsds', self._with_records({}, records)))
 
     def transform(self, source: Any, shapes: Any, *,
                   records: Sequence[int] | None = None,
@@ -7140,7 +7224,8 @@ class Project(dict):
         return added
 
     def export(self, name: str, path: str | os.PathLike,
-               unit_system: Any = None, **kwargs: Any) -> str:
+               unit_system: Any = None, *, records: Sequence[int] | None = None,
+               **kwargs: Any) -> str:
         """Write an object to another file format, chosen by the file's
         suffix (Export).
 
@@ -7157,6 +7242,10 @@ class Project(dict):
         unit_system : UnitSystem, optional
             Units to write in. Omitted, the stored (SI) values are
             written as they are.
+        records : sequence of int, optional
+            The records of a data object, or the modes of a shape set,
+            to write, by index from zero, such as the ones picked in the
+            tree. Every one when omitted.
         **kwargs
             Passed through to the exporter. An Exodus file's `geometry`
             may be the object or its name, as the journal writes it.
@@ -7171,8 +7260,8 @@ class Project(dict):
         name = self.name_of(name)
         if isinstance(kwargs.get('geometry'), str):
             kwargs['geometry'] = self[kwargs['geometry']]
-        export_file(self[name], str(path), unit_system=unit_system,
-                    **kwargs)
+        export_file(self[name].kept(records) if records is not None else self[name],
+                    str(path), unit_system=unit_system, **kwargs)
         return str(path)
 
     def export_state_space(self, shapes: Any, table: Any,
@@ -9654,7 +9743,8 @@ class Project(dict):
 
     def extract_sine(self, source: Any,
                      specification: Any = None,
-                     progress: Any = None) -> list[str]:
+                     progress: Any = None, *,
+                     records: Sequence[int] | None = None) -> list[str]:
         """Read each specification tone's level out of a recording
         (Extract Sine Levels), as one sine level set holding every tone.
 
@@ -9679,6 +9769,10 @@ class Project(dict):
             the solve's pieces for each channel. The app's progress bar
             uses it; a script can print it. Anything it raises stops
             the extraction.
+        records : sequence of int, optional
+            Which of the source's records to read, by index from zero,
+            such as the ones picked in the tree. Every record when
+            omitted; a refresh reads the same ones.
 
         Returns
         -------
@@ -9727,7 +9821,7 @@ class Project(dict):
         setting = history.sine_extraction
         if setting is None:
             setting = history.suggest_sine_extraction()
-        levels = extract_sine(history, spec, cycles=setting.cycles,
+        levels = extract_sine(self._picked(history, records), spec, cycles=setting.cycles,
                               refine=setting.refine,
                               target_db=setting.target_db,
                               progress=progress)
@@ -9735,8 +9829,8 @@ class Project(dict):
         # the journal say what was used
         history.sine_extraction = replace(setting, chosen=levels.cycles)
         return [self._derive(source, levels, 'Sine Levels',
-                             recipe=('extract_sine',
-                                     {'specification': spec_name}))]
+                             recipe=('extract_sine', self._with_records(
+                                 {'specification': spec_name}, records)))]
 
     def _derive(self, source: str, obj: Any, name: str,
                 recipe: tuple[str, dict[str, Any]] | None = None,

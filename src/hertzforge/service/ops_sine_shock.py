@@ -16,7 +16,8 @@ from hertzforge.units import signed
 
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .parsing import parse_numbers
+from .ops_project import picks_param
+from .parsing import parse_numbers, parse_optional_picks
 from .protocol import refused
 from .waterfalls import unit_text
 
@@ -152,6 +153,15 @@ def sine_extraction(project: Any, params: dict[str, Any]) -> list[dict]:
 THRESHOLD = Param('threshold', 'Threshold', 'number', default=3.0, min=0.1, step=0.5, unit='dB')
 
 
+def picked_dofs(grouped: Any, text: str) -> set[str] | None:
+    """The control DOFs picked under a sine specification or a level set,
+    numbered as the tree lists them (`sine_dofs`); None for every DOF when
+    `text` is blank."""
+    dofs = sine_dofs(grouped)
+    picks = parse_optional_picks(text, len(dofs), 'channel')
+    return None if picks is None else {dofs[i] for i in picks}
+
+
 def sine_dofs(grouped: Any) -> list[str]:
     """The control DOFs a sine specification or a level set covers, in
     order: the specification's own, or the union of its levels', since a
@@ -250,6 +260,17 @@ def level_error(project: Any, params: dict[str, Any]) -> list[dict]:
     if not matched:
         raise refused(f'{levels_name} holds no tone of {spec_name} '
                       f'({", ".join(tones)})')
+    # the control DOFs picked under either, every DOF of one picked whole
+    wanted = [dofs for dofs in (picked_dofs(spec, params.get('specification_records', '')),
+                                picked_dofs(levels, params.get('levels_records', '')))
+              if dofs is not None]
+    if wanted:
+        dofs = set.intersection(*wanted)
+        matched = [level.kept([i for i, dof in enumerate(level.response_dof)
+                               if str(dof) in dofs])
+                   for level in matched if any(str(dof) in dofs for dof in level.response_dof)]
+        if not matched:
+            raise refused(f'no level of {levels_name} is at a DOF picked')
     tone = _nth(tones, params['tone'], 'tone', spec_name)
     lines, unit = sine_lines(spec, tone, matched)
     levels_view = v.spectrum(f'{tone}: the extracted levels against the requirement of '
@@ -1117,7 +1138,8 @@ OPERATIONS = (
         summary='Extracted sine levels against the specification they were controlled to: '
                 'one tone\'s levels over its requirement, and each channel\'s RMS deviation '
                 'in dB across the sweep.',
-        params=(SWEEP, LEVELS, TONE, THRESHOLD), outputs=('spectrum', 'reading'),
+        params=(SWEEP, LEVELS, TONE, THRESHOLD, picks_param('specification'),
+                picks_param('levels')), outputs=('spectrum', 'reading'),
         run=level_error),
     Operation(
         id='project.sine_distortion', title='Distortion', workspace='sine',
