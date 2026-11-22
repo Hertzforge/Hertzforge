@@ -939,3 +939,45 @@ def test_add_mode_offers_an_empty_group_only_for_the_family_it_was_made_for(proj
         labels[family] = [o['label'] for o in drawn['pick']['settings'][1]['options']]
     assert labels['quads'] == ['First or new', 'element group 1', 'Skins', 'Open']
     assert labels['beams'] == ['First or new', 'Struts', 'Open']
+def test_elements_dragged_onto_a_group_move_into_it(project, validate):
+    """Dragging elements onto an element group in the tree moves them into it: the ones
+    marked, refused when the group holds another element family."""
+    geometry = project['Geometry']
+    first = int(geometry.group_id[0])
+    target = geometry.add_group('target')
+    views = run(project, 'project.move_elements', elements='1-3, 7', group=target)
+    wire_views(views, validate)
+    moved = sorted(int(e) for e, g in zip(geometry.elem_id, geometry.elem_group) if g == target)
+    assert moved == [1, 2, 3, 7]
+    assert views[-1]['title'].endswith('(4 elements moved in)')
+    assert [row[0] for row in views[-1]['rows']] == ['1', '2', '3', '7'], "the group's table"
+    again = run(project, 'project.move_elements', elements='1-3', group=target)
+    assert again[-1]['title'].endswith('(0 elements moved in)')
+    run(project, 'project.move_elements', elements='7', group=first)
+    assert int(geometry.elem_group[np.flatnonzero(geometry.elem_id == 7)[0]]) == first
+    run(project, 'project.add_element_group', name='struts')
+    struts = int(geometry.group_id[-1])
+    run(project, 'project.add_element', family='beams', nodes='101 102', group=struts)
+    with pytest.raises(ProtocolError, match=f'element group {struts} holds beams; these elements are quads'):
+        run(project, 'project.move_elements', elements='4', group=struts)
+    beam = int(geometry.elem_id[-1])
+    with pytest.raises(ProtocolError, match='one element family; these elements are beams and quads'):
+        run(project, 'project.move_elements', elements=f'4, {beam}', group=target)
+    with pytest.raises(ProtocolError, match='no element 99999'):
+        run(project, 'project.move_elements', elements='99999', group=target)
+    with pytest.raises(ProtocolError, match='no element group 77'):
+        run(project, 'project.move_elements', elements='4', group=77)
+
+
+def test_an_empty_group_made_for_a_family_takes_only_that_family():
+    from hertzforge.core.geometry import Geometry
+
+    geometry = Geometry(node_id=[1, 2, 3, 4], node_xyz=np.eye(4, 3),
+                        elem_id=[1], elem_type=[44], elem_conn=[np.array([1, 2, 3, 4])],
+                        elem_group=[1], group_id=[1], group_name=['plate'])
+    beams = geometry.add_group('beams')
+    geometry.group_family = {beams: 'beams'}
+    with pytest.raises(ValueError, match=f'element group {beams} holds beams'):
+        geometry.move_elements([1], beams)
+    open_group = geometry.add_group('any')
+    assert geometry.move_elements([1], open_group) == 1, 'an empty group made for nothing takes any'

@@ -708,6 +708,26 @@ def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
                   + (f' for the {family}' if family else ''))
 
 
+def move_elements(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.move_elements`: elements put in another element group
+    (`Geometry.move_elements`), as dragging them onto it in the tree does; the group's
+    Edit views show after."""
+    name = params['geometry']
+    geometry = project[name]
+    ids = parse_id_runs(params['elements'])
+    if not ids:
+        raise refused('name the elements to move, such as 1-3, 7')
+    try:
+        moved = geometry.move_elements(ids, params['group'])
+    except ValueError as error:
+        raise refused(str(error)) from None
+    project.record_call(name, 'move_elements', ids, int(params['group']))
+    views = view_entities(project, {'geometry': name, 'kind': 'elements', 'family': '',
+                                    'groups': str(params['group']), 'cs': 0})
+    views[-1]['title'] += f' ({moved} element{"s" * (moved != 1)} moved in)'
+    return views
+
+
 ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
 FIELDS = {
     'nodes': ('id', 'x', 'y', 'z', 'placement_cs', 'displacement_cs'),
@@ -1674,6 +1694,12 @@ OPERATIONS = (
            (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP,
             Param('groups', 'Element groups whose Edit shows after', 'string', default='')),
            DRAWN, add_element),
+    _model('project.move_elements', 'Move Elements',
+           'Elements put in another element group of the same element family, as dragging '
+           'them onto it in the tree does.',
+           (GEOMETRY, Param('elements', 'Elements, as 1-3, 7', 'string', default=''),
+            Param('group', 'Element group', 'integer', default=1, min=1, step=1)),
+           DRAWN, move_elements),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
            (GEOMETRY, GROUP_NAME, NODE_ID,
             Param('family', 'Element family (blank: none yet)', 'string', default='')),

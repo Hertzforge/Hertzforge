@@ -1956,6 +1956,56 @@ class Geometry:
             raise ValueError(f'no element group {group_id}')
         self.group_name[int(rows[0])] = str(name).strip()
 
+    def move_elements(self, elem_ids: Ids, group_id: int) -> int:
+        """Put elements in another element group, as dragging them onto it in the tree does.
+
+        An element group holds one element family, so elements of another family than
+        the group holds, or than an empty group was made for (`group_family`), are
+        refused, as are elements of two families at once. The groups they leave stay,
+        empty if they held nothing else.
+
+        Parameters
+        ----------
+        elem_ids : sequence of int
+            The elements, by id.
+        group_id : int
+            The element group they go in.
+
+        Returns
+        -------
+        int
+            How many elements moved: those not in the group already.
+
+        Raises
+        ------
+        ValueError
+            When the group or an element is not in the geometry, or the families differ.
+        """
+        group_id = int(group_id)
+        if group_id not in {int(g) for g in self.group_id}:
+            raise ValueError(f'no element group {group_id}')
+        wanted = {int(e) for e in elem_ids}
+        missing = sorted(wanted - {int(e) for e in self.elem_id})
+        if missing:
+            raise ValueError('no element ' + ', '.join(str(e) for e in missing[:4])
+                             + (f' (and {len(missing) - 4} more)' if len(missing) > 4 else ''))
+        rows = np.flatnonzero(np.isin(self.elem_id, list(wanted)))
+        moving = {element_family(int(self.elem_type[r])) for r in rows}
+        if len(moving) > 1:
+            raise ValueError('an element group holds one element family; these elements are '
+                             + ' and '.join(sorted(moving)))
+        held = {element_family(int(code)) for code, group
+                in zip(self.elem_type, self.elem_group, strict=True)
+                if int(group) == group_id}
+        made_for = getattr(self, 'group_family', {}).get(group_id)
+        holds = held or ({made_for} if made_for else set())
+        if moving and holds and holds != moving:
+            raise ValueError(f'element group {group_id} holds {holds.pop()}; these elements '
+                             f'are {moving.pop()}')
+        moved = int(np.sum(self.elem_group[rows] != group_id))
+        self.elem_group[rows] = group_id
+        return moved
+
     def renumber_group(self, row: int, group_id: int) -> None:
         """Give an element group a new id, and update its elements.
 

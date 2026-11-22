@@ -76,6 +76,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'work_up_sine': 'Auto Compute Sine', 'work_up_modal': 'Auto Compute Modal',
     'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
+    'move_elements': 'Move Elements',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',
     'plan_instrumentation': 'Plan Sensors', 'export_state_space': 'Export Model',
     'create_sensors': 'Fit Sensors',
@@ -187,6 +188,8 @@ PARTS = {f'project.{name}': part for name, part in {
 #: and modes are fitted on the fitting screen alone, the band fit left to scripts and
 #: to recomputing what it made (2026-11-14)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
+                       # elements are moved by dragging them onto a group in the tree
+                       'project.move_elements',
                        'project.delete_entities', 'project.solids', 'project.fit_modes',
                        # a coordinate system is slid and turned in its Edit: typed in its
                        # row, or dragged by the arrows and rings on it (Brandon, 2026-11-17)
