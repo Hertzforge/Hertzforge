@@ -117,3 +117,49 @@ def test_an_irregular_string_among_normalized_ones_gets_the_rule(item):
             validate.dofs(values, allow_unknown=True)
     else:
         assert validate.dofs(values, allow_unknown=True) == expected
+
+
+@pytest.mark.parametrize('text, named', [
+    ('Current', True), ('Drive Limit', True), ('KE', True), ('Accel, X', True),
+    ('MX', True), ('X', False), ('rz-', False), ('M3', False), ('101X+', False),
+    ('6002 Accel', False), ('', False), ('A\nB', False)])
+def test_a_channel_name_is_text_that_is_no_place(text, named):
+    assert validate.channel_name(text) is named
+
+
+def test_a_name_stands_as_a_dof_only_where_an_incomplete_one_may():
+    """Two channels with no node left at '' would be one channel twice to
+    every spectrum, so a name is kept; it is still refused where a DOF
+    must be a place, and a typo after a node is still a typo."""
+    from hertzforge.core.data import parse_dof
+
+    assert validate.dofs(['Current', ' Drive Limit ', 'z'], allow_unknown=True) == \
+        ['Current', 'Drive Limit', 'Z+']
+    with pytest.raises(ValueError, match="^DOF 'Current' does not start with a node id$"):
+        validate.dofs(['Current'])
+    with pytest.raises(ValueError, match="DOF '101Q' names no direction"):
+        validate.dofs(['101Q'], allow_unknown=True)
+    assert parse_dof('Drive Limit') == (None, '')
+    assert parse_dof('Z+') == (None, 'Z+')
+
+
+@pytest.mark.parametrize('text, dof', [
+    ('101z', '101Z+'), ('Current', 'Current'), ('6002 Accel', ''), ('X', ''), ('', '')])
+def test_dof_or_name_is_what_a_channel_is_known_by(text, dof):
+    assert validate.dof_or_name(text) == dof
+
+
+def test_a_named_channel_writes_to_uff_as_no_place_with_its_name(tmp_path):
+    """A format that writes a node and a direction code has neither for a
+    name: node 0 and code 0, the name in the record's ID line."""
+    from hertzforge.core.data import TimeHistory
+    from hertzforge.io import export_file
+
+    history = TimeHistory(np.arange(8) / 8.0, np.ones((2, 8)),
+                          response_dof=['Drive Limit', '101X+'])
+    path = tmp_path / 'out.unv'
+    export_file(history, path, format='unv')
+    lines = path.read_text().splitlines()
+    first = lines.index('    58') + 1
+    assert lines[first] == 'Drive Limit'
+    assert lines[first + 5].split()[5:7] == ['0', '0']

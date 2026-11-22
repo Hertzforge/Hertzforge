@@ -257,7 +257,10 @@ the function type alone cannot say which class to rebuild:
                                  float64, or float32 for a time
                                  history converted from a control run,
                                  the precision it was recorded at
-            response_dof         strings, one per record
+            response_dof         strings, one per record: a DOF
+                                 ('101X+'), or a channel's name where
+                                 it has no node and direction
+                                 ('Current'), or '' when it has neither
             ordinate_dim, comment, ordinate_unit, reference_unit,
             dimension_hint       strings, '' = undefined / not stated
 

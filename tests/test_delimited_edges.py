@@ -226,8 +226,8 @@ def test_a_column_index_out_of_range_is_refused(tmp_path):
         with pytest.raises(ValueError, match=f'columns names {key} is not a column: '
                                              'the file has 3'):
             read_delimited(path, columns=[key])
-    assert _read(path, columns=[2])[0].block == ['Force']
-    assert _read(path, columns=[1, 1])[0].block == ['Accel'], 'once each'
+    assert _read(path, columns=[2])[0].response_dof == ['Force']
+    assert _read(path, columns=[1, 1])[0].response_dof == ['Accel'], 'once each'
 
 
 def test_the_first_missing_sample_in_the_file_is_the_one_refused(tmp_path):
@@ -247,7 +247,7 @@ def test_a_record_with_no_label_is_written_by_its_number(tmp_path):
     delimited.save(history, target)
     assert _text(target).splitlines()[1] == 'time (s),record 1'
     back, _notes = _read(target)
-    assert back.block == ['record 1']
+    assert back.response_dof == ['record 1']
     assert np.array_equal(back.ordinate, history.ordinate)
 
 
@@ -327,7 +327,7 @@ def test_a_headerless_file_keeps_every_column(tmp_path):
 def test_one_column_written_with_a_trailing_delimiter(tmp_path):
     path = _write(tmp_path, 'a\n0.1,\n0.2,\n0.3,\n')
     history, _notes = _read(path, sample_rate=10.0)
-    assert history.num_records == 1 and history.block == ['a']
+    assert history.num_records == 1 and history.response_dof == ['a']
 
 
 def test_a_title_line_is_not_the_header_of_a_trailing_delimiter_file(tmp_path):

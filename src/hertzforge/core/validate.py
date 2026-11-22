@@ -170,6 +170,58 @@ def modal_coordinate(text: str) -> int | None:
     return None
 
 
+def channel_name(text: str) -> bool:
+    """Whether a DOF string is a channel's name rather than a place: text
+    that does not start with a digit and is neither a direction (`'Z+'`,
+    `'z'`) nor a modal coordinate (`'M3'`). `'Current'`, `'Drive Limit'`
+    and `'KE'` are names; a name with a control character is not.
+
+    A name is how a channel with no node and direction is told from the
+    others (`dofs`). A format that writes a node number and a direction
+    code has neither for it, so its writer writes it as a DOF of `''`.
+
+    Parameters
+    ----------
+    text : str
+        A DOF string.
+
+    Returns
+    -------
+    bool
+        True for a name.
+    """
+    text = str(text).strip()
+    if not text or not text.isprintable() or text[0].isdigit():
+        return False
+    if modal_coordinate(text) is not None:
+        return False
+    upper = text.upper()
+    return upper not in DIRECTIONS and upper + '+' not in DIRECTIONS
+
+
+def dof_or_name(text: str) -> str:
+    """What a channel called `text` is known by: its DOF when the text is
+    one (`'101z'` is `'101Z+'`), else the text itself when it is a name
+    (`channel_name`), else `''` for a channel whose text can be neither,
+    such as `'6002 Accel'` or a direction alone.
+
+    Parameters
+    ----------
+    text : str
+        A channel's name as a file gives it.
+
+    Returns
+    -------
+    str
+        The record's DOF.
+    """
+    text = '' if text is None else str(text).strip()
+    try:
+        return dofs([text])[0]
+    except ValueError:
+        return text if channel_name(text) else ''
+
+
 def dofs(values: Sequence[str], label: str = 'DOF',
          allow_unknown: bool = False) -> list[str]:
     """DOF strings, checked and normalized: a node id, then one of
@@ -205,6 +257,13 @@ def dofs(values: Sequence[str], label: str = 'DOF',
     can be corrected in the channel table. A direction that is not a
     direction is still refused either way: `101Q+` is a typo, not an
     omission, and Q is not an axis.
+
+    `allow_unknown` also lets a channel's name through where it has no
+    node and direction (`'Current'`, `'Drive Limit'`; see
+    `channel_name`), kept as written. The DOF string is what tells one
+    channel from another, in spectra, cross-spectra, merging and the
+    project tree, so two such channels left at `''` would be taken for
+    one channel measured twice. A name matches no node on a geometry.
     """
     items = [values] if isinstance(values, str) else list(values)
     normalized = _dofs_normalized(items)
@@ -266,6 +325,9 @@ def _dofs_each(values: Sequence[str], label: str,
         index = modal_coordinate(text)
         if index is not None:
             out.append(f'{MODAL_PREFIX}{index}')
+            continue
+        if allow_unknown and channel_name(text):
+            out.append(text)
             continue
         digits = 0
         while digits < len(text) and text[digits].isdigit():

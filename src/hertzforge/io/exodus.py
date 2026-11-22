@@ -613,12 +613,15 @@ def _read_results(path, node_ids, steps, nodes=None):
 
     Returns {'time': ...} or {'spectra': ...} for the nodal records and
     a second entry for the global ones — separate objects because a
-    global variable has no node: its name is its whole identity,
-    carried in `block` where a nodal record's identity is its DOF.
+    global variable has no node: its name is its whole identity, and
+    so its DOF (`validate.channel_name`). A name a DOF cannot hold (one
+    that starts with a digit, or an axis alone) is carried in `block`
+    instead.
     """
     import netCDF4
 
     from ..core.data import Spectrum, TimeHistory
+    from ..core.validate import channel_name
     from ..units import UNKNOWN
 
     cls = TimeHistory if steps == 'time' else Spectrum
@@ -697,13 +700,17 @@ def _read_results(path, node_ids, steps, nodes=None):
                  for base, part, (values, _h) in columns])
             hints = {base: hint for base, _p, (_v, hint) in columns}
             if merged:
+                named = [channel_name(base) for base, _v in merged]
                 result[keys[1]] = cls(
                     abscissa=abscissa,
                     ordinate=np.asarray([values for _b, values in merged]),
-                    response_dof=[''] * len(merged),
+                    response_dof=[base if ok else ''
+                                  for (base, _v), ok in zip(merged, named, strict=True)],
                     ordinate_dim=[UNKNOWN] * len(merged),
                     dimension_hint=[hints[base] for base, _v in merged],
-                    block=[base for base, _v in merged],
+                    block=(None if all(named) else
+                           ['' if ok else base
+                            for (base, _v), ok in zip(merged, named, strict=True)]),
                 )
     if not result:
         raise ValueError(
@@ -1091,19 +1098,22 @@ def _result_names(data):
 
     The name is how the reader reads it back: canonical stem for the
     record's quantity plus its direction — `AccX`, `Pressure`, `Val`
-    for a quantity nobody knows — and the block's own name for a
-    DOF-less (global) record. Two records writing the same variable at
+    for a quantity nobody knows — and for a record at no node (a global
+    one) its name: the DOF when that is a channel's name, else its
+    block or comment. Two records writing the same variable at
     the same node is refused with the collision named: a stacked
     object's averages all share a channel, and one variable per node
     cannot hold twenty readings.
     """
     from ..core.data import parse_dof
+    from ..core.validate import channel_name
 
     named, seen = [], {}
     for i, dof in enumerate(data.response_dof):
         node, direction = parse_dof(dof)
         if node is None:
-            label = ((data.block[i] if data.block is not None else '')
+            label = ((dof if channel_name(dof) else '')
+                     or (data.block[i] if data.block is not None else '')
                      or (data.comment[i] or '').strip()
                      or f'Global{i + 1}')
             named.append((i, None, label[:32]))

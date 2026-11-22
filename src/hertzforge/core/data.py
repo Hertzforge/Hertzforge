@@ -79,7 +79,7 @@ from ..units import (
 #: the gather, the scaling, the decimator's padding — are bounded by
 #: it whatever the object weighs
 DISPLAY_BLOCK_BYTES = 256 * 2 ** 20
-from .validate import DIRECTION_CODES
+from .validate import DIRECTION_CODES, channel_name
 from .validate import dofs as _dofs
 
 # direction code (UFF convention) <-> string. Built from the one list in
@@ -154,9 +154,13 @@ def parse_dof(text: str) -> tuple[int | None, str]:
     tuple of (int or None, str)
         The node number and the rest of the string. The node is None
         when the string does not start with a digit, so a caller can
-        report the problem instead of failing.
+        report the problem instead of failing. A channel's name
+        (`validate.channel_name`, `'Current'`) has neither a node nor a
+        direction: (None, '').
     """
     text = str(text).strip()
+    if channel_name(text):
+        return None, ''
     digits = 0
     while digits < len(text) and text[digits].isdigit():
         digits += 1

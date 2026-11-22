@@ -227,13 +227,14 @@ def test_a_complex_spectrum_rides_out_and_back(tmp_path):
 
 def test_global_records_ride_out_and_back(tmp_path):
     ke = np.linspace(0.0, 9.0, 6)
-    history = TimeHistory(STEPS, np.vstack([ke]), response_dof=[''],
-                          block=['KE'])
+    history = TimeHistory(STEPS, np.vstack([ke, 2 * ke, 3 * ke]),
+                          response_dof=['KE', 'IE', ''], block=['', '', 'X'])
     path = str(tmp_path / 'out.exo')
     exodus.save(history, path, geometry=plate())
     back = exodus.load(path, steps='time')['global']
-    assert back.record_label(0) == 'KE'
-    assert np.allclose(back.ordinate[0], ke)
+    assert back.response_dof == ['KE', 'IE', ''], 'a global is known by its name'
+    assert back.block == ['', '', 'X'], 'an axis alone is no name, so it rides in the block'
+    assert np.allclose(back.ordinate, history.ordinate)
 
 
 def test_a_stacked_object_is_refused_with_the_collision_named(tmp_path):

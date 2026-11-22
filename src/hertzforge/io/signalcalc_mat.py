@@ -26,12 +26,19 @@ engineering unit, which `Unit` names; the sensitivity is kept for
 reference, not applied.
 
 What is read: one `TimeHistory` with a record per channel, starting at
-0 s, and a `ChannelTable` with each channel's unit, quantity and
-sensitivity, its comment holding its name and input number. A name that
-is a DOF (`101X+`) becomes the record's response DOF; any other name
-(`A6501- Z`, `Current`) labels the record and leaves its DOF to be set
-in the channel table, since splitting a sensor's name into a node and a
-direction would be a guess. A unit Hertzforge reads is declared,
+0 s, and a `ChannelTable` with each channel's node, direction, unit,
+quantity and sensitivity, its comment holding its name as the file
+gives it and its input number. A name that reads as a node and an axis
+becomes the record's DOF: optional letters naming the sensor, the node
+number, an optional hyphen, then the axis with an optional sign, so
+`A6002- X` and `6002X` are `6002X+` and `A6002 Y-` is `6002Y-`. The
+hyphen after the node separates it from the axis and is not a sign.
+Any other name (`Current`, `Drive Limit`) is the record's DOF as it
+stands, which tells the channel from the others and matches no node;
+the channel table's comment keeps the name either way, for correcting
+a node or direction read wrong. A name that is not a node and an axis
+and cannot be a DOF either (one that starts with a digit, or an axis
+alone) leaves its record's DOF empty, and the import says so. A unit Hertzforge reads is declared,
 converting the values to SI; one it does not is left undeclared with
 the file's numbers, and the import says so. `EUType` is not read: no
 public description of its codes was found.
@@ -47,8 +54,9 @@ Refused, each by name: an `hDelta` that is not one positive time step,
 a channel vector that is a matrix or of another length than the rest, a
 `Unit`, `Sensitivity` or `InputChanNums` whose count differs from the
 names', an `INP_k_Data` with no row k and a row with no `INP_k_Data`, a
-`TimeData` with another number of columns than there are names, and a
-file holding both `TimeData` and `INP_k_Data`.
+`TimeData` with another number of columns than there are names, a
+file holding both `TimeData` and `INP_k_Data`, and two channels with
+one DOF and one quantity, which nothing could tell apart.
 A missing sample is kept as NaN and noted, and so is a channel that
 never varies (`core.channel_health`).
 
@@ -76,6 +84,8 @@ SUFFIX = '.mat'
 #: the variables every export has, besides its channels
 NEEDED = ('ChanName', 'Unit', 'hDelta')
 _CHANNEL = re.compile(r'^INP_(\d+)_Data$')
+#: a sensor's name as a node and an axis: 'A6002- X', '6002X', 'A6002 Y-'
+_SENSOR = re.compile(r'^[A-Za-z]*\s*(\d+)\s*-?\s*(R?[XYZ])\s*([+-]?)$', re.IGNORECASE)
 #: the variable holding every channel, in the export's other layout
 MATRIX = 'TimeData'
 #: MATLAB's version 7.3 header: 116 bytes of text, an 8-byte subsystem
@@ -236,7 +246,6 @@ def load(path: str | os.PathLike, start: float | None = None,
     from ..core.channel_table import CHANNEL_TYPES, ChannelTable
     from ..core.data import TimeHistory
     from ..core.progress import Ticker
-    from ..core.validate import dofs
     from ..units import dimension_of, from_si
     from .rattlesnake import _channel_rows, _read_stream, _sample_window
 
@@ -267,18 +276,10 @@ def load(path: str | os.PathLike, start: float | None = None,
         except ValueError as error:
             raise refused(error) from None
 
-        response, block = [], []
-        for name in names:
-            try:
-                [dof] = dofs([name])
-            except ValueError:
-                response.append('')
-                block.append(name)
-            else:
-                response.append(dof)
-                block.append('')
-        labels = [dof or name for dof, name in zip(response, block, strict=True)]
+        response = [_dof_of(name) for name in names]
+        labels = [dof or name for dof, name in zip(response, names, strict=True)]
         try:
+            _distinct(response, units, names)
             rows = (list(range(len(names))) if channels is None
                     else _channel_rows(channels, labels))
             span = _sample_window(start, stop, samples, 1.0 / step)
@@ -308,9 +309,11 @@ def load(path: str | os.PathLike, start: float | None = None,
     history = TimeHistory(
         np.arange(first, last) * step, values,
         response_dof=[response[row] for row in rows],
-        block=[block[row] for row in rows] if any(block[row] for row in rows) else None,
         comment=[f'{window}{source(row)} of {base}' for row in rows])
-    notes = []
+    notes = [f'{names[row]!r} is not a node and an axis, and a DOF cannot hold it as a '
+             'name (a name does not start with a digit or read as a direction); its DOF '
+             'is left empty'
+             for row in rows if names[row] and not response[row]]
     chosen = [units[row] for row in rows]
     for k, unit, reason in declare_stated_units(history, chosen):
         notes.append(f'{labels[rows[k]]}: the unit {unit!r} {reason}; left '
@@ -341,6 +344,36 @@ def load(path: str | os.PathLike, start: float | None = None,
                     for k, name in enumerate(names)],
     })
     return {'time_data': history, 'channel_table': table}
+
+
+def _dof_of(name: str) -> str:
+    """The DOF a channel's name gives: its node and axis when it reads as
+    a sensor's (`_SENSOR`), else the name itself when that can be a DOF,
+    else ''."""
+    from ..core.validate import dof_or_name, dofs
+
+    match = _SENSOR.match(name)
+    if match:
+        node, axis, sign = match.groups()
+        return dofs([f'{int(node)}{axis.upper()}{sign or "+"}'])[0]
+    return dof_or_name(name)
+
+
+def _distinct(response: list[str], units: list[str], names: list[str]) -> None:
+    """Refuses two channels that would be one: one DOF and one quantity."""
+    from ..units import dimension_of
+
+    seen: dict[tuple[str, str], int] = {}
+    for row, (dof, unit) in enumerate(zip(response, units, strict=True)):
+        if not dof:
+            continue
+        key = (dof, (dimension_of(unit) if unit else None) or unit)
+        if key in seen:
+            first = seen[key]
+            raise ValueError(f'rows {first + 1} and {row + 1} of ChanName, '
+                             f'{names[first]!r} and {names[row]!r}, are both {dof} '
+                             f'in {unit or "no unit"}: one channel twice')
+        seen[key] = row
 
 
 def _node(dof: str) -> str:

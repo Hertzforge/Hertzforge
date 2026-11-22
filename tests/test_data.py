@@ -266,7 +266,8 @@ def test_withdrawing_an_undeclared_record_is_harmless():
 def test_a_dof_that_is_wrong_is_refused_where_one_that_is_missing_is_not():
     """The distinction the objects draw: an *omission* imports so the
     user can fix it, a *mistake* does not, because no amount of fixing
-    the channel table makes Q an axis or 'not a dof' a measurement."""
+    the channel table makes Q an axis. Text that is no place at all is a
+    channel's name, which tells it from the others and matches no node."""
     import numpy as np
     import pytest
 
@@ -277,7 +278,8 @@ def test_a_dof_that_is_wrong_is_refused_where_one_that_is_missing_is_not():
     with pytest.raises(ValueError, match='names no direction'):
         TimeHistory(t, values, response_dof=['101Q+'])
     with pytest.raises(ValueError, match='names no direction'):
-        TimeHistory(t, values, response_dof=['not a dof'])
+        TimeHistory(t, values, response_dof=['101 not a dof'])
+    assert TimeHistory(t, values, response_dof=['not a dof']).response_dof == ['not a dof']
     # and the omissions, which import
     assert TimeHistory(t, values, response_dof=['X+']).response_dof == ['X+']
     assert TimeHistory(t, values, response_dof=['101']).response_dof == ['101']
@@ -303,8 +305,10 @@ def test_a_reference_dof_is_held_to_the_same_rule():
     from hertzforge.core.data import Frf
 
     f = np.arange(4) * 1.0
-    with pytest.raises(ValueError, match='reference DOF'):
-        Frf(f, [[1 + 0j] * 4], response_dof=['1X+'], reference_dof=['sledge'])
+    with pytest.raises(ValueError, match="reference DOF '1Q' names no direction"):
+        Frf(f, [[1 + 0j] * 4], response_dof=['1X+'], reference_dof=['1Q'])
+    named = Frf(f, [[1 + 0j] * 4], response_dof=['1X+'], reference_dof=['sledge'])
+    assert named.reference_dof == ['sledge'], 'a hammer named, not placed'
 
 
 def test_an_uneven_or_shuffled_abscissa_is_stored_without_complaint():
