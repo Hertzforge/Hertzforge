@@ -92,8 +92,9 @@ root attributes:
                       when the fingerprint holds settings only; absent,
                       only the settings are compared
     projections       optional JSON, how pairs of shape sets on two
-                      geometries are brought onto common DOFs when
-                      compared, as DOF Mapping sets them: [{"first",
+                      geometries, or a shape set and a geometry it is
+                      not on, are brought onto common DOFs, as DOF
+                      Mapping sets them: [{"first",
                       "second", "source", "distance", "method"}, ...],
                       "source" the set moved onto the other's DOFs,
                       "method" "reduction" (its modes at the other's

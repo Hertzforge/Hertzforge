@@ -791,6 +791,14 @@ describe("Project's direction, worded by its row", () => {
 		expect(a.errors.direction).toBeUndefined();
 	});
 
+	it('offers only the ways its row names', async () => {
+		const { a } = directed();
+		const one = { ...row('named'), labels: { direction: { named: 'Test at the nodes of Model' } } } as unknown as ActionRow;
+		await a.perform(one, column);
+		const direction = a.formParams.find((p) => p.name === 'direction');
+		expect(direction?.options?.map((o) => [o.value, o.label])).toEqual([['named', 'Test at the nodes of Model']]);
+	});
+
 	it('says why when the way chosen is the one that cannot be made', async () => {
 		vi.useFakeTimers();
 		try {

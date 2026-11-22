@@ -213,9 +213,10 @@ class AnalyzeState {
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p))
 			.map((p) => {
-				// the row's own words for a param's options: Project's directions name the two sets
+				// the row's own words for a param's options, and the options it offers: DOF Mapping's
+				// ways name the two objects, and a geometry is never the one moved
 				const words = row?.labels?.[p.name];
-				return words && p.options ? { ...p, options: p.options.map((o) => ({ ...o, label: words[String(o.value)] ?? o.label })) } : p;
+				return words && p.options ? { ...p, options: p.options.filter((o) => String(o.value) in words).map((o) => ({ ...o, label: words[String(o.value)] })) } : p;
 			});
 	}
 

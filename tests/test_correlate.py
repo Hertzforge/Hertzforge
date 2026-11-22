@@ -595,13 +595,44 @@ def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
      'Test Shapes cannot be projected onto FEM Shapes: Test Shapes has 2 nodes'),
     ('Test Shapes', 'FEM Shapes', {'source': 'FEM Geometry'}, 'is Test Shapes or FEM Shapes'),
     ('Test Shapes', 'FEM Shapes', {'distance': -1.0}, 'must be above zero'),
-    ('FEM Shapes', 'FEM Geometry', {}, 'FEM Geometry is not a shape set'),
+    ('FEM Shapes', 'FEM Geometry', {}, 'FEM Shapes is on FEM Geometry already'),
+    ('FEM Shapes', 'Test Geometry', {'source': 'Test Geometry'},
+     'Test Geometry is a geometry, with no modes to bring onto the DOFs of FEM Shapes'),
+    ('FEM Shapes', 'Test Geometry', {'method': 'expansion'},
+     'Test Geometry holds no modes to expand through$'),
+    ('Test Shapes', 'FEM Geometry', {'method': 'expansion'},
+     'FEM Geometry holds no modes to expand through; pick Test Shapes with FEM Shapes'),
+    ('FEM Geometry', 'Test Geometry', {}, 'Test Geometry is not a shape set'),
+    ('FEM Shapes', 'RC Channels', {}, 'RC Channels is not a shape set'),
 ])
 def test_a_projection_that_cannot_be_made_is_refused_and_not_kept(first, second, given, refused):
     project = _two_geometries()
+    project.add('RC Channels', _channels())
     with pytest.raises((ValueError, TypeError), match=refused):
         project.set_projection(first, second, **given)
     assert project.projections == {}
+
+
+def test_a_set_and_a_geometry_it_is_not_on_keep_a_reduction_onto_its_nodes():
+    """The set is the one moved, onto the geometry's nodes, at the distance kept; the pair is
+    kept in the file and follows a rename like two sets."""
+    project = _two_geometries()
+    assert project.projection_of('Test Geometry', 'FEM Shapes') == (
+        'FEM Shapes', 'Test Geometry', None)
+    project.set_projection('Test Geometry', 'FEM Shapes', distance=0.004)
+    assert project.projection_of('FEM Shapes', 'Test Geometry') == (
+        'FEM Shapes', 'Test Geometry', 0.004)
+    assert project.projection_method('FEM Shapes', 'Test Geometry') == 'reduction'
+    project.rename('Test Geometry', 'Bench')
+    assert project.projection_of('FEM Shapes', 'Bench')[2] == 0.004
+
+
+def test_expansion_goes_through_the_set_named_never_one_found_by_a_link():
+    project = _two_geometries()
+    with pytest.raises(ValueError, match='FEM Geometry holds no modes to expand through'):
+        project.expand_modes('Test Shapes', onto='FEM Geometry')
+    added = project.expand_modes('Test Shapes', onto='FEM Shapes')
+    assert project.geometry_for(added)[0] == 'FEM Geometry'
 
 
 def test_two_sets_on_one_geometry_have_no_projection_to_set():
