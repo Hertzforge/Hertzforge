@@ -181,14 +181,6 @@
 							{/if}
 							{#if offers.projection}
 								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
-								{#if a.matchShown}
-									<label class="tolerance" title="How far a test node may be from the model node it is matched to; 0 for 2 % of the size of the geometry projected onto. Loosen it when nodes are dropped; when none match, check first that the two geometries overlay">
-										Node match
-										<input class="field sm num" type="number" min="0" step="any" data-testid="read-match-tolerance" value={a.matchShown.value}
-											onchange={(e) => { const field = e.currentTarget as HTMLInputElement; if (!a.setMatchDistance(Number(field.value))) field.value = String(a.matchShown?.value ?? ''); }} />
-										{a.matchShown.unit}
-									</label>
-								{/if}
 							{/if}
 							{#if offers.environments.length > 1}
 								<select class="field sm" aria-label="Environment" data-testid="read-environment" value={a.prefs.environment ?? offers.environments[0]} onchange={(e) => a.setPref('environment', (e.currentTarget as HTMLSelectElement).value)} title="Which environment's control channels the Control column shows, and whose transformation the view drop-down offers">
@@ -699,20 +691,6 @@
 	.phead select.field {
 		flex: none;
 		width: auto;
-	}
-
-	.tolerance {
-		display: inline-flex;
-		flex: none;
-		align-items: center;
-		gap: 4px;
-		color: var(--text-3);
-		font-size: 12px;
-		white-space: nowrap;
-	}
-
-	.tolerance input {
-		width: 58px;
 	}
 
 	.phead .btn.on {

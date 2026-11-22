@@ -378,6 +378,12 @@ PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
 #: half its thickest plate (`Project.match_distance`), which the action table fills in
 MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
               default=0.0, unit='m', min=0.0, step=0.001, length=True)
+#: Project for two shape sets on two geometries, the setting every comparison of the pair
+#: reads: the two sets, which is projected onto the other, and how far a node may be
+PAIR_FIRST = Param('first', 'First', 'enum', options_from='objects:shape_set')
+PAIR_SECOND = Param('second', 'Second', 'enum', options_from='objects:shape_set')
+PAIR_DIRECTION = Param('direction', 'Direction', 'enum', default='named', options=(
+    Option('named', 'First onto Second'), Option('reversed', 'Second onto First')))
 #: which of two shape sets is projected onto the other: as `source` and `onto` name them, or
 #: the other way. The action table opens on the way that can be made, words each way after
 #: the sets, and says why the other cannot be made when it cannot (`project.projection_why`)
@@ -564,6 +570,30 @@ def node_matches(project: Any, source: str, onto: str, report: dict) -> dict:
                      points=points, segments=segments)
 
 
+def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_projection`: how two shape sets on two geometries are projected when
+    compared (`Project.set_projection`), kept as it is changed: the two geometries overlaid
+    with the node pairs matched (`node_matches`) and what the projection matched. The MAC,
+    the matches and the animated projection under it read what it keeps."""
+    from hertzforge.core.correlate import NoNodeMatched
+
+    from .ops_modal_plan import _report_rows
+
+    first, second = params['first'], params['second']
+    source, onto = (first, second) if params['direction'] == 'named' else (second, first)
+    try:
+        project.set_projection(first, second, source=source,
+                               distance=params['distance'] or None)
+        report = project.compared_sets(first, second)[3]
+    except NoNodeMatched as error:
+        report = error.report
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    defined = project.geometry_for(source)[1].units_defined
+    return [node_matches(project, source, onto, report),
+            v.reading(f'{source} projected onto {onto}', _report_rows(report, defined))]
+
+
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
     DOFs, at a channel table's, or at every node of a geometry
@@ -695,6 +725,15 @@ MODAL_VERB_OPERATIONS = (
         params=(_source('solve_modes', 'Geometry'), SOLVE_BY, SOLVED_MODES, TOP_FREQUENCY,
                 MODAL_DAMPING),
         outputs=('shape3d', 'reading'), run=solve_modes),
+    Operation(
+        id='project.set_projection', title='Project', workspace='modal',
+        summary='How two shape sets on two geometries are projected when they are compared: '
+                'which is projected onto the other, and how far a node may be from the node '
+                'it is matched to. The MAC, the matches and the animated projection under it '
+                'read it, and the project keeps it.',
+        params=(PAIR_FIRST, PAIR_SECOND, PAIR_DIRECTION, MATCH),
+        # previewed as it opens and as it is typed, so the matches show before anything is kept
+        outputs=('shape3d', 'reading'), run=set_projection, edits=True, previews=True),
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
         workspace='modal',

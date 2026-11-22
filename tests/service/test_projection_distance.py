@@ -47,23 +47,20 @@ def _row(project, names, system=display_units.DEFAULT, op='project.project_onto_
     return next(row for row in table['columns'][0]['rows'] if row['id'] == op)
 
 
-def test_the_rows_open_on_the_default_distance_in_the_display_units():
+def test_onto_a_geometry_the_row_opens_on_the_default_distance_in_the_display_units():
     project = _project()
-    default = project.match_distance('FEM Shapes', 'Test Shapes')
+    default = project.match_distance('FEM Shapes', 'Test Geometry')
     for system, scale in ((display_units.DEFAULT, 1.0), (MM, 1000.0)):
-        for names, op in ((['FEM Shapes', 'Test Shapes'], 'project.project_onto_basis'),
-                          (['FEM Shapes', 'Test Geometry'], 'project.project_onto_basis'),
-                          (['FEM Shapes', 'Test Shapes'], 'project.projection_overlay')):
-            row = _row(project, names, system, op)
-            assert row['ready'], row
-            assert float(row['fill']['distance']) == pytest.approx(default * scale, rel=1e-3)
+        row = _row(project, ['FEM Shapes', 'Test Geometry'], system)
+        assert row['ready'], row
+        assert float(row['fill']['distance']) == pytest.approx(default * scale, rel=1e-3)
     assert _row(project, ['FEM Shapes', 'Test Geometry'])['fill']['onto'] == 'Test Geometry'
 
 
 def test_an_undefined_geometry_opens_on_its_own_numbers():
     project = _project(defined=False)
-    default = project.match_distance('FEM Shapes', 'Test Shapes')
-    row = _row(project, ['FEM Shapes', 'Test Shapes'], MM)
+    default = project.match_distance('FEM Shapes', 'Test Geometry')
+    row = _row(project, ['FEM Shapes', 'Test Geometry'], MM)
     assert float(row['fill']['distance']) == pytest.approx(default, rel=1e-3)
 
 
@@ -123,12 +120,19 @@ def test_a_distance_typed_in_millimeters_is_taken_to_meters(tmp_path, onto):
     _said_nothing_added(far, onto)
 
 
-def test_the_overlay_and_the_channels_take_the_distance_too(tmp_path):
+def test_the_projection_set_in_millimeters_is_what_the_overlay_projects_within(tmp_path):
+    """Project kept at 1.1 mm, the animated projection matches both test nodes; kept at
+    0.9 mm, it matches none and is refused. Taken as meters, 0.9 would match as well."""
     path = _save(_project(), tmp_path)
     pair = {'first': 'FEM Shapes', 'second': 'Test Shapes'}
-    assert 'result' in _run(path, 'project.projection_overlay', {**pair, 'distance': 1.1})
-    far = _run(path, 'project.projection_overlay', {**pair, 'distance': 0.9})
-    assert far['error']['code'] == 'refused'
+    for typed, matched in ((1.1, True), (0.9, False)):
+        set_it, overlay = (got[-1] for got in asyncio.run(_exchange([
+            ('project.open', {'path': path}), ('units.system', {'name': MM}),
+            ('op.run', {'op': 'project.set_projection',
+                        'params': {**pair, 'direction': 'named', 'distance': typed}}),
+            ('op.run', {'op': 'project.projection_overlay', 'params': pair})]))[2:])
+        assert 'result' in set_it, set_it
+        assert ('result' in overlay) is matched, overlay
 
 
 def test_an_undefined_geometry_takes_the_distance_as_it_is_typed(tmp_path):
@@ -268,53 +272,112 @@ def _row_for(project, names, op='project.project_onto_basis'):
 
 
 def _way(row):
-    """(the set projected, the one onto) as the row's fill and direction say."""
+    """(the set projected, the one onto) as Project's row fills them."""
     fill = row['fill']
-    pair = (fill['source'], fill['onto'])
+    pair = (fill['first'], fill['second'])
     return pair[::-1] if fill['direction'] == 'reversed' else pair
 
 
-def test_the_direction_is_the_one_that_can_be_made_whichever_set_is_picked_first():
+def test_project_opens_on_the_way_the_pair_goes_whichever_set_is_picked_first():
     """The test set holds one direction at each node, so only the cube's modes go onto it. In
-    either order of picking, the row opens on that way and words the other with why."""
+    either order of picking, Project opens on that way, words the other with why, and opens
+    on 0, 2 % of the target's size, while it keeps no distance."""
     project = _project()
     for names in (['Test Shapes', 'FEM Shapes'], ['FEM Shapes', 'Test Shapes']):
-        row = _row_for(project, names)
+        row = _row_for(project, names, 'project.set_projection')
+        assert row['live'] and row['open']
         assert _way(row) == ('FEM Shapes', 'Test Shapes'), names
         words = row['labels']['direction']
         bad = 'named' if row['fill']['direction'] == 'reversed' else 'reversed'
         assert words[bad] == ('Test Shapes onto FEM Shapes (not possible: Test Shapes has 2 '
                               'nodes measured in fewer than three directions)')
         assert words[row['fill']['direction']] == 'FEM Shapes onto Test Shapes'
-        assert float(row['fill']['distance']) == pytest.approx(
-            project.match_distance('FEM Shapes', 'Test Shapes'), rel=1e-3)
+        assert row['fill']['distance'] == '0'
 
 
-def test_the_way_that_cannot_be_made_is_refused_with_why():
+def test_what_reads_the_projection_is_listed_under_project():
     project = _project()
-    row = _row_for(project, ['FEM Shapes', 'Test Shapes'])
-    bad = 'named' if row['fill']['direction'] == 'reversed' else 'reversed'
-    with pytest.raises(ProtocolError, match='Test Shapes cannot be projected onto FEM Shapes: '
-                                            'Test Shapes has 2 nodes measured'):
-        _project_op(project, source=row['fill']['source'], onto=row['fill']['onto'],
-                    direction=bad, distance=0.0)
-    views = _project_op(project, source=row['fill']['source'], onto=row['fill']['onto'],
-                        direction=row['fill']['direction'], distance=0.0)
-    assert views[0]['title'] == 'Node matches: FEM Shapes onto Test Shapes'
+    rows = {row['id']: row for row in action_table(project, ['FEM Shapes', 'Test Shapes'],
+                                                   {})['columns'][0]['rows']}
+    under = sorted(name for name, row in rows.items() if row.get('under') == 'project.set_projection')
+    assert under == sorted(['show.mac', 'project.projection_overlay', 'project.match_modes',
+                            'project.add_matches', 'project.project_onto_basis'])
+    assert rows['project.project_onto_basis']['verb'] == 'Add Projected Set'
+    # on one geometry there is nothing to project: no Project, and MAC stands alone
+    project.add('Other Modes', copy.deepcopy(project['FEM Shapes']))
+    project.link('FEM Geometry', 'Other Modes')
+    rows = {row['id']: row for row in action_table(project, ['FEM Shapes', 'Other Modes'],
+                                                   {})['columns'][0]['rows']}
+    assert not rows['project.set_projection']['ready']
+    assert rows['project.set_projection']['reason'] == ('Both are on FEM Geometry, so there '
+                                                        'is nothing to project')
+    assert 'under' not in rows['show.mac']
 
 
-def test_when_both_ways_can_be_made_neither_is_chosen():
-    """Two sets that each hold every direction: the form asks which way, and opens on 0, the
-    default distance whichever way is chosen."""
+def test_project_keeps_what_is_set_and_its_row_shows_it_in_the_display_units():
     project = _project()
     project.add('Model B', copy.deepcopy(project['FEM Geometry']))
     project.add('Modes B', copy.deepcopy(project['FEM Shapes']))
     project.link('Model B', 'Modes B')
-    row = _row_for(project, ['FEM Shapes', 'Modes B'])
-    assert row['fill']['direction'] == ''
-    assert 'distance' not in row['fill']
-    assert row['labels']['direction'] == {'named': 'FEM Shapes onto Modes B',
-                                          'reversed': 'Modes B onto FEM Shapes'}
+    project.set_projection('FEM Shapes', 'Modes B', source='Modes B', distance=0.0011)
+    for system, typed in ((display_units.DEFAULT, 0.0011), (MM, 1.1)):
+        row = _row(project, ['FEM Shapes', 'Modes B'], system, 'project.set_projection')
+        assert _way(row) == ('Modes B', 'FEM Shapes')
+        assert float(row['fill']['distance']) == pytest.approx(typed)
+        added = _row(project, ['FEM Shapes', 'Modes B'], system)
+        assert (added['fill']['source'], added['fill']['onto']) == ('Modes B', 'FEM Shapes')
+        assert float(added['fill']['distance']) == pytest.approx(typed)
+        assert sorted(added['omit']) == ['direction', 'distance']
+
+
+def _set_op(project, **given):
+    from hertzforge.service import projects
+    from hertzforge.service.ops_project import MODAL_VERB_OPERATIONS
+
+    op = next(o for o in MODAL_VERB_OPERATIONS if o.id == 'project.set_projection')
+    values = op.resolve(given, objects={n: projects.kind_of(o) for n, o in project.items()},
+                        verbs={n: projects.verbs_of(project, n) for n in project})
+    return op.run(project, values)
+
+
+def test_setting_the_projection_keeps_it_and_draws_what_it_matches(validate):
+    from .conftest import wire_views
+
+    project = _project(defined=False)
+    stage, reading = _set_op(project, first='Test Shapes', second='FEM Shapes',
+                             direction='reversed', distance=0.0011)
+    wire_views([stage, reading], validate)
+    assert project.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  0.0011)
+    assert stage['title'] == 'Node matches: FEM Shapes onto Test Shapes'
+    assert {row['label']: row['value'] for row in reading['rows']}['Match limit'] == 0.0011
+    # kept tighter than any node is close, it is still kept, and says nothing matched
+    stage, reading = _set_op(project, first='Test Shapes', second='FEM Shapes',
+                             direction='reversed', distance=0.0009)
+    assert project.projection_of('Test Shapes', 'FEM Shapes')[2] == 0.0009
+    assert {row['label']: row['value'] for row in reading['rows']}['Nodes matched'] == '0 of 2'
+    with pytest.raises(ProtocolError, match='Test Shapes cannot be projected onto FEM Shapes: '
+                                            'Test Shapes has 2 nodes measured'):
+        _set_op(project, first='Test Shapes', second='FEM Shapes', direction='named',
+                distance=0.0)
+    assert project.projection_of('Test Shapes', 'FEM Shapes')[2] == 0.0009, 'refused, not kept'
+
+
+def test_the_comparisons_read_the_projection_project_keeps():
+    """Kept tighter than a millimeter, no node of the test is within reach: the MAC, Match
+    Modes and Add Projected Set all say so, where the default matched both."""
+    project = _project(defined=False)
+    project.comparison_mac('FEM Shapes', 'Test Shapes')
+    project.match_modes('FEM Shapes', 'Test Shapes')
+    project.set_projection('FEM Shapes', 'Test Shapes', distance=0.0009)
+    for call in (lambda: project.comparison_mac('FEM Shapes', 'Test Shapes'),
+                 lambda: project.match_modes('FEM Shapes', 'Test Shapes', name='Again')):
+        with pytest.raises(ValueError, match='within the match tolerance'):
+            call()
+    row = _row_for(project, ['FEM Shapes', 'Test Shapes'])
+    views = _project_op(project, **{k: row['fill'][k] for k in ('source', 'onto', 'direction')},
+                        distance=float(row['fill']['distance']))
+    assert views[-1]['title'] == 'No node of Test Shapes matched, so nothing was added'
 
 
 def test_a_table_or_a_geometry_goes_one_way_and_is_not_asked():
@@ -327,5 +390,22 @@ def test_a_table_or_a_geometry_goes_one_way_and_is_not_asked():
         row = _row_for(project, ['FEM Shapes', onto])
         assert 'direction' in row['omit'] and 'labels' not in row
         assert 'direction' not in row['fill']
+        assert row['verb'] == 'Project' and 'under' not in row
     with pytest.raises(ProtocolError, match='only a shape set is projected the other way'):
         _project_op(project, source='FEM Shapes', onto='Channels', direction='reversed')
+
+
+def test_a_preview_of_project_draws_the_matches_and_keeps_nothing(tmp_path):
+    """Project is previewed as it opens: the matches are drawn, and the pair's projection is
+    kept only when the form is changed, not by the preview."""
+    path = _save(_project(), tmp_path)
+    params = {'first': 'FEM Shapes', 'second': 'Test Shapes', 'direction': 'named',
+              'distance': 1.1}
+    previewed, actions = (got[-1] for got in asyncio.run(_exchange([
+        ('project.open', {'path': path}), ('units.system', {'name': MM}),
+        ('op.run', {'op': 'project.set_projection', 'params': params, 'preview': True}),
+        ('project.actions', {'objects': ['FEM Shapes', 'Test Shapes'], 'records': {}})]))[2:])
+    assert previewed['result']['views'][0]['title'] == 'Node matches: FEM Shapes onto Test Shapes'
+    row = next(r for r in actions['result']['table']['columns'][0]['rows']
+               if r['id'] == 'project.set_projection')
+    assert row['fill']['distance'] == '0', 'the preview kept nothing'

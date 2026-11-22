@@ -91,7 +91,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 #: the operations on the project row that run at once, asking nothing (Brandon, 2026-11-10)
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 #: forms with no Apply: each change is stored as it is made, and drawn where it is seen
-LIVE = frozenset({'project.set_averaging'})
+LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
 
 #: params that number the channels, records or rows of the object an action runs on:
 #: several as text ('1-3, 7', blank for all), or one. They are filled from what is picked
@@ -229,6 +229,8 @@ def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
     reason = when[1](project, fill[when[0]]) if when else ''
     verb = op.id.removeprefix('project.')
     names = fill.values()
+    if op.id == 'project.set_projection':
+        return _pair_why(project, fill['first'], fill['second'])
     if op.id in _ONE_TYPE:
         said = mergeable([project[n] for n in names]) if len(fill) > 1 else None
         return said[0].upper() + said[1:] if said else ''
@@ -350,13 +352,17 @@ NESTS: dict[str, tuple[str, ...]] = {
     'project.sensors': ('project.set_sensor_model', 'project.calibration_check'),
     'project.set_control': ('project.add_controller_settings',
                             'project.remove_controller_settings'),
+    # two shape sets on two geometries: what reads how they are projected is under Project,
+    # which sets it, as the spectra are under Averaging (Brandon, 2026-11-21)
+    'project.set_projection': ('show.mac', 'project.projection_overlay', 'project.match_modes',
+                               'project.add_matches', 'project.project_onto_basis'),
     # with nothing selected: the ways a file is brought in are under Import
     'self.import': ('project.rattlesnake_preview', 'project.import_rattlesnake_part',
                     'project.truncate_rattlesnake_file', 'project.text_preview',
                     'project.import_text'),
 }
 #: the groups that open with their actions showing: the ones most selections are made for
-OPEN_AT_FIRST = frozenset({'project.set_averaging'})
+OPEN_AT_FIRST = frozenset({'project.set_averaging', 'project.set_projection'})
 #: the acts every object has, on the object itself and its group, under one row that is
 #: not an action
 OBJECT_GROUP = 'group.object'
@@ -636,18 +642,29 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
                 continue
             more['omit'] = [*more.get('omit', []), 'mate']
+        if op.id == 'project.set_projection':
+            fill.update(_projection_fill(project, fill))
+            more['labels'] = {'direction': _direction_words(project, fill['first'],
+                                                            fill['second'])}
         if op.id == 'project.project_onto_basis':
-            directed = _directions(project, fill)
-            if directed is None:
-                more['omit'] = [*more.get('omit', []), 'direction']
+            from hertzforge.core.shapes import ShapeSet
+
+            if isinstance(project[fill['onto']], ShapeSet):
+                # two sets go the way Project sets, and it asks nothing: it adds the set
+                source, onto, _distance = project.projection_of(fill['source'], fill['onto'])
+                fill.update({'source': source, 'onto': onto, 'direction': 'named',
+                             **_projection_fill(project, {'first': source, 'second': onto},
+                                                distance_only=True)})
+                more['omit'] = [*more.get('omit', []), 'direction', 'distance']
+                more['verb'] = 'Add Projected Set'
             else:
-                fill.update(directed[0])
-                more['labels'] = {'direction': directed[1]}
+                more['omit'] = [*more.get('omit', []), 'direction']
         if op.id in MATCHED:
             fill.update(_match_fill(project, op.id, fill))
         if op.id in LIVE:
             more['live'] = True
-        rows.append(_op_row(op, fill=fill, **more))
+        said = more.pop('verb', None)
+        rows.append({**_op_row(op, fill=fill, **more), **({'verb': said} if said else {})})
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
         if edit is not None:
@@ -732,27 +749,45 @@ def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
     return fill
 
 
-def _directions(project: Any, fill: dict[str, str]) -> tuple[dict, dict] | None:
-    """Two shape sets for Project: which way it projects is chosen, never taken from the order
-    they were picked in. Each way is worded after the sets, the one that cannot be made with
-    why (`project.projection_why`); when only one can be made it is chosen, and when both can,
-    neither is, so the form asks. None for a set and a table or a geometry, which go one way."""
-    from hertzforge.core.shapes import ShapeSet
+def _pair_why(project: Any, first: str, second: str) -> str:
+    """Why two shape sets have no projection to set: one geometry between them, or none
+    (`project.projection_why`); '' when either can be projected onto the other."""
     from hertzforge.project import projection_why
 
-    first, second = fill['source'], fill['onto']
-    if not isinstance(project[second], ShapeSet):
-        return None
+    ways = [projection_why(project, first, second), projection_why(project, second, first)]
+    return '' if not all(ways) else ways[0]
+
+
+def _direction_words(project: Any, first: str, second: str) -> dict[str, str]:
+    """Project's two directions for two shape sets, worded after the sets, the one that
+    cannot be made with why (`project.projection_why`)."""
+    from hertzforge.project import projection_why
+
     ways = {'named': (first, second), 'reversed': (second, first)}
-    why = {key: projection_why(project, *pair) for key, pair in ways.items()}
-    words = {key: f'{a} onto {b}' + (f' (not possible: {why[key]})' if why[key] else '')
-             for key, (a, b) in ways.items()}
-    possible = [key for key in ways if not why[key]]
-    return {'direction': possible[0] if len(possible) == 1 else ''}, words
+    return {key: f'{a} onto {b}' + (f' (not possible: {why})'
+                                    if (why := projection_why(project, a, b)) else '')
+            for key, (a, b) in ways.items()}
+
+
+def _projection_fill(project: Any, fill: dict[str, str], distance_only: bool = False
+                     ) -> dict[str, str]:
+    """Project's form for two shape sets as the pair is projected now
+    (`Project.projection_of`): the direction it goes, and the node match distance it keeps in
+    the display units, or 0 for 2 % of the target's size when it keeps none."""
+    from . import display_units
+
+    first, second = fill['first'], fill['second']
+    source, _onto, distance = project.projection_of(first, second)
+    out = {} if distance_only else {'direction': 'named' if source == first else 'reversed'}
+    if distance is None:
+        return {**out, 'distance': '0'}
+    defined = project.geometry_for(source)[1].units_defined
+    scale = display_units.words_in('length')[1] if defined else 1.0
+    return {**out, 'distance': f'{distance * scale:.6g}'}
 
 
 #: the projections whose node match tolerance, a distance, the row fills in
-MATCHED = frozenset(('project.project_onto_basis', 'project.projection_overlay',
+MATCHED = frozenset(('project.project_onto_basis',
                      'project.project_onto_channels', 'project.expand'))
 
 
@@ -762,15 +797,11 @@ def _match_fill(project: Any, op_id: str, fill: dict[str, str]) -> dict[str, str
     the display units, or in the model's own when its units are not defined. Nothing when
     the pair would not be projected: one geometry between them, or none."""
     from hertzforge.core.channel_table import ChannelTable
-    from hertzforge.core.correlate import projection_order
+    from hertzforge.core.shapes import ShapeSet
 
     from . import display_units
 
-    if op_id == 'project.projection_overlay':
-        first, second = fill['first'], fill['second']
-        flipped, _why = projection_order(project[first], project[second])
-        pair = (first, second) if flipped else (second, first)
-    elif op_id == 'project.expand':
+    if op_id == 'project.expand':
         # a record through a shape set matches no nodes: only a table on another geometry does
         if not isinstance(project.get(fill['shapes']), ChannelTable):
             return {}
@@ -778,8 +809,8 @@ def _match_fill(project: Any, op_id: str, fill: dict[str, str]) -> dict[str, str
         if basis is None:
             return {}
         pair = (basis, fill['shapes'])
-    elif fill.get('direction') == '':
-        # which way is not chosen yet: 0, the default either way, until it is
+    elif isinstance(project[fill['onto']], ShapeSet) if 'onto' in fill else False:
+        # two sets: the distance is the pair's projection's, filled with it
         return {}
     else:
         pair = (fill['source'], fill.get('onto') or fill['table'])
