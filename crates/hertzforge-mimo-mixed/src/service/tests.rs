@@ -701,3 +701,12 @@ fn mimo_mixed_a_tone_is_judged_at_the_line_it_is_at() {
         "{want:?} against {before:?}"
     );
 }
+
+#[test]
+fn numbers_in_a_log_line_are_the_same_on_every_platform() {
+    // two platforms' last bits of one value
+    let here = super::listed(&[0.9261958540267572, 0.930899086473891], 3);
+    let there = super::listed(&[0.9261958540267573, 0.9308990864738907], 3);
+    assert_eq!(here, "[0.926, 0.931]");
+    assert_eq!(here, there);
+}

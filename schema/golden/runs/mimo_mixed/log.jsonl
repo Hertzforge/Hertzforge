@@ -6,7 +6,7 @@
 {"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"identification","text":"identification started","data":{"event":"identification_start"}}
 {"seq":6,"at_unix":1794240006.25,"frame":35328,"kind":"note","text":"7.62 s: Identified at -20.1 dB against the reference after 2 steps; lag 74 frames; 8 frames ahead of the first drive frame.","data":{"source":"controller"}}
 {"seq":7,"at_unix":1794240007.25,"frame":35328,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
-{"seq":8,"at_unix":1794240008.25,"frame":35328,"kind":"note","text":"7.62 s: Coherence gate passed: per control [0.9261958540267573, 0.9455659004665876, 0.9308990864738907, 0.9381248619746771] against 0.5.","data":{"source":"controller"}}
+{"seq":8,"at_unix":1794240008.25,"frame":35328,"kind":"note","text":"7.62 s: Coherence gate passed: per control [0.926, 0.946, 0.931, 0.938] against 0.5.","data":{"source":"controller"}}
 {"seq":9,"at_unix":1794240009.25,"frame":35328,"kind":"identification","text":"identified at -20.15 dB in 2 steps: band coherence [0.926, 0.946, 0.931, 0.938], gate passed","data":{"event":"identification","level_db":-20.1474884610582,"steps":2,"band_coherence":[0.9261958540267572,0.9455659004665876,0.9308990864738907,0.9381248619746771],"passed":true,"lag_frames":74}}
 {"seq":10,"at_unix":1794240010.25,"frame":35328,"kind":"identification","text":"prediction within every drive ceiling","data":{"event":"prediction","within":true,"refused":null}}
 {"seq":11,"at_unix":1794240011.25,"frame":35328,"kind":"state","text":"coherence gate to awaiting review","data":{"from":"coherence_gate","to":"awaiting_review","state":"review"}}

@@ -603,6 +603,13 @@ pub fn station_stop_words(reason: &StopReason) -> String {
     }
 }
 
+/// Numbers for a line an operator reads, to a fixed number of places: the last bits of a
+/// computed value differ between platforms, and a log's words must not.
+pub(crate) fn listed(values: &[f64], places: usize) -> String {
+    let parts: Vec<String> = values.iter().map(|v| format!("{v:.places$}")).collect();
+    format!("[{}]", parts.join(", "))
+}
+
 fn plant(e: hertzforge_hal::HalError) -> MimoMixedError {
     MimoMixedError::Plant(e.to_string())
 }
@@ -1346,9 +1353,9 @@ impl MimoMixedService {
         let thr = self.cfg.gates.coherence_threshold;
         let ok = id.band_coherence.iter().all(|c| *c >= thr);
         let words = format!(
-            "Coherence gate {}: per control {:?} against {thr}.",
+            "Coherence gate {}: per control {} against {thr}.",
             if ok { "passed" } else { "failed" },
-            id.band_coherence
+            listed(&id.band_coherence, 3)
         );
         self.note(words);
         self.gate_passed = Some(ok);
@@ -1921,8 +1928,9 @@ impl MimoMixedService {
                         control: None,
                         drive: None,
                         words: format!(
-                            "the floor did not equalize within {:.1} s (errors {:?} dB)",
-                            self.cfg.floor_settle_s, self.floor_err_db
+                            "the floor did not equalize within {:.1} s (errors {} dB)",
+                            self.cfg.floor_settle_s,
+                            listed(&self.floor_err_db, 2)
                         ),
                     });
                 }
