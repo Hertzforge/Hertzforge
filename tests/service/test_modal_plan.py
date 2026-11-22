@@ -256,7 +256,7 @@ def test_the_projection_overlays_a_set_from_another_geometry(plate, validate):
     assert len(shape['overlays']) == plate[shapes].num_shapes
     # the fitted set is measured along one axis at its nodes, so the plan's three-axis
     # shapes are the ones projected, onto it, and the pair is drawn on its geometry
-    assert matrix['rows']['label'] == f'{basis}, projected'
+    assert matrix['rows']['label'] == f'{basis}, reduced'
     assert len(shape['nodes']) == plate.geometry_for(shapes)[1].num_nodes
     assert reading['title'].startswith(f'{basis} projected onto {shapes}: it has ')
     # some of the fitted set's ten measured nodes have a plan node within the limit; how

@@ -481,13 +481,14 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from error
     flipped = project.projection_of(first, second)[0] == first
     basis = theirs if flipped else home
+    moved = 'expanded' if project.projection_method(first, second) == 'expansion' else 'reduced'
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
 
     matrix = v.matrix(f'MAC of {first} Against {second} on {basis[0]}',
-                      axis(f'{first}, projected' if flipped else first, rows),
-                      axis(second if flipped else f'{second}, projected', columns),
+                      axis(f'{first}, {moved}' if flipped else first, rows),
+                      axis(second if flipped else f'{second}, {moved}', columns),
                       values, 'MAC', (0.0, 1.0))
     views = paired(basis[1], matrix, rows, range(rows.num_shapes), columns,
                    range(columns.num_shapes))

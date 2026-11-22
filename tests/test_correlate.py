@@ -640,3 +640,77 @@ def test_a_file_written_before_projections_were_kept_opens_with_none(tmp_path):
     opened = hertzforge.Project.open(path)
     assert opened.projections == {}
     assert opened.projection_of('Test Shapes', 'FEM Shapes')[2] is None
+
+
+def _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes, combination):
+    """A test set that is `combination` of the model's modes at the test DOFs, so the exact
+    expansion is `combination` of the model's modes at every DOF."""
+    reduced, _report = project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry)
+    values = np.asarray(combination) @ np.asarray(reduced.shape_matrix)
+    return ShapeSet([30.0, 40.0], [0.01, 0.02], list(reduced.coordinate), values)
+
+
+@pytest.mark.parametrize('combination', [[[1.0, 2.0], [3.0, -1.0]],
+                                         [[1.0 + 2.0j, 0.5], [-1.0j, 2.0 - 1.0j]]])
+def test_a_test_set_in_the_models_span_expands_to_it_exactly(combination):
+    """Two model modes, two test DOFs: each test mode is a known combination of the modes at
+    the test DOFs, and the expansion is that combination at all 24 model DOFs, phase kept."""
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes, combination)
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry,
+                                     modes=[0, 1])
+    assert list(expanded.coordinate) == list(fem_shapes.coordinate)
+    assert np.allclose(expanded.shape_matrix,
+                       np.asarray(combination) @ np.asarray(fem_shapes.shape_matrix))
+    assert list(expanded.frequency) == [30.0, 40.0], "the test's own modal parameters"
+    assert report['modes'] == [0, 1] and report['matched'] == 2
+    assert report['residual'] == pytest.approx([0.0, 0.0], abs=1e-12)
+    assert report['condition'] > 1
+
+
+def test_a_test_mode_outside_the_span_is_the_nearest_fit_and_says_how_far():
+    """With one model mode, a test mode that is not a multiple of it is fitted by least
+    squares: its residual at the test DOFs is what the fit leaves, over the mode's size."""
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes,
+                        [[1.0, 0.0], [1.0, 1.0]])
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry, modes=[0])
+    phi = np.array([10.0, 21.0])  # mode 1 at the two test DOFs
+    psi = np.asarray(known.shape_matrix)
+    scale = psi @ phi / (phi @ phi)
+    left = psi - np.outer(scale, phi)
+    assert report['residual'] == pytest.approx(
+        np.linalg.norm(left, axis=1) / np.linalg.norm(psi, axis=1))
+    assert report['residual'][0] == pytest.approx(0.0, abs=1e-12)
+    assert np.allclose(expanded.shape_matrix,
+                       np.outer(scale, np.asarray(fem_shapes.shape_matrix)[0]))
+
+
+def test_more_modes_than_test_dofs_are_refused():
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    three = ShapeSet([10.0, 20.0, 30.0], [0.0] * 3, fem_shapes.coordinate,
+                     np.vstack([fem_shapes.shape_matrix, np.ones(24)]))
+    with pytest.raises(ValueError, match='3 model modes for 2 test DOFs matched'):
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[0, 1, 2])
+    with pytest.raises(ValueError, match='the model has 3 modes; \\[5\\] are not among them'):
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[4])
+
+
+def test_the_default_basis_is_the_band_up_to_one_and_a_half_times_the_test_capped_at_its_dofs():
+    from hertzforge.core.correlate import expansion_modes
+
+    fem = [0.0, 0.0, 100.0, 140.0, 160.0, 400.0]
+    assert expansion_modes(fem, [50.0, 100.0], 10) == [0, 1, 2, 3]
+    assert expansion_modes(fem, [50.0, 100.0], 3) == [0, 1, 2], 'the lowest, no more than DOFs'
+    assert expansion_modes([300.0, 100.0, 200.0], [100.0], 5) == [1], 'by frequency, not order'
+    assert expansion_modes([300.0, 100.0, 200.0], [10.0], 2) == [1, 2], \
+        'none in the band: the lowest, as many as the DOFs'

@@ -129,7 +129,7 @@ def test_the_projection_set_in_millimeters_is_what_the_overlay_projects_within(t
         set_it, overlay = (got[-1] for got in asyncio.run(_exchange([
             ('project.open', {'path': path}), ('units.system', {'name': MM}),
             ('op.run', {'op': 'project.set_projection',
-                        'params': {**pair, 'direction': 'named', 'distance': typed}}),
+                        'params': {**pair, 'mapping': 'reduce_named', 'distance': typed}}),
             ('op.run', {'op': 'project.projection_overlay', 'params': pair})]))[2:])
         assert 'result' in set_it, set_it
         assert ('result' in overlay) is matched, overlay
@@ -272,26 +272,30 @@ def _row_for(project, names, op='project.project_onto_basis'):
 
 
 def _way(row):
-    """(the set projected, the one onto) as Project's row fills them."""
+    """(the set moved, the one whose DOFs it is brought to, how) as DOF Mapping's row
+    fills them."""
     fill = row['fill']
     pair = (fill['first'], fill['second'])
-    return pair[::-1] if fill['direction'] == 'reversed' else pair
+    method, turn = fill['mapping'].split('_')
+    return (*(pair[::-1] if turn == 'reversed' else pair), method)
 
 
-def test_project_opens_on_the_way_the_pair_goes_whichever_set_is_picked_first():
-    """The test set holds one direction at each node, so only the cube's modes go onto it. In
-    either order of picking, Project opens on that way, words the other with why, and opens
-    on 0, 2 % of the target's size, while it keeps no distance."""
+def test_dof_mapping_opens_on_reduction_whichever_set_is_picked_first():
+    """The test set holds one direction at each node: the cube's modes reduce to its DOFs, and
+    it expands to the cube's through them; the other two ways cannot be made and say why. In
+    either order of picking, DOF Mapping opens on the reduction, at 0, 2 % of the target's
+    size, while it keeps no distance."""
     project = _project()
+    why = ' (not possible: Test Shapes has 2 nodes measured in fewer than three directions)'
     for names in (['Test Shapes', 'FEM Shapes'], ['FEM Shapes', 'Test Shapes']):
         row = _row_for(project, names, 'project.set_projection')
-        assert row['live'] and row['open']
-        assert _way(row) == ('FEM Shapes', 'Test Shapes'), names
-        words = row['labels']['direction']
-        bad = 'named' if row['fill']['direction'] == 'reversed' else 'reversed'
-        assert words[bad] == ('Test Shapes onto FEM Shapes (not possible: Test Shapes has 2 '
-                              'nodes measured in fewer than three directions)')
-        assert words[row['fill']['direction']] == 'FEM Shapes onto Test Shapes'
+        assert row['verb'] == 'DOF Mapping' and row['live'] and row['open']
+        assert _way(row) == ('FEM Shapes', 'Test Shapes', 'reduce'), names
+        assert sorted(row['labels']['mapping'].values()) == sorted([
+            'Reduction: FEM Shapes at the DOFs of Test Shapes',
+            'Reduction: Test Shapes at the DOFs of FEM Shapes' + why,
+            'Expansion: Test Shapes to the DOFs of FEM Shapes',
+            'Expansion: FEM Shapes to the DOFs of Test Shapes' + why])
         assert row['fill']['distance'] == '0'
 
 
@@ -301,8 +305,12 @@ def test_what_reads_the_projection_is_listed_under_project():
                                                    {})['columns'][0]['rows']}
     under = sorted(name for name, row in rows.items() if row.get('under') == 'project.set_projection')
     assert under == sorted(['show.mac', 'project.projection_overlay', 'project.match_modes',
-                            'project.add_matches', 'project.project_onto_basis'])
-    assert rows['project.project_onto_basis']['verb'] == 'Add Projected Set'
+                            'project.add_matches', 'project.project_onto_basis',
+                            'project.expand_modes'])
+    assert rows['project.project_onto_basis']['verb'] == 'Reduce'
+    assert rows['project.expand_modes']['verb'] == 'Expand'
+    assert (rows['project.expand_modes']['fill']['source'],
+            rows['project.expand_modes']['fill']['onto']) == ('Test Shapes', 'FEM Shapes')
     # on one geometry there is nothing to project: no Project, and MAC stands alone
     project.add('Other Modes', copy.deepcopy(project['FEM Shapes']))
     project.link('FEM Geometry', 'Other Modes')
@@ -322,7 +330,7 @@ def test_project_keeps_what_is_set_and_its_row_shows_it_in_the_display_units():
     project.set_projection('FEM Shapes', 'Modes B', source='Modes B', distance=0.0011)
     for system, typed in ((display_units.DEFAULT, 0.0011), (MM, 1.1)):
         row = _row(project, ['FEM Shapes', 'Modes B'], system, 'project.set_projection')
-        assert _way(row) == ('Modes B', 'FEM Shapes')
+        assert _way(row) == ('Modes B', 'FEM Shapes', 'reduce')
         assert float(row['fill']['distance']) == pytest.approx(typed)
         added = _row(project, ['FEM Shapes', 'Modes B'], system)
         assert (added['fill']['source'], added['fill']['onto']) == ('Modes B', 'FEM Shapes')
@@ -345,20 +353,21 @@ def test_setting_the_projection_keeps_it_and_draws_what_it_matches(validate):
 
     project = _project(defined=False)
     stage, reading = _set_op(project, first='Test Shapes', second='FEM Shapes',
-                             direction='reversed', distance=0.0011)
+                             mapping='reduce_reversed', distance=0.0011)
     wire_views([stage, reading], validate)
     assert project.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
                                                                   0.0011)
     assert stage['title'] == 'Node matches: FEM Shapes onto Test Shapes'
+    assert reading['title'] == 'FEM Shapes at the DOFs of Test Shapes'
     assert {row['label']: row['value'] for row in reading['rows']}['Match limit'] == 0.0011
     # kept tighter than any node is close, it is still kept, and says nothing matched
     stage, reading = _set_op(project, first='Test Shapes', second='FEM Shapes',
-                             direction='reversed', distance=0.0009)
+                             mapping='reduce_reversed', distance=0.0009)
     assert project.projection_of('Test Shapes', 'FEM Shapes')[2] == 0.0009
     assert {row['label']: row['value'] for row in reading['rows']}['Nodes matched'] == '0 of 2'
     with pytest.raises(ProtocolError, match='Test Shapes cannot be projected onto FEM Shapes: '
                                             'Test Shapes has 2 nodes measured'):
-        _set_op(project, first='Test Shapes', second='FEM Shapes', direction='named',
+        _set_op(project, first='Test Shapes', second='FEM Shapes', mapping='reduce_named',
                 distance=0.0)
     assert project.projection_of('Test Shapes', 'FEM Shapes')[2] == 0.0009, 'refused, not kept'
 
@@ -375,7 +384,7 @@ def test_the_comparisons_read_the_projection_project_keeps():
         with pytest.raises(ValueError, match='within the match tolerance'):
             call()
     row = _row_for(project, ['FEM Shapes', 'Test Shapes'])
-    views = _project_op(project, **{k: row['fill'][k] for k in ('source', 'onto', 'direction')},
+    views = _project_op(project, **{k: row['fill'][k] for k in ('source', 'onto')},
                         distance=float(row['fill']['distance']))
     assert views[-1]['title'] == 'No node of Test Shapes matched, so nothing was added'
 
@@ -390,7 +399,8 @@ def test_a_table_or_a_geometry_goes_one_way_and_is_not_asked():
         row = _row_for(project, ['FEM Shapes', onto])
         assert 'direction' in row['omit'] and 'labels' not in row
         assert 'direction' not in row['fill']
-        assert row['verb'] == 'Project' and 'under' not in row
+        assert row['verb'] == ('Reduce' if onto == 'Test Geometry' else 'Project')
+        assert 'under' not in row
     with pytest.raises(ProtocolError, match='only a shape set is projected the other way'):
         _project_op(project, source='FEM Shapes', onto='Channels', direction='reversed')
 
@@ -399,7 +409,7 @@ def test_a_preview_of_project_draws_the_matches_and_keeps_nothing(tmp_path):
     """Project is previewed as it opens: the matches are drawn, and the pair's projection is
     kept only when the form is changed, not by the preview."""
     path = _save(_project(), tmp_path)
-    params = {'first': 'FEM Shapes', 'second': 'Test Shapes', 'direction': 'named',
+    params = {'first': 'FEM Shapes', 'second': 'Test Shapes', 'mapping': 'reduce_named',
               'distance': 1.1}
     previewed, actions = (got[-1] for got in asyncio.run(_exchange([
         ('project.open', {'path': path}), ('units.system', {'name': MM}),
@@ -409,3 +419,43 @@ def test_a_preview_of_project_draws_the_matches_and_keeps_nothing(tmp_path):
     row = next(r for r in actions['result']['table']['columns'][0]['rows']
                if r['id'] == 'project.set_projection')
     assert row['fill']['distance'] == '0', 'the preview kept nothing'
+
+
+def test_expand_adds_the_test_set_at_the_models_dofs_on_the_models_geometry(validate):
+    from .conftest import wire_views
+
+    project = _project(defined=False)
+    row = _row_for(project, ['Test Shapes', 'FEM Shapes'], 'project.expand_modes')
+    assert (row['fill']['source'], row['fill']['onto']) == ('Test Shapes', 'FEM Shapes')
+    from hertzforge.service import projects
+    from hertzforge.service.ops_project import MODAL_VERB_OPERATIONS
+
+    op = next(o for o in MODAL_VERB_OPERATIONS if o.id == 'project.expand_modes')
+    values = op.resolve({'source': 'Test Shapes', 'onto': 'FEM Shapes', 'distance': 0.0},
+                        objects={n: projects.kind_of(o) for n, o in project.items()},
+                        verbs={n: projects.verbs_of(project, n) for n in project})
+    views = op.run(project, values)
+    wire_views(views, validate)
+    added = project['Test Shapes @ FEM Shapes']
+    assert list(added.coordinate) == list(project['FEM Shapes'].coordinate)
+    assert 'Test Shapes @ FEM Shapes' in project.object_group_of('FEM Geometry')
+    said = {r['label']: r['value'] for r in views[1]['rows']}
+    assert said['Model modes used'] == 2.0 and 'Condition' in said
+
+
+def test_mapping_by_expansion_compares_on_the_models_dofs():
+    project = _project(defined=False)
+    _stage, reading = _set_op(project, first='Test Shapes', second='FEM Shapes',
+                              mapping='expand_named', distance=0.0)
+    assert reading['title'] == 'Test Shapes expanded to the DOFs of FEM Shapes'
+    assert project.projection_method('Test Shapes', 'FEM Shapes') == 'expansion'
+    _rows, columns, said, _report = project.compared_sets('FEM Shapes', 'Test Shapes')
+    assert said.startswith('Test Shapes expanded onto FEM Shapes: through 2 of its modes')
+    assert list(columns.coordinate) == list(project['FEM Shapes'].coordinate)
+    row = _row_for(project, ['FEM Shapes', 'Test Shapes'], 'project.set_projection')
+    assert _way(row) == ('Test Shapes', 'FEM Shapes', 'expand')
+    reduced = _row_for(project, ['FEM Shapes', 'Test Shapes'])
+    assert (reduced['fill']['source'], reduced['fill']['onto']) == ('FEM Shapes', 'Test Shapes')
+    with pytest.raises(ProtocolError, match='FEM Shapes cannot be expanded onto Test Shapes'):
+        _set_op(project, first='Test Shapes', second='FEM Shapes', mapping='expand_reversed',
+                distance=0.0)
