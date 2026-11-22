@@ -1,0 +1,9 @@
+{
+ "type": "response",
+ "id": 97,
+ "error": {
+  "code": "refused",
+  "reason": "adjust_not_built",
+  "message": "MIMO Mixed Mode's laws take no live parameters (neither a MIMO Random floor law nor a MIMO Sine tone law declares one); configure the parameters instead."
+ }
+}

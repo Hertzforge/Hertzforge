@@ -1,0 +1,41 @@
+{
+  "name": "identification_coherence",
+  "kind": "coherence",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 112.0,
+    "step": 8.0
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "labels": [
+      "control 1",
+      "control 2",
+      "control 3",
+      "control 4"
+    ]
+  },
+  "band": [
+    14,
+    29
+  ],
+  "description": "each control's multiple coherence with the drives",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "",
+      "offset": 0
+    }
+  ]
+}

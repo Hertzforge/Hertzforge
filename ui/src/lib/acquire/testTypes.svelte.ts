@@ -25,6 +25,7 @@ import type { MimoShockRunState } from '$lib/protocol/mimoShock';
 import { MS_LIVE_STATES } from './mimoshock/msVerbs';
 import type { MimoSineRunState } from '$lib/protocol/mimoSine';
 import { MSINE_LIVE_STATES } from './mimosine/msineVerbs';
+import type { MimoMixedRunState } from '$lib/protocol/mimoMixed';
 import { isLive, LIVE_STATES } from './actions';
 import { TWR_LIVE_STATES } from './twr/twrVerbs';
 import { EXPLORER_LIVE_STATES } from './explorer/explorerVerbs';
@@ -85,7 +86,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: true },
 	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: true },
 	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: true },
-	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
+	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine tones and narrowband random on a random floor, on several shakers controlled together.', ready: true },
 	{ id: 'mimo_twr', group: 'mimo', title: 'MIMO TWR', summary: 'Recorded signals reproduced at several control points at once, from several shakers.', ready: false },
 	{ id: 'recorder', group: 'specialized', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: true },
 	{ id: 'explorer', group: 'specialized', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: true },
@@ -106,7 +107,7 @@ export type LiveTest = TestTypeId | null | undefined;
 
 /**
  * Which test type holds a live run, from the Random, MIMO Random, classical shock, SRS shock, Sine,
- * TWR, Explorer, Recorder, MIMO Shock, Playback, MIMO Sine and Modal Test stores and their connection. Before the first read the answer is not known yet; a service that
+ * TWR, Explorer, Recorder, MIMO Shock, Playback, MIMO Sine, Modal Test and MIMO Mixed Mode stores and their connection. Before the first read the answer is not known yet; a service that
  * cannot be reached, or that refused the read, has nothing live to show.
  */
 export function liveTestOf(
@@ -123,7 +124,8 @@ export function liveTestOf(
 	mimoShock?: { status: { state: MimoShockRunState } | null; syncError: string | null },
 	playback?: { status: { state: PlaybackRunState } | null; syncError: string | null },
 	mimoSine?: { status: { state: MimoSineRunState } | null; syncError: string | null },
-	modalTest?: { status: { state: ModalRunState } | null; syncError: string | null }
+	modalTest?: { status: { state: ModalRunState } | null; syncError: string | null },
+	mimoMixed?: { status: { state: MimoMixedRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
@@ -138,9 +140,10 @@ export function liveTestOf(
 	if (playback?.status && PLAYBACK_LIVE_STATES.includes(playback.status.state)) return 'playback';
 	if (mimoSine?.status && MSINE_LIVE_STATES.includes(mimoSine.status.state)) return 'mimo_sine';
 	if (modalTest?.status && MODAL_LIVE_STATES.includes(modalTest.status.state)) return 'modal_test';
+	if (mimoMixed?.status && LIVE_STATES.includes(mimoMixed.status.state)) return 'mimo_mixed';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed) && answered(mimoShock) && answered(playback) && answered(mimoSine) && answered(modalTest)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed) && answered(mimoShock) && answered(playback) && answered(mimoSine) && answered(modalTest) && answered(mimoMixed)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

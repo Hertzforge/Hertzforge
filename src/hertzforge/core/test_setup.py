@@ -30,7 +30,7 @@ from typing import Any
 #: gives its test (`RunRecord.test`)
 MODULES = ('random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer',
            'recorder', 'mimo_random', 'mimo_shock', 'mimo_sine', 'playback',
-           'modal_test')
+           'modal_test', 'mimo_mixed')
 
 #: each module's configure request on the control service, and the member
 #: of its params that holds the configuration
@@ -46,7 +46,8 @@ CONFIGURE = {'random': ('random.configure', 'config'),
              'mimo_shock': ('mimo_shock.configure', 'config'),
              'mimo_sine': ('mimo_sine.configure', 'config'),
              'playback': ('playback.configure', 'config'),
-             'modal_test': ('modal_test.configure', 'config')}
+             'modal_test': ('modal_test.configure', 'config'),
+             'mimo_mixed': ('mimo_mixed.configure', 'config')}
 
 #: the protocol a setup is written under when it does not say
 PROTOCOL = 'sds/1'

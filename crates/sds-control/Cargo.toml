@@ -102,6 +102,13 @@ hertzforge-mimo-shock-laws = { path = "../hertzforge-mimo-shock-laws" }
 # backend it is handed, and holds the Sim only as a dev-dependency.
 hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
 hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
+# MIMO Mixed Mode (src/mimo_mixed/): the run service the run thread drives
+# (handed the station at arm), and the laws' roles, the hardware rule and the
+# law check's cases. Reviewed 2026-11-21 with their contracts
+# (tests/forbidden_deps.rs): each reaches hardware only through the station
+# backend it is handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-mixed = { workspace = true, features = ["service"] }
+hertzforge-mimo-mixed-laws.workspace = true
 serde_json.workspace = true
 # A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
 # or Apache-2.0, as the reference reader already has it).

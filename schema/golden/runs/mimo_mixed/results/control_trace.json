@@ -1,0 +1,110 @@
+{
+  "name": "control_trace",
+  "kind": "mimo_mixed_control",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "every call of the two laws, in the order taken (the controller's law-call record, format hertzforge.mimo_mixed.law_ticks.v1): station time, the law (0 the floor's, once a loop; 1 a tone's, once a tick), the tone's index among the tones, the drive in force before the call and the drive the controller took from it (the floor's in-band rms summed over the drives, full level; a tone's drive vector norm, peak, at the level), the call's time, a miss (0 a usable call) and its flags (1 a cap bound, 2 the engage or the seed); NaN where a record was not filled",
+  "roles": [
+    "floor",
+    "tone"
+  ],
+  "tones": [
+    "t1"
+  ],
+  "format": "hertzforge.mimo_mixed.law_ticks.v1",
+  "fields": [
+    "t_s",
+    "drive_in",
+    "drive_out",
+    "took_us",
+    "role",
+    "tone",
+    "miss",
+    "flags"
+  ],
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "role",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 512
+    },
+    {
+      "name": "tone",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 1024
+    },
+    {
+      "name": "drive_in",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 1536
+    },
+    {
+      "name": "drive_out",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 2048
+    },
+    {
+      "name": "call_us",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "us",
+      "offset": 2560
+    },
+    {
+      "name": "miss",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 3072
+    },
+    {
+      "name": "flags",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 3584
+    }
+  ]
+}

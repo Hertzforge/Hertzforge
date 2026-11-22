@@ -45,6 +45,10 @@ pub struct CheckRecord {
     pub passed: bool,
     /// Each case's result.
     pub cases: Vec<CheckCase>,
+    /// Cases run and recorded for information only: they are not part of
+    /// the verdict (a check states which of its cases these are).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub informational: Vec<CheckCase>,
 }
 
 impl CheckRecord {
@@ -63,7 +67,15 @@ impl CheckRecord {
             date: date.into(),
             passed,
             cases,
+            informational: Vec::new(),
         }
+    }
+
+    /// The record with `cases` recorded for information only, outside the
+    /// verdict.
+    pub fn with_informational(mut self, cases: Vec<CheckCase>) -> Self {
+        self.informational = cases;
+        self
     }
 
     /// Where the record for `law_sha256` lives in `laws_dir`.

@@ -709,6 +709,59 @@ fn a_further_check_record_lives_beside_the_law_and_leaves_its_own_check_alone() 
     ));
 }
 
+/// Requirement: a check's informational cases are recorded with it and
+/// read back, take no part in the verdict, and a record written before the
+/// field existed reads as having none.
+#[test]
+fn informational_cases_are_recorded_outside_the_verdict() {
+    let scratch = Scratch::new("catalog-informational");
+    let mut cat = open(scratch.path());
+    let law = cat.import(&law_file(RATIO)).unwrap();
+    let case = |name: &str, passed| CheckCase {
+        name: name.into(),
+        passed,
+        detail: String::new(),
+    };
+    let record = CheckRecord::new(
+        law.id.clone(),
+        "role-check 2",
+        "2026-11-21T10:00:00Z",
+        vec![case("floor only", true)],
+    )
+    .with_informational(vec![case("swept tone", false)]);
+    assert!(
+        record.passed,
+        "an informational case is outside the verdict"
+    );
+    assert_eq!(record.validate(), Ok(()));
+    cat.record_named_check("mixed-floor", &record).unwrap();
+    assert_eq!(
+        cat.named_check(&law.id, "mixed-floor"),
+        CheckStatus::Checked(record.clone())
+    );
+    let path = scratch
+        .path()
+        .join(LAWS_DIR)
+        .join(format!("{}.mixed-floor.check.json", law.id));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\"informational\""), "{text}");
+    // Written without the field: none.
+    let plain = CheckRecord::new(
+        law.id.clone(),
+        "role-check 2",
+        "2026-11-21T10:00:00Z",
+        vec![case("floor only", true)],
+    );
+    std::fs::write(&path, serde_json_text(&plain)).unwrap();
+    assert_eq!(
+        cat.named_check(&law.id, "mixed-floor"),
+        CheckStatus::Checked(plain.clone())
+    );
+    assert!(!serde_json::to_string(&plain)
+        .unwrap()
+        .contains("informational"));
+}
+
 #[test]
 fn mimo_shock_the_world_is_named_and_its_law_files_are_listed_under_it() {
     assert_eq!(LawWorld::ShockMimo.as_str(), "shock_mimo");

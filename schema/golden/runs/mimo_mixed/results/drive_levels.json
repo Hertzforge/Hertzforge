@@ -1,0 +1,113 @@
+{
+  "name": "drive_levels",
+  "kind": "mimo_mixed_drives",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "the run's level and each control's floor error (dB, the floor's rms against the reference on clean lines); per drive the random part's rms, the largest magnitude played, the peak held over the last second, the tones' summed amplitude, the headroom to the drive's peak ceiling (dB) and the tones' common scale",
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        32
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "level_db",
+      "dtype": "f8",
+      "shape": [
+        32
+      ],
+      "unit": "dB",
+      "offset": 256
+    },
+    {
+      "name": "floor_error_db",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "dB",
+      "offset": 512
+    },
+    {
+      "name": "random_rms",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "V",
+      "offset": 1536
+    },
+    {
+      "name": "peak",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "V",
+      "offset": 2560
+    },
+    {
+      "name": "held_peak",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "V",
+      "offset": 3584
+    },
+    {
+      "name": "tone_sum",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "V",
+      "offset": 4608
+    },
+    {
+      "name": "headroom_db",
+      "dtype": "f8",
+      "shape": [
+        4,
+        32
+      ],
+      "unit": "dB",
+      "offset": 5632
+    },
+    {
+      "name": "scale",
+      "dtype": "f8",
+      "shape": [
+        32
+      ],
+      "unit": "",
+      "offset": 6656
+    }
+  ]
+}

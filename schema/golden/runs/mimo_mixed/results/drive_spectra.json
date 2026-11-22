@@ -1,0 +1,35 @@
+{
+  "name": "drive_spectra",
+  "kind": "mimo_mixed_drive_spectra",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 112.0,
+    "step": 8.0
+  },
+  "channels": {
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "band": [
+    14,
+    29
+  ],
+  "description": "per drive, at the level in force: the floor law's drive autospectrum",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "V^2/Hz",
+      "offset": 0
+    }
+  ]
+}

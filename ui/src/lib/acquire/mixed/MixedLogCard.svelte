@@ -1,17 +1,20 @@
 <script lang="ts">
 	/**
 	 * The run's log, newest first: each entry's time, its kind in a word and the service's words. A
-	 * part switched on or off (by its window, its end, or a screen) is logged as a Part entry.
+	 * part switched on or off (by its window, its end, or a screen) is logged as a Part entry. A
+	 * test type with kinds of its own gives their words.
 	 */
 	import type { MixedLogEntry } from '$lib/protocol/mixed';
 	import { LOG_WORDS } from '../words';
 
 	interface Props {
 		log: MixedLogEntry[];
+		/** Words for kinds the shared list does not have. */
+		words?: Record<string, string>;
 	}
-	let { log }: Props = $props();
+	let { log, words = {} }: Props = $props();
 
-	const WORDS: Record<string, string> = { ...LOG_WORDS, part: 'Part' };
+	const WORDS = $derived<Record<string, string>>({ ...LOG_WORDS, part: 'Part', ...words });
 	const recent = $derived([...log].reverse().slice(0, 200));
 	const time = (s: number) => new Date(s * 1000).toLocaleTimeString([], { hour12: false });
 </script>

@@ -1,0 +1,43 @@
+{
+  "name": "identification_response",
+  "kind": "cpsd",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 112.0,
+    "step": 8.0
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "band": [
+    14,
+    29
+  ],
+  "convention": "file",
+  "description": "the controls' spectral matrix while the drives played",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "c16",
+      "shape": [
+        4,
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 0
+    }
+  ]
+}

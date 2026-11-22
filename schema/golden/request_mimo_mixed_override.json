@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 99,
+ "method": "mimo_mixed.override",
+ "params": {
+  "ack": "Coherence low at the band edges; accepted.",
+  "reason": "gate_failed"
+ }
+}

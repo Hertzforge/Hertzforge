@@ -1,0 +1,48 @@
+{
+ "type": "request",
+ "id": 93,
+ "method": "mimo_mixed.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control"
+   },
+   {
+    "id": "res",
+    "quantity": "residual",
+    "channels": [
+     1,
+     2
+    ]
+   },
+   {
+    "id": "crs",
+    "quantity": "cross"
+   },
+   {
+    "id": "drv",
+    "quantity": "drive"
+   },
+   {
+    "id": "amp",
+    "quantity": "tone_amplitude",
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "phs",
+    "quantity": "tone_phase",
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "bnd",
+    "quantity": "band_level"
+   }
+  ]
+ }
+}

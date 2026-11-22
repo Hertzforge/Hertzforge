@@ -38,7 +38,8 @@ REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams'),
             'mimo_sine': ('request_mimo_sine_configure', None),
             'playback': ('request_playback_configure', 'playbackConfigureParams'),
-            'modal_test': ('request_modal_test_configure', 'modalTestConfigureParams')}
+            'modal_test': ('request_modal_test_configure', 'modalTestConfigureParams'),
+            'mimo_mixed': ('request_mimo_mixed_configure', 'mimoMixedConfigureParams')}
 
 #: the golden run folders, by the module each ran; a module that keeps several runs
 #: (Modal Test) keeps each in a folder of its own under the module's

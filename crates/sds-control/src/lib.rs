@@ -45,6 +45,7 @@ pub mod codec;
 pub mod explorer;
 pub mod laws;
 pub mod mimo;
+pub mod mimo_mixed;
 pub mod mimo_shock;
 pub mod mimo_sine;
 pub mod mixed;

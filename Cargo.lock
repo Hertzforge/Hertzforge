@@ -1292,6 +1292,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-mixed"
+version = "0.1.22"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-mimo-random",
+ "hertzforge-mimo-sine",
+ "hertzforge-mixed",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-random-laws",
+ "hertzforge-reference",
+ "hertzforge-sdm",
+ "hertzforge-shaker-db",
+ "hertzforge-sine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mimo-mixed-laws"
+version = "0.1.22"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-mimo-mixed",
+ "hertzforge-mimo-random",
+ "hertzforge-mimo-sine",
+ "hertzforge-mimo-sine-laws",
+ "hertzforge-mixed",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-random-laws",
+ "hertzforge-reference",
+ "hertzforge-sdm",
+]
+
+[[package]]
 name = "hertzforge-mimo-random"
 version = "0.1.22"
 dependencies = [
@@ -2615,6 +2660,8 @@ dependencies = [
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-law-host",
+ "hertzforge-mimo-mixed",
+ "hertzforge-mimo-mixed-laws",
  "hertzforge-mimo-random",
  "hertzforge-mimo-shock",
  "hertzforge-mimo-shock-laws",

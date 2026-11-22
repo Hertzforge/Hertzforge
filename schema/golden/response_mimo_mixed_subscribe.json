@@ -1,0 +1,68 @@
+{
+ "type": "response",
+ "id": 93,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": null,
+    "parts": null
+   },
+   {
+    "id": "res",
+    "quantity": "residual",
+    "channels": [
+     1,
+     2
+    ],
+    "parts": null
+   },
+   {
+    "id": "crs",
+    "quantity": "cross",
+    "channels": null,
+    "parts": null
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "channels": null,
+    "parts": null
+   },
+   {
+    "id": "amp",
+    "quantity": "tone_amplitude",
+    "channels": null,
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "phs",
+    "quantity": "tone_phase",
+    "channels": null,
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "bnd",
+    "quantity": "band_level",
+    "channels": null,
+    "parts": null
+   }
+  ],
+  "quantities": [
+   "control",
+   "residual",
+   "cross",
+   "drive",
+   "tone_amplitude",
+   "tone_phase",
+   "band_level"
+  ]
+ }
+}

@@ -93,7 +93,8 @@ pub fn same_json(a: &Value, b: &Value, path: &str) {
     }
 }
 
-fn same_numbers(name: &str, got: &[u8], want: &[u8], width: usize) {
+/// What differs between a file of numbers and the golden one, or nothing.
+fn same_numbers(name: &str, got: &[u8], want: &[u8], width: usize) -> Option<String> {
     assert_eq!(
         got.len(),
         want.len(),
@@ -101,6 +102,7 @@ fn same_numbers(name: &str, got: &[u8], want: &[u8], width: usize) {
         got.len(),
         want.len()
     );
+    let (mut wrong, mut said) = (0usize, Vec::<String>::new());
     for (k, (a, b)) in got.chunks(width).zip(want.chunks(width)).enumerate() {
         let (x, y) = if width == 4 {
             (
@@ -115,13 +117,25 @@ fn same_numbers(name: &str, got: &[u8], want: &[u8], width: usize) {
         };
         // a float32 sample to its own precision
         let tol = if width == 4 { 1e-5 } else { 1e-6 };
-        assert!(
-            x == y
-                || (x - y).abs() <= tol * x.abs().max(y.abs()) + 1e-9
-                || (x.is_nan() && y.is_nan()),
-            "{name}: value {k} is {x}, the golden {y}"
-        );
+        if !(x == y
+            || (x - y).abs() <= tol * x.abs().max(y.abs()) + 1e-9
+            || (x.is_nan() && y.is_nan()))
+        {
+            wrong += 1;
+            if said.len() < 8 {
+                said.push(format!("value {k} is {x}, the golden {y}"));
+            }
+        }
     }
+    // Every value that differs is counted and the first few are said, so one
+    // failed run on another platform shows how far the difference reaches.
+    (wrong > 0).then(|| {
+        format!(
+            "{name}: {wrong} of {} values differ from the golden: {}",
+            got.len() / width,
+            said.join("; ")
+        )
+    })
 }
 
 /// The folder's files against the golden folder's: the same files, JSON member
@@ -130,6 +144,7 @@ pub fn compare(got: &BTreeMap<String, Vec<u8>>, want: &BTreeMap<String, Vec<u8>>
     let a: Vec<&String> = got.keys().collect();
     let b: Vec<&String> = want.keys().collect();
     assert_eq!(a, b, "the folder's files differ from the golden folder's");
+    let mut differ = Vec::<String>::new();
     for (name, bytes) in got {
         let gold = &want[name];
         if name.ends_with(".json") {
@@ -153,13 +168,21 @@ pub fn compare(got: &BTreeMap<String, Vec<u8>>, want: &BTreeMap<String, Vec<u8>>
                 );
             }
         } else if name.ends_with(".f32") {
-            same_numbers(name, bytes, gold, 4);
+            differ.extend(same_numbers(name, bytes, gold, 4));
         } else if name.ends_with(".bin") {
-            same_numbers(name, bytes, gold, 8);
+            differ.extend(same_numbers(name, bytes, gold, 8));
         } else {
             assert_eq!(bytes, gold, "{name} differs");
         }
     }
+    assert!(
+        differ.is_empty(),
+        "{}",
+        differ.join(
+            "
+"
+        )
+    );
 }
 
 /// Write `files` as the folder `dir`, replacing what is there.

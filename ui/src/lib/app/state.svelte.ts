@@ -19,6 +19,8 @@ import { MimoShockStore } from '$lib/acquire/mimoshock/msStore.svelte';
 import { MsViewsState } from '$lib/acquire/mimoshock/msViews.svelte';
 import { MimoSineStore } from '$lib/acquire/mimosine/msineStore.svelte';
 import { MsineViewsState } from '$lib/acquire/mimosine/msineViews.svelte';
+import { MimoMixedStore } from '$lib/acquire/mimomixed/mmixStore.svelte';
+import { MmixViewsState } from '$lib/acquire/mimomixed/mmixViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
@@ -2362,6 +2364,8 @@ export class AppState {
 	readonly mimoShockRunOpen: RunOpen;
 	/** A finished MIMO Sine run's way to its data: the Sine workspace. */
 	readonly mimoSineRunOpen: RunOpen;
+	/** A finished MIMO Mixed Mode run's way to its data on the analysis side. */
+	readonly mimoMixedRunOpen: RunOpen;
 	/** A finished Sine run's way to its data on the analysis side. */
 	readonly sineRunOpen: RunOpen;
 	/** A finished Mixed Mode run's way to its data on the analysis side. */
@@ -2397,6 +2401,10 @@ export class AppState {
 	readonly mimoSine: MimoSineStore;
 	/** The MIMO Sine run's pages and this window's subscription. */
 	readonly mimoSineViews: MsineViewsState;
+	/** MIMO Mixed Mode's setup and run; the station and table are the Acquire store's. */
+	readonly mimoMixed: MimoMixedStore;
+	/** The MIMO Mixed Mode run's pages and this window's subscription. */
+	readonly mimoMixedViews: MmixViewsState;
 	/** SRS shock's setup and run; the station and table are the Acquire store's. */
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
@@ -2464,6 +2472,7 @@ export class AppState {
 		this.srsRunOpen = new RunOpen(runHost, 'srs');
 		this.mimoShockRunOpen = new RunOpen(runHost, 'mimo_shock');
 		this.mimoSineRunOpen = new RunOpen(runHost, 'mimo_sine');
+		this.mimoMixedRunOpen = new RunOpen(runHost, 'mimo_mixed');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mixedRunOpen = new RunOpen(runHost, 'mixed');
 		this.explorerRunOpen = new RunOpen(runHost, 'explorer');
@@ -2476,6 +2485,7 @@ export class AppState {
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoSine = new MimoSineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mimoMixed = new MimoMixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -2523,6 +2533,12 @@ export class AppState {
 			setupTitle: () => this.mimoSine.status?.title ?? (config.popout ? null : this.mimoSine.setup.title),
 			showing: () => mimoSinePopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_sine' && this.mimoSine.step === 'run'),
 			page: mimoSinePopout ? config.page : null
+		});
+		const mimoMixedPopout = config.popout && config.popoutTest === 'mimo_mixed';
+		this.mimoMixedViews = new MmixViewsState(this.control, {
+			setupTitle: () => this.mimoMixed.status?.title ?? (config.popout ? null : this.mimoMixed.setup.title),
+			showing: () => mimoMixedPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_mixed' && this.mimoMixed.step === 'run'),
+			page: mimoMixedPopout ? config.page : null
 		});
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(
@@ -2596,7 +2612,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine' | 'mimo_mixed' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2620,6 +2636,7 @@ export class AppState {
 		const recorder = this.config.popoutTest === 'recorder';
 		const mimoShock = this.config.popoutTest === 'mimo_shock';
 		const mimoSine = this.config.popoutTest === 'mimo_sine';
+		const mimoMixed = this.config.popoutTest === 'mimo_mixed';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -2674,6 +2691,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.mimoSine.sync();
 				});
 			}
+			if (mimoMixed) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimoMixed.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
@@ -2685,13 +2707,14 @@ export class AppState {
 		else if (recorder) this.recorderViews.watch();
 		else if (mimoShock) this.mimoShockViews.watch();
 		else if (mimoSine) this.mimoSineViews.watch();
+		else if (mimoMixed) this.mimoMixedViews.watch();
 		else this.display.watch();
 		if (this.config.control) this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine, this.modalTest);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine, this.modalTest, this.mimoMixed);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2732,6 +2755,8 @@ export class AppState {
 		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
 		const onMimoSine = this.workspace === 'acquire' && this.tests.screen === 'mimo_sine';
 		if (onMimoSine || this.mimoSine.isLive) return this.mimoSine.source;
+		const onMimoMixed = this.workspace === 'acquire' && this.tests.screen === 'mimo_mixed';
+		if (onMimoMixed || this.mimoMixed.isLive) return this.mimoMixed.source;
 		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
 		if (onPlayback || this.playback.isLive) return this.playback.source;
 		const onModal = this.workspace === 'acquire' && this.tests.screen === 'modal_test';
@@ -2794,6 +2819,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.mimoSine.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimoMixed.sync();
+			});
+			$effect(() => {
 				if (this.control.status === 'open') void this.playback.sync();
 			});
 			$effect(() => {
@@ -2816,6 +2844,7 @@ export class AppState {
 		this.recorder.watch();
 		this.mimoShock.watch();
 		this.mimoSine.watch();
+		this.mimoMixed.watch();
 		this.playback.watch();
 		this.modalTest.watch();
 		this.tests.watch();
@@ -2830,6 +2859,7 @@ export class AppState {
 		this.recorderViews.watch();
 		this.mimoShockViews.watch();
 		this.mimoSineViews.watch();
+		this.mimoMixedViews.watch();
 		this.playbackViews.watch();
 		this.analysis.connect();
 		if (this.config.control) this.control.connect();

@@ -1,0 +1,13 @@
+{
+ "type": "response",
+ "id": 96,
+ "error": {
+  "code": "refused",
+  "reason": "part_refused",
+  "message": "The floor plays for the whole run; it cannot be switched off.",
+  "detail": {
+   "id": "floor",
+   "why": "floor"
+  }
+ }
+}

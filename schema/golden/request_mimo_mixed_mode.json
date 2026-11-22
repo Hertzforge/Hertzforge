@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 98,
+ "method": "mimo_mixed.mode",
+ "params": {
+  "mode": "manual"
+ }
+}

@@ -1,0 +1,40 @@
+[package]
+name = "hertzforge-mimo-mixed-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The laws of a MIMO Mixed Mode run: the floor's multiple-output Random law
+# (world `mimo`) and the tones' MIMO Sine law (world `sine_mimo`), each from
+# its own world with no world of its own, the hardware rule of a role, and
+# the check cases the composed run is held to on the simulator's existing
+# structures.
+[dependencies]
+# The run (its service, its law seam and its configuration).
+hertzforge-mimo-mixed = { workspace = true, features = ["service"] }
+# Parts, schedules and law picks.
+hertzforge-mixed = { path = "../hertzforge-mixed", default-features = false }
+# The catalog, its check records and the hardware rule of a world.
+hertzforge-random-laws.workspace = true
+# The MIMO Sine check's version, which a tone law's own record must carry.
+hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
+# The level schedule of a case and the floor's estimation settings.
+hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
+hertzforge-random.workspace = true
+hertzforge-reference = { path = "../hertzforge-reference" }
+hertzforge-sdm.workspace = true
+# The check's runs: the station it is handed, the channel table and the run's
+# station class.
+hertzforge-hal.workspace = true
+hertzforge-channel-table.workspace = true
+hertzforge-module-abi.workspace = true
+
+[dev-dependencies]
+# A catalog entry's identity, in the hardware rule's tests.
+hertzforge-law-host.workspace = true
+# The built-in tone law a test wraps into a law that misses its level.
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine", default-features = false }
+# TEST FIXTURE ONLY: the check's stations, the simulator's existing
+# structures. On deny.toml's hertzforge-hal-sim wrapper list for that reason.
+hertzforge-hal-sim.workspace = true

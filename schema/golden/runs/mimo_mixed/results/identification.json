@@ -1,0 +1,55 @@
+{
+  "name": "identification",
+  "kind": "mimo_identification",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 112.0,
+    "step": 8.0
+  },
+  "channels": {
+    "controls": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "band": [
+    14,
+    29
+  ],
+  "description": "the identification's facts: its level against the reference, the steps of its level search, its frames and lag, each control's band coherence and each drive's rms",
+  "level_db": -20.147488461058202,
+  "frames": 64,
+  "steps": 2,
+  "lag_frames": 74,
+  "frames_ahead": 8,
+  "loaded": false,
+  "arrays": [
+    {
+      "name": "band_coherence",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 0
+    },
+    {
+      "name": "drive_vrms",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "V",
+      "offset": 32
+    }
+  ]
+}

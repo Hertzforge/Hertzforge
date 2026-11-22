@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 95,
+ "method": "mimo_mixed.part",
+ "params": {
+  "id": "t2",
+  "on": false
+ }
+}
