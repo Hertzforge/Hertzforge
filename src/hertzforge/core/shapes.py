@@ -887,6 +887,26 @@ class ShapeSet:
         self.comment = [self.comment[i] for i in keep]
         self.description = [self.description[i] for i in keep]
 
+    def kept(self, modes: Sequence[int] | None) -> ShapeSet:
+        """A copy holding only `modes` (indices from zero), in the set's
+        order and once each; the set itself when `modes` is None. The
+        modes picked in the tree are what an action reads.
+
+        Raises ValueError for a mode the set does not have, or for an
+        empty `modes` (`modal_frf.picked_modes`).
+        """
+        from copy import deepcopy
+
+        from .modal_frf import picked_modes
+
+        if modes is None:
+            return self
+        chosen = set(picked_modes(self, modes))
+        copy = deepcopy(self)
+        if len(chosen) < self.num_shapes:
+            copy.delete_modes([k for k in range(self.num_shapes) if k not in chosen])
+        return copy
+
     @property
     def num_shapes(self) -> int:
         """How many mode shapes the set holds."""

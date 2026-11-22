@@ -14,6 +14,7 @@ from typing import Any
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .mode_pairs import FIRST_MODES, SECOND_MODES
 from .ops_project import chosen_records
 from .protocol import refused
 
@@ -86,12 +87,20 @@ def match_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.match_modes`: each of the basis set's modes paired with
     the compared set's mode of highest MAC, when that MAC is at least the
     lowest given (`Project.match_modes`, across geometries after
-    projection), kept as a Matched Modes object, and its table."""
+    projection), kept as a Matched Modes object, and its table. Only the
+    modes picked under each set are paired, every mode of a set picked
+    whole."""
+    from .mode_pairs import modes_param
+
     first, second = params['first'], params['second']
     if first == second:
         raise refused('a set is matched against another set, not itself')
+    # the modes picked under each set are the ones paired
+    first_modes = modes_param(project[first], params.get('first_modes', ''))
+    second_modes = modes_param(project[second], params.get('second_modes', ''))
     try:
         name = project.match_modes(first, second, threshold=params['threshold'],
+                                   first_modes=first_modes, second_modes=second_modes,
                                    name=params['name'] or 'Matched Modes')
     except ValueError as error:
         raise refused(str(error)) from None
@@ -196,7 +205,8 @@ OPERATIONS = (
         id='project.match_modes', title='Match Modes', workspace='modal',
         summary='Pair each mode of the basis set with the compared set\'s mode of highest '
                 'MAC, at or above the lowest MAC given, and keep the pairs as an object.',
-        params=(FIRST, SECOND, THRESHOLD, NAME), outputs=('table',), run=match_modes),
+        params=(FIRST, SECOND, THRESHOLD, FIRST_MODES, SECOND_MODES, NAME),
+        outputs=('table',), run=match_modes),
     Operation(
         id='project.add_matches', title='Add Matches', workspace='modal',
         summary='Keep the picked MAC squares as matched modes of this pair of sets, with the '

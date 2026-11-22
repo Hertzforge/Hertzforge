@@ -349,7 +349,7 @@ def test_project_keeps_what_is_set_and_its_row_shows_it_in_the_display_units():
         added = _row(project, ['FEM Shapes', 'Modes B'], system)
         assert (added['fill']['source'], added['fill']['onto']) == ('Modes B', 'FEM Shapes')
         assert float(added['fill']['distance']) == pytest.approx(typed)
-        assert sorted(added['omit']) == ['direction', 'distance']
+        assert sorted(added['omit']) == ['direction', 'distance', 'modes']
 
 
 def _set_op(project, **given):
