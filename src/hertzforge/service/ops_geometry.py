@@ -27,7 +27,7 @@ from hertzforge.drawing.viz.geometry import dof_arrow_solids
 from . import display_units, group_cells
 from . import views as v
 from .descriptors import TREE_PICKS, Operation, Option, Param, Workspace
-from .mesh import drawn_mesh
+from .mesh import drawn_mesh, element_colors
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
 from .parsing import each_picked, parse_id_runs
@@ -81,9 +81,11 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     # the nodes no line or face is drawn through, as points, so a geometry of measured
     # points shows while its coordinate system is moved or one of its groups is picked
     points, _note = scans.layers(geometry)
-    # the first rows are the geometry's own nodes, so their ids caption and number them
+    # the first rows are the geometry's own nodes, so their ids caption and number them;
+    # every element in its own color, as the plot of the geometry draws it
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
                      triangles=triangles, lines=lines, node_ids=np.asarray(geometry.node_id),
+                     element_colors=element_colors(geometry),
                      **({'points': points} if points else {}))
 
 
@@ -196,7 +198,7 @@ def entity_columns(geometry: Any, kind: str) -> list[str]:
         return ['CS', 'Name', 'Type', *(f'Origin {a} [{unit}]' for a in 'XYZ'),
                 *(f'Rotation {a} [°]' for a in 'XYZ')]
     if kind == 'elements':
-        return ['Element', 'Type', 'Element group', 'Nodes']
+        return ['Element', 'Type', 'Element group', 'Nodes', 'Color']
     return ['Element group', 'Name', 'Elements', 'Elements are', 'Count',
             *group_cells.titles(geometry)]
 
@@ -205,6 +207,7 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
     """The cells of the entities at `indices`, and of no others: a page of a long table
     is written without writing the rest."""
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
+    from hertzforge.drawing.viz.geometry import color_text
     from hertzforge.rotate import angles_of
 
     indices = [int(k) for k in indices]
@@ -226,7 +229,8 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
         return [[str(int(geometry.elem_id[k])),
                  ELEMENT_TYPES.get(int(geometry.elem_type[k]), ('unknown',))[0],
                  labels.get(int(geometry.elem_group[k]), ''),
-                 ' '.join(str(int(n)) for n in geometry.elem_conn[k])] for k in indices]
+                 ' '.join(str(int(n)) for n in geometry.elem_conn[k]),
+                 color_text(int(geometry.elem_color[k]))] for k in indices]
     elem_group = np.asarray(geometry.elem_group)
     rows = []
     for k in indices:
@@ -236,6 +240,26 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
                      group_cells.family(geometry, group) or 'empty', str(len(members)),
                      *group_cells.cells(geometry, group)])
     return rows
+
+
+def _element_choices(geometry: Any, picked: Any) -> dict[str, list[str]]:
+    """What an element table's Type and Color cells offer: the types of the families its
+    rows hold (every family when it has none), and the palette's colors."""
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
+    from hertzforge.drawing.viz.geometry import PALETTE, color_text
+
+    codes = np.asarray(geometry.elem_type, dtype=int)
+    shown = codes if picked is None else codes[picked]
+    families = {element_family(int(c)) for c in np.unique(shown)} or set(FAMILY_ADD_TYPES)
+    return {'type': [word for c, (word, _n, _r) in ELEMENT_TYPES.items()
+                     if element_family(c) in families],
+            'color': [color_text(k) for k in range(len(PALETTE))]}
+
+
+def _hex(index: int) -> str:
+    from hertzforge.drawing.viz.geometry import color_rgb
+
+    return '#' + ''.join(f'{round(255 * c):02x}' for c in color_rgb(index))
 
 
 def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
@@ -248,24 +272,33 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
     it sends its first and its count, the rest asked for as they are
     scrolled to. `family` or `groups` keeps a part's rows (`picked_rows`),
     and its edits and pages say the same part, so a row is the part's."""
+    from hertzforge.drawing.viz.geometry import color_index
+
     picked = picked_rows(geometry, kind, family, groups)
     count = len(getattr(geometry, ID_ARRAYS[kind])) if picked is None else len(picked)
     sent = min(count, PAGE_ROWS) if name is not None else count
     indices = np.arange(sent) if picked is None else picked[:sent]
     rows = entity_rows(geometry, kind, indices)
     part = {key: value for key, value in (('family', family), ('groups', groups)) if value}
+    choices, kinds = (group_cells.choices(), None) if kind == 'groups' else (None, None)
+    if kind == 'elements':
+        choices, kinds = _element_choices(geometry, picked), {'type': 'choice', 'color': 'choice'}
     edit = None if name is None else v.editing(
         'project.set_entity_cell', {'geometry': name, 'kind': kind, **part}, FIELDS[kind],
-        group_cells.choices() if kind == 'groups' else None)
+        choices, kinds)
+    if edit is not None and kind == 'elements':
+        # each color's cell shows its swatch
+        edit['swatches'] = {'color': {choice: _hex(color_index(choice))
+                                      for choice in choices['color']}}
     if edit is not None:
         # the rows are the entities, so Delete takes rows, not cells: each by its id,
         # the first column
         edit['remove'] = {'op': 'project.delete_entities',
                           'params': {'geometry': name, 'kind': kind, **part}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
-    if name is not None and kind == 'nodes':
-        # its rows and the nodes of the view beside it are marked together
-        table['marks'] = {'link': part_link('nodes', name), 'column': 0}
+    if name is not None and kind in ('nodes', 'elements'):
+        # its rows and the nodes or elements of the view beside it are marked together
+        table['marks'] = {'link': part_link(kind, name), 'column': 0}
     if name is not None and kind == 'coordinate_systems':
         # the row picked is the system the arrows and rings in the view are on
         table['select'] = {'op': 'project.view_entities',
@@ -292,17 +325,54 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
                          'Click in the view to place a coordinate system', ids=ids, in_display=True)
     if kind != 'elements':
         return None
-    from hertzforge.core.geometry import ELEMENT_TYPES
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
 
     element = element or {'family': FAMILY.default, 'type': '', 'group': 0}
     family = element['family']
-    code, count = FAMILY_ADD_TYPES[family]
-    chained = ELEMENT_TYPES[code][2] == 'line'
-    hint = (f'Click nodes in order, then press Enter for the line of {family}' if chained
-            else f'Click {count} node{"s" * (count != 1)} to make one of the {family}')
-    return v.picking('project.add_element', {'geometry': name, **element}, 'nodes', hint,
-                     ids=ids, count=0 if chained else count,
-                     param='nodes')
+    # the type Add mode makes: the one picked in its Type list, or the family's own
+    wanted = str(element.get('type') or '').strip().lower()
+    code = next((c for c, (word, _n, _r) in ELEMENT_TYPES.items()
+                 if word == wanted and element_family(c) == family), FAMILY_ADD_TYPES[family][0])
+    word = ELEMENT_TYPES[code][0]
+    count, hint = _clicks(code)
+    pick = v.picking('project.add_element', {'geometry': name, **element, 'type': word},
+                     'nodes', hint, ids=ids, count=count, param='nodes')
+    pick['settings'] = _add_settings(geometry, family)
+    return pick
+
+
+def _clicks(code: int) -> tuple[int, str]:
+    """How many clicked nodes make an element of this type (0: a line through as many as
+    are clicked, then Enter), and the hint that says so."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    word, count, render = ELEMENT_TYPES[code]
+    if render == 'line':
+        return 0, f'Click nodes in order, then press Enter for the line of {word} elements'
+    return count, f'Click {count} node{"s" * (count != 1)} to make a {word}'
+
+
+def _add_settings(geometry: Any, family: str) -> list[dict[str, Any]]:
+    """What Add mode asks beside the clicks: the type of the family to make, and the
+    element group it goes in, of the groups that hold that family, or hold nothing yet and
+    were made for it or for no family (`Geometry.group_family`)."""
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
+
+    held: dict[int, set[str]] = {int(g): set() for g in geometry.group_id}
+    for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
+        held.setdefault(int(group), set()).add(element_family(int(code)))
+    made_for = geometry.group_family
+    groups = [{'value': int(g), 'label': _group_label(geometry, k)}
+              for k, g in enumerate(geometry.group_id)
+              if held[int(g)] == {family}
+              or (not held[int(g)] and made_for.get(int(g), family) == family)]
+    return [
+        {'param': 'type', 'label': 'Type',
+         # each type says how many clicks make one, so the view counts them as it is picked
+         'options': [{'value': word, 'label': word, 'count': _clicks(c)[0], 'hint': _clicks(c)[1]}
+                     for c, (word, _n, _r) in ELEMENT_TYPES.items() if element_family(c) == family]},
+        {'param': 'group', 'label': 'Element group',
+         'options': [{'value': 0, 'label': 'First or new'}, *groups]}]
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '',
@@ -324,7 +394,39 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
         drawn['pick'] = pick
     if kind == 'nodes':
         drawn['marks'] = {'link': part_link('nodes', name)}
+    if kind == 'elements':
+        # in Select mode a click in the view marks the element under it, as its row does
+        # and Delete there removes the elements marked, as it does in the table
+        drawn['mark_sets'] = [{**_table_element_marks(name, geometry, **part), 'clicks': True,
+                               'remove': {'op': 'project.delete_entities',
+                                          'params': {'geometry': name, 'kind': 'elements', **part}}}]
+        if len(drawn['mark_sets'][0]['ids']) == MARKED_ELEMENTS:
+            drawn['note'] = (f'Rows after the first {MARKED_ELEMENTS} are not highlighted '
+                             'in the view.')
     return [drawn, entity_table(geometry, kind, title, name, **part)]
+
+
+#: the most elements of an element table the 3-D view beside it highlights
+MARKED_ELEMENTS = 10_000
+
+
+def _table_element_marks(name: str, geometry: Any, family: str = '', groups: str = ''
+                         ) -> dict[str, Any]:
+    """The elements of an element table as the view beside it highlights the ones whose
+    rows are selected: each element's id, the rows of its nodes (ringed), and its faces and
+    edges (`mesh.element_highlights`), for the table's first `MARKED_ELEMENTS` rows."""
+    from .mesh import element_highlights
+
+    picked = picked_rows(geometry, 'elements', family, groups)
+    elements = np.arange(len(geometry.elem_id)) if picked is None else picked
+    elements = elements[:MARKED_ELEMENTS]
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    faces, edges = element_highlights(geometry, elements)
+    return {'link': part_link('elements', name),
+            'ids': [int(geometry.elem_id[element]) for element in elements],
+            'rows': [[rows[int(node)] for node in geometry.elem_conn[element]
+                      if int(node) in rows] for element in elements],
+            'faces': faces, 'edges': edges}
 
 
 def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:
@@ -395,11 +497,8 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
     if runs:
         groups = parse_id_runs(runs)
         runs = id_runs_text(groups)
-        said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
-        drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
-        _mark_points(drawn, geometry, groups)
-        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
-                                    name, groups=runs), elements]
+        return _group_views(name, geometry, groups,
+                            ('element group ' if len(groups) == 1 else 'element groups ') + runs)
     if family:
         return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
                       _family_element(family), family=family)
@@ -410,6 +509,26 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
         if cs:
             views = _with_gizmo(views, name, geometry, cs)
     return views
+
+
+def _group_views(name: str, geometry: Any, groups: list[int], said: str) -> list[dict]:
+    """Element groups' Edit: the geometry drawn, the groups' table and their elements'
+    table. Add mode makes an element of the groups' family, in the group when one is
+    picked, and shows the groups again."""
+    from hertzforge.core.geometry import element_family
+
+    runs = id_runs_text(groups)
+    rows = picked_rows(geometry, 'elements', groups=runs)
+    families = {element_family(int(geometry.elem_type[r])) for r in rows}
+    family = families.pop() if len(families) == 1 else ''
+    element = None
+    if family in FAMILY_ADD_TYPES:
+        element = {'family': family, 'type': '', 'group': groups[0] if len(groups) == 1 else 0,
+                   'groups': runs}
+    drawn, elements = _shown(name, geometry, 'elements', said, element, groups=runs)
+    _mark_points(drawn, geometry, groups)
+    return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
+                                name, groups=runs), elements]
 
 
 def _family_element(family: str) -> dict[str, Any] | None:
@@ -561,6 +680,9 @@ def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
                     f'{int(geometry.elem_id[row])}')
     except ValueError as error:
         raise refused(str(error)) from None
+    if params['groups'].strip():
+        # added from element groups' Edit: those groups again
+        return _group_views(name, geometry, parse_id_runs(params['groups']), said)
     # the family's own table again, as its Edit opened it, not every element
     return _shown(name, geometry, 'elements', said,
                   {key: params[key] for key in ('family', 'type', 'group')}, family=family)
@@ -572,15 +694,38 @@ GROUP_NAME = Param('name', 'Name', 'string', default='')
 def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_element_group`: an empty element group
     (`Geometry.add_group`), added outright since
-    an element group is not placed in space."""
+    an element group is not placed in space. With `family` it is that family's, listed
+    under it in the tree while it is empty and offered in its Edit's Add mode."""
     name = params['geometry']
     geometry = project[name]
+    family = params['family'].strip()
     try:
-        group = geometry.add_group(params['name'], _optional_id(params['id']))
+        group = geometry.add_group(params['name'], _optional_id(params['id']), family=family)
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_call(name, 'add_group', params['name'], int(group))
-    return _shown(name, geometry, 'groups', f'added element group {group}')
+    project.record_call(name, 'add_group', params['name'], int(group), family=family)
+    return _shown(name, geometry, 'groups', f'added element group {group}'
+                  + (f' for the {family}' if family else ''))
+
+
+def move_elements(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.move_elements`: elements put in another element group
+    (`Geometry.move_elements`), as dragging them onto it in the tree does; the group's
+    Edit views show after."""
+    name = params['geometry']
+    geometry = project[name]
+    ids = parse_id_runs(params['elements'])
+    if not ids:
+        raise refused('name the elements to move, such as 1-3, 7')
+    try:
+        moved = geometry.move_elements(ids, params['group'])
+    except ValueError as error:
+        raise refused(str(error)) from None
+    project.record_call(name, 'move_elements', ids, int(params['group']))
+    views = view_entities(project, {'geometry': name, 'kind': 'elements', 'family': '',
+                                    'groups': str(params['group']), 'cs': 0})
+    views[-1]['title'] += f' ({moved} element{"s" * (moved != 1)} moved in)'
+    return views
 
 
 ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
@@ -588,7 +733,7 @@ FIELDS = {
     'nodes': ('id', 'x', 'y', 'z', 'placement_cs', 'displacement_cs'),
     'coordinate_systems': ('id', 'name', 'type', 'origin_x', 'origin_y', 'origin_z',
                            'rotation_x', 'rotation_y', 'rotation_z'),
-    'elements': ('id', 'type', 'group', 'nodes'),
+    'elements': ('id', 'type', 'group', 'nodes', 'color'),
     'groups': ('id', 'name', 'elements', None, None, *group_cells.KEYS),
 }
 FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
@@ -598,7 +743,8 @@ FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
         ('name', 'Name'), ('type', 'Type'), ('origin_x', 'Origin X'),
         ('origin_y', 'Origin Y'), ('origin_z', 'Origin Z'), ('rotation_x', 'Rotation X (°)'),
         ('rotation_y', 'Rotation Y (°)'), ('rotation_z', 'Rotation Z (°)'),
-        ('group', 'Element group'), ('nodes', 'Nodes'), ('elements', 'Elements'),
+        ('group', 'Element group'), ('nodes', 'Nodes'), ('color', 'Color'),
+        ('elements', 'Elements'),
         *((key, title) for key, title, *_rest in group_cells.COLUMNS))))
 VALUE = Param('value', 'Value', 'string', default='')
 
@@ -701,13 +847,17 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                     geometry.elem_group[row] = int(group)
                     return
             raise ValueError(f'no element group {wanted!r}; add it first')
-        else:
+        elif field == 'nodes':
             nodes = parse_id_runs(text, 'a node id')
             missing = set(nodes) - set(geometry.node_id.tolist())
             if missing:
                 raise ValueError(f'unknown nodes {sorted(missing)}')
             _check_nodes(int(geometry.elem_type[row]), nodes)
             geometry.elem_conn[row] = np.asarray(nodes, dtype=np.int64)
+        elif field == 'color':
+            from hertzforge.drawing.viz.geometry import color_index
+
+            geometry.elem_color[row] = color_index(text)
     else:
         if field == 'id':
             geometry.renumber_group(row, _whole(text, 1))
@@ -1541,9 +1691,19 @@ OPERATIONS = (
     _model('project.add_element', 'Add Element',
            'An element of a family on the nodes named, in order; for beams, the chain of '
            'elements through every node named.',
-           (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP), DRAWN, add_element),
+           (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP,
+            Param('groups', 'Element groups whose Edit shows after', 'string', default='')),
+           DRAWN, add_element),
+    _model('project.move_elements', 'Move Elements',
+           'Elements put in another element group of the same element family, as dragging '
+           'them onto it in the tree does.',
+           (GEOMETRY, Param('elements', 'Elements, as 1-3, 7', 'string', default=''),
+            Param('group', 'Element group', 'integer', default=1, min=1, step=1)),
+           DRAWN, move_elements),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='geometry'),
+           (GEOMETRY, GROUP_NAME, NODE_ID,
+            Param('family', 'Element family (blank: none yet)', 'string', default='')),
+           DRAWN, add_element_group, workspace='geometry'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',

@@ -213,7 +213,12 @@ class AnalyzeState {
 			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
 			.filter((p) => p.name !== this.op?.commits)
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
-			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
+			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p))
+			.map((p) => {
+				// the row's own words for a param's options: Project's directions name the two sets
+				const words = row?.labels?.[p.name];
+				return words && p.options ? { ...p, options: p.options.map((o) => ({ ...o, label: words[String(o.value)] ?? o.label })) } : p;
+			});
 	}
 
 	get currentValues(): ParamValues {
@@ -276,8 +281,7 @@ class AnalyzeState {
 			this.picks = [];
 			this.shapeView = null;
 			// each selection opens as it is: Projection is asked for again, not carried over
-			// and so is a loosened node match: one pair's tolerance is not the next pair's
-			if (this.prefs.projection || this.prefs.match_distance !== 0) this.prefs = { ...this.prefs, projection: false, match_distance: 0 };
+			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -298,7 +302,6 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
-						match_distance: this.prefs.match_distance,
 						limits: this.prefs.limits,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
@@ -673,26 +676,6 @@ class AnalyzeState {
 		return null;
 	}
 
-	/**
-	 * The distance two shape sets on two geometries are matched within, as the bar shows it: in the
-	 * display system's length, or the model's own numbers when its geometries have no units. Null when
-	 * the selection compares no such pair.
-	 */
-	get matchShown(): { value: number; unit: string } | null {
-		const held = this.shown?.offers?.match_distance;
-		if (!held) return null;
-		const length = held.defined ? this.app.units.length : null;
-		return { value: Number((held.value / (length?.to_si ?? 1)).toPrecision(4)), unit: length?.unit ?? '' };
-	}
-
-	/** A node match distance typed in the bar, in the units it shows it in, 0 for the default; false, and nothing asked, for one below 0. */
-	setMatchDistance(typed: number): boolean {
-		if (!Number.isFinite(typed) || typed < 0) return false;
-		const held = this.shown?.offers?.match_distance;
-		this.setPref('match_distance', typed * (held?.defined ? (this.app.units.length?.to_si ?? 1) : 1));
-		return true;
-	}
-
 	/** One of the bar's choices changed: kept, and the selection read again. */
 	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
 		// moving the force is the same question asked of another point: the line shown is kept,
@@ -771,11 +754,12 @@ class AnalyzeState {
 		this.previewDrawn = null;
 	}
 
-	/** Every field the form asks, but for what its row filled in, still holds its default. */
+	/** Every field the form asks still holds what it opened on: what its row filled in, or else its default. */
 	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
 		const defaults = defaultValues(this.paramsOf(op));
 		const filled = this.formRow?.fill ?? {};
-		return this.formParams.every((p) => p.name in filled || values[p.name] === defaults[p.name]);
+		// a filled field changed is typed into, as any other: Project's direction turned the way that cannot be made says why
+		return this.formParams.every((p) => (p.name in filled ? String(values[p.name]) === filled[p.name] : values[p.name] === defaults[p.name]));
 	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
@@ -1646,7 +1630,6 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
-		match_distance: 0,
 		limits: true,
 		bars: true,
 		values_dofs: 'all',
@@ -2108,6 +2091,13 @@ export class ProjectState {
 	}
 
 	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	/** Elements dragged onto an element group in the tree: they move into it (`project.move_elements`). */
+	async moveElements(name: string, ids: number[], group: number): Promise<boolean> {
+		const ok = await this.act(`Moving elements into element group ${group}`, 'project.move_elements', { geometry: name, elements: ids.join(', '), group });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
 	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
 		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
 		if (ok) void this.loadChildren(name);

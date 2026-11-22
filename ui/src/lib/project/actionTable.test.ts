@@ -101,6 +101,16 @@ describe('rows under the row they work from', () => {
 		expect(nestedRows(few, () => false).map((r) => r.verb)).toEqual(['Plot', 'PSDs', 'Integrate', 'FRFs', 'Filter', 'Orphan']);
 	});
 
+	it('draws a view listed before its setting under it, as MAC under Project', () => {
+		const pair: ActionRow[] = [
+			row('MAC', { kind: 'default', id: 'show.mac', under: 'project.set_projection' }),
+			row('Project', { id: 'project.set_projection', open: true, live: true }),
+			row('Match Modes', { id: 'project.match_modes', under: 'project.set_projection' }),
+			row('Link', { kind: 'self', id: 'self.link' })
+		];
+		expect(nestedRows(pair, (_id, atFirst) => atFirst).map((r) => `${'  '.repeat(r.depth)}${r.verb}`)).toEqual(['Project', '  MAC', '  Match Modes', 'Link']);
+	});
+
 	it('reads a row under its holder without the holder\'s own words', () => {
 		const six: ActionRow[] = [{ id: 'group.auto_compute', verb: 'Auto Compute', kind: 'group', ready: true }, row('Auto Compute Random', { id: 'project.work_up_random', under: 'group.auto_compute' }), row('Predict', { under: 'group.auto_compute' })];
 		expect(nestedRows(six, () => true).map((r) => r.label)).toEqual(['Auto Compute', 'Random', 'Predict']);

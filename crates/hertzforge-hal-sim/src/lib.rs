@@ -875,11 +875,17 @@ impl Backend for SimBackend {
         })
     }
 
+    /// Arm from Configured, or from Stopped for a restart. A restart's output
+    /// starts from zero, where the stop's ramp-down ended, until new drive is
+    /// played (`stop` drops the queue).
     fn arm(&mut self) -> Result<(), HalError> {
         match self.state {
             State::Configured | State::Stopped => {
                 if self.map.is_none() {
                     return Err(HalError::Config("arm() before configure()".into()));
+                }
+                if self.state == State::Stopped {
+                    self.pending_drive.fill(0.0);
                 }
                 self.state = State::Armed;
                 Ok(())
@@ -903,10 +909,21 @@ impl Backend for SimBackend {
         }
     }
 
+    /// Stop from any live state and begin a graceful drive ramp-down from the
+    /// last drive frame played.
+    ///
+    /// The stop ends this generation of the output, as on a hardware station,
+    /// whose stop releases the output task and with it every frame still queued:
+    /// drive written before the stop is never played after it, and the next
+    /// start plays first what was written after the stop (a cold start's
+    /// lead-in). Without this a restart played the old generation's queued
+    /// frames ahead of the new drive, and the drive-to-response lag after every
+    /// suspend and restart was longer than at the first start (by 8 frames at
+    /// MIMO Random's engage seam).
     fn stop(&mut self) -> Result<(), HalError> {
-        // Stop from any live state; begin a graceful drive ramp-down.
         if matches!(self.state, State::Running | State::Armed) {
             self.ramp = Some(self.drive_scale());
+            self.out_fifo.clear();
             self.state = State::Stopped;
         }
         Ok(())
@@ -1698,6 +1715,72 @@ mod tests {
         assert_eq!(b.read_input(&mut buf).unwrap(), InputRead::Frames(4));
         let commanded: Vec<f32> = (0..4).map(|f| buf[f * 2 + 1]).collect();
         assert_eq!(commanded, vec![0.9, 0.9, 0.9, 0.9], "held, not cliffed");
+    }
+
+    /// A restart after a stop plays the NEW drive first: frames queued before the
+    /// stop belong to the old generation of the output and are dropped by the
+    /// stop, as a hardware station's stop releases them. Kept, they played ahead
+    /// of the new drive and lengthened the drive-to-response lag after every
+    /// suspend and restart by however many were queued. Drive written after the
+    /// stop is the new generation's, whether before the re-arm (Sine's engage
+    /// lead-in) or between arm and start (the record modules' cold start).
+    #[test]
+    fn a_restart_after_a_stop_plays_the_new_drive_first() {
+        let mut t = ChannelTable::new();
+        let mut ctrl = Channel::new(1);
+        ctrl.role = ChannelRole::Control;
+        t.channels.push(ctrl);
+        let mut r = Channel::new(2);
+        r.role = ChannelRole::Reference;
+        t.channels.push(r);
+        let mut d = Channel::new(3);
+        d.role = ChannelRole::Drive;
+        t.channels.push(d);
+        let mut b = run_backend(SimBackend::new(), &t);
+        let new: Vec<f32> = (1..=8).map(|i| i as f32 * 0.1).collect();
+
+        for write_before_arm in [false, true] {
+            // The old generation: 16 frames queued, 4 played, 12 queued at the stop.
+            let old = vec![0.25f32; 16];
+            assert_eq!(b.write_drive(&old).unwrap(), 16);
+            let mut buf = vec![0.0f32; 2 * 4];
+            assert_eq!(b.read_input(&mut buf).unwrap(), InputRead::Frames(4));
+            b.stop().unwrap();
+            assert_eq!(
+                b.output_buffered_frames(),
+                0,
+                "the old generation is dropped"
+            );
+
+            // The restart: the new drive's head, then arm and start (or arm, the
+            // head, start).
+            if write_before_arm {
+                assert_eq!(b.write_drive(&new).unwrap(), 8);
+                b.arm().unwrap();
+            } else {
+                b.arm().unwrap();
+                assert_eq!(b.write_drive(&new).unwrap(), 8);
+            }
+            b.start().unwrap();
+            let mut buf = vec![0.0f32; 2 * 10];
+            assert_eq!(b.read_input(&mut buf).unwrap(), InputRead::Frames(10));
+            let commanded: Vec<f32> = (0..10).map(|f| buf[f * 2 + 1]).collect();
+            assert_eq!(&commanded[..8], &new[..], "the new drive first, in order");
+            assert_eq!(
+                &commanded[8..],
+                &[new[7], new[7]],
+                "then its last frame held"
+            );
+        }
+
+        // A restart with nothing written holds zero, not the old generation's drive.
+        b.stop().unwrap();
+        b.arm().unwrap();
+        b.start().unwrap();
+        let mut buf = vec![0.0f32; 2 * 3];
+        assert_eq!(b.read_input(&mut buf).unwrap(), InputRead::Frames(3));
+        let commanded: Vec<f32> = (0..3).map(|f| buf[f * 2 + 1]).collect();
+        assert_eq!(commanded, vec![0.0; 3]);
     }
 
     /// A sub-frame write buffers NOTHING and says so. Half a frame has no meaning at

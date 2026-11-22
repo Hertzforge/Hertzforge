@@ -24,7 +24,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .mesh import drawn_mesh, sides_view
+from .mesh import drawn_mesh, element_colors, sides_view
 from .op_progress import hook
 from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
@@ -175,6 +175,9 @@ def _drawn(title: str, geometry: Any, defined: bool | None = None,
     defined = geometry.units_defined if defined is None else defined
     view = v.shape3d(title, 'm' if defined else 'undefined',
                      np.concatenate(nodes), [], triangles=np.concatenate(faces), lines=lines)
+    if len(geometry.elem_id):
+        # the meshed elements in their own colors; the solids' surfaces come after their nodes
+        view['element_colors'] = element_colors(geometry, used)
     if shown:
         corners = np.concatenate(shown).astype(np.float32)
         view['bodies'] = {

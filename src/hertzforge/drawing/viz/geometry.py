@@ -31,6 +31,30 @@ PALETTE = [
 ]
 
 
+#: what each palette color is called, as an element's Color cell names it
+PALETTE_NAMES = ('gray', 'blue', 'orange', 'green', 'red', 'purple', 'brown', 'pink',
+                 'olive', 'cyan')
+
+
+def color_text(index: int) -> str:
+    """A color index as a cell says it: the index and its color's name, '3 green'."""
+    return f'{int(index)} {PALETTE_NAMES[int(index) % len(PALETTE)]}'
+
+
+def color_index(text: str) -> int:
+    """The color index a typed color names: a whole number from 0 (a name after it is
+    ignored, so '3 green' reads as 3), or a palette color's name."""
+    words = str(text).strip().lower().split()
+    if not words:
+        raise ValueError('name a color: a number from 0, or ' + ', '.join(PALETTE_NAMES))
+    if words[0].isdigit():
+        return int(words[0])
+    if words[0] in PALETTE_NAMES:
+        return PALETTE_NAMES.index(words[0])
+    raise ValueError(f'"{text}" is not a color: a number from 0, or '
+                     + ', '.join(PALETTE_NAMES))
+
+
 def color_rgb(index: int) -> tuple[float, float, float]:
     """The RGB triple (0 to 1) of a color index, wrapping past 9."""
     return PALETTE[int(index) % len(PALETTE)]
@@ -58,6 +82,22 @@ def display_points(geometry: Geometry,
         return geometry.node_xyz, axis_unit_text(geometry, unit_system)
     return (unit_system.from_si(geometry.node_xyz, 'length'),
             axis_unit_text(geometry, unit_system))
+
+
+def element_shapes(code: int, conn: Sequence[int]) -> tuple[list[list[int]], list[list[int]]]:
+    """(polygons, lines) one element is drawn by on its own, as its nodes: a face
+    element its corner nodes (`face_corners`), a solid every face of its cell
+    (`solid_faces`), a line element its first two nodes, a point element nothing.
+    `element_cells` draws every element from these, and the 3-D view highlights one
+    element by them."""
+    render = ELEMENT_TYPES[code][2]
+    if render == 'face':
+        return [list(conn[:face_corners(code)])], []
+    if render == 'volume':
+        return [[conn[k] for k in face] for face in solid_faces(len(conn))], []
+    if render == 'line':
+        return [], [list(conn[:2])]
+    return [], []
 
 
 def element_cells(geometry: Geometry,
@@ -108,23 +148,24 @@ def element_cells(geometry: Geometry,
     for i in (range(len(geometry.elem_conn)) if indices is None else indices):
         code, color = int(geometry.elem_type[i]), int(geometry.elem_color[i])
         conn = geometry.elem_conn[i]
-        _name, _nnodes, render = ELEMENT_TYPES[code]
+        render = ELEMENT_TYPES[code][2]
+        polygons, segments = element_shapes(code, conn)
         if render == 'face':
-            faces.setdefault(color, []).append(rows(conn[:face_corners(code)]))
+            faces.setdefault(color, []).extend(rows(face) for face in polygons)
         elif render == 'volume':
             # a solid draws as its skin: the faces of its cells that no
             # other cell of the color shares (2026-09-30; a polyline
             # through every corner drew the mesh's insides as a tangle)
             skin = skins.setdefault(color, {})
-            for face in solid_faces(len(conn)):
-                corners = rows([conn[k] for k in face])
+            for face in polygons:
+                corners = rows(face)
                 key = tuple(sorted(corners))
                 if key in skin:
                     del skin[key]
                 else:
                     skin[key] = corners
         elif render == 'line':
-            lines.setdefault(color, []).append(rows(conn[:2]))
+            lines.setdefault(color, []).extend(rows(pair) for pair in segments)
         elif render == 'point':
             points.setdefault(color, []).extend(rows(conn))
     if separate_skins:

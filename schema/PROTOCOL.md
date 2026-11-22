@@ -192,10 +192,22 @@ the result's place:
         "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
         "off":2,                       nodes: marked places, shown through the model; this many of
                                        the last `ids` are left out and drawn dim
-        "others":[40,6]}               nodes: a second set of places in the rows after `ids`, drawn
+        "others":[40,6],               nodes: a second set of places in the rows after `ids`, drawn
                                        in their own color and not clicked: this many held, then
                                        this many not (a mate's other side)
+        "settings":[{"param":"type","label":"Type",
+                     "options":[{"value":"quad4","label":"quad4","count":4,"hint":"..."}, ...]}]}
+                                       what is asked beside the clicks: each value chosen goes
+                                       with the click as `param`, and an option with `count` (and
+                                       `hint`) changes how many clicks make one
 ```
+
+A view with a `pick` and a mark set with `"clicks":true` (an element table's view) has two modes,
+Select and Add, Select first. In Select a click marks the element under it (the face nearest the
+camera, else the side nearest on screen), Cmd (Ctrl) or Shift adding to the ones marked, and the
+set's `remove` (`{"op","params"}`) runs on Delete with the ids marked as `ids`. In Add the `pick`
+takes the clicks, with its `settings`: Add Element's Type (the family's types) and Element group.
+The mode carries over to the view an element added answers with.
 
 A point clicked is sent in the view's `unit` when the pick says `"in_display":true` (its `op` takes
 its `x`, `y` and `z` as lengths typed in the display system), and otherwise in meters, by the
@@ -408,15 +420,23 @@ Views with `marks` share the nodes marked. A `shape3d` with `marks` (`{"link"}`,
 marks the node clicked, Cmd (Ctrl) or Shift adding to or taking from the ones marked, a click on
 nothing or Escape clearing them, unless the view has a `pick`, whose clicks are its own. A `table`
 with `marks` (`{"link","column"}`) marks the rows selected, each by its cell in `column`, the
-node's id. What is marked in one view with a `link` is drawn marked in every other with the same
+node's or element's id; Cmd (Ctrl)-click adds a row to the ones marked or takes it from them, as
+in the view, and Delete removes the rows marked. What is marked in one view with a `link` is drawn marked in every other with the same
 one: the rows of the table highlighted and scrolled to, the nodes ringed in the view. The marks
 are the shell's and no operation reads them. A `shape3d` may also carry `mark_sets`, things
 marked by where they are and not by a click in the view: each `{"link","ids"}` with `rows`, the
 rows of `nodes` id k rings (an element's nodes), or `"frames":true`, id k being the k-th of
-`frames` and ringed at its origin (a coordinate system). The tree's rows for them mark with the
-same `link`: the view of a geometry's Coordinate systems part, and of element groups picked, whose
-listed elements are the ones sent. A geometry's nodes have `marks`: the table and the view
-of `project.view_entities` for nodes, and the view the Nodes part shows.
+`frames` and ringed at its origin (a coordinate system); `faces` and `edges`, flat rows of `nodes`
+for id k, fill its triangles and draw its sides over the model and through it (an element alone).
+The tree's rows for them mark with the same `link`: the view of a geometry's Coordinate systems
+part, and of element groups picked, whose listed elements are the ones sent. An element table of
+`project.view_entities` marks its rows with the same link, and its view's set holds the table's
+elements, the first 10,000, with their faces and edges; past that the view's `note` says so. A geometry's nodes have `marks`: the table and the view
+of `project.view_entities` for nodes, and the view the Nodes part shows. A geometry drawn on its
+own (the geometry picked, one of its parts, its Edit views) also carries `element_colors`
+(`{"triangles","triangle_colors","lines","line_colors"}`, u32 rows of `nodes` and u8 RGB each),
+every element in its own palette color over the gray surface, shown while the surface is solid. A
+mode shape's view colors by deflection and carries none.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
@@ -443,7 +463,9 @@ ids) as runs (`"1-3, 7"`). A table longer than a thousand rows sends its first t
 its count, and `more` (`{"method","params"}`); the shell asks `method` with `params` and `start`
 and `count` (at most 5000) for the rows it scrolls to, in the display units as the table is. An
 entity table of a part says the part in its edit's and `more`'s params (`family` or `groups`), and
-`project.set_entity_cell` takes a row as that part's.
+`project.set_entity_cell` takes a row as that part's. `swatches` (`{key: {text: "#rrggbb"}}`) draws a
+color's swatch in each cell of a column whose text it names: an element's Color, its palette index
+and name ("4 red"), chosen from the palette or typed as either.
 
 A table with `select` (`{"op","params","param","column"}`) says what picking one of its rows does:
 the shell runs `op` with `params` and that row's cell in `column` as `param`, and the views answered
@@ -739,14 +761,14 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
-projected onto. `prefs.match_distance` (in meters, or in the model's own units when its geometries
-have none; 0 or absent for 2 % of the size of the geometry projected onto, plus half the model's
-thickest plate) is how far a test node may be from the model node it is matched to, for the MAC and
-for the projection. `offers.match_distance` is the distance used, `{value, defined}` (`defined`
-false when the geometries have no units), null when the sets are not on two geometries; the shell
-offers it with `projection`, in the display units. When no node matches at all the
-answer is a `reading` of how far off the nearest pair is and the limit, with the reason in `note`,
-so the tolerance can be set beside it. Which set is projected is decided by what the sets measure and not by their order: the
+projected onto. How the pair is brought onto common DOFs (a reduction, one set's modes at the
+other's DOFs, or an expansion, one set expanded through the other's modes), which set is moved, and
+how far a test node may be from the model node it is matched to, are the pair's DOF mapping, which DOF
+Mapping sets (`project.set_projection`, kept in the project file) and the MAC, the projection, Match
+Modes, Add Matches and a Matched Modes object of the pair all read; with none set, the pair is
+reduced. When no node matches at all the answer is a `reading` of how far off the nearest pair
+is and the limit, with the reason in `note`, so the tolerance can be set in Project. With no
+projection set, which set is projected is decided by what the sets measure and not by their order: the
 set with nodes measured in fewer than three translation directions is the one projected onto, since it
 has no whole motion to sample; with none or with some in both, the set with more DOFs is projected onto
 the one with fewer. The MAC, the matches and each pair's alignment are read after that projection, and
@@ -822,6 +844,19 @@ display unit system (the server puts its name in), `si` for the stored values.
 **Export's formats.** The Export row carries `formats`, each `{"value","label","suffix"}`: what that
 object can be written in, `.hforge` first. The desktop app lists them as the save window's file types.
 
+**A row's own words.** A row may carry `labels`, `{param: {option value: words}}`, the words its
+form shows for a param's options in place of the descriptor's. Project for two shape sets on two
+geometries (DOF Mapping, `project.set_projection`, a form kept as it is changed) names each of its
+four `mapping`s after the sets, as "Reduction: A at the DOFs of B" or "Expansion: A to the DOFs of
+B", each that cannot be made followed by why in parentheses, and fills the pair's mapping as it
+stands: set, or else the reduction decided by what the sets measure, never by the order they were
+picked in, and its distance, `0` for 2 % of the target's size. The comparisons that read it are
+listed under it: MAC, Animate Projection, Match Modes, Add Matches, Reduce
+(`project.project_onto_basis`) and Expand (`project.expand_modes`), the last two filled the way the
+mapping goes and asking nothing. A shape set picked with a geometry it does not belong on is offered
+Reduce onto that geometry's nodes, or Expand through the shape set linked to it, and its view shows
+what the one that can be made would add, or why neither can.
+
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose
@@ -843,8 +878,8 @@ would refuse what the selection holds, as far as that can be told with nothing t
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, offers the operations on that part alone, each carrying `"part": true`,
-and none of the geometry's own: the shapes to build from on the Solids row, Add Element and
-Add Group on an element family (the family filled in), and on element groups what sets their
+and none of the geometry's own: the shapes to build from on the Solids row, Edit and Add Group on
+an element family (the family filled in; its elements are added in Edit's Add mode), and on element groups what sets their
 properties, merges, aligns or mates them, with every group picked filled into `groups`, and on
 solids what edits, moves, patterns, takes apart, meshes or deletes them, with every solid picked filled into
 `solids`. Element groups or solids picked together come as `{"kind": "group", "id", "ids"}` (or

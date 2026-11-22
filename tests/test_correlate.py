@@ -8,6 +8,8 @@ the local frame, and the uniaxial dot product all pin exactly.
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 
@@ -437,7 +439,8 @@ def test_the_mac_is_the_same_whichever_set_is_named_first():
 def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
     project = _two_geometries()
     with pytest.raises(ValueError, match='Test Shapes cannot be projected onto FEM Shapes: '
-                                         'it has 2 nodes measured in fewer than three'):
+                                         'Test Shapes has 2 nodes measured in fewer than '
+                                         r'three directions\. Project FEM Shapes onto Test Shapes'):
         project.project_onto_basis('Test Shapes', onto='FEM Shapes')
     made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
     assert list(project[made].coordinate) == list(project['Test Shapes'].coordinate)
@@ -532,8 +535,7 @@ def test_what_cannot_go_onto_a_geometry_is_refused_and_not_offered():
     for source, onto, why in cases:
         assert projection_why(project, source, onto) == why
         assert 'project_onto_basis' not in dict(project.selection_verbs(source, onto))
-        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: '
-                                             f'{why[0].lower()}{why[1:]}'):
+        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: {why}'):
             project.project_onto_basis(source, onto=onto)
     assert projection_why(project, 'FEM Shapes', 'Test Geometry') == ''
 
@@ -553,3 +555,162 @@ def test_the_match_distance_is_said_for_the_pair_it_projects():
     project['Test Geometry'].define_units('m')
     assert project.match_distance('FEM Shapes', 'Test Shapes') is None, \
         'one geometry in meters and one in its own units overlay in no frame'
+
+
+def test_a_pair_is_projected_the_way_it_is_set():
+    """Unset, the cube's modes go onto the test's (the test holds one direction at each node)
+    within 2 % of the test geometry's size; set, with the distance asked for, and the line that
+    replays it is in the journal."""
+    project = _two_geometries()
+    assert project.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  None)
+    default = project.compared_sets('FEM Shapes', 'Test Shapes')[3]['limit']
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    assert project.projection_of('FEM Shapes', 'Test Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  0.0011)
+    _rows, _columns, said, report = project.compared_sets('Test Shapes', 'FEM Shapes')
+    assert report['limit'] == 0.0011 != default
+    assert said.startswith('FEM Shapes projected onto Test Shapes')
+    assert project.journal[-1] == ("project.set_projection('Test Shapes', 'FEM Shapes', "
+                                   'distance=0.0011)')
+    # a distance asked for in the call still takes the place of the one set
+    assert project.compared_sets('FEM Shapes', 'Test Shapes', distance=0.002)[3]['limit'] == 0.002
+
+
+def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
+    project = _two_geometries()
+    project.add('Model B', copy.deepcopy(project['FEM Geometry']))
+    project.add('Modes B', copy.deepcopy(project['FEM Shapes']))
+    project.link('Model B', 'Modes B')
+    chosen = project.projection_of('FEM Shapes', 'Modes B')[0]
+    other = 'Modes B' if chosen == 'FEM Shapes' else 'FEM Shapes'
+    project.set_projection('FEM Shapes', 'Modes B', source=other)
+    assert project.projection_of('Modes B', 'FEM Shapes')[0] == other
+    said = project.compared_sets('FEM Shapes', 'Modes B')[2]
+    assert said == f'{other} projected onto {chosen}: the direction set in Project'
+
+
+@pytest.mark.parametrize(('first', 'second', 'given', 'refused'), [
+    ('Test Shapes', 'FEM Shapes', {'source': 'Test Shapes'},
+     'Test Shapes cannot be projected onto FEM Shapes: Test Shapes has 2 nodes'),
+    ('Test Shapes', 'FEM Shapes', {'source': 'FEM Geometry'}, 'is Test Shapes or FEM Shapes'),
+    ('Test Shapes', 'FEM Shapes', {'distance': -1.0}, 'must be above zero'),
+    ('FEM Shapes', 'FEM Geometry', {}, 'FEM Geometry is not a shape set'),
+])
+def test_a_projection_that_cannot_be_made_is_refused_and_not_kept(first, second, given, refused):
+    project = _two_geometries()
+    with pytest.raises((ValueError, TypeError), match=refused):
+        project.set_projection(first, second, **given)
+    assert project.projections == {}
+
+
+def test_two_sets_on_one_geometry_have_no_projection_to_set():
+    project = _two_geometries()
+    project.add('Other Modes', copy.deepcopy(project['FEM Shapes']))
+    project.link('FEM Geometry', 'Other Modes')
+    with pytest.raises(ValueError, match='Both are on FEM Geometry, so there is nothing'):
+        project.set_projection('FEM Shapes', 'Other Modes')
+
+
+def test_the_projection_is_kept_in_the_file_and_follows_a_rename(tmp_path):
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'kept.hforge')
+    project.save(path)
+    opened = hertzforge.Project.open(path)
+    assert opened.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                 0.0011)
+    opened.rename('FEM Shapes', 'Model Modes')
+    assert opened.projection_of('Test Shapes', 'Model Modes') == ('Model Modes', 'Test Shapes',
+                                                                  0.0011)
+    assert list(opened.projections) == [('Model Modes', 'Test Shapes')], 'the old name is gone'
+    opened.remove('Test Shapes')
+    assert opened.projections == {}, 'gone with either set'
+
+
+def test_a_file_written_before_projections_were_kept_opens_with_none(tmp_path):
+    import h5py
+
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'older.hforge')
+    project.save(path)
+    with h5py.File(path, 'a') as f:
+        del f.attrs['projections']
+    opened = hertzforge.Project.open(path)
+    assert opened.projections == {}
+    assert opened.projection_of('Test Shapes', 'FEM Shapes')[2] is None
+
+
+def _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes, combination):
+    """A test set that is `combination` of the model's modes at the test DOFs, so the exact
+    expansion is `combination` of the model's modes at every DOF."""
+    reduced, _report = project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry)
+    values = np.asarray(combination) @ np.asarray(reduced.shape_matrix)
+    return ShapeSet([30.0, 40.0], [0.01, 0.02], list(reduced.coordinate), values)
+
+
+@pytest.mark.parametrize('combination', [[[1.0, 2.0], [3.0, -1.0]],
+                                         [[1.0 + 2.0j, 0.5], [-1.0j, 2.0 - 1.0j]]])
+def test_a_test_set_in_the_models_span_expands_to_it_exactly(combination):
+    """Two model modes, two test DOFs: each test mode is a known combination of the modes at
+    the test DOFs, and the expansion is that combination at all 24 model DOFs, phase kept."""
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes, combination)
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry,
+                                     modes=[0, 1])
+    assert list(expanded.coordinate) == list(fem_shapes.coordinate)
+    assert np.allclose(expanded.shape_matrix,
+                       np.asarray(combination) @ np.asarray(fem_shapes.shape_matrix))
+    assert list(expanded.frequency) == [30.0, 40.0], "the test's own modal parameters"
+    assert report['modes'] == [0, 1] and report['matched'] == 2
+    assert report['residual'] == pytest.approx([0.0, 0.0], abs=1e-12)
+    assert report['condition'] > 1
+
+
+def test_a_test_mode_outside_the_span_is_the_nearest_fit_and_says_how_far():
+    """With one model mode, a test mode that is not a multiple of it is fitted by least
+    squares: its residual at the test DOFs is what the fit leaves, over the mode's size."""
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    known = _known_test(fem_shapes, fem_geometry, test_geometry, test_shapes,
+                        [[1.0, 0.0], [1.0, 1.0]])
+    expanded, report = expand_shapes(known, test_geometry, fem_shapes, fem_geometry, modes=[0])
+    phi = np.array([10.0, 21.0])  # mode 1 at the two test DOFs
+    psi = np.asarray(known.shape_matrix)
+    scale = psi @ phi / (phi @ phi)
+    left = psi - np.outer(scale, phi)
+    assert report['residual'] == pytest.approx(
+        np.linalg.norm(left, axis=1) / np.linalg.norm(psi, axis=1))
+    assert report['residual'][0] == pytest.approx(0.0, abs=1e-12)
+    assert np.allclose(expanded.shape_matrix,
+                       np.outer(scale, np.asarray(fem_shapes.shape_matrix)[0]))
+
+
+def test_more_modes_than_test_dofs_are_refused():
+    from hertzforge.core.correlate import expand_shapes
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    three = ShapeSet([10.0, 20.0, 30.0], [0.0] * 3, fem_shapes.coordinate,
+                     np.vstack([fem_shapes.shape_matrix, np.ones(24)]))
+    with pytest.raises(ValueError, match='3 model modes for 2 test DOFs matched'):
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[0, 1, 2])
+    with pytest.raises(ValueError, match='the model has 3 modes; \\[5\\] are not among them'):
+        expand_shapes(test_shapes, test_geometry, three, fem_geometry, modes=[4])
+
+
+def test_the_default_basis_is_the_band_up_to_one_and_a_half_times_the_test_capped_at_its_dofs():
+    from hertzforge.core.correlate import expansion_modes
+
+    fem = [0.0, 0.0, 100.0, 140.0, 160.0, 400.0]
+    assert expansion_modes(fem, [50.0, 100.0], 10) == [0, 1, 2, 3]
+    assert expansion_modes(fem, [50.0, 100.0], 3) == [0, 1, 2], 'the lowest, no more than DOFs'
+    assert expansion_modes([300.0, 100.0, 200.0], [100.0], 5) == [1], 'by frequency, not order'
+    assert expansion_modes([300.0, 100.0, 200.0], [10.0], 2) == [1, 2], \
+        'none in the band: the lowest, as many as the DOFs'

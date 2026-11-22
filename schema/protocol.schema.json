@@ -289,6 +289,14 @@
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
         "overlay_lines": {"$ref": "#/$defs/arrayRef"},
+        "element_colors": {
+          "type": "object", "required": ["triangles", "triangle_colors", "lines", "line_colors"],
+          "additionalProperties": false,
+          "properties": {
+            "triangles": {"$ref": "#/$defs/arrayRef"}, "triangle_colors": {"$ref": "#/$defs/arrayRef"},
+            "lines": {"$ref": "#/$defs/arrayRef"}, "line_colors": {"$ref": "#/$defs/arrayRef"}
+          }
+        },
         "paired": {"type": "boolean"},
         "link": {"type": "string"},
         "note": {"type": "string"},
@@ -313,7 +321,14 @@
               "link": {"type": "string"},
               "ids": {"type": "array", "items": {"type": "integer"}},
               "rows": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
-              "frames": {"type": "boolean"}
+              "frames": {"type": "boolean"},
+              "faces": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "edges": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "clicks": {"type": "boolean"},
+              "remove": {
+                "type": "object", "required": ["op", "params"], "additionalProperties": false,
+                "properties": {"op": {"type": "string"}, "params": {"type": "object"}}
+              }
             }
           }
         },
@@ -334,7 +349,19 @@
             "out": {"type": "string"},
             "back": {"type": "string"},
             "in_display": {"type": "boolean"},
-            "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+            "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+            "settings": {"type": "array", "items": {
+              "type": "object", "required": ["param", "label", "options"], "additionalProperties": false,
+              "properties": {
+                "param": {"type": "string"},
+                "label": {"type": "string"},
+                "options": {"type": "array", "items": {
+                  "type": "object", "required": ["value", "label"], "additionalProperties": false,
+                  "properties": {"value": {"type": ["string", "integer"]}, "label": {"type": "string"},
+                                 "count": {"type": "integer", "minimum": 0}, "hint": {"type": "string"}}
+                }}
+              }
+            }}
           }
         },
         "motion": {
@@ -518,6 +545,7 @@
             "kinds": {"type": "object", "additionalProperties": {"enum": ["choice", "flag", "date", "unit", "number", "text"]}},
             "rows": {"type": "array", "items": {"type": "integer", "minimum": 1}},
             "to_si": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+            "swatches": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^#[0-9a-f]{6}$"}}},
             "remove": {
               "type": "object", "required": ["op", "params", "column"], "additionalProperties": false,
               "properties": {
@@ -686,11 +714,9 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "limits", "complex", "projection", "match_distance", "shapes", "values_dofs", "arrows", "arrow_roles", "drives", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "limits", "complex", "projection", "shapes", "values_dofs", "arrows", "arrow_roles", "drives", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"},
           "projection": {"type": "boolean"},
-          "match_distance": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["value", "defined"], "additionalProperties": false,
-            "properties": {"value": {"type": "number", "exclusiveMinimum": 0}, "defined": {"type": "boolean"}}}]},
           "limits": {"type": "boolean"},
           "shapes": {"type": "boolean"},
           "values_dofs": {"type": "array", "items": {"type": "string"}},
@@ -743,7 +769,8 @@
         "formats": {"type": "array", "items": {
           "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}
-        }}
+        }},
+        "labels": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string"}}}
       }
     },
     "solidRow": {

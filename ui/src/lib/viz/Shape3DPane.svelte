@@ -84,7 +84,8 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, stillFramed, idList, markedBy, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedShapes, modelPlane, nearestEdge, nearestNode, numbered, pickClicks, placedPoint, setTriangles, toggledSurface } from './pick';
+	import { isAdding, setAdding } from './editMode.svelte';
 	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
 	import { linearColors, span as pointSpan } from './points';
@@ -198,8 +199,16 @@
 		dirty = true;
 	}
 
+	/** The elements a click in the view selects in Select mode (`mark_sets` with `clicks`). */
+	const elementSet = $derived(view.mark_sets?.find((set) => set.clicks) ?? null);
+	/** A view that both selects elements and adds them has Select and Add modes, Select first. */
+	const twoModes = $derived(!!(onpick && view.pick && elementSet));
 	/** The click the view takes, when it takes one and there is somewhere to send it. */
-	const pick = $derived(onpick ? view.pick : undefined);
+	const pick = $derived(onpick && (!twoModes || isAdding()) ? view.pick : undefined);
+	/** What Add mode's settings (`pick.settings`) are set to here, sent with the next element made. */
+	let chosen = $state<Record<string, unknown>>({});
+	/** How many clicks make one, and what the bar says: the type chosen decides both. */
+	const clicks = $derived(pick ? pickClicks(pick, chosen) : { count: 0, hint: '' });
 	/** Nodes picked so far toward one element, as rows of `view.nodes`. */
 	let picked = $state<number[]>([]);
 	/** The pickable node under the cursor. */
@@ -402,6 +411,8 @@
 		}
 		return places;
 	});
+	/** The triangles and edges, as rows of `view.nodes`, of the elements marked with a table's rows or the tree. */
+	const setShapes = $derived(markedShapes(view.mark_sets ?? [], marked));
 	/** The DOF labels over the canvas, redrawn each frame the view moves. */
 	let labelsSvg: SVGSVGElement;
 	/** Where each label sits in the model: its arrow's free end, a little past it. */
@@ -560,6 +571,15 @@
 	let otherOn: Points | null = null;
 	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
+	/** The elements in their own colors (`element_colors`), over the gray surface. */
+	let elementColors: Mesh | null = null;
+	let coloredLines: LineSegments | null = null;
+	/** The selectable elements' faces, not drawn, that a click in Select mode is matched against, and each triangle's element. */
+	let elementPick: Mesh | null = null;
+	let elementOwner: number[] = [];
+	/** The faces and edges of the elements marked (`mark_sets` with `faces` and `edges`), drawn over the model. */
+	let lit: Mesh | null = null;
+	let litEdges: LineSegments | null = null;
 	const materials: Material[] = [];
 	/**
 	 * The deflection's two parts, and for the surface's colors: the largest travel at the scale
@@ -784,6 +804,9 @@
 		if (outline) (outline.material as LineMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
+		// the theme's text color, which stands out on an element of any palette color
+		if (lit) (lit.material as MeshBasicMaterial).color = new Color(cssVar('--text-1'));
+		if (litEdges) (litEdges.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		// beside a second set of places, the ones a click picks wear the accent
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
@@ -1093,6 +1116,67 @@
 			marks.renderOrder = 5;
 			marks.frustumCulled = false;
 			scene.add(marks);
+		}
+		if (view.element_colors?.triangles.length) {
+			const { triangles, triangle_colors } = view.element_colors;
+			// a triangle a color: each corner its own vertex, so neighbors of another color keep theirs
+			const xyz = new Float32Array(3 * triangles.length);
+			const rgb = new Float32Array(3 * triangles.length);
+			for (let v = 0; v < triangles.length; v++) {
+				xyz.set(view.nodes.subarray(3 * triangles[v], 3 * triangles[v] + 3), 3 * v);
+				const t = Math.floor(v / 3);
+				for (let c = 0; c < 3; c++) rgb[3 * v + c] = srgbToLinear(triangle_colors[3 * t + c] / 255);
+			}
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			g.setAttribute('color', new BufferAttribute(rgb, 3));
+			elementColors = new Mesh(g, plain(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true })));
+			elementColors.frustumCulled = false;
+			scene.add(elementColors);
+		}
+		if (view.element_colors?.lines.length) {
+			const { lines, line_colors } = view.element_colors;
+			const xyz = new Float32Array(3 * lines.length);
+			const rgb = new Float32Array(3 * lines.length);
+			for (let v = 0; v < lines.length; v++) {
+				xyz.set(view.nodes.subarray(3 * lines[v], 3 * lines[v] + 3), 3 * v);
+				const l = Math.floor(v / 2);
+				for (let c = 0; c < 3; c++) rgb[3 * v + c] = srgbToLinear(line_colors[3 * l + c] / 255);
+			}
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			g.setAttribute('color', new BufferAttribute(rgb, 3));
+			coloredLines = new LineSegments(g, plain(new LineBasicMaterial({ vertexColors: true })));
+			coloredLines.frustumCulled = false;
+			scene.add(coloredLines);
+		}
+		const selectable = view.mark_sets?.find((set) => set.clicks);
+		if (selectable?.faces) {
+			const { index, owner } = setTriangles(selectable);
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(view.nodes, 3));
+			g.setIndex(index);
+			elementPick = new Mesh(g, plain(new MeshBasicMaterial({ side: DoubleSide })));
+			elementPick.visible = false;
+			elementOwner = owner;
+		}
+		if (view.mark_sets?.some((set) => set.faces || set.edges)) {
+			// over the model and through it, so an element inside a solid shows when its row is selected
+			const at = new BufferAttribute(view.nodes, 3);
+			const faces = new BufferGeometry();
+			faces.setAttribute('position', at);
+			faces.setIndex([]);
+			lit = new Mesh(faces, plain(new MeshBasicMaterial({ side: DoubleSide, transparent: true, opacity: 0.6, depthTest: false, depthWrite: false })));
+			lit.renderOrder = 4;
+			lit.frustumCulled = false;
+			scene.add(lit);
+			const lines = new BufferGeometry();
+			lines.setAttribute('position', at);
+			lines.setIndex([]);
+			litEdges = new LineSegments(lines, plain(new LineBasicMaterial({ depthTest: false })));
+			litEdges.renderOrder = 4;
+			litEdges.frustumCulled = false;
+			scene.add(litEdges);
 		}
 
 		// A headlight that follows the camera keeps shading even while orbiting.
@@ -1460,6 +1544,15 @@
 		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
+		// the colors are the surface's: a wireframe or a see-through model shows the gray mesh
+		if (elementColors) elementColors.visible = !wireframe && opacity >= 1;
+		dirty = true;
+	});
+	// every node shows as a dot only while clicks make elements of them (Add mode)
+	$effect(() => {
+		const on = !!pick;
+		if (!renderer || !dots) return;
+		dots.visible = on;
 		dirty = true;
 	});
 
@@ -1501,6 +1594,11 @@
 		otherOn?.geometry.dispose();
 		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
+		lit?.geometry.dispose();
+		litEdges?.geometry.dispose();
+		elementColors?.geometry.dispose();
+		coloredLines?.geometry.dispose();
+		elementPick?.geometry.dispose();
 		overlayGeometry?.dispose();
 		overlayOutline?.geometry.dispose();
 		overlayEdges?.geometry.dispose();
@@ -1519,6 +1617,13 @@
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
 		xyz.set(setPlaces, 3 * rows.length);
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
+		dirty = true;
+	});
+	$effect(() => {
+		const { faces, edges } = setShapes;
+		if (!renderer || !lit || !litEdges) return;
+		lit.geometry.setIndex(faces);
+		litEdges.geometry.setIndex(edges);
 		dirty = true;
 	});
 
@@ -1548,6 +1653,30 @@
 		return nearestNode(screen, visible, count, x, y);
 	}
 
+	/** The element under (x, y), as its place in the selectable set: the face hit nearest the camera, else the side nearest on screen. */
+	function elementAt(x: number, y: number): number | null {
+		const set = elementSet;
+		if (!set) return null;
+		if (elementPick) {
+			pointer.set((x / canvasHost.clientWidth) * 2 - 1, -(y / canvasHost.clientHeight) * 2 + 1);
+			raycaster.setFromCamera(pointer, camera);
+			const hit = raycaster.intersectObject(elementPick, false)[0];
+			if (hit?.faceIndex != null) return elementOwner[hit.faceIndex] ?? null;
+		}
+		const count = view.nodes.length / 3;
+		const w = canvasHost.clientWidth;
+		const h = canvasHost.clientHeight;
+		const screen = new Float32Array(2 * count);
+		const visible: boolean[] = [];
+		for (let n = 0; n < count; n++) {
+			tmp.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			screen[2 * n] = ((tmp.x + 1) / 2) * w;
+			screen[2 * n + 1] = ((1 - tmp.y) / 2) * h;
+			visible.push(tmp.z < 1);
+		}
+		return nearestEdge(set, screen, visible, x, y);
+	}
+
 	/** Aim the raycaster through (x, y) and return what it meets on the model's faces. */
 	function aim(x: number, y: number) {
 		pointer.set((x / canvasHost.clientWidth) * 2 - 1, -(y / canvasHost.clientHeight) * 2 + 1);
@@ -1557,8 +1686,8 @@
 
 	function commitNodes() {
 		const p = pick;
-		if (!p?.ids || !p.param || picked.length < (p.count === 1 ? 1 : 2)) return;
-		onpick?.({ [p.param]: idList(picked.map((r) => p.ids![r])) });
+		if (!p?.ids || !p.param || picked.length < (clicks.count === 1 ? 1 : 2)) return;
+		onpick?.({ ...chosen, [p.param]: idList(picked.map((r) => p.ids![r])) });
 		picked = [];
 	}
 
@@ -1566,6 +1695,12 @@
 		const p = pick;
 		if (!renderer) return;
 		if (!p) {
+			if (elementSet) {
+				// Select mode: the element under the cursor is marked, with its row in the table
+				const k = elementAt(x, y);
+				mark(elementSet.link, markedBy(marked(elementSet.link), k === null ? null : elementSet.ids[k], add));
+				return;
+			}
 			// no click of the view's own: it marks the node, with the table and the tree
 			if (!marking || !view.node_ids) return;
 			const row = nodeAt(x, y, view.node_ids.length);
@@ -1577,7 +1712,7 @@
 			const row = nodeAt(x, y);
 			if (row === null) return;
 			picked = picked.includes(row) ? picked.filter((r) => r !== row) : [...picked, row];
-			if (p.count && picked.length === p.count) commitNodes();
+			if (clicks.count && picked.length === clicks.count) commitNodes();
 			return;
 		}
 		const hit = aim(x, y);
@@ -1672,6 +1807,9 @@
 		else if (e.key === 'Enter' && pick?.target === 'nodes') commitNodes();
 		else if (e.key === 'Escape' && picked.length) picked = [];
 		else if (e.key === 'Escape' && marking && marked(marking).length) mark(marking, []);
+		else if (e.key === 'Escape' && !pick && elementSet && marked(elementSet.link).length) mark(elementSet.link, []);
+		else if ((e.key === 'Delete' || e.key === 'Backspace') && !pick && elementSet?.remove && ongizmo && marked(elementSet.link).length)
+			ongizmo(elementSet.remove, { ids: idList([...marked(elementSet.link)]) });
 		else return;
 		e.preventDefault();
 	}
@@ -1716,12 +1854,29 @@
 		</div>
 	{/if}
 
-	{#if pick}
+	{#if twoModes || pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">
-			<span>{pick.hint}</span>
-			{#if picked.length}
+			{#if twoModes}
+				<span class="seg" role="radiogroup" aria-label="What a click does">
+					<button role="radio" data-testid="shape3d-select-mode" aria-checked={!pick} class:on={!pick} onclick={() => { setAdding(false); picked = []; }} title="Click elements to select them">Select</button>
+					<button role="radio" data-testid="shape3d-add-mode" aria-checked={!!pick} class:on={!!pick} onclick={() => setAdding(true)} title="Click nodes to make elements">Add</button>
+				</span>
+			{/if}
+			{#if pick}
+				{#each pick.settings ?? [] as setting (setting.param)}
+					<label class="setting">{setting.label}
+						<select data-testid="shape3d-setting-{setting.param}" value={String(chosen[setting.param] ?? pick.params[setting.param] ?? '')} onchange={(e) => { chosen = { ...chosen, [setting.param]: typeof setting.options[0]?.value === 'number' ? Number(e.currentTarget.value) : e.currentTarget.value }; picked = []; }}>
+							{#each setting.options as option (option.value)}<option value={String(option.value)}>{option.label}</option>{/each}
+						</select>
+					</label>
+				{/each}
+				<span data-testid="shape3d-pick-hint">{clicks.hint}</span>
+			{:else}
+				<span data-testid="shape3d-pick-hint">Click an element to select it, Cmd-click to add more; Delete removes them</span>
+			{/if}
+			{#if pick && picked.length}
 				<span class="num" data-testid="shape3d-picked">Picked {idList(picked.map((r) => pick.ids?.[r] ?? r))}</span>
-				{#if !pick.count}<button class="btn sm" data-testid="shape3d-pick-done" onclick={commitNodes} title="Make the elements (Enter)">Done</button>{/if}
+				{#if !clicks.count}<button class="btn sm" data-testid="shape3d-pick-done" onclick={commitNodes} title="Make the elements (Enter)">Done</button>{/if}
 				<button class="btn ghost sm" onclick={() => (picked = [])} title="Clear the picks (Escape)">Clear</button>
 			{/if}
 		</div>
@@ -1999,6 +2154,25 @@
 		background: color-mix(in srgb, var(--bg-1) 88%, transparent);
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-md);
+	}
+	.pickbar:has(.setting) {
+		/* Add mode's settings and hint wrap rather than run past the view */
+		flex-wrap: wrap;
+		justify-content: center;
+		row-gap: 4px;
+	}
+	.pickbar .setting {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.pickbar select {
+		font: inherit;
+		color: var(--text-1);
+		background: var(--bg-2);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-sm);
+		padding: 1px 4px;
 	}
 
 	.top,

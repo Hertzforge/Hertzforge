@@ -274,8 +274,13 @@ export interface Shape3DView {
 	note?: string;
 	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
 	marks?: { link: string };
-	/** Things the tree's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the origin of the k-th frame. */
-	mark_sets?: { link: string; ids: number[]; rows?: number[][]; frames?: boolean }[];
+	/**
+	 * Things the tree's rows or a table's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the
+	 * origin of the k-th frame, and fills the triangles `faces[k]` and draws the edges `edges[k]` (rows of `nodes`, flat).
+	 */
+	mark_sets?: MarkSet[];
+	/** The elements in their own colors: triangles and lines (rows of `nodes`) and each one's color, u8 RGB. */
+	element_colors?: { triangles: Uint32Array; triangle_colors: Uint8Array; lines: Uint32Array; line_colors: Uint8Array };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -283,6 +288,20 @@ export interface Shape3DView {
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
+}
+
+/** Things marked together under a `link` (schema/PROTOCOL.md, `mark_sets`). */
+export interface MarkSet {
+	link: string;
+	ids: number[];
+	rows?: number[][];
+	frames?: boolean;
+	faces?: number[][];
+	edges?: number[][];
+	/** A click in the view marks the element under it (Select mode, beside a `pick`'s Add mode). */
+	clicks?: boolean;
+	/** Delete in the view runs `op` with `params` and the ids marked as `ids`. */
+	remove?: { op: string; params: Record<string, unknown> };
 }
 
 /** What a drag on a gizmo's arrow or ring runs. */
@@ -339,6 +358,14 @@ export interface Pick3D {
 	back?: string;
 	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI; absent where the service takes it in the view's unit. */
 	to_si?: [number, number];
+	/** What is asked beside the clicks, each a param and its options; an option may change how many clicks make one, and the hint. */
+	settings?: PickSetting[];
+}
+
+export interface PickSetting {
+	param: string;
+	label: string;
+	options: { value: string | number; label: string; count?: number; hint?: string }[];
 }
 
 /**
@@ -508,6 +535,8 @@ export interface TableEdit {
 	rows?: number[];
 	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
 	to_si?: Record<string, [number, number]>;
+	/** A swatch drawn in each cell of a column, by key: the cell's text to its color, '#rrggbb'. */
+	swatches?: Record<string, Record<string, string>>;
 	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' ids, the cells in `column`, as runs. */
 	remove?: { op: string; params: Record<string, unknown>; column: number };
 }
@@ -701,6 +730,8 @@ export interface ActionRow {
 	live?: true;
 	/** Export: the formats this object can be written in. */
 	formats?: ExportFormat[];
+	/** The words a param's options read in this row, by param and option value (Project's directions, named after the two sets). */
+	labels?: Record<string, Record<string, string>>;
 }
 
 /** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */
@@ -729,8 +760,6 @@ export interface Shown {
 		limits: boolean;
 		complex: boolean;
 		projection: boolean;
-		/** With `projection`: the distance nodes are matched within, typed or the default, and whether its geometries have units (else it is in the model's own). */
-		match_distance: { value: number; defined: boolean } | null;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
 		values_dofs: string[];
@@ -760,8 +789,6 @@ export interface ShowPrefs {
 	projection: boolean;
 	/** The warning and abort limits of a specification, drawn on its 2-D plot. */
 	limits: boolean;
-	/** Two shape sets on two geometries: how far a test node may be from its model node, in meters (the model's own units when its geometries have none); 0 for 2 % of the size of the geometry projected onto. */
-	match_distance: number;
 	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';

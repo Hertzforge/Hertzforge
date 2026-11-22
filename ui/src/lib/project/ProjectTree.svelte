@@ -14,6 +14,7 @@
 	import type { Modifiers } from './selection';
 	import { tick } from 'svelte';
 	import { spans, ticks } from './brackets';
+	import { draggedElements, movesInto } from './elementDrag';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
@@ -187,6 +188,45 @@
 		if (!place) return;
 		const order = reordered(drag.ids, drag.id, place.before);
 		if (order.some((id, k) => id !== drag.ids[k])) void p.reorderSolids(drag.name, order, drag.within);
+	}
+	/**
+	 * Elements dragged onto an element group: from an element's row, the elements marked (or that
+	 * one) move into the group let go on, of the same geometry; the group lights while it is under
+	 * the pointer.
+	 */
+	let elementDrag: { name: string; ids: number[]; x: number; y: number; moved: boolean } | null = null;
+	let elementDrop = $state<string | null>(null);
+	let elementDragged = false;
+	function elementDown(e: PointerEvent, name: string, id: number) {
+		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+		e.stopPropagation();
+		elementDrag = { name, ids: draggedElements(marked(partLink('elements', name)), id), x: e.clientX, y: e.clientY, moved: false };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function elementMove(e: PointerEvent) {
+		const drag = elementDrag;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+		drag.moved = true;
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-group-of]');
+		elementDrop = row && row.dataset.groupOf?.startsWith(`${drag.name}|`) ? row.dataset.groupOf : null;
+	}
+	function elementUp(e: PointerEvent) {
+		const drag = elementDrag;
+		const target = elementDrop;
+		elementDrag = null;
+		elementDrop = null;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved) return;
+		elementDragged = true;
+		setTimeout(() => (elementDragged = false), 0);
+		if (!target) return;
+		const group = Number(target.slice(drag.name.length + 1));
+		const kids = p.children[drag.name];
+		const groups = kids?.kind === 'geometry' ? kids.families.flatMap((f) => f.groups) : [];
+		if (movesInto(groups, drag.ids, group)) void p.moveElements(drag.name, drag.ids, group);
 	}
 	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
 	let justDragged = false;
@@ -370,7 +410,9 @@
 	{@const on = new Set(marked(partLink(kind, name)))}
 	<div class="entries" role="group" data-testid="{kind}-{name}{holder.kind === 'group' ? `-${holder.id}` : ''}">
 		{#each ids as id, i (id)}
-			<div class="sub" class:picked={on.has(id)} style="--depth: {depth}" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="{kind}-{name}-{id}" onclick={(e) => clickListed(name, kind, holder, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(name, kind, holder, id, {}, ids)}>
+			<div class="sub" class:picked={on.has(id)} style="--depth: {depth}" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="{kind}-{name}-{id}"
+				onpointerdown={kind === 'elements' ? (e) => elementDown(e, name, id) : undefined} onpointermove={kind === 'elements' ? elementMove : undefined} onpointerup={kind === 'elements' ? elementUp : undefined}
+				onclick={(e) => !elementDragged && clickListed(name, kind, holder, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(name, kind, holder, id, {}, ids)}>
 				<Glyph name={glyph} of="child" parent="geometry" size={14} />
 				<span class="label">{label(id, i)}</span>
 			</div>
@@ -529,7 +571,7 @@
 							<span class="label" class:dim={!family.count}>{family.label} ({family.count})</span>
 						</div>
 						{#each family.groups as group (group.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startSub(o.name, 'group', group.id, group.label)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'group', group.id, group.label), () => clickSub(o.name, 'group', group.id))}>
+							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} class:drop={elementDrop === `${o.name}|${group.id}`} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" data-group-of="{o.name}|{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startSub(o.name, 'group', group.id, group.label)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'group', group.id, group.label), () => clickSub(o.name, 'group', group.id))}>
 								{#if group.elements?.length}
 									{@const shown = listsOpen.includes(listKey(o.name, 'group', group.id))}
 									<button class="twist inner" class:open={shown} aria-label={shown ? `Close the elements of ${group.label}` : `List the elements of ${group.label}`} tabindex="-1" data-testid="expand-group-{o.name}-{group.id}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'group', group.id)); }}>
@@ -743,7 +785,8 @@
 		box-shadow: inset 0 0 0 1px var(--blue-line);
 	}
 
-	.row.drop {
+	.row.drop,
+	.sub.drop {
 		box-shadow: inset 0 0 0 1px var(--accent);
 	}
 

@@ -456,16 +456,12 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.projection_overlay`: two shape sets on two geometries,
-    the second projected onto the basis set's DOFs
-    (`core.correlate.project_shapes`), their MAC after projection
-    (`core.shapes.cross_mac`, as `Project.comparison_mac` reads it), and
-    the pair a cell picks drawn on the basis geometry, the projected
-    mode over the basis mode: Animate the Projection. Which set is
-    projected is `core.correlate.projection_order`'s to say: the set
-    with nodes measured in fewer than three directions is the basis,
-    whichever was named first.
+    one projected onto the other's DOFs the way the pair's projection
+    says (`Project.compared_sets`, as Project sets it), their MAC after
+    projection (`core.shapes.cross_mac`, as `Project.comparison_mac`
+    reads it), and the pair a cell picks drawn on the geometry projected
+    onto, the projected mode over the other: Animate the Projection.
     Nothing is added."""
-    from hertzforge.core.correlate import project_shapes
     from hertzforge.core.shapes import cross_mac
 
     first, second = params['first'], params['second']
@@ -477,37 +473,26 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     if home[1] is theirs[1]:
         raise refused(f'{first} and {second} are both on {home[0]}, so there is nothing to '
                       'project; MAC overlays them there')
-    from hertzforge.core.correlate import projection_order
-
-    # which is projected is decided by what the sets measure, not by the order they are
-    # named in: the one with nodes measured in fewer than three directions is projected onto
-    flipped, why = projection_order(project[first], project[second])
     try:
-        if flipped:
-            columns = project[second]
-            rows, report = project_shapes(project[first], home[1], columns, theirs[1],
-                                          distance=params['distance'] or None)
-        else:
-            rows = project[first]
-            columns, report = project_shapes(project[second], theirs[1], rows, home[1],
-                                             distance=params['distance'] or None)
+        rows, columns, said, report = project.compared_sets(first, second)
         values = cross_mac(rows, columns)
     except ValueError as error:
         # the cause is kept: the comparison tells no node matched from another refusal
         raise refused(str(error)) from error
-    moved, onto, basis = (first, second, theirs) if flipped else (second, first, home)
+    flipped = project.projection_of(first, second)[0] == first
+    basis = theirs if flipped else home
+    moved = 'expanded' if project.projection_method(first, second) == 'expansion' else 'reduced'
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
 
     matrix = v.matrix(f'MAC of {first} Against {second} on {basis[0]}',
-                      axis(f'{first}, projected' if flipped else first, rows),
-                      axis(second if flipped else f'{second}, projected', columns),
+                      axis(f'{first}, {moved}' if flipped else first, rows),
+                      axis(second if flipped else f'{second}, {moved}', columns),
                       values, 'MAC', (0.0, 1.0))
     views = paired(basis[1], matrix, rows, range(rows.num_shapes), columns,
                    range(columns.num_shapes))
-    return [*views, v.reading(f'{moved} projected onto {onto}: {why}',
-                              _report_rows(report, basis[1].units_defined))]
+    return [*views, v.reading(said, _report_rows(report, basis[1].units_defined))]
 
 
 OPERATIONS = (
@@ -537,9 +522,9 @@ OPERATIONS = (
         run=project_onto_channels),
     Operation(
         id='project.projection_overlay', title='Animate the Projection', workspace='modal',
-        summary='A shape set on another geometry projected onto the basis set\'s DOFs, their '
-                'MAC, and a pair drawn on the basis geometry, the projected mode over the basis '
-                'mode.',
-        params=(BASIS, OTHER, TOLERANCE), outputs=('matrix', 'shape3d', 'reading'),
+        summary='Two shape sets on two geometries, one projected onto the other\'s DOFs as '
+                'Project sets it, their MAC, and a pair drawn on the geometry projected onto, '
+                'the projected mode over the other.',
+        params=(BASIS, OTHER), outputs=('matrix', 'shape3d', 'reading'),
         run=projection_overlay),
 )

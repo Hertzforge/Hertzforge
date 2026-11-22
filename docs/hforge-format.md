@@ -91,6 +91,20 @@ root attributes:
                       "source_print", the digest of the source's values
                       when the fingerprint holds settings only; absent,
                       only the settings are compared
+    projections       optional JSON, how pairs of shape sets on two
+                      geometries are brought onto common DOFs when
+                      compared, as DOF Mapping sets them: [{"first",
+                      "second", "source", "distance", "method"}, ...],
+                      "source" the set moved onto the other's DOFs,
+                      "method" "reduction" (its modes at the other's
+                      DOFs) or "expansion" (expanded through the
+                      other's modes, SEREP; absent reads as reduction)
+                      and "distance" the node match distance (meters,
+                      or the geometries' own units when theirs are not
+                      defined), or null for 2 % of the size of the
+                      geometry projected onto. Absent when none is set;
+                      a pair with none is reduced the way the sets'
+                      measured directions decide
 
 A project whose data index holds anything also has one dataset at the
 root (absent otherwise):
@@ -201,6 +215,10 @@ the project's `data_index`, as every imported file is.
             group_solids           JSON, {element group id: the solids it
                                    was meshed from} (only when there are
                                    any); a group absent is found by its name
+            group_family           JSON, {element group id: the element
+                                   family it was made for, 'quads'}, where
+                                   an empty group is listed (only when
+                                   there are any)
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,

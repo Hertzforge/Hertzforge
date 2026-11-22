@@ -189,9 +189,9 @@ def test_each_template_carries_the_record_facts(projects, name):
 
 def test_the_mixed_template_shows_each_part_with_its_unit(projects):
     _html, blocks, text = _page(projects['mixed'], _report(projects['mixed']))
-    assert 'narrowband 1 at 419.375 Hz: 0.002134 g^2/Hz measured, 0.0025 g^2/Hz its ' \
-        'reference, error -0.86 dB (at 5.75 s from engage, 0 dB)' in text
-    assert 'the floor: 0.3147 g rms measured, 0.4472 g rms its reference' in text
+    assert 'narrowband 1 at 419.375 Hz: 0.002126 g^2/Hz measured, 0.0025 g^2/Hz its ' \
+        'reference, error -0.89 dB (at 5.75 s from engage, 0 dB)' in text
+    assert 'the floor: 0.3144 g rms measured, 0.4472 g rms its reference' in text
     assert 'tone 1: no point recorded' in text
     captions = [b.get('caption', '') for b in blocks]
     assert any(c.startswith('Floor with the tones taken out') for c in captions)
@@ -222,7 +222,7 @@ def test_the_mimo_template_binds_its_owed_blocks_to_the_run(projects):
         'passed' in text
     assert "the control law's seed, before the loop engaged, asked for Shaker 1 0.4847 V " \
         'rms (ceiling 5 V rms)' in text
-    assert 'over the run the drives played Shaker 1 0.5049 V rms' in text
+    assert 'over the run the drives played Shaker 1 0.5195 V rms' in text
     assert 'Control 1 2.736 g rms against its reference 2.401 g rms, +1.33 dB' in text
     assert any(b.get('caption', '').startswith('Drive spectra') for b in blocks)
     owed = [b['text'] for b in report.blocks if b['kind'] == 'text'

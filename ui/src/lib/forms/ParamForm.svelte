@@ -209,6 +209,8 @@
 							}}
 						>
 							{#if opts.length === 0}<option value="">No options</option>{/if}
+							<!-- a choice the form leaves to the user (Project's direction when both ways can be made) -->
+							{#if opts.length && !opts.some((o) => o.value === values[p.name])}<option value="" disabled>Choose…</option>{/if}
 							{#each opts as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
 						</select>
 					{/if}
