@@ -624,9 +624,19 @@ class ShapeSet:
         self.description = [self.description[i] for i in order]
 
     def _dof_lookup(self):
-        """{base DOF: (column, sign)} — '101X-' is minus the '101X+' column."""
-        return {base: (i, sign) for i, (base, sign) in
-                enumerate(_split_sign(dof) for dof in self.coordinate)}
+        """{base DOF: (column, sign)} — '101X-' is minus the '101X+' column.
+        Callers read it and never change it."""
+        # a model's set holds hundreds of thousands of DOFs, and one selection looks them up
+        # many times (what the set can be expanded with, what it can be transformed by), so
+        # the lookup is kept with the set while its DOF list is the same one
+        held = self.coordinate
+        kept = getattr(self, '_lookup_kept', None)
+        if kept is not None and kept[0] is held and kept[1] == len(held):
+            return kept[2]
+        lookup = {base: (i, sign) for i, (base, sign) in
+                  enumerate(_split_sign(dof) for dof in held)}
+        self._lookup_kept = (held, len(held), lookup)
+        return lookup
 
     def auto_mac(self) -> np.ndarray:
         """The MAC of every mode against every other mode; the diagonal is 1."""

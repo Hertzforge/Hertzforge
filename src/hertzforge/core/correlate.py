@@ -46,14 +46,23 @@ def partial_nodes(shapes: ShapeSet) -> int:
     translation directions: the nodes a uni-axial or a bi-axial sensor
     measured. A rotation, and a DOF at no node (a modal coordinate), is
     not counted."""
+    # a model's set holds hundreds of thousands of DOFs, and one selection asks this of each
+    # set many times (which way a pair goes, why a way cannot be made), so the count is kept
+    # with the set while its DOF list is the same one
+    held = shapes.coordinate
+    kept = getattr(shapes, '_partial_nodes', None)
+    if kept is not None and kept[0] is held and kept[1] == len(held):
+        return kept[2]
     axes: dict[str, set[str]] = {}
-    for dof in shapes.coordinate:
+    for dof in held:
         text = str(dof).strip().upper()
         node = text[:len(text) - len(text.lstrip('0123456789'))]
         direction = text[len(node):]
         if node and direction[:1] in ('X', 'Y', 'Z'):
             axes.setdefault(node, set()).add(direction[0])
-    return sum(1 for held in axes.values() if len(held) < 3)
+    count = sum(1 for found in axes.values() if len(found) < 3)
+    shapes._partial_nodes = (held, len(held), count)
+    return count
 
 
 def projection_order(first: ShapeSet, second: ShapeSet) -> tuple[bool, str]:
