@@ -31,7 +31,9 @@ use crate::factor::{FactorLoop, LoopSettings};
 use crate::pareto::{self, ResidualWeight, Target, Tradeoff};
 use crate::pinv::ALL_SHAPES;
 use crate::spec::{DiagDecl, DiagKind, LawSpec, ParamDecl, ParamKindDecl, ParamVal};
-use crate::support::{convergence_param, diag_clamped, diag_condition, diag_correction, diag_kept};
+use crate::support::{
+    convergence_param, diag_clamped, diag_condition, diag_correction, diag_held, diag_kept,
+};
 use crate::BuiltinMimoLaw;
 use hertzforge_sdm::law::{
     DiagnosticData, DiagnosticValue, LawError, MimoControlLaw, MimoInput, MimoLoopInputs,
@@ -215,7 +217,7 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "minimum drive",
-            version: "1.1.0",
+            version: "1.2.0",
             author: "Hertzforge",
             summary: "Takes the cross terms of the reference from the drive that needs the least \
                       power to produce its autospectra: on each line the drive minimizing the \
@@ -292,6 +294,7 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                 diag_kept(),
                 diag_correction(),
                 diag_clamped(),
+                diag_held(),
                 DiagDecl {
                     key: "tradeoff",
                     label: "Trade-off used",

@@ -45,7 +45,7 @@ fn law(id: &str) -> Option<LawFacts> {
         "pinv_closed" => Some(LawFacts {
             id: id.into(),
             name: "pseudo-inverse, closed loop".into(),
-            version: "1.0.0".into(),
+            version: "1.1.0".into(),
             sha256: String::new(),
             builtin: true,
             world: Err("multiple-output Random"),

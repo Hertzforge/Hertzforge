@@ -9,6 +9,8 @@
 //!   bound, the drive rose from 2.6e4 to 3e9 and the worst error from 17 to
 //!   65 dB).
 //! - On the exact estimate the same run is unchanged by those rules.
+//! - The `held_rows` diagnostic counts the rows those rules act on: some on the
+//!   estimate identified through noise, none on the exact estimate.
 
 // Index loops over lines and channels mirror the matrix algebra they check.
 #![allow(clippy::needless_range_loop)]
@@ -17,7 +19,7 @@ mod common;
 
 use common::*;
 use hertzforge_mimo_laws::{BuiltinMimoLaw, BuzzMatchedLaw, PseudoInverseLaw};
-use hertzforge_sdm::law::MimoControlLaw;
+use hertzforge_sdm::law::{DiagnosticData, MimoControlLaw, MimoLoopOutputs};
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
 
 const LINES: usize = 32;
@@ -59,9 +61,29 @@ fn drive_power(g: &HermitianStack) -> f64 {
     (0..g.lines()).map(|l| g.trace(l)).sum()
 }
 
-/// The drive power and the worst error of every loop, the response measured
-/// through the true plant with the noise floor added.
-fn run(law: &mut dyn MimoControlLaw, s: &Synthetic) -> Vec<(f64, f64)> {
+/// The rows the law reports held this loop.
+fn held_rows(o: &MimoLoopOutputs) -> f64 {
+    let d = o
+        .diagnostics
+        .iter()
+        .find(|d| d.key == "held_rows")
+        .expect("the closed loop reports held_rows");
+    match d.data {
+        DiagnosticData::Scalar(v) => v,
+        _ => panic!("held_rows is a scalar"),
+    }
+}
+
+/// One loop: the drive power, the worst error and the rows held.
+struct Loop {
+    power: f64,
+    worst_db: f64,
+    held: f64,
+}
+
+/// Every loop of a run, the response measured through the true plant with the
+/// noise floor added.
+fn run(law: &mut dyn MimoControlLaw, s: &Synthetic) -> Vec<Loop> {
     let needs = law.needs().to_vec();
     let mut response = s.sysid_response.clone();
     let mut last = s.sysid_drive.clone();
@@ -75,6 +97,7 @@ fn run(law: &mut dyn MimoControlLaw, s: &Synthetic) -> Vec<(f64, f64)> {
             law.iterate(&inputs)
         }
         .unwrap_or_else(|e| panic!("loop {l}: {e}"));
+        let held = held_rows(&o);
         last = o.drive;
         response = s.respond(&last, l + 1);
         for line in 0..LINES {
@@ -83,7 +106,11 @@ fn run(law: &mut dyn MimoControlLaw, s: &Synthetic) -> Vec<(f64, f64)> {
                 response.set(line, c, c, v + C64::new(FLOOR, 0.0));
             }
         }
-        out.push((drive_power(&last), worst_db(s, &last)));
+        out.push(Loop {
+            power: drive_power(&last),
+            worst_db: worst_db(s, &last),
+            held,
+        });
     }
     out
 }
@@ -107,12 +134,19 @@ fn the_closed_loop_does_not_wind_up_in_directions_the_plant_does_not_answer() {
     let s = run_on(3, plant, frf, unreachable_reference(24), BAND, 0.01);
     for (name, mut law) in laws(&s) {
         let trace = run(law.as_mut(), &s);
-        let (seed_power, _) = trace[0];
-        let (_, first_err) = trace[1];
-        let peak = trace.iter().map(|t| t.0).fold(0.0f64, f64::max);
-        let (_, last_err) = *trace.last().expect("loops");
+        let seed_power = trace[0].power;
+        let first_err = trace[1].worst_db;
+        let peak = trace.iter().map(|t| t.power).fold(0.0f64, f64::max);
+        let last_err = trace.last().expect("loops").worst_db;
+        let held: f64 = trace.iter().map(|t| t.held).sum();
+        let first_held = trace.iter().position(|t| t.held > 0.0);
         eprintln!(
-            "{name}: drive {seed_power:.3e} at the seed, peak {peak:.3e}; worst error {first_err:.2} dB at loop 1, {last_err:.2} dB at loop {LOOPS}"
+            "{name}: drive {seed_power:.3e} at the seed, peak {peak:.3e}; worst error {first_err:.2} dB at loop 1, {last_err:.2} dB at loop {LOOPS}; {held} rows held, first at loop {first_held:?}"
+        );
+        assert_eq!(trace[0].held, 0.0, "{name}: the seed holds nothing");
+        assert!(
+            held > 0.0,
+            "{name}: the rules held the drive and held_rows reported none"
         );
         assert!(
             peak <= 10.0 * seed_power,
@@ -131,11 +165,17 @@ fn on_the_exact_estimate_the_rules_change_nothing_the_loop_needs() {
     let s = run_on(3, plant, frf, unreachable_reference(24), BAND, 0.01);
     for (name, mut law) in laws(&s) {
         let trace = run(law.as_mut(), &s);
-        let (p0, e0) = trace[0];
-        let (p, e) = *trace.last().expect("loops");
+        let (p0, e0) = (trace[0].power, trace[0].worst_db);
+        let last = trace.last().expect("loops");
+        let (p, e) = (last.power, last.worst_db);
         assert!(
             (p / p0 - 1.0).abs() < 0.05 && (e - e0).abs() < 0.5,
             "{name}: drive {p0:.3e} to {p:.3e}, worst error {e0:.2} to {e:.2} dB"
+        );
+        let held: Vec<f64> = trace.iter().map(|t| t.held).collect();
+        assert!(
+            held.iter().all(|h| *h == 0.0),
+            "{name}: rows held on the exact estimate: {held:?}"
         );
     }
 }

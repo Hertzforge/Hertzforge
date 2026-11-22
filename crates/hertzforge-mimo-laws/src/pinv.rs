@@ -15,9 +15,9 @@
 use crate::factor::{FactorLoop, LoopSettings};
 use crate::spec::{LawSpec, ParamVal};
 use crate::support::{
-    cap_params, convergence_param, diag_clamped, diag_condition, diag_correction, diag_kept,
-    rank_tolerance_param, regularization, regularization_params, weighting, weighting_param,
-    InverseRule,
+    cap_params, convergence_param, diag_clamped, diag_condition, diag_correction, diag_held,
+    diag_kept, rank_tolerance_param, regularization, regularization_params, weighting,
+    weighting_param, InverseRule,
 };
 use crate::BuiltinMimoLaw;
 use hertzforge_sdm::law::{
@@ -140,7 +140,7 @@ impl BuiltinMimoLaw for PseudoInverseLaw {
         params.push(weighting_param());
         LawSpec {
             name: "pseudo-inverse, closed loop",
-            version: "1.0.0",
+            version: "1.1.0",
             author: "Hertzforge",
             summary: "Starts from the regularized pseudo-inverse drive, then each loop corrects \
                       a lower-triangular factor of the reference from the measured error \
@@ -154,6 +154,7 @@ impl BuiltinMimoLaw for PseudoInverseLaw {
                 diag_kept(),
                 diag_correction(),
                 diag_clamped(),
+                diag_held(),
             ],
             shapes: ALL_SHAPES.to_vec(),
             needs: Vec::new(),
