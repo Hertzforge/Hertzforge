@@ -82,6 +82,11 @@ def test_an_frf_on_a_geometry_is_its_operating_shape_at_the_loudest_line(plate, 
     assert mode['label'].startswith('ODS at') and 'shape_imag' in mode
     assert mode['frequency_hz'] > 0 and np.abs(mode['shape']).max() > 0
     assert curves['view'] == 'spectrum'
+    # a line is drawn at full scale with its fullest deflection at phase zero: the real
+    # part is the larger one, and the two together reach 1 at the DOF that moves most
+    real, imag = np.asarray(mode['shape']), np.asarray(mode['shape_imag'])
+    assert np.abs(real).max() > np.abs(imag).max()
+    assert np.hypot(real, imag).max() == pytest.approx(1.0, abs=1e-5)
 
 
 def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, validate):
@@ -472,17 +477,117 @@ def test_an_frf_beside_a_shape_set_shows_its_resynthesis(plate, validate):
         project.remove('Fit')
 
 
+def test_a_channel_table_on_a_geometry_is_the_geometry_with_arrows_by_role(plate, validate):
+    project = plate.project
+    geometry, table = named(plate, 'geometry'), named(plate, 'channel_table')
+    both = shown(plate, geometry, table, prefs={'sensors': False}, validate=validate)
+    (stage,) = both['views']
+    assert stage['view'] == 'shape3d', 'the stage alone, no table beside it'
+    assert len(stage['nodes']) == project[geometry].num_nodes
+    offers = both['offers']
+    assert offers['arrows'] is False, 'always drawn, so nothing to switch'
+    assert offers['arrow_roles'] == project[table].choices()
+    everything = len(stage['arrows']['axes'])
+    assert everything > 0 and f'{everything} DOF arrows' in both['note']
+    for role in offers['arrow_roles'][1:]:
+        some = shown(plate, table, geometry, prefs={'sensors': False, 'arrow_role': role},
+                     validate=validate)
+        count = len(some['views'][0]['arrows']['axes'])
+        assert 0 < count <= len(project[table].chosen(role)) and count < everything
+    with pytest.raises(ProtocolError, match='arrow_role'):
+        shown(plate, geometry, table, prefs={'arrow_role': 'loud'})
+
+
+def test_the_averaging_form_has_no_apply_and_is_alone_in_that(plate):
+    history = named(plate, 'time_history')
+    table = projects.actions(plate, {'objects': [history]})['table']
+    rows = [row for column in table['columns'] for row in column['rows']]
+    live = {row['id'] for row in rows if row.get('live')}
+    assert live == {'project.set_averaging'}
+
+
+def test_the_averaging_form_draws_its_frames_on_the_history(plate, validate):
+    project = plate.project
+    history = named(plate, 'time_history')
+    rate = project[history].sample_rate
+    plain = shown(plate, history, validate=validate)
+    assert 'regions' not in plain['views'][0], 'nothing drawn while the form is closed'
+    draft = {'frame_length': 2048, 'overlap': 0.75, 'window': 'hann', 'frames': 5, 'start': 0.25}
+    for flat, kind in ((False, 'waterfall'), (True, 'spectrum')):
+        out = shown(plate, history, prefs={'averaging': draft, 'flat': flat}, validate=validate)
+        (view,) = out['views']
+        assert view['view'] == kind
+        *frames, span = view['regions']
+        assert [r['kind'] for r in frames] == ['frame'] * 5 and span['kind'] == 'span'
+        # at three quarters overlap four frames are up at once, each on a row of its own
+        assert [r['level'] for r in frames] == [0, 1, 2, 3, 0] and frames[0]['rows'] == 4
+        assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(512 / rate)
+        assert span['x0'] == frames[0]['x0'] and span['x1'] == frames[-1]['x1']
+        assert span['drag']['op'] == 'project.drag_averaging' and span['drag']['high'] == 'stop'
+        assert f'5 frames of {2048 / rate:g} s' in out['note']
+    # what was typed is drawn, not stored
+    held = project[history].averaging
+    assert held is None or (held.frame_length, held.frames) != (2048, 5)
+    many = shown(plate, history, prefs={'averaging': {'frame_length': 2048, 'frames': 10 ** 6}})
+    assert 'fit from' in many['note']
+    bad = shown(plate, history, prefs={'averaging': {'overlap': 2.0}})
+    assert 'averaging not drawn' in bad['note'] and 'regions' not in bad['views'][0]
+    with pytest.raises(ProtocolError, match='"averaging"'):
+        shown(plate, history, prefs={'averaging': {'span': [0, 1]}})
+def test_channels_picked_in_a_table_are_the_only_arrows_on_its_geometry(plate, validate):
+    project = plate.project
+    geometry, table = named(plate, 'geometry'), named(plate, 'channel_table')
+    dofs = project[table].dof_strings()
+    whole = shown(plate, geometry, table, prefs={'sensors': False}, validate=validate)
+    drawn = whole['views'][0]['arrows']
+    assert drawn['labels'] == [dof for dof in dofs if dof in drawn['labels']], 'in table order'
+    assert len(drawn['labels']) == len(drawn['axes']) == len(drawn['inward'])
+    assert drawn['inward'].dtype == np.uint8
+    rows = [project[table].chosen('reference')[0], project[table].chosen('response')[0]]
+    some = shown(plate, table, geometry, records={table: rows},
+                 prefs={'sensors': False, 'arrow_role': 'response'}, validate=validate)
+    picked = some['views'][0]['arrows']
+    assert picked['labels'] == [dofs[i] for i in sorted(rows)], 'the picked ones, whatever the role'
+    assert sorted(picked['inward'].tolist()) == [0, 1], 'the reference points in'
+    assert '2 DOF arrows (2 channels picked)' in some['note']
+    assert some['offers']['arrow_roles'] == [], 'the pick is the choice'
+    assert len(some['views']) == 1
+
+
+def test_the_frames_alone_are_asked_for_without_the_plot(plate, validate):
+    history, geometry = named(plate, 'time_history'), named(plate, 'geometry')
+    draft = {'frame_length': 2048, 'overlap': 0.5, 'window': 'hann', 'frames': 3, 'start': 0.25}
+    drawn = projects.averaging(plate, {'name': history, 'averaging': draft})
+    validate(drawn, 'averagingDrawn')
+    whole = shown(plate, history, prefs={'averaging': draft})
+    assert drawn['regions'] == whole['views'][0]['regions'], 'as the whole view draws them'
+    assert drawn['note'] == whole['note']
+    refused = projects.averaging(plate, {'name': history, 'averaging': {'overlap': 2.0}})
+    assert refused['regions'] == [] and 'averaging not drawn' in refused['note']
+    with pytest.raises(ProtocolError, match='not a time history'):
+        projects.averaging(plate, {'name': geometry})
+    with pytest.raises(ProtocolError, match='"averaging" holds'):
+        projects.averaging(plate, {'name': history, 'averaging': {'span': 1}})
+
+
 def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
     project = plate.project
     geometry, history = named(plate, 'geometry'), named(plate, 'time_history')
     plain = shown(plate, geometry, history, validate=validate)
     assert plain['offers']['arrows'] is True and plain['offers']['sensors'] is False
-    assert 'marks' not in plain['views'][0]
+    assert 'arrows' not in plain['views'][0]
     marked = shown(plate, geometry, history, prefs={'arrows': True}, validate=validate)
     stage = marked['views'][0]
-    assert stage['view'] == 'shape3d' and stage['marks']['nodes'].shape[1] == 3
-    assert stage['marks']['lines'].dtype == np.uint32 and len(stage['marks']['lines']) > 0
+    assert stage['view'] == 'shape3d' and stage['arrows']['tails'].shape[1] == 3
+    assert stage['arrows']['axes'].dtype == np.uint8 and len(stage['arrows']['axes']) > 0
+    assert set(stage['arrows']['axes'].tolist()) <= {0, 1, 2} and stage['arrows']['length'] > 0
     assert 'DOF arrows' in marked['note']
+    roles = marked['offers']['arrow_roles']
+    assert roles[0] == 'all' and 'reference' in roles
+    some = shown(plate, geometry, history, prefs={'arrows': True, 'arrow_role': 'reference'},
+                 validate=validate)
+    assert 0 < len(some['views'][0]['arrows']['axes']) < len(stage['arrows']['axes'])
+    assert '(references)' in some['note']
     table_name = next(n for n, o in project.items() if projects.kind_of(o) == 'channel_table')
     table = project[table_name]
     was = table['model'][0]
@@ -492,7 +597,7 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert offered['offers']['sensors'] is True
         with_sensors = shown(plate, geometry, history, prefs={'sensors': True, 'arrows': False},
                              validate=validate)
-        assert '1 sensors' in with_sensors['note'] and 'marks' not in with_sensors['views'][0]
+        assert '1 sensors' in with_sensors['note'] and 'arrows' not in with_sensors['views'][0]
         stage = with_sensors['views'][0]
         bodies = stage['bodies']
         assert bodies['triangles'].dtype == np.uint32 and len(bodies['triangles']) > 0
@@ -727,3 +832,65 @@ def test_modal_responses_with_no_set_to_name_say_what_to_select():
     three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
                                   'prefs': {}})
     assert 'motion' in three['views'][0]
+
+
+def test_a_specifications_limits_are_drawn_on_its_plot_and_turned_off(validate):
+    f = np.array([20.0, 80.0, 350.0, 2000.0])
+    level = np.array([[0.01, 0.04, 0.04, 0.007], [0.02, 0.02, 0.02, 0.02]])
+    nothing = np.full(4, np.nan)
+    limits = {'warning_lower': np.array([level[0] * 0.7, nothing]),
+              'warning_upper': np.array([level[0] * 1.4, nothing]),
+              'abort_lower': np.array([level[0] * 0.5, nothing]),
+              'abort_upper': np.array([level[0] * 2.0, nothing])}
+    held = projects.new({'title': 'Limits'})
+    held.project.add('Spec', Specification(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                           ordinate_unit='g', **limits))
+    held.project.add('Plain', Psd(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                  ordinate_unit='g'))
+
+    def drawn(name, **prefs):
+        out = projects.show(held, {'objects': [name], 'records': {}, 'part': None,
+                                   'prefs': {'flat': True, **prefs}})
+        wire_views(out['views'], validate)
+        validate({**out, 'views': []}, 'shown')
+        return out, [(line['name'], line['role']) for line in out['views'][0]['series']]
+
+    out, lines = drawn('Spec')
+    assert out['offers']['limits'] is True
+    # the control channel's four limits after the records; the other record has none
+    assert lines == [('1X+', 'measured'), ('2Y+', 'measured'),
+                     ('1X+: Warning, lower', 'tolerance'), ('1X+: Warning, upper', 'tolerance'),
+                     ('1X+: Abort, lower', 'abort'), ('1X+: Abort, upper', 'abort')]
+    spec, upper = out['views'][0]['series'][0], out['views'][0]['series'][5]
+    # drawn as the specification is: the same points along the power law, twice as high
+    assert np.allclose(upper['x'], spec['x']) and np.allclose(upper['y'], 2.0 * spec['y'])
+    _out, off = drawn('Spec', limits=False)
+    assert off == [('1X+', 'measured'), ('2Y+', 'measured')]
+    plain, lines = drawn('Plain')
+    assert plain['offers']['limits'] is False and len(lines) == 2
+    with pytest.raises(ProtocolError, match='"limits"'):
+        drawn('Spec', limits='yes')
+
+
+def test_a_psd_is_drawn_flat_across_its_bins_on_the_2d_plot_too(validate):
+    f = np.arange(10.0, 210.0, 10.0)
+    level = np.vstack([np.linspace(0.01, 0.02, f.size), np.full(f.size, 0.03)])
+    held = projects.new({'title': 'Steps'})
+    held.project.add('Measured', Psd(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                     ordinate_unit='g'))
+    held.project.add('Response', Frf(f, level + 0j, ['1X+', '2Y+'], ['9Z+', '9Z+']))
+    out = projects.show(held, {'objects': ['Measured'], 'records': {}, 'part': None,
+                               'prefs': {'flat': True}})
+    wire_views(out['views'], validate)
+    plot = out['views'][0]
+    first = plot['series'][0]
+    # a value a bin and the bins' edges: the area drawn is the area the values stand for
+    assert first['shape'] == 'steps' and len(first['x']) == f.size
+    assert np.allclose(first['edges'], np.arange(5.0, 210.0, 10.0))
+    assert np.allclose(first['y'], level[0])
+    # and it opens on log frequency and log level
+    assert plot['x']['scale'] == 'log' and plot['y']['scale'] == 'log'
+    # a value at a frequency stays a line
+    other = projects.show(held, {'objects': ['Response'], 'records': {}, 'part': None,
+                                 'prefs': {'flat': True}})
+    assert all(line.get('shape', 'line') == 'line' for line in other['views'][0]['series'])

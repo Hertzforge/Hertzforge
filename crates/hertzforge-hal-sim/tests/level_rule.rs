@@ -975,14 +975,14 @@ fn level_rule_equalized_step_plays_its_frf() {
                 })
                 .collect();
             let s = p.simulate(FS_BM, &drives).unwrap();
-            for i in 0..p.n_inputs {
+            for (i, out) in s.outputs.iter().enumerate().take(p.n_inputs) {
                 // The last second, by correlation with the drive's tone.
                 let (mut re, mut im) = (0.0, 0.0);
                 let m = FS_BM as usize;
-                for k in n - m..n {
+                for (k, &y) in out.iter().enumerate().take(n).skip(n - m) {
                     let (sn, cs) = (TAU * f * k as f64 / FS_BM).sin_cos();
-                    re += s.outputs[i][k] * cs;
-                    im -= s.outputs[i][k] * sn;
+                    re += y * cs;
+                    im -= y * sn;
                 }
                 let got = C64::new(2.0 * re / m as f64, 2.0 * im / m as f64);
                 let want = h.get(0, i, j);

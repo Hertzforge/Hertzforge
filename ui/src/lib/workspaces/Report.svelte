@@ -188,8 +188,10 @@
 						</div>
 					</div>
 				{/if}
-				<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
-					title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
+				{#if r.canPrint}
+					<button class="btn ghost sm" data-testid="report-print" onclick={() => r.print()} disabled={r.busy !== null}
+						title="Print the page as a reader sees it; the print dialog saves it as a PDF">Print or Save as PDF</button>
+				{/if}
 				<button class="btn ghost sm" data-testid="report-issue" onclick={() => r.issue('begin')} disabled={r.busy !== null || r.issuing !== null}
 					title="Print the page as issued, then name the PDF, which issues the report and records its hash">Issue</button>
 				{#if r.issuing}

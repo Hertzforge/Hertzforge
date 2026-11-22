@@ -13,7 +13,7 @@ import numpy as np
 from . import group_cells
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .mesh import drawn_mesh, places_view
+from .mesh import drawn_mesh, element_colors, places_view
 from .ops_geometry import entity_table
 from .parsing import parse_id_runs
 from .protocol import refused
@@ -43,7 +43,7 @@ TIE_KEEP = Param('keep', 'Tie (else pick the elements)', 'boolean', default=Fals
 REACH = Param('reach', 'Reach (the file\'s own numbers if its units are not defined)', 'number',
               default=0.0, unit='mm', min=0.0, step=0.1)
 TOLERANCE = Param('tolerance', 'Tolerance', 'number', default=0.0, unit='m', min=0.0,
-                  step=0.0001)
+                  step=0.0001, length=True)
 LEFT_OUT = Param('left_out', 'Places left out: node ids, or all', 'string', default='')
 #: a place the view was clicked on; not a setting of the form's
 TOGGLE = Param('toggle', 'Place clicked', 'string', default='', in_view=True)
@@ -63,11 +63,22 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     geometry = project[name]
     if solids.top_level(geometry):
         return [_drawn(name, geometry)[0]]
+    from . import scans
+
     rows, triangles, lines = drawn_mesh(geometry)
-    return [v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
-                      np.asarray(geometry.node_xyz, dtype=float)[rows], [],
-                      triangles=triangles, lines=lines,
-                      node_ids=np.asarray(geometry.node_id)[rows])]
+    view = v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
+                     np.asarray(geometry.node_xyz, dtype=float)[rows], [],
+                     triangles=triangles, lines=lines,
+                     node_ids=np.asarray(geometry.node_id)[rows],
+                     element_colors=element_colors(geometry, rows))
+    # the nodes no line or face is drawn through, as points: a geometry of
+    # measured points, or of nodes alone, drew nothing
+    points, note = scans.layers(geometry)
+    if points:
+        view['points'] = points
+    if note:
+        view['note'] = note
+    return [view]
 
 
 _family = group_cells.family

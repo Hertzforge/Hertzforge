@@ -119,8 +119,10 @@ def test_the_composite_is_the_mean_of_its_channels(project, validate):
 
 
 def test_scaling_is_held_on_the_measurement_and_read_by_every_comparison(project, validate):
-    (reading,) = run(project, 'project.comparison_scale', scale='+6 dB')
+    # the field takes the run's level, as the report states it: a run at -6 dB
+    (reading,) = run(project, 'project.comparison_scale', level='-6 dB')
     wire_views([reading], validate)
+    assert rows(reading)['Test level']['value'] == -6.0
     assert rows(reading)['Comparison scale']['value'] == 6.0
     assert project['Time History PSDs'].scale_db == 6
     _plot, spectra = run(project, 'project.spec_spectra')
@@ -131,7 +133,7 @@ def test_scaling_is_held_on_the_measurement_and_read_by_every_comparison(project
     assert project['Time History PSDs'].scale_db is None
     assert rows(back)['Scaled']['value'] == 'detected from the data'
     with pytest.raises(ProtocolError, match='whole decibels'):
-        run(project, 'project.comparison_scale', scale='lots')
+        run(project, 'project.comparison_scale', level='lots')
 
 
 def test_a_specification_alone_reads_its_levels(project, validate):

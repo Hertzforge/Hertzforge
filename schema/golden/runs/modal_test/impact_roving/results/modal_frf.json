@@ -1,0 +1,75 @@
+{
+  "name": "modal_frf",
+  "kind": "frf",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 0,
+    "step": 2
+  },
+  "channels": {
+    "references": [
+      {
+        "index": 1,
+        "node": 1,
+        "direction": "Z+",
+        "unit": "lbf"
+      }
+    ],
+    "responses": [
+      {
+        "index": 2,
+        "node": 4,
+        "direction": "Z+",
+        "unit": "g"
+      },
+      {
+        "index": 3,
+        "node": 7,
+        "direction": "Z+",
+        "unit": "g"
+      }
+    ]
+  },
+  "records": {
+    "measurement": "the measurement's number in the test",
+    "point": "the point",
+    "replaces": "the measurement of the point it replaces, if any",
+    "averages": "the hits or frames averaged",
+    "estimator": "H1, H2 or Hv with one reference; matrix H1 with several",
+    "rows": "the references and responses at the point",
+    "decay": "the largest decay check over the hits or frames averaged, or null when none was checked"
+  },
+  "layout": [
+    "response",
+    "reference",
+    "line"
+  ],
+  "windows": {
+    "analysis": "uniform",
+    "force": {
+      "pre_frames": 26,
+      "width_frames": 51,
+      "fall_frames": 5
+    },
+    "exponential": {
+      "tau_s": 0.21714724095162594,
+      "inv_tau_per_s": 4.605170185988091,
+      "end": 0.1,
+      "added_damping": "1/(2*pi*f_n*tau_s)"
+    }
+  },
+  "arrays": [
+    {
+      "name": "frf",
+      "dtype": "c16",
+      "shape": [
+        2,
+        1,
+        101
+      ],
+      "unit": "g/lbf",
+      "offset": 0
+    }
+  ]
+}

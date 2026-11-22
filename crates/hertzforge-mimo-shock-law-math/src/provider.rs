@@ -683,9 +683,9 @@ impl PoleTrackModel {
                 let el = r * n_d + j;
                 self.modal.b0[el] = C64::new(x[2 * j], x[2 * j + 1]);
                 self.modal.b2[el] = C64::new(x[2 * (n_d + j)], x[2 * (n_d + j) + 1]);
-                for m in 0..nm {
+                for (m, mode) in self.modal.modes.iter_mut().enumerate().take(nm) {
                     let k = 2 * ((m + 2) * n_d + j);
-                    self.modal.modes[m].residue[el] = C64::new(x[k], x[k + 1]);
+                    mode.residue[el] = C64::new(x[k], x[k + 1]);
                 }
             }
         }

@@ -79,12 +79,15 @@ def _geometry_for(project: Any, name: str) -> str | None:
     return found[0] if found else None
 
 
-#: how the window reads data, kept across selections: the stage or the flat plot,
-#: decades on the frequency axis, and the
-#: component of complex data
+#: how the window reads data, kept across selections: the stage or the flat plot, the
+#: component of complex data, and what is drawn with it (a specification's limits, a
+#: table's arrows and sensors). The axes' scales are chosen on the plot, not here.
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'shape_view': None,
-         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
+         'projection': False, 'shape_view': None, 'limits': True,
+         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
+         'drive': None,
+         'sensors': True,
+         'averaging': None,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
 TABLE_VIEWS = ('channels', 'response', 'reference')
@@ -187,18 +190,52 @@ def _values_view(project: Any, name: str, shapes: Any, prefs: dict[str, Any]
     return v.table(title, headers, rows), notes
 
 
-def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
+def _marked_table(project: Any, objects: list[str], geometry_name: str
+                  ) -> tuple[tuple[str, Any] | None, bool]:
+    """(the channel table whose channels are marked on the stage, whether it was picked
+    with the geometry): a table selected beside the geometry, linked with it or not, whose
+    arrows are then always drawn; else the table drawn on the geometry (`_table_on`)."""
+    from hertzforge.core.channel_table import ChannelTable
+
+    if len(objects) == 2 and geometry_name in objects:
+        other = objects[1] if objects[0] == geometry_name else objects[0]
+        if isinstance(project[other], ChannelTable):
+            return (other, project[other]), True
+    return _table_on(project, geometry_name), False
+
+
+def _arrow_role(table: Any, prefs: dict[str, Any]) -> str:
+    """The channel choice the arrows are drawn for: `prefs.arrow_role` while the table
+    holds such channels, else every channel."""
+    role = prefs.get('arrow_role', 'all')
+    return role if role in table.choices() else 'all'
+
+
+def _picked_channels(objects: list[str], records: dict[str, list[int]],
+                     table: tuple[str, Any] | None) -> list[int] | None:
+    """The rows of the channels picked inside a selected channel table, or None when
+    the table is whole: only their arrows are drawn."""
+    if table is None or table[0] not in objects:
+        return None
+    rows = sorted({int(i) for i in records.get(table[0], [])
+                   if 0 <= int(i) < table[1].num_channels})
+    return rows or None
+
+
+def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None,
+                role: str = 'all', only: list[int] | None = None
                 ) -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
-    table's channels, a force or a drive pointing in, else a lone shape
-    set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
+    table's channels in `role` (`ChannelTable.chosen`), or the rows `only` when channels
+    are picked inside it, a force or a drive pointing in,
+    else a lone shape set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
 
     if table is not None:
         _name, obj = table
         strings, types = obj.dof_strings(), obj.types()
-        rows = [i for i in range(len(strings))
+        rows = [i for i in (obj.chosen(role) if only is None else only)
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
@@ -208,45 +245,55 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
     return [], []
 
 
-def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
-           ) -> list[str]:
+def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any],
+           records: dict[str, list[int]] | None = None) -> list[str]:
     """DOF arrows and sensors over every stage the selection shows, in the
-    geometry's coordinates: the arrows as static line work (`marks` on the
+    geometry's coordinates: the arrows as solids that stay put (`arrows` on the
     `shape3d`) as `project.dof_arrows` draws them, the sensors as solids
     that move with their nodes (`bodies`) as `project.sensors` draws
-    them. Returns the notes."""
+    them. A channel table picked with a geometry always has its arrows drawn, for
+    the channels `prefs.arrow_role` chooses, or for the channels picked inside the table
+    when some are. Returns the notes."""
     stages = [view for view in views if view.get('view') == 'shape3d']
-    if not stages or not (prefs['arrows'] or prefs['sensors']):
-        return []
-    geometry_name = _stage_geometry(project, objects)
+    geometry_name = _stage_geometry(project, objects) if stages else None
     if geometry_name is None:
         return []
-    from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+    table, picked = _marked_table(project, objects, geometry_name)
+    if not (prefs['arrows'] or picked or prefs['sensors']):
+        return []
+    from hertzforge.drawing.viz.geometry import (
+        dof_arrow_length,
+        dof_arrow_solids,
+        dof_arrow_vectors,
+    )
     from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
 
-    from .ops_geometry import _arrow, _extent
+    from .ops_geometry import _extent
 
     geometry = project[geometry_name]
-    table = _table_on(project, geometry_name)
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-    nodes: list = []
-    lines: list = []
     notes: list[str] = []
-    if prefs['arrows']:
-        dofs, into = _arrow_dofs(project, objects, table)
+    if prefs['arrows'] or picked:
+        only = _picked_channels(objects, records or {}, table)
+        role = _arrow_role(table[1], prefs) if table is not None and only is None else 'all'
+        dofs, into = _arrow_dofs(project, objects, table, role, only)
         into = into or [False] * len(dofs)
-        if dofs:
+        if dofs or picked:
             hits = dof_arrow_vectors(geometry, dofs)
             drawn = [(i, hit) for i, hit in zip(into, hits, strict=True) if hit is not None]
+            labels = [dof for dof, hit in zip(dofs, hits, strict=True) if hit is not None]
             if drawn:
                 length = dof_arrow_length(xyz[[hit[0] for _i, hit in drawn]], _extent(xyz))
-                for inward, (row, vector, _axis) in drawn:
-                    at = xyz[row]
-                    if inward:
-                        _arrow(at - length * vector, at, nodes, lines)
-                    else:
-                        _arrow(at, at + length * vector, nodes, lines)
-            said = f'{len(drawn)} DOF arrows'
+                for stage in stages:
+                    # each its own, since converting a stage's units writes into it; a
+                    # stage that draws a force of its own keeps that arrow alone
+                    if 'arrows' not in stage:
+                        stage['arrows'] = dof_arrow_solids(xyz, drawn, length, labels)
+            said = f'{len(drawn)} DOF arrow{"s" * (len(drawn) != 1)}'
+            if only is not None:
+                said += f' ({len(only)} channel{"s" * (len(only) != 1)} picked)'
+            elif role != 'all':
+                said += f' ({VALUES_CHOICES[role].lower()})'
             if len(drawn) < len(dofs):
                 said += f', {len(dofs) - len(drawn)} with no node or direction on {geometry_name}'
             notes.append(said)
@@ -261,13 +308,60 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
                 stage['bodies'] = sensor_bodies(
                     placed, geometry, rows_of(geometry.node_id if ids is None else ids))[0]
             notes.append(f'{len(placed)} sensors')
-    if nodes:
-        marks = {'nodes': np.asarray(nodes, dtype=np.float32).reshape(-1, 3),
-                 'lines': np.asarray(lines, dtype=np.uint32).reshape(-1, 2)}
-        for stage in stages:
-            # each its own, since converting a stage's units writes into it
-            stage['marks'] = dict(marks)
     return notes
+
+
+#: what `prefs.averaging` may hold: the Averaging form's fields
+AVERAGING_FIELDS = ('frame_length', 'overlap', 'window', 'frames', 'start', 'detrend')
+
+
+def averaging_drawn(project: Any, name: str, draft: dict[str, Any]
+                    ) -> tuple[list[dict] | None, str]:
+    """(regions, note) for an averaging drawn on the time history `name`: what
+    `draft` holds of the Averaging form's fields, the history's own for the rest
+    (`ops_settings.averaging_regions`: each frame with its window and its row,
+    then the span that drags them). No regions, and why, when it cannot be drawn."""
+    from hertzforge.core.averaging import Averaging
+
+    from .ops_settings import averaging_regions
+
+    history = project[name]
+    held = history.averaging
+    stored = {} if held is None else {field: getattr(held, field) for field in AVERAGING_FIELDS}
+    fields = {'frame_length': 4096, 'overlap': 0.5, 'window': 'hann', 'frames': 1,
+              'start': 0.0, 'detrend': 'none', **stored, **draft}
+    try:
+        averaging = Averaging(int(fields['frame_length']), float(fields['overlap']),
+                              fields['window'], int(fields['frames']), float(fields['start']),
+                              fields['detrend'], start_set=True)
+        rate = float(history.sample_rate)
+    except (TypeError, ValueError) as error:
+        return None, f'averaging not drawn: {error}'
+    most = averaging.most_frames(len(history.abscissa), rate)
+    said = (f'{averaging.frames} frame{"s" * (averaging.frames != 1)} of '
+            f'{averaging.frame_length / rate:g} s')
+    if averaging.frames > most:
+        said += f'; only {most} fit from {averaging.start:g} s'
+    return averaging_regions(name, history, averaging), said
+
+
+def _averaging(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
+               ) -> list[str]:
+    """The averaging drawn on a lone time history's own plot, the stage or
+    the flat one, while its form is open: `prefs.averaging` holds what the
+    form holds, typed or stored, and the frames come as `regions`
+    (`averaging_drawn`). Returns the notes."""
+    from hertzforge.core.data import TimeHistory
+
+    draft = prefs.get('averaging')
+    if draft is None or len(objects) != 1 or not isinstance(project[objects[0]], TimeHistory):
+        return []
+    regions, said = averaging_drawn(project, objects[0], draft)
+    if regions is not None:
+        for view in views:
+            if view.get('view') in ('spectrum', 'waterfall'):
+                view['regions'] = [dict(region) for region in regions]
+    return [said]
 
 
 def _alone(project: Any, name: str, picks: list[int],
@@ -369,8 +463,16 @@ def _alone(project: Any, name: str, picks: list[int],
         geometry = _geometry_for(project, obj.first)
         if geometry is None:
             return table, [*notes, f'{obj.first} is on no geometry, so the pairs are not drawn']
+        # a second set on a geometry of its own is drawn there, laid over the first's
+        other = project.geometry_for(obj.second)
+        apart = other is not None and other[1] is not project[geometry]
+        try:
+            compared = project.compared_sets(obj.first, obj.second)[:2] if apart else None
+        except ValueError:
+            compared = None
         stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
-                              sets[0], sets[1], pairs, obj.second)
+                              sets[0], sets[1], pairs, obj.second,
+                              column_geometry=other[1] if apart else None, compared=compared)
         return [stage, *table], notes
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
@@ -390,7 +492,7 @@ def _alone(project: Any, name: str, picks: list[int],
         component = prefs['component']
         if picks and prefs['flat']:
             return _run(project, 'project.plot', data=name, records=_runs(picks),
-                        component=component), []
+                        component=component, limits=bool(prefs['limits'])), []
         if picks:
             from .waterfalls import waterfall_view
 
@@ -404,7 +506,7 @@ def _alone(project: Any, name: str, picks: list[int],
             # the flat plot draws every record
             return _run(project, 'project.plot', data=name,
                         records=_runs(list(range(int(obj.num_records)))),
-                        component=component), []
+                        component=component, limits=bool(prefs['limits'])), []
         views = _run(project, 'project.waterfall', data=name, component=component)
         _faced(views, obj)
         return views, []
@@ -621,6 +723,19 @@ def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
                  and obj.second == second), None)
 
 
+def _none_matched(first: str, second: str, homes: Any, error: Any
+                  ) -> tuple[list[dict], list[str]]:
+    """Two sets whose geometries share no node within the tolerance: how far off they
+    are, said in the window and not refused. The tolerance is set beside what is shown,
+    and a refusal shows nothing to set it beside."""
+    from .ops_modal_plan import _report_rows
+
+    both = homes[0][1].units_defined and homes[1][1].units_defined
+    return ([v.reading(f'No node of {first} and {second} matched',
+                       _report_rows(error.report, both))],
+            [f'{error}. Project sets the node match tolerance'])
+
+
 def _mac(project: Any, first: str, second: str, geometry: str | None,
          prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """Two shape sets: their MAC, each axis ticked by its own frequencies,
@@ -631,6 +746,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
     as `matched`."""
+    from hertzforge.core.correlate import NoNodeMatched
+
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
@@ -639,13 +756,27 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     homes = project.geometry_for(first), project.geometry_for(second)
     apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
     notes: list[str] = []
+    # how the pair is projected, and how far a node may be from its match, are Project's
+    # (`Project.set_projection`): the MAC is drawn the way Project sets it
     if apart and prefs.get('projection'):
-        views = _run(project, 'project.projection_overlay', first=first, second=second,
-                     tolerance=2.0)
-    else:
         try:
-            values = (rows.auto_mac() if first == second
-                      else project.comparison_mac(first, second))
+            views = _run(project, 'project.projection_overlay', first=first, second=second)
+        except ProtocolError as error:
+            if not isinstance(error.__cause__, NoNodeMatched):
+                raise
+            # nothing to animate: answered as the comparison answers it, with how far off
+            return _mac(project, first, second, geometry, {**prefs, 'projection': False})
+    else:
+        from hertzforge.core.shapes import cross_mac
+
+        try:
+            # the two sets as they are compared: one projected onto the other's DOFs when
+            # they are on two geometries, for the MAC and for each pair's alignment
+            ours, theirs, said, report = ((rows, columns, '', None) if first == second
+                                          else project.compared_sets(first, second))
+            values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
+        except NoNodeMatched as error:
+            return _none_matched(first, second, homes, error)
         except ValueError as error:
             raise refused(str(error)) from None
 
@@ -656,11 +787,23 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
                  else f'MAC of {first} Against {second}')
         matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
                           (0.0, 1.0))
-        views = paired(None if geometry is None else project[geometry], matrix, rows,
-                       range(rows.num_shapes), columns, range(columns.num_shapes))
         if apart:
-            notes.append(f'the MAC after projecting {second} onto {first}; both drawn on '
-                         f'{geometry} by DOF name, Projection animates the projection')
+            # each set on its own geometry, the second's laid over the first's
+            views = paired(homes[0][1], matrix, rows, range(rows.num_shapes), columns,
+                           range(columns.num_shapes), column_geometry=homes[1][1],
+                           compared=(ours, theirs))
+            notes.append(f'the MAC with {said}; {first} drawn on '
+                         f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
+                         'the projection')
+            if report is not None:
+                # the projection behind the MAC is made whether or not it is animated: what
+                # it matched is shown with it, as beside the Projection view
+                from .ops_modal_plan import _report_rows
+                views.append(v.reading(said, _report_rows(
+                    report, homes[0][1].units_defined and homes[1][1].units_defined)))
+        else:
+            views = paired(None if geometry is None else project[geometry], matrix, rows,
+                           range(rows.num_shapes), columns, range(columns.num_shapes))
     found = _matched(project, first, second)
     if found is not None:
         views[0]['matched'] = [[int(a), int(b)] for a, b in found[1].pairs]
@@ -812,6 +955,172 @@ def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
     return [stage, plot], notes
 
 
+def _swept(deflection: Any) -> np.ndarray:
+    """A swept pattern as one complex shape, nodes × 3: its offsets at phase zero and a
+    quarter turn on. `offsets` answers in one buffer it writes again on every call, so
+    the first answer is copied before the second is asked for; read in one expression,
+    both were the quarter-turn offsets and the pattern at phase zero was lost."""
+    at_zero = deflection.offsets(0.0).copy()
+    return at_zero - 1j * deflection.offsets(np.pi / 2)
+
+
+def _modal_frf_records(data: Any, picks: list[int]) -> list[int] | None:
+    """The records of modal FRFs a selection reads, every one when none is picked; None
+    when `data` is not an FRF or a record read is not a mode against a mode."""
+    from hertzforge.core.data import Frf
+    from hertzforge.core.validate import modal_coordinate
+
+    if not isinstance(data, Frf) or data.reference_dof is None:
+        return None
+    records = list(picks) or list(range(int(data.num_records)))
+    if not records or any(modal_coordinate(data.response_dof[i]) is None
+                          or modal_coordinate(data.reference_dof[i]) is None for i in records):
+        return None
+    return records
+
+
+def _linked_geometry(project: Any, name: str) -> str | None:
+    """The geometry an object is linked to (the one in its object group), by name."""
+    from hertzforge.core.geometry import Geometry
+
+    for member in project.object_group_of(name) or ():
+        if isinstance(project.get(member), Geometry):
+            return member
+    return None
+
+
+def _driven_selection(project: Any, objects: list[str], records: dict[str, list[int]]
+                      ) -> tuple[str, str, str, list[int]] | None:
+    """(geometry, modal FRFs, channel table, the records read) when the selection is one
+    geometry, modal FRFs and one channel table, with or without the shape set the modal
+    FRFs are of: what shows the response to a force at the table's force reference. None
+    for anything else."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import Frf
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    def only(cls: Any) -> str | None:
+        found = [name for name in objects if isinstance(project[name], cls)]
+        return found[0] if len(found) == 1 else None
+
+    geometry, modal, table = only(Geometry), only(Frf), only(ChannelTable)
+    if not (geometry and modal and table) or len(objects) not in (3, 4):
+        return None
+    read = _modal_frf_records(project[modal], records.get(modal, []))
+    if read is None:
+        return None
+    if len(objects) == 4:
+        shapes = only(ShapeSet)
+        if shapes is None or shapes != project.modal_basis(modal, read):
+            return None
+    return geometry, modal, table, read
+
+
+def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
+            prefs: dict[str, Any]) -> tuple[list[dict], list[str]] | None:
+    """Modal FRFs, a channel table with a force reference and a geometry: the operating
+    deflection shape of a force at that reference. At the line the cursor asks for, each
+    mode's shape scaled by its modal FRF and its shape value at the drive, summed
+    (`Project.driven_modes`), at every DOF the shape set has on the geometry, so no FRF
+    is made for any of them (`deform.ModalOdsDeflection`). The records picked are the
+    modes included: without the rigid-body modes, displacement at 0 Hz is the elastic
+    static deflection. `prefs.drive` picks among several force references. None for any
+    other selection."""
+    from hertzforge.deform import modal_ods_deflection
+    from hertzforge.drawing.viz.geometry import (
+        dof_arrow_length,
+        dof_arrow_solids,
+        dof_arrow_vectors,
+    )
+
+    from .ops_geometry import _extent
+
+    chosen = _driven_selection(project, objects, records)
+    if chosen is None:
+        return None
+    geometry_name, modal, table, read = chosen
+    points = project.drive_points(table)
+    if not points:
+        return [], [(f'{table} has no reference channel measuring force: the response of '
+                    f'{modal} to a force needs one')]
+    drive = prefs.get('drive') if prefs.get('drive') in points else points[0]
+    geometry, data = project[geometry_name], project[modal]
+    picked = records.get(modal) or None
+    try:
+        basis, driven = project.driven_modes(modal, drive, table=table, records=picked)
+        deflection = modal_ods_deflection(geometry, project[basis], driven)
+    except (TypeError, ValueError) as refusal:
+        return [], [f'{modal}: {refusal}']
+    if not len(deflection.rows):
+        return [], [f'{modal}: {basis} has no DOF on {geometry_name}']
+    if deflection.peak == 0.0:
+        return [], [f'{modal}: a force at {drive} moves none of its modes']
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    if prefs.get('line') is not None:
+        line = int(np.argmin(np.abs(abscissa - float(prefs['line']))))
+    else:
+        line = deflection.strongest_line
+    deflection.line = line
+    frequency = float(abscissa[line])
+    drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
+    shape = np.zeros((drawn_rows.size, 3), dtype=complex)
+    at = drawn[deflection.rows]
+    kept = at >= 0
+    shape[at[kept]] = _swept(deflection)[kept]
+    label = f'ODS at {frequency:.4g} Hz'
+    count = len(driven.modes)
+    notes = [(f'the response to a force at {drive}: {count} mode shape{"s" * (count != 1)} of '
+             f'{basis} scaled by their modal FRFs and summed')]
+    if not deflection.line_defined:
+        # displacement at 0 Hz with a rigid-body mode among the modes is unbounded
+        label += ': no shape, a mode is unbounded here'
+        notes.append(f'no shape at {frequency:.4g} Hz: a mode is unbounded there')
+    if not np.all(kept):
+        notes.append(f'{int((~kept).sum())} moving nodes are not drawn')
+    title = f'{modal} on {geometry_name}'
+    stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
+                      np.asarray(geometry.node_xyz, dtype=float)[drawn_rows],
+                      [v.mode(1, frequency, None, shape, label=label)],
+                      triangles=triangles, lines=lines, normalization='unscaled',
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows],
+                      cursor='frequency')
+    # the one arrow is the force: modal coordinates are at no node. The drive is a DOF of
+    # the table's geometry: when the table is linked to one, the shapes were read at its
+    # node's place (`Project.channel_shapes`), so the arrow is that node's place and
+    # coordinate system, not the node with the same number on the geometry drawn (a table
+    # on a sparse test geometry over a finite element model put it at the model's node of
+    # that number, or nowhere). It is drawn at the drawn node nearest that place and
+    # rides it (`follow`).
+    home = _linked_geometry(project, table)
+    on = geometry if home is None else project[home]
+    hit = dof_arrow_vectors(on, [drive])[0]
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    if hit is not None and drawn_rows.size:
+        place = np.asarray(on.node_xyz, dtype=float).reshape(-1, 3)[hit[0]]
+        row = int(np.argmin(np.linalg.norm(xyz[drawn_rows] - place, axis=1)))
+        at_node = xyz[drawn_rows][[row]]
+        stage['arrows'] = dof_arrow_solids(at_node, [(True, (0, hit[1], hit[2]))],
+                                 dof_arrow_length(at_node, _extent(xyz)), [drive])
+        stage['arrows']['follow'] = np.array([row], dtype=np.uint32)
+    else:
+        notes.append(f'{drive} is not a node of {geometry_name if home is None else home}: '
+                     'the force is not drawn')
+    curves = _run(project, 'project.plot', data=modal, records=_runs(read),
+                  component=prefs['component'])
+    for curve in curves:
+        if curve.get('view') == 'spectrum':
+            curve['link'] = 'frequency'
+    return [stage, *curves], notes
+
+
+def _drives(project: Any, objects: list[str], records: dict[str, list[int]] | None
+            ) -> list[str]:
+    """The force references a driven selection (`_driven`) can be driven at."""
+    chosen = _driven_selection(project, objects, records or {})
+    return project.drive_points(chosen[2]) if chosen is not None else []
+
+
 def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
              prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]]:
     """Frequency data on a geometry: the operating deflection shape of
@@ -827,6 +1136,9 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
 
     prefs = {**PREFS, **(prefs or {})}
     geometry, data = project[geometry_name], project[data_name]
+    if _modal_frf_records(data, picks) is not None:
+        return [], [(f'{data_name}: its records are modal FRFs; select a channel table with a '
+                    'force reference too, to see the response to that force')]
     notes: list[str] = []
     flavor = 'ODS'
     envelope = False
@@ -870,7 +1182,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
         shape[at[kept]] = deflection.offsets(0.0)[kept]
         label = f'Envelope at {frequency:.4g} Hz'
     else:
-        shape[at[kept]] = (deflection.offsets(0.0) - 1j * deflection.offsets(np.pi / 2))[kept]
+        shape[at[kept]] = _swept(deflection)[kept]
         label = f'{flavor} at {frequency:.4g} Hz'
     if not np.all(kept):
         notes.append(f'{int((~kept).sum())} moving nodes are not drawn')
@@ -907,12 +1219,18 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
                  if t is not None and len(t)]
     lines = [t for t in (lines_a, None if lines_b is None or not len(lines_b) else lines_b + offset)
              if t is not None and len(t)]
+    from . import scans
+
+    # the nodes neither geometry draws a line or a face through, as points: measured points
+    # laid over a scan of the same part, or over the model
+    points = [layer for name in (first, second) for layer in scans.layers(project[name])[0]]
     return v.shape3d(f'{second} over {first}',
                      'm' if defined_a and defined_b else 'undefined',
                      np.vstack([nodes_a, nodes_b]), [],
                      triangles=np.vstack(triangles) if triangles else None,
                      lines=np.vstack(lines) if lines else None,
-                     node_ids=np.concatenate(ids))
+                     node_ids=np.concatenate(ids),
+                     **({'points': points} if points else {}))
 
 
 def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
@@ -951,9 +1269,17 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         obj = project[other]
         picks = records.get(other, [])
         if isinstance(obj, ShapeSet):
+            from hertzforge.project import drawn_elsewhere
+
+            if drawn_elsewhere(project, other, geometry):
+                # not where the set's DOFs are: the projection onto it, not a drawing by number
+                from .ops_project import projection_views
+
+                return projection_views(project, other, geometry), []
             return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
         if isinstance(obj, ChannelTable):
-            return _run(project, 'project.dof_arrows', source=other), []
+            # the geometry alone; `_marks` draws the table's arrows over it
+            return _run(project, 'project.view_geometry', geometry=geometry), []
         if isinstance(obj, TimeHistory):
             return (_modal_motion(project, geometry, other, picks)
                     or _motion(project, geometry, other, picks))
@@ -1055,7 +1381,8 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
     return [view], [note]
 
 
-def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str, Any]:
+def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
+            records: dict[str, list[int]] | None = None) -> dict[str, Any]:
     """Which of the bar's choices the selection can take: the stage or the
     flat plot for a data object, a component for complex frequency data.
     A frequency axis is made linear or log on the plot itself."""
@@ -1064,7 +1391,10 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
     data = [project[name] for name in objects if _is_data(project[name])]
     sets = [name for name in objects if isinstance(project[name], ShapeSet)]
     homes = [project.geometry_for(name) for name in sets]
+    apart = (len(sets) == 2 and all(home is not None for home in homes)
+             and homes[0][1] is not homes[1][1])
     alone = len(objects) == 1 and len(sets) == 1
+    drives = _drives(project, objects, records)
     choices = ['all']
     if alone:
         found = project.channel_table_for(sets[0])
@@ -1077,7 +1407,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
     if len(objects) == 1 and isinstance(project[objects[0]], ChannelTable):
         loops, _environment, forms, _form = _table_views(project[objects[0]], prefs)
     stage = _stage_geometry(project, objects)
-    table = _table_on(project, stage) if stage is not None else None
+    table, picked = _marked_table(project, objects, stage) if stage is not None else (None, False)
+    marked = stage is not None and bool(_arrow_dofs(project, objects, table)[0])
     placed: list = []
     if table is not None:
         try:
@@ -1104,11 +1435,19 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
         'values_dofs': choices,
         'environments': loops,
         'table_views': forms,
-        'arrows': stage is not None and bool(_arrow_dofs(project, objects, table)[0]),
+        # modal FRFs driven at a force draw that force alone
+        'arrows': marked and not picked and not drives,
+        # the force references modal FRFs can be driven at (`prefs.drive`)
+        'drives': drives,
+        # channels picked inside the table are the choice, so no role is offered
+        'arrow_roles': (table[1].choices() if table is not None and (marked or picked)
+                        and not drives
+                        and _picked_channels(objects, records or {}, table) is None else []),
         'sensors': bool(placed),
-        'projection': (len(sets) == 2 and all(home is not None for home in homes)
-                       and homes[0][1] is not homes[1][1]),
+        'projection': apart,
         'flat': bool(data),
+        # an object with warning and abort limits to draw on the 2-D plot, or leave off
+        'limits': any(bool(getattr(obj, 'limits', None)) for obj in data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
                        and np.iscomplexobj(obj.ordinate) for obj in data),
     }
@@ -1128,6 +1467,8 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
                 views, notes = paired
         elif len(objects) == 3 and (played := _three_played(project, objects, records)):
             views, notes = played
+        elif (driven := _driven(project, objects, records, prefs)) is not None:
+            views, notes = driven
         elif len(objects) == 3:
             compared = _compared(project, objects, prefs)
             if compared is not None:
@@ -1145,7 +1486,8 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
                 notes.append('each object on its own')
     except ProtocolError as error:
         raise refused(str(error)) from None
-    notes += _marks(project, views, objects, prefs)
+    notes += _marks(project, views, objects, prefs, records)
+    notes += _averaging(project, views, objects, prefs)
     _home(project, views, objects)
     if part and part.get('kind') and len(objects) == 1:
         from .ops_geometry import part_entities
@@ -1163,4 +1505,4 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
     title = ' and '.join(objects) if len(objects) <= 3 else f'{objects[0]} and {len(objects) - 1} more'
     return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n),
-            'offers': _offers(project, objects, prefs)}
+            'offers': _offers(project, objects, prefs, records)}

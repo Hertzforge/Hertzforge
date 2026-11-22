@@ -26,9 +26,9 @@ from hertzforge.core.channel_table import ChannelTable, title_of
 from hertzforge.core.sensor_catalog import CATALOG
 
 from . import views as v
-from .descriptors import Operation, Option, Param
+from .descriptors import TREE_PICKS, Operation, Option, Param
 from .ops_project import chosen_records
-from .parsing import parse_id_runs, parse_numbers
+from .parsing import each_picked, parse_id_runs, parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
@@ -925,8 +925,8 @@ OPERATIONS = (
         id='project.set_sensor_model', title='Sensor Model', workspace='geometry',
         summary='A channel\'s model picked from the sensor catalog: its maker fills a blank '
                 'Make, and a triax fills its other legs at the node.',
-        params=(TABLE, ROW, MODEL), outputs=('table', 'reading'), run=set_sensor_model,
-        edits=True),
+        params=(TABLE, ROW, MODEL, TREE_PICKS), outputs=('table', 'reading'),
+        run=each_picked(set_sensor_model, key='row', source='table'), edits=True),
     Operation(
         id='project.calibration_check', title='Calibration Dates', workspace='geometry',
         summary='Each sensor\'s calibration expiration against the test\'s first and last '

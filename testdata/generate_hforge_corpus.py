@@ -11,7 +11,10 @@ roles, project type, predictions, a run log extract) whose handling
 when absent is what future readers must keep. From schema 3 it also
 holds a converted control run: its channel table, streams, specification,
 results and run record. From schema 4 it also holds two test setups:
-one typed, and one taken from the converted run. The run log extract is
+one typed, and one taken from the converted run. The frozen schema 5
+file also holds two `scan/` groups, measured points as they were stored
+for a few days in November 2026; nothing writes that group now, so this
+script cannot write that file again. The run log extract is
 taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
 the log is not found beside it, a case a reader must keep too.

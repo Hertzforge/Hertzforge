@@ -79,6 +79,19 @@ const SIM_CRATES: &[&str] = &[
     "sds-control",
 ];
 
+/// Crates that may name a Sim type only behind an opt-in feature.
+///
+/// Each holds `hertzforge-hal-sim` in `[dependencies]` as `optional = true`, behind a
+/// feature that is not on by default, so the crate as a dependency builds no Sim
+/// unless a holder asks for it. The compiler keeps the code half honest: with the
+/// dependency optional, a line naming the Sim outside that feature's `cfg` does not
+/// build. The manifest half below checks the `optional` and the default.
+///
+/// * `hertzforge-mimo-sine-laws` - the MIMO Sine law check's simulated stations
+///   (`check::sim_station`, feature `simulator`), the stations its cases run on in
+///   its own tests and study.
+const FEATURE_SIM_CRATES: &[&str] = &["hertzforge-mimo-sine-laws"];
+
 /// Files in `ui/src-tauri/src` allowed to construct a Sim.
 ///
 /// **EMPTY since the factory lift, and that is the interesting part.** Before the lift, this list
@@ -322,10 +335,7 @@ fn find_cfg_test(s: &str) -> Option<(usize, usize)> {
     while let Some(rel) = s[from..].find("#[cfg(") {
         let start = from + rel;
         // The attribute ends at the matching `]`.
-        let end = match s[start..].find(")]") {
-            Some(e) => start + e + 2,
-            None => return None,
-        };
+        let end = start + s[start..].find(")]")? + 2;
         let attr = &s[start..end];
         // `test` as a whole word inside the predicate.
         let has_test = attr
@@ -426,7 +436,8 @@ fn production_rust_never_names_a_sim_type() {
         }
         // Allowed: the Sim's own crate, the demo, and the UI's factory.
         if let Some(krate) = owning_crate_dir(&root, f) {
-            if SIM_CRATES.contains(&krate.as_str()) {
+            if SIM_CRATES.contains(&krate.as_str()) || FEATURE_SIM_CRATES.contains(&krate.as_str())
+            {
                 continue;
             }
         }
@@ -597,7 +608,14 @@ fn no_crate_outside_the_allowlist_depends_on_the_sim_in_production() {
             let is_prod = section == "[dependencies]" || section.ends_with(".dependencies]");
             if is_prod {
                 prod_holders.insert(name.clone());
-                if !allowed.contains(name.as_str()) {
+                if FEATURE_SIM_CRATES.contains(&name.as_str()) {
+                    if let Some(why) = feature_hold_fault(&src, t) {
+                        violations.push(format!(
+                            "{}: `{name}` holds hertzforge-hal-sim in {section}, {why}",
+                            m.strip_prefix(&root).unwrap_or(m).display()
+                        ));
+                    }
+                } else if !allowed.contains(name.as_str()) {
                     violations.push(format!(
                         "{}: `{name}` holds hertzforge-hal-sim in {section}",
                         m.strip_prefix(&root).unwrap_or(m).display()
@@ -629,6 +647,60 @@ fn no_crate_outside_the_allowlist_depends_on_the_sim_in_production() {
         "hertzforge-hal-sim is a PRODUCTION dependency outside the allowlist {allowed:?}. \
          Move it to [dev-dependencies], or take the backend from the station factory:\n  {}",
         violations.join("\n  ")
+    );
+}
+
+/// Why a feature-only holder's `hertzforge-hal-sim` line is not feature-only, if it is not:
+/// the dependency must be `optional = true`, and no feature that enables it may be on
+/// by default.
+fn feature_hold_fault(manifest: &str, dep_line: &str) -> Option<String> {
+    if !dep_line.replace(' ', "").contains("optional=true") {
+        return Some("not as `optional = true`".into());
+    }
+    // The features that enable it, then whether `default` names any of them.
+    let mut in_features = false;
+    let mut enabling: Vec<String> = vec!["hertzforge-hal-sim".into()];
+    let mut default_line = String::new();
+    for line in manifest.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            in_features = t == "[features]";
+            continue;
+        }
+        if !in_features {
+            continue;
+        }
+        let Some((feat, val)) = t.split_once('=') else {
+            continue;
+        };
+        let feat = feat.trim();
+        if feat == "default" {
+            default_line = val.to_string();
+        } else if val.contains("hertzforge-hal-sim") {
+            enabling.push(feat.to_string());
+        }
+    }
+    let on = enabling.iter().any(|f| {
+        default_line.contains(&format!("\"{f}\"")) || default_line.contains(&format!(":{f}\""))
+    });
+    on.then(|| "and turns it on by default".into())
+}
+
+#[test]
+fn mimo_sine_a_feature_only_holder_must_hold_the_sim_as_optional() {
+    let opt = "hertzforge-hal-sim = { path = \"../hertzforge-hal-sim\", optional = true }";
+    let plain = "hertzforge-hal-sim = { path = \"../hertzforge-hal-sim\" }";
+    let ok =
+        format!("[dependencies]\n{opt}\n[features]\nsimulator = [\"dep:hertzforge-hal-sim\"]\n");
+    assert_eq!(feature_hold_fault(&ok, opt), None);
+    assert!(
+        feature_hold_fault(&ok, plain).is_some(),
+        "a plain dependency was taken"
+    );
+    let on = format!("{ok}default = [\"simulator\"]\n");
+    assert!(
+        feature_hold_fault(&on, opt).is_some(),
+        "a default-on feature was taken"
     );
 }
 

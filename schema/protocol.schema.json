@@ -130,7 +130,25 @@
               }
             }}
           }
-        }}
+        }},
+        "bands": {"type": "array", "items": {
+          "type": "object", "required": ["x", "lower", "upper", "kind"], "additionalProperties": false,
+          "properties": {
+            "x": {"type": "array", "items": {"type": ["number", "null"]}},
+            "lower": {"type": ["array", "null"], "items": {"type": ["number", "null"]}},
+            "upper": {"type": ["array", "null"], "items": {"type": ["number", "null"]}},
+            "kind": {"enum": ["warning", "over", "under"]}
+          }
+        }},
+        "key": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
+        "readouts": {"type": "array", "items": {
+          "type": "object", "required": ["label", "text", "status"], "additionalProperties": false,
+          "properties": {
+            "label": {"type": "string"}, "text": {"type": "string"},
+            "status": {"enum": ["pass", "warn", "fail", "info"]}
+          }
+        }},
+        "x_home": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
       }
     },
     "barsView": {
@@ -158,8 +176,16 @@
       "properties": {
         "x0": {"type": "number"},
         "x1": {"type": "number"},
-        "kind": {"enum": ["frame", "cut", "span"]},
+        "kind": {"enum": ["frame", "cut", "span", "over", "under"]},
         "label": {"type": "string"},
+        "window": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
+        "level": {"type": "integer", "minimum": 0},
+        "rows": {"type": "integer", "minimum": 1},
+        "snap": {
+          "type": "object", "required": ["frame", "hop", "low", "high"], "additionalProperties": false,
+          "properties": {"frame": {"type": "number", "exclusiveMinimum": 0}, "hop": {"type": "number", "exclusiveMinimum": 0},
+                         "low": {"type": "number"}, "high": {"type": "number"}}
+        },
         "drag": {
           "type": "object", "required": ["op", "params", "low"], "additionalProperties": false,
           "properties": {
@@ -229,9 +255,14 @@
         "node_ids": {"$ref": "#/$defs/arrayRef"},
         "home": {"type": "object", "required": ["eye", "up"], "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}},
         "cursor": {"const": "frequency"},
-        "marks": {
-          "type": "object", "required": ["nodes", "lines"],
-          "properties": {"nodes": {"$ref": "#/$defs/arrayRef"}, "lines": {"$ref": "#/$defs/arrayRef"}}
+        "arrows": {
+          "type": "object", "required": ["tails", "directions", "axes", "length", "labels", "inward"],
+          "properties": {
+            "tails": {"$ref": "#/$defs/arrayRef"}, "directions": {"$ref": "#/$defs/arrayRef"},
+            "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0},
+            "labels": {"type": "array", "items": {"type": "string"}}, "inward": {"$ref": "#/$defs/arrayRef"},
+            "follow": {"$ref": "#/$defs/arrayRef"}
+          }
         },
         "bodies": {
           "type": "object", "required": ["nodes", "triangles", "colors", "follow"],
@@ -240,8 +271,32 @@
             "colors": {"$ref": "#/$defs/arrayRef"}, "follow": {"$ref": "#/$defs/arrayRef"}
           }
         },
+        "points": {"type": "array", "items": {
+          "type": "object", "required": ["xyz", "colors", "size"],
+          "properties": {
+            "xyz": {"$ref": "#/$defs/arrayRef"}, "colors": {"$ref": "#/$defs/arrayRef"},
+            "size": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }},
+        "segments": {"type": "array", "items": {
+          "type": "object", "required": ["xyz", "color"], "additionalProperties": false,
+          "properties": {
+            "xyz": {"$ref": "#/$defs/arrayRef"},
+            "color": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 3, "maxItems": 3}
+          }
+        }},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
+        "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
+        "overlay_lines": {"$ref": "#/$defs/arrayRef"},
+        "element_colors": {
+          "type": "object", "required": ["triangles", "triangle_colors", "lines", "line_colors"],
+          "additionalProperties": false,
+          "properties": {
+            "triangles": {"$ref": "#/$defs/arrayRef"}, "triangle_colors": {"$ref": "#/$defs/arrayRef"},
+            "lines": {"$ref": "#/$defs/arrayRef"}, "line_colors": {"$ref": "#/$defs/arrayRef"}
+          }
+        },
         "paired": {"type": "boolean"},
         "link": {"type": "string"},
         "note": {"type": "string"},
@@ -253,6 +308,28 @@
             "slide": {"type": "object"},
             "turn": {"type": "object"},
             "to_si": {"type": "number"}
+          }
+        },
+        "marks": {
+          "type": "object", "required": ["link"], "additionalProperties": false,
+          "properties": {"link": {"type": "string"}}
+        },
+        "mark_sets": {
+          "type": "array", "items": {
+            "type": "object", "required": ["link", "ids"], "additionalProperties": false,
+            "properties": {
+              "link": {"type": "string"},
+              "ids": {"type": "array", "items": {"type": "integer"}},
+              "rows": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "frames": {"type": "boolean"},
+              "faces": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "edges": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "clicks": {"type": "boolean"},
+              "remove": {
+                "type": "object", "required": ["op", "params"], "additionalProperties": false,
+                "properties": {"op": {"type": "string"}, "params": {"type": "object"}}
+              }
+            }
           }
         },
         "pick": {
@@ -271,7 +348,20 @@
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},
             "back": {"type": "string"},
-            "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+            "in_display": {"type": "boolean"},
+            "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+            "settings": {"type": "array", "items": {
+              "type": "object", "required": ["param", "label", "options"], "additionalProperties": false,
+              "properties": {
+                "param": {"type": "string"},
+                "label": {"type": "string"},
+                "options": {"type": "array", "items": {
+                  "type": "object", "required": ["value", "label"], "additionalProperties": false,
+                  "properties": {"value": {"type": ["string", "integer"]}, "label": {"type": "string"},
+                                 "count": {"type": "integer", "minimum": 0}, "hint": {"type": "string"}}
+                }}
+              }
+            }}
           }
         },
         "motion": {
@@ -443,6 +533,8 @@
         "title": {"type": "string"},
         "columns": {"type": "array", "items": {"type": "string"}},
         "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "nested": {"type": "array", "items": {"anyOf": [{"$ref": "#/$defs/tableView"}, {"type": "null"}]}},
+        "open": {"type": "array", "items": {"type": "integer", "minimum": 1}},
         "edit": {
           "type": "object", "required": ["op", "params", "columns"], "additionalProperties": false,
           "properties": {
@@ -453,6 +545,7 @@
             "kinds": {"type": "object", "additionalProperties": {"enum": ["choice", "flag", "date", "unit", "number", "text"]}},
             "rows": {"type": "array", "items": {"type": "integer", "minimum": 1}},
             "to_si": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+            "swatches": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^#[0-9a-f]{6}$"}}},
             "remove": {
               "type": "object", "required": ["op", "params", "column"], "additionalProperties": false,
               "properties": {
@@ -467,6 +560,19 @@
         "more": {
           "type": "object", "required": ["method", "params"], "additionalProperties": false,
           "properties": {"method": {"type": "string"}, "params": {"type": "object"}}
+        },
+        "marks": {
+          "type": "object", "required": ["link", "column"], "additionalProperties": false,
+          "properties": {"link": {"type": "string"}, "column": {"type": "integer", "minimum": 0}}
+        },
+        "select": {
+          "type": "object", "required": ["op", "params", "param", "column"], "additionalProperties": false,
+          "properties": {
+            "op": {"type": "string"},
+            "params": {"type": "object"},
+            "param": {"type": "string"},
+            "column": {"type": "integer", "minimum": 0}
+          }
         }
       }
     },
@@ -506,6 +612,7 @@
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "previews": {"type": "boolean"},
         "commits": {"type": "string"},
+        "opens_previewed": {"type": "boolean"},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}
@@ -520,6 +627,7 @@
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
         "banded": {"type": "boolean"},
+        "opens": {"type": "boolean"},
         "between": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
         "holds": {"type": "string"},
         "issue": {
@@ -547,18 +655,21 @@
     },
     "children": {
       "type": "object", "required": ["kind"],
-      "properties": {"kind": {"enum": ["geometry", "grid", "modes", "channels", "photos", "matches", "none"]}},
+      "properties": {"kind": {"enum": ["geometry", "grid", "modes", "channels", "photos", "matches", "items", "none"]}},
       "oneOf": [
         {"properties": {"kind": {"const": "geometry"},
           "parts": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
-            "properties": {"id": {"enum": ["nodes", "coordinate_systems"]}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}}},
+            "properties": {"id": {"enum": ["nodes", "coordinate_systems"]}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
+              "ids": {"type": "array", "items": {"type": "integer"}},
+              "rows": {"type": "array", "items": {"type": "string"}}}}},
           "families": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count", "groups"],
             "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
               "groups": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
-                "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}}}}}},
+                "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
+                  "elements": {"type": "array", "items": {"type": "integer"}}}}}}}},
           "solids": {"type": "array", "items": {"$ref": "#/$defs/solidRow"}},
           "mates": {"type": "array", "items": {"type": "object", "required": ["id", "label"],
-            "properties": {"id": {"type": "integer"}, "label": {"type": "string"}}}}},
+            "properties": {"id": {"type": "integer"}, "label": {"type": "string"}, "name": {"type": "string"}}}}},
          "required": ["parts", "families", "solids", "mates"]},
         {"properties": {"kind": {"const": "grid"},
           "rows": {"type": "array", "items": {"type": "object", "required": ["label", "dof", "quantity"],
@@ -582,8 +693,19 @@
           "matches": {"type": "array", "items": {"type": "object", "required": ["first", "second", "mac"],
             "properties": {"first": {"type": "integer"}, "second": {"type": "integer"}, "mac": {"type": "number"}}}}},
          "required": ["matches"]},
+        {"properties": {"kind": {"const": "items"},
+          "items": {"type": "array", "items": {"type": "object", "required": ["label", "detail"], "additionalProperties": false,
+            "properties": {"label": {"type": "string"}, "detail": {"type": "string"}}}}},
+         "required": ["items"]},
         {"properties": {"kind": {"const": "none"}}, "additionalProperties": false}
       ]
+    },
+    "averagingDrawn": {
+      "type": "object", "required": ["regions", "note"], "additionalProperties": false,
+      "properties": {
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+        "note": {"type": "string"}
+      }
     },
     "shown": {
       "type": "object", "required": ["title", "views", "note"], "additionalProperties": false,
@@ -592,12 +714,15 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "complex", "projection", "shapes", "values_dofs", "arrows", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "limits", "complex", "projection", "shapes", "values_dofs", "arrows", "arrow_roles", "drives", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"},
           "projection": {"type": "boolean"},
+          "limits": {"type": "boolean"},
           "shapes": {"type": "boolean"},
           "values_dofs": {"type": "array", "items": {"type": "string"}},
           "arrows": {"type": "boolean"},
+          "arrow_roles": {"type": "array", "items": {"type": "string"}},
+          "drives": {"type": "array", "items": {"type": "string"}},
           "sensors": {"type": "boolean"},
           "environments": {"type": "array", "items": {"type": "string"}},
           "table_views": {"type": "array", "items": {"enum": ["channels", "response", "reference"]}},
@@ -629,8 +754,10 @@
       "properties": {
         "id": {"type": "string"},
         "verb": {"type": "string"},
-        "kind": {"enum": ["default", "run", "self"]},
+        "kind": {"enum": ["default", "run", "self", "group"]},
         "ready": {"type": "boolean"},
+        "under": {"type": "string"},
+        "open": {"const": true},
         "reason": {"type": "string"},
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},
@@ -642,7 +769,8 @@
         "formats": {"type": "array", "items": {
           "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}
-        }}
+        }},
+        "labels": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string"}}}
       }
     },
     "solidRow": {
@@ -774,6 +902,27 @@
             "note": {"type": "string"},
             "html": {"type": "string"},
             "views": {"$ref": "#/$defs/views"},
+            "grid": {
+              "type": "object", "required": ["columns", "rows"], "additionalProperties": false,
+              "properties": {
+                "columns": {"type": "array", "items": {"type": "string"}},
+                "rows": {"type": "array", "items": {
+                  "type": "object", "required": ["label", "cells"], "additionalProperties": false,
+                  "properties": {
+                    "label": {"type": "string"},
+                    "cells": {"type": "array", "items": {"type": "array", "items": {
+                      "type": "object", "required": ["view", "caption"], "additionalProperties": false,
+                      "properties": {
+                        "view": {"type": "integer", "minimum": 0},
+                        "caption": {"type": "string"},
+                        "note": {"type": "string"},
+                        "facts": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}
+                      }
+                    }}}
+                  }
+                }}
+              }
+            },
             "was": {"type": "string"},
             "empty": {"type": "boolean"}
           }
@@ -798,7 +947,8 @@
     "reportPrintResult": {
       "allOf": [{"$ref": "#/$defs/reportHeld"}],
       "type": "object", "required": ["html"],
-      "properties": {"html": {"type": ["string", "null"]}}
+      "properties": {"html": {"type": ["string", "null"]},
+                     "opened": {"type": "string", "description": "With browser true: the file the page was written to and opened in the default browser."}}
     },
     "reportField": {
       "type": "object", "required": ["field", "label", "value", "options"],
@@ -929,7 +1079,7 @@
         "fills": {"type": "string"}
       }
     },
-    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock"]},
+    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock", "mimo_sine", "playback", "modal_test"]},
     "testSetup": {
       "type": "object", "required": ["module", "protocol", "config", "table", "title", "notes", "origin"],
       "properties": {
@@ -1074,7 +1224,8 @@
         "controls": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "drives": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "response_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
-        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}}
+        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
+        "kind": {"type": "string"}
       }
     },
     "tablesSaveParams": {
@@ -1120,6 +1271,141 @@
         "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
+    "driveSignal": {
+      "type": "object", "required": ["key", "name", "samples", "rate_hz", "unit", "where", "problem"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "samples": {"type": "integer", "minimum": 0},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "unit": {"type": ["string", "null"]},
+        "where": {"type": "string"},
+        "problem": {"type": ["string", "null"]}
+      }
+    },
+    "driveSelection": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "object", "required": ["signal"], "additionalProperties": false,
+         "properties": {"signal": {"type": "string", "minLength": 1},
+                        "name": {"type": ["string", "null"]}}}
+      ]
+    },
+    "driveSidecar": {
+      "type": "object",
+      "required": ["format", "version", "rate_hz", "samples", "channels", "sha256", "source", "fixes", "tool", "created_utc"],
+      "properties": {
+        "format": {"const": "hertzforge-drive"},
+        "version": {"const": 1},
+        "rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "samples": {"type": "integer", "minimum": 2},
+        "channels": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["name", "unit", "source"],
+          "properties": {"name": {"type": "string"}, "unit": {"const": "V"},
+                         "source": {"type": "string"}}}},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source": {
+          "type": "object", "required": ["path", "sha256", "format", "selections"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+            "format": {"type": "string"},
+            "selections": {"type": "array", "items": {
+              "type": "object", "required": ["signal", "name"],
+              "properties": {"signal": {"type": "string"}, "name": {"type": "string"}}}}
+          }
+        },
+        "fixes": {"type": "array", "items": {"$ref": "#/$defs/driveFixRecord"}},
+        "tool": {"type": "string"},
+        "created_utc": {"type": "string"}
+      }
+    },
+    "driveFixRecord": {
+      "type": "object", "required": ["kind", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "kind": {"const": "fix_ends"},
+        "from": {"type": "object", "required": ["folder", "sha256"],
+                 "properties": {"folder": {"type": "string"}, "sha256": {"type": "string"}}},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "correction": {"type": "string"},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"},
+                         "b": {"type": "number"}, "rms_before": {"type": "number"},
+                         "rms_after": {"type": "number"}}}}
+      }
+    },
+    "driveEnds": {
+      "type": "object",
+      "required": ["start", "end", "peak", "velocity_end", "velocity_peak", "displacement_end", "displacement_peak"],
+      "additionalProperties": {"type": "number"}
+    },
+    "driveInspectParams": {
+      "type": "object", "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "driveInspectResult": {
+      "type": "object", "required": ["source", "signals", "rate_hz", "notes"],
+      "properties": {
+        "source": {"type": "object", "required": ["path", "format"],
+                   "properties": {"path": {"type": ["string", "null"]}, "format": {"type": "string"}}},
+        "signals": {"type": "array", "items": {"$ref": "#/$defs/driveSignal"}},
+        "rate_hz": {"type": ["number", "null"]},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "driveConvertParams": {
+      "type": "object", "required": ["selections"], "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "selections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/driveSelection"}},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "out": {"type": ["string", "null"]},
+        "fix_ends": {"type": "boolean"},
+        "taper_s": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "driveConvertResult": {
+      "type": "object", "required": ["folder", "drive", "notes"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "fixed": {"$ref": "#/$defs/driveFixEndsResult"}
+      }
+    },
+    "driveFixEndsParams": {
+      "type": "object", "required": ["folder"], "additionalProperties": false,
+      "properties": {
+        "folder": {"type": "string", "minLength": 1},
+        "taper_s": {"type": ["number", "null"], "minimum": 0},
+        "out": {"type": ["string", "null"]}
+      }
+    },
+    "driveFixEndsResult": {
+      "type": "object", "required": ["folder", "drive", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "from": {"type": "object", "required": ["folder", "sha256"]},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after", "before", "after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"}, "b": {"type": "number"},
+                         "rms_before": {"type": "number"}, "rms_after": {"type": "number"},
+                         "before": {"$ref": "#/$defs/driveEnds"},
+                         "after": {"$ref": "#/$defs/driveEnds"}}}}
+      }
+    },
     "catalog": {
       "type": "object", "required": ["operations"],
       "properties": {
@@ -1149,7 +1435,10 @@
                "hardware_busy", "stale_revision", "table_invalid", "table_not_applied", "nothing_to_apply", "config_invalid",
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
-               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space", "record_unwritable"]
+               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space", "record_unwritable",
+               "drive_changed", "drive_unreadable", "rate_mismatch", "table_changed",
+               "reverse_not_available", "mode_fixed",
+               "not_live", "not_started", "not_in_mode", "not_simulated", "already", "busy", "no_hit", "no_such_point", "nothing_to_undo", "point_done", "ending"]
     },
     "itemReason": {
       "enum": ["no_floor", "too_many_floors", "unknown_part_kind", "duplicate_part_id", "part_out_of_band", "parts_too_close", "too_many_tones", "too_many_bands", "follow_unknown_part", "follow_self", "follow_loop", "schedule_unsupported", "not_power_of_two", "row_not_recorded", "frf_same_row",
@@ -1177,7 +1466,9 @@
                "geometry", "transform_rank", "transform_condition", "tolerance", "pulses_length_mismatch", "record_too_long", "spacing_below_floor", "quiet_window_exceeded",
                "bands_empty", "target_not_covering", "target_not_ascending",
                "per_band_length_mismatch", "components_engine_mismatch", "component_invalid",
-               "limit_no_frf", "target_file", "table_file", "synthesis_not_converged", "profile_too_short", "value_not_positive", "quantity_ambiguous", "profile_not_covering", "start_not_a_level", "end_before_full_level", "tick_out_of_range", "abort_below_ceiling", "limit_on_control_channel", "cola_needs_two_outputs", "safe_stop_budget", "tracking_lag", "profile_file", "join_discontinuity", "units_column_ignored", "reference_unknown", "reference_changed", "units_mismatch", "rate_mismatch", "section_outside_reference", "band_outside_identification", "highpass_above_band", "identification_too_short", "reference_resampled", "ceiling_over_range", "extra_drive_channels", "no_input_channel", "controls_out_of_range", "drives_out_of_range", "targets_length_mismatch", "delays_length_mismatch", "target_invalid", "verdict_needs_srs", "plant_unknown", "law_wrong_target"]
+               "limit_no_frf", "target_file", "table_file", "synthesis_not_converged", "profile_too_short", "value_not_positive", "quantity_ambiguous", "profile_not_covering", "start_not_a_level", "end_before_full_level", "tick_out_of_range", "abort_below_ceiling", "limit_on_control_channel", "cola_needs_two_outputs", "safe_stop_budget", "tracking_lag", "profile_file", "join_discontinuity", "units_column_ignored", "reference_unknown", "reference_changed", "units_mismatch", "rate_mismatch", "section_outside_reference", "band_outside_identification", "highpass_above_band", "identification_too_short", "reference_resampled", "ceiling_over_range", "extra_drive_channels", "no_input_channel", "controls_out_of_range", "drives_out_of_range", "targets_length_mismatch", "delays_length_mismatch", "target_invalid", "verdict_needs_srs", "plant_unknown", "law_wrong_target",
+               "drive_unreadable", "drive_format", "drive_version", "drive_unit", "drive_size", "drive_magic", "drive_hash_mismatch", "drive_pin_mismatch", "drive_not_finite", "ends_not_zero", "map_length", "map_missing_row", "map_repeated_row", "too_many_drives", "peak_over_ceiling", "drive_changed", "drive_unchecked",
+               "block_invalid", "band_invalid", "too_few_averages", "roving_invalid", "no_reference", "no_response", "reference_count", "no_drive", "drive_row_invalid", "drive_repeated", "level_over_ceiling", "source_refused", "estimator_refused", "dof_missing", "no_pretrigger", "no_roving", "one_average", "exponential_window_damping"]
     },
     "reportItem": {
       "type": "object", "required": ["reason", "message"], "additionalProperties": false,
@@ -2404,9 +2695,13 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "shock_mimo"]},
+        "world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "shock_mimo", "sine_mimo"]},
         "targets": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
         "default_for": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
+        "test_types": {"type": "array", "items": {"enum": ["sweep", "dwell", "stepped"]}},
+        "amplitude_only": {"type": "boolean"},
+        "default": {"type": "boolean"},
+        "limits": {"type": ["string", "null"]},
         "builtin": {"type": "boolean"},
         "name": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
@@ -2442,13 +2737,18 @@
       },
       "if": {"properties": {"world": {"const": "mimo"}}},
       "then": {"properties": {"shapes": {"type": "array"}, "needs": {"type": "array"}}},
-      "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"}}},
+      "else": {"if": {"properties": {"world": {"const": "sine_mimo"}}},
+               "then": {"required": ["test_types", "amplitude_only", "default", "limits"],
+                        "properties": {"shapes": {"type": "array"}, "needs": {"type": "null"}}},
+               "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"},
+                                       "test_types": false, "amplitude_only": false,
+                                       "default": false, "limits": false}}},
       "allOf": [{"if": {"properties": {"world": {"const": "sine"}}},
                  "then": {"required": ["live"]}, "else": {"properties": {"live": false}}}]
     },
     "lawsListParams": {
       "type": "object", "additionalProperties": false,
-      "properties": {"world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", null]}}
+      "properties": {"world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "sine_mimo", null]}}
     },
     "lawsListResult": {
       "type": "object", "required": ["laws", "problems"], "additionalProperties": false,
@@ -11236,6 +11536,78 @@
     "recorderDataPlot": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 64}, "quantity": {"$ref": "#/$defs/recorderQuantity"}, "channels": {"type": ["array", "null"], "items": {"type": "integer", "minimum": 0}}, "first_frame": {"type": ["integer", "null"], "minimum": 0}, "views": {"$ref": "#/$defs/views"}}, "required": ["id", "quantity", "channels", "first_frame", "views"]},
     "recorderData": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "source": {"$ref": "#/$defs/source"}, "class": {"$ref": "#/$defs/stationClass"}, "state": {"enum": ["running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/recorderPhase"}, "t_s": {"type": ["number", "null"], "minimum": 0}, "station_frames": {"type": ["integer", "null"], "minimum": 0}, "grid": {"$ref": "#/$defs/recorderLiveGrid"}, "rows": {"type": "array", "items": {"$ref": "#/$defs/recorderLiveRow"}}, "trigger": {"oneOf": [{"$ref": "#/$defs/recorderTrigger"}, {"type": "null"}]}, "recording": {"oneOf": [{"$ref": "#/$defs/recorderRecordingNow"}, {"type": "null"}]}, "recordings": {"type": "integer", "minimum": 0}, "marks": {"type": "integer", "minimum": 0}, "disk": {"oneOf": [{"$ref": "#/$defs/recorderDisk"}, {"type": "null"}]}, "health": {"oneOf": [{"$ref": "#/$defs/recorderHealth"}, {"type": "null"}]}, "plots": {"type": "array", "items": {"$ref": "#/$defs/recorderDataPlot"}}}, "required": ["run_id", "source", "class", "state", "phase", "t_s", "station_frames", "grid", "rows", "trigger", "recording", "recordings", "marks", "disk", "health", "plots"]},
     "recorderStream": {"type": "object", "required": ["kind", "channels", "complete", "name", "trigger", "requested_fs_hz", "fs_hz", "group_delay_frames", "rows", "units", "first_station_frame", "trigger_station_frame", "pre_frames", "pre_frames_asked", "frames", "gaps", "marks", "fault"], "properties": {"kind": {"const": "recording"}, "channels": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["index", "unit"], "properties": {"index": {"type": "integer", "minimum": 0}, "unit": {"type": "string", "minLength": 1}, "description": {"type": "string"}}}}, "complete": {"type": "boolean"}, "name": {"type": "string", "minLength": 1}, "trigger": {"$ref": "#/$defs/recorderMode"}, "requested_fs_hz": {"type": "number", "exclusiveMinimum": 0}, "fs_hz": {"type": "number", "exclusiveMinimum": 0}, "group_delay_frames": {"type": "number", "minimum": 0}, "rows": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "units": {"type": "array", "items": {"type": "string", "minLength": 1}}, "first_station_frame": {"type": "integer", "minimum": 0}, "trigger_station_frame": {"type": "integer", "minimum": 0}, "pre_frames": {"type": "integer", "minimum": 0}, "pre_frames_asked": {"type": "integer", "minimum": 0}, "frames": {"type": "integer", "minimum": 0}, "gaps": {"type": "array", "items": {"$ref": "#/$defs/recorderGap"}}, "marks": {"type": "array", "items": {"$ref": "#/$defs/recorderMark"}}, "fault": {"type": ["string", "null"]}}},
+    "playbackConfig": {"type": "object", "additionalProperties": false, "properties": {"title": {"type": "string"}, "drive": {"type": "object", "additionalProperties": false, "properties": {"folder": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}, "required": ["folder", "sha256"]}, "map": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "pre_roll_s": {"type": "number"}, "post_roll_s": {"type": "number"}, "capture": {"type": "object", "additionalProperties": false, "properties": {"run_name": {"type": "string"}}, "required": []}, "metadata": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"key": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}}, "operator": {"type": "string"}, "article": {"type": "string"}, "notes": {"type": "string"}, "specification": {"type": ["object", "null"], "additionalProperties": false, "properties": {"document": {"type": "string"}, "clause": {"type": "string"}}}, "record": {"type": ["object", "null"], "additionalProperties": false, "properties": {"streams": {"type": "boolean"}}}}, "required": ["drive", "map", "ceiling_v"]},
+    "playbackConfigureParams": {"type": "object", "additionalProperties": false, "properties": {"config": {"$ref": "#/$defs/playbackConfig"}, "dry_run": {"type": "boolean"}}, "required": ["config"]},
+    "playbackDerived": {"type": "object", "additionalProperties": false, "properties": {"fs_hz": {"type": "number", "exclusiveMinimum": 0}, "block_frames": {"type": "integer", "minimum": 1}, "samples": {"type": "integer", "minimum": 0}, "channels": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "pre_roll_frames": {"type": "integer", "minimum": 0}, "post_roll_frames": {"type": "integer", "minimum": 0}, "total_s": {"type": "number", "minimum": 0}, "gain": {"type": "number", "minimum": 0}, "stop": {"type": "object", "additionalProperties": false, "properties": {"depth_db": {"type": "number", "minimum": 0}, "ramp_s": {"type": "number", "minimum": 0}}, "required": ["depth_db", "ramp_s"]}, "read_ahead_s": {"type": "number", "minimum": 0}}, "required": ["fs_hz", "block_frames", "samples", "channels", "duration_s", "pre_roll_frames", "post_roll_frames", "total_s", "gain", "stop", "read_ahead_s"]},
+    "playbackFault": {"type": "object", "additionalProperties": false, "properties": {"reason": {"enum": ["start_not_zero", "end_not_zero", "velocity_not_zero", "displacement_not_zero"]}, "value": {"type": "number"}, "allowed": {"type": "number", "minimum": 0}, "text": {"type": "string", "minLength": 1}}, "required": ["reason", "value", "allowed", "text"]},
+    "playbackCheckChannel": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "name": {"type": "string"}, "peak_v": {"type": "number", "minimum": 0}, "start_v": {"type": "number"}, "end_v": {"type": "number"}, "velocity_v_s": {"type": "object", "additionalProperties": false, "properties": {"end": {"type": "number"}, "peak": {"type": "number", "minimum": 0}}, "required": ["end", "peak"]}, "displacement_v_s2": {"type": "object", "additionalProperties": false, "properties": {"end": {"type": "number"}, "peak": {"type": "number", "minimum": 0}}, "required": ["end", "peak"]}, "pass": {"type": "boolean"}, "faults": {"type": "array", "items": {"$ref": "#/$defs/playbackFault"}}, "note": {"type": ["string", "null"]}, "drive_row": {"type": ["integer", "null"], "minimum": 0}, "played_peak_v": {"type": "number", "minimum": 0}}, "required": ["channel", "name", "peak_v", "start_v", "end_v", "velocity_v_s", "displacement_v_s2", "pass", "faults", "note", "drive_row", "played_peak_v"]},
+    "playbackRefusal": {"type": "object", "additionalProperties": false, "properties": {"reason": {"$ref": "#/$defs/itemReason"}, "message": {"type": "string", "minLength": 1}, "detail": {"type": ["object", "null"]}}, "required": ["reason", "message", "detail"]},
+    "playbackEnvelope": {"type": "object", "additionalProperties": false, "properties": {"t_s": {"type": "array", "items": {"type": "number"}}, "min": {"type": "array", "items": {"type": "number"}}, "max": {"type": "array", "items": {"type": "number"}}}, "required": ["t_s", "min", "max"]},
+    "playbackPreview": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "drive_v": {"$ref": "#/$defs/playbackEnvelope"}, "velocity_v_s": {"$ref": "#/$defs/playbackEnvelope"}, "displacement_v_s2": {"$ref": "#/$defs/playbackEnvelope"}}, "required": ["channel", "drive_v", "velocity_v_s", "displacement_v_s2"]},
+    "playbackCheckReport": {"type": "object", "additionalProperties": false, "properties": {"pass": {"type": "boolean"}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}, "rate_hz": {"type": "number", "exclusiveMinimum": 0}, "samples": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "tolerances": {"type": "object", "additionalProperties": false, "properties": {"ends_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "velocity_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "displacement_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "integrator": {"type": "string", "minLength": 1}}, "required": ["ends_fraction_of_peak", "velocity_fraction_of_peak", "displacement_fraction_of_peak", "integrator"]}, "channels": {"type": "array", "items": {"$ref": "#/$defs/playbackCheckChannel"}}, "refusals": {"type": "array", "items": {"$ref": "#/$defs/playbackRefusal"}}, "limits": {"type": "string", "minLength": 1}, "previews": {"type": "array", "items": {"$ref": "#/$defs/playbackPreview"}}}, "required": ["pass", "sha256", "rate_hz", "samples", "duration_s", "level_db", "ceiling_v", "tolerances", "channels", "refusals", "limits"]},
+    "playbackCheckUnread": {"type": "object", "additionalProperties": false, "properties": {"pass": {"const": false}, "refusals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/playbackRefusal"}}}, "required": ["pass", "refusals"]},
+    "playbackCheck": {"oneOf": [{"$ref": "#/$defs/playbackCheckReport"}, {"$ref": "#/$defs/playbackCheckUnread"}]},
+    "playbackRunState": {"enum": ["unconfigured", "configured", "starting", "running", "stopping", "finished"]},
+    "playbackPhase": {"enum": ["idle", "reading_ahead", "pre_roll", "playing", "post_roll", "done", "stopping", "stopped", "zeroed", "refused"]},
+    "playbackOutcome": {"enum": ["completed", "stopped", "aborted", "response_abort", "drive_ceiling", "input_overload", "drive_underrun", "reader_failed", "loop_faulted", "loop_panicked", "arm_refused"]},
+    "playbackTrip": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "axis": {"type": "string", "minLength": 1}, "value": {"type": "number"}, "limit": {"type": "number"}}, "required": ["channel", "axis", "value", "limit"]},
+    "playbackEnd": {"type": "object", "additionalProperties": false, "properties": {"outcome": {"$ref": "#/$defs/playbackOutcome"}, "message": {"type": "string", "minLength": 1}, "at_s": {"type": ["number", "null"], "minimum": 0}, "played": {"type": "integer", "minimum": 0}, "emergency_stop": {"type": "boolean"}, "trip": {"oneOf": [{"$ref": "#/$defs/playbackTrip"}, {"type": "null"}]}}, "required": ["outcome", "message", "at_s", "played", "emergency_stop", "trip"]},
+    "playbackHealth": {"type": "object", "additionalProperties": false, "properties": {"engine_ticks": {"type": "integer", "minimum": 0}, "worst_tick_ms": {"type": ["number", "null"], "minimum": 0}, "budget_ms": {"type": ["number", "null"], "minimum": 0}, "health_faults": {"type": "integer", "minimum": 0}, "ring_overruns": {"type": "integer", "minimum": 0}}, "required": ["engine_ticks", "worst_tick_ms", "budget_ms", "health_faults", "ring_overruns"]},
+    "playbackProgress": {"type": "object", "additionalProperties": false, "properties": {"played": {"type": "integer", "minimum": 0}, "samples": {"type": "integer", "minimum": 0}, "played_s": {"type": "number", "minimum": 0}, "fraction": {"type": "number", "minimum": 0, "maximum": 1}, "elapsed_s": {"type": "number", "minimum": 0}, "buffered_s": {"type": "number", "minimum": 0}}, "required": ["played", "samples", "played_s", "fraction", "elapsed_s", "buffered_s"]},
+    "playbackRow": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["input", "drive"]}, "unit": {"type": "string", "minLength": 1}, "description": {"type": "string"}}, "required": ["index", "role", "unit", "description"]},
+    "playbackRun": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"enum": ["configured", "starting", "running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/playbackPhase"}, "title": {"type": "string"}, "source": {"$ref": "#/$defs/source"}, "class": {"$ref": "#/$defs/stationClass"}, "fs_hz": {"type": "number", "exclusiveMinimum": 0}, "drive": {"type": "object", "additionalProperties": false, "properties": {"samples": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}, "map": {"type": "array", "items": {"type": "integer", "minimum": 0}}}, "required": ["samples", "duration_s", "sha256", "map"]}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "rolls": {"type": "object", "additionalProperties": false, "properties": {"pre_frames": {"type": "integer", "minimum": 0}, "post_frames": {"type": "integer", "minimum": 0}}, "required": ["pre_frames", "post_frames"]}, "progress": {"$ref": "#/$defs/playbackProgress"}, "inputs": {"type": "array", "items": {"$ref": "#/$defs/playbackRow"}}, "drives": {"type": "array", "items": {"$ref": "#/$defs/playbackRow"}}, "overloads": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "overload": {"type": "boolean"}}, "required": ["channel", "overload"]}}, "health": {"oneOf": [{"$ref": "#/$defs/playbackHealth"}, {"type": "null"}]}, "record": {"oneOf": [{"$ref": "#/$defs/runRecordRef"}, {"type": "null"}]}, "end": {"oneOf": [{"$ref": "#/$defs/playbackEnd"}, {"type": "null"}]}}, "required": ["run_id", "state", "phase", "title", "source", "class", "fs_hz", "drive", "level_db", "ceiling_v", "rolls", "progress", "inputs", "drives", "overloads", "health", "record", "end"]},
+    "playbackState": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "null"}, "state": {"const": "unconfigured"}}, "required": ["run_id", "state"]}, {"$ref": "#/$defs/playbackRun"}]},
+    "playbackConfigureResult": {"type": "object", "additionalProperties": false, "properties": {"state": {"$ref": "#/$defs/playbackState"}, "check": {"$ref": "#/$defs/playbackCheck"}, "derived": {"$ref": "#/$defs/playbackDerived"}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}}, "required": ["state", "check", "derived", "warnings"]},
+    "playbackDryRunResult": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"$ref": "#/$defs/playbackCheck"}, "derived": {"oneOf": [{"$ref": "#/$defs/playbackDerived"}, {"type": "null"}]}}, "required": ["errors", "warnings", "check", "derived"]},
+    "playbackConfigResult": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": ["string", "null"]}, "config": {"oneOf": [{"$ref": "#/$defs/playbackConfig"}, {"type": "null"}]}, "check": {"oneOf": [{"$ref": "#/$defs/playbackCheck"}, {"type": "null"}]}, "derived": {"oneOf": [{"$ref": "#/$defs/playbackDerived"}, {"type": "null"}]}}, "required": ["run_id", "config", "check", "derived"]},
+    "playbackInvalidDetail": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"$ref": "#/$defs/playbackCheck"}}, "required": ["errors", "warnings"]},
+    "playbackEmptyParams": {"type": "object", "additionalProperties": false, "properties": {}, "required": []},
+    "playbackLogParams": {"type": "object", "additionalProperties": false, "properties": {"since": {"type": "integer", "minimum": 0}}, "required": []},
+    "playbackLogEntry": {"type": "object", "additionalProperties": false, "properties": {"seq": {"type": "integer", "minimum": 0}, "at_unix": {"type": "number"}, "kind": {"enum": ["state", "check", "note", "record", "operator", "overload", "trip", "underrun", "abort", "outcome"]}, "text": {"type": "string"}}, "required": ["seq", "at_unix", "kind", "text"]},
+    "playbackLogResult": {"type": "object", "additionalProperties": false, "properties": {"entries": {"type": "array", "items": {"$ref": "#/$defs/playbackLogEntry"}}, "next": {"type": "integer", "minimum": 0}}, "required": ["entries", "next"]},
+    "playbackLogEvent": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "entries": {"type": "array", "items": {"$ref": "#/$defs/playbackLogEntry"}}}, "required": ["run_id", "entries"]},
+    "playbackLiveChannel": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["input", "drive"]}, "unit": {"type": "string", "minLength": 1}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["index", "role", "unit", "values"]},
+    "playbackLive": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"enum": ["starting", "running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/playbackPhase"}, "progress": {"$ref": "#/$defs/playbackProgress"}, "time": {"type": "object", "additionalProperties": false, "properties": {"rate_hz": {"type": "number", "exclusiveMinimum": 0}, "t0_s": {"type": "number", "minimum": 0}, "channels": {"type": "array", "items": {"$ref": "#/$defs/playbackLiveChannel"}}}, "required": ["rate_hz", "t0_s", "channels"]}}, "required": ["run_id", "state", "phase", "progress", "time"]},
+    "modalTestPoint": {"type": "object", "additionalProperties": false, "properties": {"node": {"type": "integer", "minimum": 0}, "direction": {"type": "string", "pattern": "^[XYZxyz][+-]$"}}, "required": ["node"]},
+    "modalTestPoints": {"oneOf": [{"type": "array", "items": {"$ref": "#/$defs/modalTestPoint"}}, {"type": "object", "additionalProperties": false, "properties": {"start": {"type": "integer", "minimum": 0}, "step": {"type": "integer", "minimum": 0}, "count": {"type": "integer", "minimum": 1, "maximum": 10000}}, "required": ["count"]}]},
+    "modalTestImpactConfig": {"type": "object", "additionalProperties": false, "properties": {"trigger_level_pct": {"type": "number"}, "pretrigger_pct": {"type": "number"}, "holdoff_blocks": {"type": "number"}, "double_hit_pct": {"type": "number"}, "tip_warn_db": {"type": "number"}, "accept": {"enum": ["auto", "manual"]}, "force_window": {"type": "object", "additionalProperties": false, "properties": {"on": {"type": "boolean"}, "width_pct": {"type": "number"}, "fall_pct": {"type": "number"}}, "required": []}, "exponential_window": {"type": "object", "additionalProperties": false, "properties": {"on": {"type": "boolean"}, "end_pct": {"type": "number"}}, "required": []}, "auto_advance": {"type": "boolean"}, "target": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"peak": {"type": "number"}, "tolerance_pct": {"type": "number"}}, "required": ["peak"]}, {"type": "null"}]}, "polarity": {"enum": ["positive", "negative"]}}, "required": []},
+    "modalTestSource": {"enum": ["random", "burst_random", "pseudo_random", "periodic_random", "periodic_chirp", "burst_chirp"]},
+    "modalTestShakerConfig": {"type": "object", "additionalProperties": false, "properties": {"drives": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"row": {"type": "integer", "minimum": 0}, "level_vrms": {"type": "number"}}, "required": ["row"]}}, "source": {"$ref": "#/$defs/modalTestSource"}, "burst_pct": {"type": "number"}, "ramp_s": {"type": "number"}, "ceiling_v": {"type": "number"}, "delay_frames": {"type": "integer", "minimum": 0}, "overlap_pct": {"type": "number"}, "seed": {"type": "integer", "minimum": 0}}, "required": ["drives"]},
+    "modalTestConfig": {"type": "object", "additionalProperties": false, "properties": {"title": {"type": "string"}, "operator": {"type": "string"}, "article": {"type": "string"}, "notes": {"type": "string"}, "specification": {"type": ["object", "null"], "additionalProperties": false, "properties": {"document": {"type": "string"}, "clause": {"type": "string"}}}, "capture": {"type": "object", "additionalProperties": false, "properties": {"run_name": {"type": "string"}}, "required": []}, "record": {"type": ["object", "null"], "additionalProperties": false, "properties": {"streams": {"type": "boolean"}}}, "metadata": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"key": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}}, "mode": {"enum": ["impact", "shaker"]}, "fs_hz": {"type": "number"}, "block": {"type": "integer"}, "band": {"type": "object", "additionalProperties": false, "properties": {"lo_hz": {"type": "number"}, "hi_hz": {"type": "number"}}, "required": []}, "estimator": {"enum": ["H1", "H2", "Hv"]}, "averages": {"type": "integer"}, "decay_warn_pct": {"type": "number"}, "roving": {"type": "object", "additionalProperties": false, "properties": {"channels": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "points": {"$ref": "#/$defs/modalTestPoints"}}, "required": ["channels", "points"]}, "impact": {"$ref": "#/$defs/modalTestImpactConfig"}, "shaker": {"$ref": "#/$defs/modalTestShakerConfig"}}, "required": ["mode", "fs_hz"]},
+    "modalTestConfigureParams": {"type": "object", "additionalProperties": false, "properties": {"config": {"$ref": "#/$defs/modalTestConfig"}, "dry_run": {"type": "boolean"}}, "required": ["config"]},
+    "modalTestRowDof": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "node": {"type": ["integer", "null"], "minimum": 0}, "direction": {"type": ["string", "null"], "pattern": "^[XYZ][+-]$"}, "unit": {"type": "string"}}, "required": ["index", "node", "direction", "unit"]},
+    "modalTestCheckRow": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "unit": {"type": "string"}, "range": {"type": "number", "minimum": 0}, "node": {"type": ["integer", "null"], "minimum": 0}, "direction": {"type": ["string", "null"], "pattern": "^[XYZ][+-]$"}, "roves": {"type": "boolean"}}, "required": ["index", "unit", "range", "node", "direction", "roves"]},
+    "modalTestCheckImpact": {"type": "object", "additionalProperties": false, "properties": {"drives": {"type": "string", "minLength": 1}, "trigger": {"type": "object", "additionalProperties": false, "properties": {"level": {"type": "number"}, "unit": {"type": "string"}, "pretrigger_frames": {"type": "integer", "minimum": 0}, "polarity": {"enum": ["positive", "negative"]}, "watches": {"type": "string", "minLength": 1}}, "required": ["level", "unit", "polarity", "watches", "pretrigger_frames"]}, "holdoff_blocks": {"type": "number", "minimum": 0}, "accept": {"enum": ["auto", "manual"]}, "auto_advance": {"type": "boolean"}, "checks": {"type": "object", "additionalProperties": false, "properties": {"overload": {"type": "string", "minLength": 1}, "double_hit": {"type": "string", "minLength": 1}, "tip_warn_db": {"type": "number"}, "target": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"peak": {"type": "number"}, "tolerance_pct": {"type": "number", "minimum": 0}, "unit": {"type": "string"}, "rejects": {"const": false}}, "required": ["peak", "tolerance_pct", "unit", "rejects"]}, {"type": "null"}]}}, "required": ["overload", "double_hit", "tip_warn_db", "target"]}, "force_window": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"pre_frames": {"type": "integer", "minimum": 0}, "width_frames": {"type": "integer", "minimum": 1}, "fall_frames": {"type": "integer", "minimum": 1}}, "required": ["pre_frames", "width_frames", "fall_frames"]}, {"type": "null"}]}, "exponential_window": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"tau_s": {"type": "number", "exclusiveMinimum": 0}, "inv_tau_per_s": {"type": "number", "exclusiveMinimum": 0}, "end": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "added_damping": {"type": "string", "minLength": 1}}, "required": ["tau_s", "inv_tau_per_s", "end", "added_damping"]}, {"type": "null"}]}}, "required": ["drives", "trigger", "holdoff_blocks", "accept", "auto_advance", "checks", "force_window", "exponential_window"]},
+    "modalTestCheckShaker": {"type": "object", "additionalProperties": false, "properties": {"source": {"$ref": "#/$defs/modalTestSource"}, "crest": {"type": "number", "exclusiveMinimum": 0}, "drives": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"row": {"type": "integer", "minimum": 0}, "level_vrms": {"type": "number", "minimum": 0}, "peak_v": {"type": "number", "minimum": 0}, "range_v": {"type": "number", "minimum": 0}}, "required": ["row", "level_vrms", "peak_v", "range_v"]}}, "ceiling_v": {"type": "number", "minimum": 0}, "burst_pct": {"type": ["number", "null"]}, "ramp_s": {"type": "number", "minimum": 0}, "delay_frames": {"type": "integer", "minimum": 0}, "overlap_pct": {"type": ["number", "null"]}, "seed": {"type": "integer", "minimum": 0}, "window": {"enum": ["hann", "uniform"]}, "stop": {"type": "object", "additionalProperties": false, "properties": {"depth_db": {"type": "number", "minimum": 0}, "ramp_s": {"type": "number", "minimum": 0}, "then": {"type": "string", "minLength": 1}}, "required": ["depth_db", "ramp_s", "then"]}, "seconds_per_point": {"type": "number", "minimum": 0}}, "required": ["source", "crest", "drives", "ceiling_v", "burst_pct", "ramp_s", "delay_frames", "overlap_pct", "seed", "window", "stop", "seconds_per_point"]},
+    "modalTestCheck": {"type": "object", "additionalProperties": false, "properties": {"source": {"$ref": "#/$defs/source"}, "mode": {"enum": ["impact", "shaker"]}, "fs_hz": {"type": "number", "exclusiveMinimum": 0}, "block": {"type": "integer", "minimum": 1}, "frame_s": {"type": "number", "exclusiveMinimum": 0}, "df_hz": {"type": "number", "exclusiveMinimum": 0}, "band": {"type": "object", "additionalProperties": false, "properties": {"lo_hz": {"type": "number", "minimum": 0}, "hi_hz": {"type": "number", "minimum": 0}, "first_line": {"type": "integer", "minimum": 0}, "last_line": {"type": "integer", "minimum": 0}, "lines": {"type": "integer", "minimum": 0}}, "required": ["lo_hz", "hi_hz", "first_line", "last_line", "lines"]}, "estimator": {"enum": ["H1", "H2", "Hv", "matrix H1"]}, "averages": {"type": "integer", "minimum": 1}, "references": {"type": "array", "items": {"$ref": "#/$defs/modalTestCheckRow"}}, "responses": {"type": "array", "items": {"$ref": "#/$defs/modalTestCheckRow"}}, "points": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "references": {"type": "array", "items": {"$ref": "#/$defs/modalTestRowDof"}}, "responses": {"type": "array", "items": {"$ref": "#/$defs/modalTestRowDof"}}}, "required": ["index", "references", "responses"]}}, "impact": {"$ref": "#/$defs/modalTestCheckImpact"}, "shaker": {"$ref": "#/$defs/modalTestCheckShaker"}}, "required": ["source", "mode", "fs_hz", "block", "frame_s", "df_hz", "band", "estimator", "averages", "references", "responses", "points"]},
+    "modalTestRunState": {"enum": ["configured", "starting", "idle", "arming", "armed", "captured", "measuring", "stopping", "point_done", "finished"]},
+    "modalTestDrivePhase": {"enum": ["idle", "waiting", "ramping", "driving", "stopping", "zeroed"]},
+    "modalTestOutcome": {"enum": ["ended", "aborted", "response_abort", "drive_underrun", "drive_ceiling", "source_failed", "input_overload", "loop_faulted", "loop_panicked", "run_not_started", "run_panicked", "arm_refused"]},
+    "modalTestDecay": {"type": "object", "additionalProperties": false, "properties": {"row": {"type": "integer", "minimum": 0}, "ratio": {"type": "number", "minimum": 0}, "warning": {"type": "boolean"}}, "required": ["row", "ratio", "warning"]},
+    "modalTestCounts": {"type": "object", "additionalProperties": false, "properties": {"unit": {"enum": ["hits", "frames"]}, "point": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "accepted": {"type": "integer", "minimum": 0}, "rejected": {"type": "integer", "minimum": 0}, "asked": {"type": "integer", "minimum": 1}, "decay": {"oneOf": [{"$ref": "#/$defs/modalTestDecay"}, {"type": "null"}]}}, "required": ["index", "accepted", "rejected", "asked"]}, "points": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "accepted": {"type": "integer", "minimum": 0}, "rejected": {"type": "integer", "minimum": 0}, "taken": {"type": "integer", "minimum": 0}, "measured": {"type": "boolean"}}, "required": ["index", "accepted", "rejected", "taken", "measured"]}}, "totals": {"type": "object", "additionalProperties": false, "properties": {"accepted": {"type": "integer", "minimum": 0}, "taken": {"type": "integer", "minimum": 0}, "points_measured": {"type": "integer", "minimum": 0}, "points_planned": {"type": "integer", "minimum": 0}}, "required": ["accepted", "taken", "points_measured", "points_planned"]}}, "required": ["unit", "point", "points", "totals"]},
+    "modalTestTile": {"type": "object", "additionalProperties": false, "properties": {"n": {"type": "integer", "minimum": 1}, "seq": {"type": "integer", "minimum": 0}, "status": {"enum": ["pending", "accepted", "rejected", "undone"]}, "reason": {"enum": ["overload", "double_hit", "operator", null]}, "overload": {"type": "boolean"}, "double_hit": {"type": "boolean"}, "start_frame": {"type": "integer", "minimum": 0}, "decay": {"oneOf": [{"$ref": "#/$defs/modalTestDecay"}, {"type": "null"}]}, "peak": {"type": "number"}, "tip_warning": {"type": "boolean"}, "force_window_cut": {"type": "boolean"}, "target_verdict": {"enum": ["high", "low", "on_target"]}, "target_diff_pct": {"type": "number"}}, "required": ["n", "seq", "status", "reason", "overload", "double_hit", "start_frame"]},
+    "modalTestHitReport": {"type": "object", "additionalProperties": false, "properties": {"peak": {"type": "number"}, "peak_frame": {"type": "integer", "minimum": 0}, "overloaded": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "double_hit": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"frame": {"type": "integer", "minimum": 0}, "peak": {"type": "number"}, "ratio": {"type": "number", "minimum": 0}}, "required": ["frame", "peak", "ratio"]}, {"type": "null"}]}, "tip_drop_db": {"type": ["number", "null"]}, "tip_warning": {"type": "boolean"}, "no_response": {"type": "array", "items": {"type": ["boolean", "null"]}}, "force_window_cut": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"pulse_end_frame": {"type": ["integer", "null"], "minimum": 0}, "window_end_frame": {"type": "integer", "minimum": 0}}, "required": ["pulse_end_frame", "window_end_frame"]}, {"type": "null"}]}, "decay": {"oneOf": [{"$ref": "#/$defs/modalTestDecay"}, {"type": "null"}]}, "rejected": {"enum": ["overload", "double_hit", null]}, "reasons": {"type": "array", "items": {"enum": ["overload", "double_hit"]}}, "warnings": {"type": "array", "items": {"enum": ["tip_roll_off", "no_response", "force_window_cuts_pulse", "force_high", "force_low", "response_not_decayed"]}}, "target": {"type": "number"}, "target_tolerance_pct": {"type": "number", "minimum": 0}, "target_diff_pct": {"type": "number"}, "target_verdict": {"enum": ["high", "low", "on_target"]}}, "required": ["peak", "peak_frame", "overloaded", "double_hit", "tip_drop_db", "tip_warning", "no_response", "force_window_cut", "rejected", "reasons", "warnings"]},
+    "modalTestLatest": {"type": "object", "additionalProperties": false, "properties": {"n": {"type": "integer", "minimum": 1}, "seq": {"type": "integer", "minimum": 0}, "status": {"enum": ["pending", "accepted", "rejected", "undone"]}, "reason": {"enum": ["overload", "double_hit", "operator", null]}, "overload": {"type": "boolean"}, "double_hit": {"type": "boolean"}, "start_frame": {"type": "integer", "minimum": 0}, "decay": {"oneOf": [{"$ref": "#/$defs/modalTestDecay"}, {"type": "null"}]}, "peak": {"type": "number"}, "tip_warning": {"type": "boolean"}, "force_window_cut": {"type": "boolean"}, "target_verdict": {"enum": ["high", "low", "on_target"]}, "target_diff_pct": {"type": "number"}, "point": {"type": "integer", "minimum": 0}, "report": {"oneOf": [{"$ref": "#/$defs/modalTestHitReport"}, {"type": "null"}]}}, "required": ["n", "seq", "status", "reason", "overload", "double_hit", "start_frame"]},
+    "modalTestEnd": {"type": "object", "additionalProperties": false, "properties": {"outcome": {"$ref": "#/$defs/modalTestOutcome"}, "message": {"type": "string", "minLength": 1}, "emergency_stop": {"type": "boolean"}, "at_s": {"type": ["number", "null"], "minimum": 0}}, "required": ["outcome", "message", "emergency_stop", "at_s"]},
+    "modalTestRecord": {"type": "object", "additionalProperties": false, "properties": {"folder": {"type": "string", "minLength": 1}, "streams": {"type": "boolean"}, "problem": {"type": ["string", "null"]}}, "required": ["folder", "streams", "problem"]},
+    "modalTestRun": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"$ref": "#/$defs/modalTestRunState"}, "mode": {"enum": ["impact", "shaker"]}, "source": {"$ref": "#/$defs/source"}, "station_class": {"$ref": "#/$defs/stationClass"}, "title": {"type": "string"}, "drive_phase": {"$ref": "#/$defs/modalTestDrivePhase"}, "point": {"type": "integer", "minimum": 0}, "point_dofs": {"type": "object", "additionalProperties": false, "properties": {"references": {"type": "array", "items": {"$ref": "#/$defs/modalTestRowDof"}}, "responses": {"type": "array", "items": {"$ref": "#/$defs/modalTestRowDof"}}}, "required": ["references", "responses"]}, "counts": {"$ref": "#/$defs/modalTestCounts"}, "hits": {"type": "array", "items": {"$ref": "#/$defs/modalTestTile"}}, "latest": {"oneOf": [{"$ref": "#/$defs/modalTestLatest"}, {"type": "null"}]}, "record": {"oneOf": [{"$ref": "#/$defs/modalTestRecord"}, {"type": "null"}]}, "end": {"oneOf": [{"$ref": "#/$defs/modalTestEnd"}, {"type": "null"}]}}, "required": ["run_id", "state", "mode", "source", "station_class", "title", "drive_phase", "point", "point_dofs", "counts", "hits", "latest", "record", "end"]},
+    "modalTestState": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "null"}, "state": {"const": "none"}}, "required": ["run_id", "state"]}, {"$ref": "#/$defs/modalTestRun"}]},
+    "modalTestConfigureResult": {"type": "object", "additionalProperties": false, "properties": {"state": {"$ref": "#/$defs/modalTestState"}, "check": {"$ref": "#/$defs/modalTestCheck"}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}}, "required": ["state", "check", "warnings"]},
+    "modalTestDryRunResult": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"oneOf": [{"$ref": "#/$defs/modalTestCheck"}, {"type": "null"}]}}, "required": ["errors", "warnings", "check"]},
+    "modalTestConfigResult": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": ["string", "null"]}, "config": {"oneOf": [{"$ref": "#/$defs/modalTestConfig"}, {"type": "null"}]}, "check": {"oneOf": [{"$ref": "#/$defs/modalTestCheck"}, {"type": "null"}]}}, "required": ["run_id", "config", "check"]},
+    "modalTestInvalidDetail": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"oneOf": [{"$ref": "#/$defs/modalTestCheck"}, {"type": "null"}]}}, "required": ["errors", "warnings", "check"]},
+    "modalTestEmptyParams": {"type": "object", "additionalProperties": false, "properties": {}, "required": []},
+    "modalTestSelectParams": {"type": "object", "additionalProperties": false, "properties": {"point": {"type": "integer", "minimum": 0}}, "required": ["point"]},
+    "modalTestSimHitParams": {"type": "object", "additionalProperties": false, "properties": {"kind": {"enum": ["clean", "double", "overload"]}}, "required": ["kind"]},
+    "modalTestCallResult": {"type": "object", "additionalProperties": false, "properties": {"ok": {"type": "boolean"}, "counts": {"$ref": "#/$defs/modalTestCounts"}, "state": {"$ref": "#/$defs/modalTestState"}}, "required": ["ok", "state"]},
+    "modalTestLogParams": {"type": "object", "additionalProperties": false, "properties": {"since": {"type": "integer", "minimum": 0}}, "required": []},
+    "modalTestLogEntry": {"type": "object", "additionalProperties": false, "properties": {"seq": {"type": "integer", "minimum": 0}, "at_unix": {"type": "number"}, "kind": {"type": "string", "minLength": 1}, "text": {"type": "string"}}, "required": ["seq", "at_unix", "kind", "text"]},
+    "modalTestLogResult": {"type": "object", "additionalProperties": false, "properties": {"entries": {"type": "array", "items": {"$ref": "#/$defs/modalTestLogEntry"}}, "next": {"type": "integer", "minimum": 0}}, "required": ["entries", "next"]},
+    "modalTestLogEvent": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "entries": {"type": "array", "items": {"$ref": "#/$defs/modalTestLogEntry"}}}, "required": ["run_id", "entries"]},
+    "modalTestLiveHit": {"type": "object", "additionalProperties": false, "properties": {"point": {"type": "integer", "minimum": 0}, "n": {"type": "integer", "minimum": 1}, "seq": {"type": "integer", "minimum": 0}, "start_frame": {"type": "integer", "minimum": 0}, "start_s": {"type": "number", "minimum": 0}, "samples": {"type": "integer", "minimum": 0}, "decimation": {"type": "integer", "minimum": 1}, "step_s": {"type": "number", "exclusiveMinimum": 0}, "channels": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["reference", "response", "monitor", "drive"]}, "unit": {"type": "string"}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["values"]}}, "windows": {"type": "object", "additionalProperties": false, "properties": {"force": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"pre_frames": {"type": "integer", "minimum": 0}, "width_frames": {"type": "integer", "minimum": 1}, "fall_frames": {"type": "integer", "minimum": 1}}, "required": ["pre_frames", "width_frames", "fall_frames"]}, {"type": "null"}]}, "exponential": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"tau_s": {"type": "number", "exclusiveMinimum": 0}, "end": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}, "required": ["tau_s", "end"]}, {"type": "null"}]}}, "required": ["force", "exponential"]}, "force_spectrum": {"type": "object", "additionalProperties": false, "properties": {"frequency_hz": {"$ref": "#/$defs/arrayRef"}, "unit": {"type": "string"}, "values": {"$ref": "#/$defs/arrayRef"}, "tip_drop_db": {"type": ["number", "null"]}}, "required": ["frequency_hz", "unit", "values", "tip_drop_db"]}}, "required": ["point", "n", "seq", "start_frame", "start_s", "samples", "decimation", "step_s", "channels", "windows", "force_spectrum"]},
+    "modalTestLiveReferences": {"type": "object", "additionalProperties": false, "properties": {"frequency_hz": {"$ref": "#/$defs/arrayRef"}, "averages": {"type": "integer", "minimum": 0}, "autospectra": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "unit": {"type": "string"}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["values"]}}}, "required": ["frequency_hz", "averages", "autospectra"]},
+    "modalTestLiveFrame": {"type": "object", "additionalProperties": false, "properties": {"point": {"type": "integer", "minimum": 0}, "n": {"type": "integer", "minimum": 1}, "seq": {"type": "integer", "minimum": 0}, "status": {"enum": ["accepted", "rejected"]}, "start_frame": {"type": "integer", "minimum": 0}, "start_s": {"type": "number", "minimum": 0}, "samples": {"type": "integer", "minimum": 0}, "decimation": {"type": "integer", "minimum": 1}, "step_s": {"type": "number", "exclusiveMinimum": 0}, "burst_end_frame": {"type": ["integer", "null"], "minimum": 0}, "input_delay_frames": {"type": "integer", "minimum": 0}, "decay": {"oneOf": [{"$ref": "#/$defs/modalTestDecay"}, {"type": "null"}]}, "channels": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["reference", "response", "monitor", "drive"]}, "unit": {"type": "string"}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["values"]}}}, "required": ["point", "n", "seq", "status", "start_frame", "start_s", "samples", "decimation", "step_s", "burst_end_frame", "input_delay_frames", "decay", "channels"]},
+    "modalTestLive": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"$ref": "#/$defs/modalTestRunState"}, "point": {"type": "integer", "minimum": 0}, "time": {"type": "object", "additionalProperties": false, "properties": {"rate_hz": {"type": "number", "exclusiveMinimum": 0}, "channels": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["reference", "response", "monitor", "drive"]}, "unit": {"type": "string"}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["values"]}}}, "required": ["rate_hz", "channels"]}, "frf": {"type": "object", "additionalProperties": false, "properties": {"frequency_hz": {"$ref": "#/$defs/arrayRef"}, "averages": {"type": "integer", "minimum": 0}, "pairs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"response": {"type": "integer", "minimum": 0}, "reference": {"type": "integer", "minimum": 0}, "magnitude": {"$ref": "#/$defs/arrayRef"}, "phase_deg": {"$ref": "#/$defs/arrayRef"}}, "required": ["response", "reference", "magnitude", "phase_deg"]}}, "coherence": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"response": {"type": "integer", "minimum": 0}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["response", "values"]}}}, "required": ["frequency_hz", "averages", "pairs", "coherence"]}, "hit": {"oneOf": [{"$ref": "#/$defs/modalTestLiveHit"}, {"type": "null"}]}, "frame": {"oneOf": [{"$ref": "#/$defs/modalTestLiveFrame"}, {"type": "null"}]}, "references": {"$ref": "#/$defs/modalTestLiveReferences"}}, "required": ["run_id", "state", "point", "time", "frf"]},
     "mixedWindow": {"type": "object", "additionalProperties": false, "properties": {"on_s": {"type": "number", "minimum": 0}, "off_s": {"type": ["number", "null"]}}, "required": []},
     "mixedSchedule": {"type": "object", "required": ["kind"], "properties": {"kind": {"enum": ["fixed", "sweep", "follow", "segments"]}, "freq_hz": {"type": "number"}, "end": {"type": ["object", "null"]}, "band_hz": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "rate": {"$ref": "#/$defs/sineRate"}, "start_hz": {"type": ["number", "null"]}, "direction": {"enum": ["up", "down", null]}, "of": {"type": "string", "minLength": 1}, "ratio": {"type": "number"}}, "allOf": [{"if": {"properties": {"kind": {"const": "fixed"}}}, "then": {"required": ["freq_hz"]}}, {"if": {"properties": {"kind": {"const": "sweep"}}}, "then": {"required": ["band_hz", "rate"]}}, {"if": {"properties": {"kind": {"const": "follow"}}}, "then": {"required": ["of", "ratio"]}}]},
     "mixedPart": {"type": "object", "required": ["id", "kind"], "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$"}, "name": {"type": ["string", "null"]}, "kind": {"type": "string", "minLength": 1}, "enabled": {"type": "boolean"}, "window": {"$ref": "#/$defs/mixedWindow"}, "breakpoints": {"type": "array"}, "schedule": {"$ref": "#/$defs/mixedSchedule"}, "amplitude_g": {"type": ["number", "null"]}, "profile": {"oneOf": [{"$ref": "#/$defs/sineProfile"}, {"type": "null"}]}, "level_g2_hz": {"type": "number"}, "width_hz": {"type": ["number", "null"]}, "width_share": {"type": ["number", "null"]}, "alarm_db": {"oneOf": [{"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, {"type": "null"}]}, "abort_db": {"oneOf": [{"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, {"type": "null"}]}}, "allOf": [{"if": {"properties": {"kind": {"const": "floor"}}}, "then": {"required": ["breakpoints"]}}, {"if": {"properties": {"kind": {"const": "tone"}}}, "then": {"required": ["schedule"]}}, {"if": {"properties": {"kind": {"const": "narrowband"}}}, "then": {"required": ["schedule", "level_g2_hz"]}}]},

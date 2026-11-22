@@ -41,9 +41,12 @@ crates/hertzforge-mixed             Mixed Mode: summed tone and random drive, it
 crates/hertzforge-shock-common      classical shock: pulse limits, pre-fire drive ceiling, law guard settings
 crates/hertzforge-shock-host        the shock firer: pulse ceilings, tolerance aborts, emergency stop on abort
 crates/hertzforge-mimo-shock        multiple-drive shock: growth caps, abort lines, divergence watch
+crates/hertzforge-mimo-sine         multiple-drive sine: per-drive caps, ceilings, notch, aborts, stop ramp
 crates/hertzforge-srs               SRS shock: synthesized pulse, its ceiling and aborts
 crates/hertzforge-twr               time waveform replication: drive ceiling, envelope and divergence aborts
 crates/hertzforge-explorer-host     Explorer: stepped drive, its ceiling, watchdog and stop ramp
+crates/hertzforge-playback          Playback: a drive file played out, its checks, ceiling, underrun abort and stop ramp
+crates/hertzforge-modal-test        Modal Test: shaker sources played open loop, the ceiling, underrun and source-failure aborts, stop ramp; impact mode drives nothing
 
 # Control laws: they compute the next drive
 crates/hertzforge-law-host          the sandbox law files run in, with their budgets and output checks
@@ -53,22 +56,32 @@ crates/hertzforge-mimo-laws         the built-in multiple-output Random laws
 crates/hertzforge-sine-laws         the built-in Sine laws and their check
 crates/hertzforge-shock-laws        the built-in classical shock and SRS laws
 crates/hertzforge-mimo-shock-laws   the built-in multiple-drive shock laws
+crates/hertzforge-mimo-sine-laws    the built-in multiple-drive sine laws and their check
 crates/hertzforge-twr-laws          the built-in waveform replication laws
 crates/hertzforge-mixed-laws        the law roles of a Mixed Mode test
 crates/hertzforge-law-ratio-math    the ratio law's math, run by the built-in laws
 crates/hertzforge-law-band-average-math  the band-average law's math, run by a built-in law
 crates/hertzforge-shock-law-math    the classical, SRS and waveform shock law math
 crates/hertzforge-mimo-shock-law-math  the multiple-drive shock law math and its safe-gain checks
+crates/hertzforge-mimo-sine-law-math  the multiple-drive sine law math: the laws' steps, the loop-speed rule, the model the drive is carried along
 laws/hinv                           a law file: computes a drive
 laws/mimo-band-average              a law file: computes a drive
+laws/mimo-broyden-congruence        a law file: computes a drive
 laws/mimo-buzz                      a law file: computes a drive
+laws/mimo-independent               a law file: computes a drive
 laws/mimo-min-drive                 a law file: computes a drive
+laws/mimo-nearly-independent        a law file: computes a drive
 laws/mimo-open-loop                 a law file: computes a drive
 laws/mimo-pinv                      a law file: computes a drive
 laws/mimo-shape                     a law file: computes a drive
 laws/mimo-shock-inverse             a law file: computes a drive
 laws/mimo-shock-paired              a law file: computes a drive
 laws/mimo-shock-shape               a law file: computes a drive
+laws/mimo-sine-matrix               a law file: computes a drive
+laws/mimo-sine-paired               a law file: computes a drive
+laws/mimo-sine-ratio                a law file: computes a drive
+laws/mimo-sine-secant               a law file: computes a drive
+laws/mimo-sine-steepest-descent     a law file: computes a drive
 laws/mimo-zero                      a law file: computes a drive
 laws/ratio                          a law file: computes a drive
 laws/shock-fdc                      a law file: computes a drive
@@ -109,5 +122,6 @@ schema/protocol.schema.json         the suite's protocol schema, for both servic
 schema/PROTOCOL.md                  the suite's protocol, for both services; its control part reaches the drive path through the Rust crates
 schema/golden                       test frames every codec is checked against
 schema/make_golden.py               writes the test frames
+schema/make_golden_drive.py         writes the golden drive folder; the control service checks every drive file again before it arms
 src/hertzforge                      the analysis service and the Python package; it has no route to a drive
 ui                                  the shell: a client of the control service, never the only protection (invariant 4)

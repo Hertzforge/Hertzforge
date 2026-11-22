@@ -21,14 +21,19 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1, 2, 3 or 4   (integer)
+    hertzforge_schema = 1, 2, 3, 4 or 5   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
 object is stamped 2. Schema 3 adds the run record (`run_record/`,
 below), and only a file holding one, or referring to one, is stamped 3.
 Schema 4 adds the test setup (`test_setup/`, below), and only a file
-holding one, or referring to one, is stamped 4.
+holding one, or referring to one, is stamped 4. Schema 5 adds measured
+points, an element type of a geometry (203), and only a file with a geometry
+holding them is stamped 5, so a build from before them says to update
+where it would otherwise stop at an element type it does not know. For a
+few days in November 2026 schema 5 held measured points as a group of their
+own (`scan/`, below). It is read and no longer written.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -43,6 +48,8 @@ opens it. The reader follows three rules:
   is refused as not a Hertzforge file, since every writer stamps;
 - an object of a kind the reader does not know is refused by its name
   and kind, saying the file was written by a newer Hertzforge;
+- a geometry with an element type the reader does not know is refused
+  the same way, by the type's number;
 - an older stamp always loads.
 
 While Hertzforge is an alpha this is a practice, not a promise: the
@@ -54,7 +61,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/`, `run_log_extract/`, `run_record/` or `test_setup/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/`, `run_record/`, `test_setup/` or `scan/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -84,6 +91,16 @@ root attributes:
                       "source_print", the digest of the source's values
                       when the fingerprint holds settings only; absent,
                       only the settings are compared
+    projections       optional JSON, how pairs of shape sets on two
+                      geometries are projected when compared, as
+                      Project sets them: [{"first", "second", "source",
+                      "distance"}, ...], "source" the set projected onto
+                      the other and "distance" the node match distance
+                      (meters, or the geometries' own units when theirs
+                      are not defined), or null for 2 % of the size of
+                      the geometry projected onto. Absent when none is
+                      set; a pair with none is projected the way the
+                      sets' measured directions decide
 
 A project whose data index holds anything also has one dataset at the
 root (absent otherwise):
@@ -186,9 +203,18 @@ the project's `data_index`, as every imported file is.
                                    were typed (only when there are any)
             mates                  JSON, the mated surfaces (only when
                                    there are any)
+            sensor_choices         JSON, {sensor: {node, model, size,
+                                   length}}: what was chosen for each
+                                   accelerometer its measured points
+                                   locate, sizes in the coordinates'
+                                   unit (only when there are any)
             group_solids           JSON, {element group id: the solids it
                                    was meshed from} (only when there are
                                    any); a group absent is found by its name
+            group_family           JSON, {element group id: the element
+                                   family it was made for, 'quads'}, where
+                                   an empty group is listed (only when
+                                   there are any)
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,
@@ -307,6 +333,8 @@ Present only where they mean something:
             where a source carried complex modes), modal_mass
             (complex where measured), coordinate, comment, description
             modal_damping        only where a source carried one
+            reference_only       only where a fit measured some DOFs
+                                 as references alone
 
 ## `channel_table/`
 
@@ -323,7 +351,9 @@ channel at.
     environments/<k>/            the control loops, when there are any,
                                  numbered because an environment's name
                                  is free text and may hold a slash
-            attrs   name
+            attrs   name, kind (the kind of test the loop ran:
+                    random, sine, transient, modal or time; absent
+                    when unknown)
             dsets   controls, drives   channel numbers
                     response_transformation, reference_transformation
                                        matrices, when set
@@ -419,6 +449,28 @@ bands `alarm_below_db`, `alarm_above_db`, `abort_below_db` and
 A report's blocks may include one of kind `prediction`, naming the
 predictions (`source`) and the measurement (`measured`) with the level
 it was run at (`level`, dB relative to full level, or null).
+
+## `scan/`
+
+    scan/  attrs: length_unit ('' while not declared)
+           dsets:
+             points      float64 [3, N]: a row each for x, y and z
+             features    UTF-8 strings [F]: each feature's name   (optional)
+             feature_of  int32 [N]: the row in `features` a point
+                         belongs to, -1 for none                   (optional)
+             deviation   float64 [N]: how far the measuring software
+                         found each point from the surface it fit  (optional)
+             properties  one UTF-8 string, JSON: the header rows of
+                         the file it was read from                 (optional)
+
+Read only. Points measured on the part with a coordinate measuring arm
+were stored this way by builds between pull requests 309 and its
+successor; no release wrote it. A reader opens the group as a geometry:
+each point a node, numbered from 1, and each feature an element group
+of its name holding a one-node `measured_point` element (type 203) at
+each of its points. `deviation` and `properties` are not carried over.
+`points` is in meters when `length_unit` is set and as the file gave
+them when it is ''.
 
 ## `run_log_extract/`
 
@@ -601,6 +653,23 @@ a `ShockSpecification` and each pulse's SRS an `Srs` with a record per control a
 pulse, a waveform target a `TransientSpecification` of every control, its
 identification an `Frf` and a `MultipleCoherence`, and the rest stays in the run
 record (`docs/run-folder.md`, "What a MIMO Shock Run Saves").
+
+## MIMO Sine Runs
+
+A MIMO Sine run is a run folder and converts as one ("Run Folders and Their
+Conversion"), its project's type `Sine Sweep`. Its references
+(`results/reference`, kind `mimo_sine_reference`, every array controls by points)
+become a `Specification`: a `SineSweepSpecification` of one tone, `Tone 1`, with a
+column for each control, each with its own amplitude, phase and alarm and abort
+bands, in m/s**2, for a sweep or a dwell (a stepped sine's references stay in the
+run record). Its `channel_levels` (kind `sine_levels`) become a `SineLevelSet` of
+every control, limit channel and drive, its lines the last one-way pass at the
+highest level the run reached (a stepped sine read as a step test; a dwell's levels
+are against time and stay in the run record). Its identification is an `Frf` of
+every control's and limit channel's response to every drive and a
+`MultipleCoherence`; the trust mask, the law's calls (`control_trace`) and every
+other array stay in the run record (`docs/run-folder.md`, "What a MIMO Sine Run
+Saves").
 
 ## Reading One Without Hertzforge
 

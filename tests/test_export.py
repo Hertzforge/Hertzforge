@@ -668,17 +668,13 @@ def test_without_a_system_the_stored_values_go_out(tmp_path):
             RAW * 0.0254, rel=1e-9)
 
 
-def test_reading_in_g_does_not_put_g_in_the_file(tmp_path):
-    """The display override is a convenience of the screen. No format here
-    can record 'g', so exports use the coherent system underneath."""
+def test_a_format_without_units_holds_g_when_the_display_is_in_g(tmp_path):
+    """A file that cannot say its units holds the numbers on screen, g
+    included; picking a display system that suits the reader is the
+    user's call."""
     source = hertzforge.import_file(plate('time.npz'), ordinate_unit='g')
     in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
     plain = hertzforge.units.SYSTEMS['in-slinch-lbf-s']
-
-    # on screen: in/s**2 -> SI is x0.0254, SI -> g is /9.80665
-    assert np.abs(source.display_ordinate(in_g)).max() == pytest.approx(
-        np.abs(source.display_ordinate(plain)).max() * 0.0254 / 9.80665,
-        rel=1e-6)
 
     written = {}
     for system in (in_g, plain):
@@ -687,8 +683,45 @@ def test_reading_in_g_does_not_put_g_in_the_file(tmp_path):
                          unit_system=system)
         with np.load(path, allow_pickle=True) as archive:
             written[system.name] = np.abs(archive['data']['ordinate']).max()
-    assert written[in_g.name] == pytest.approx(written[plain.name]), \
-        'both write in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        np.abs(source.display_ordinate(in_g)).max(), rel=1e-9), 'g'
+    assert written[plain.name] == pytest.approx(
+        np.abs(source.display_ordinate(plain)).max(), rel=1e-9), 'in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        written[plain.name] * 0.0254 / 9.80665, rel=1e-6)
+
+
+def test_an_frf_without_units_in_the_file_holds_g_per_volt(tmp_path):
+    source = hertzforge.import_file(plate('frfs.npz'), response_unit='g',
+                                    reference_unit='V')
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'frfs.npz')
+    hertzforge.export_file(source, path, format='sdynpy_data', unit_system=in_g)
+    with np.load(path, allow_pickle=True) as archive:
+        ordinate = archive['data']['ordinate']
+    assert np.allclose(ordinate.reshape(source.ordinate.shape),
+                       source.display_ordinate(in_g))
+    assert np.allclose(np.abs(ordinate).ravel(),
+                       np.abs(source.ordinate).ravel() / 9.80665)
+
+
+def test_unv_writes_the_coherent_system_it_can_declare(tmp_path):
+    source = hertzforge.import_file(plate('time.npz'), ordinate_unit='g')
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'g.unv')
+    hertzforge.export_file(source, path, format='unv', unit_system=in_g)
+    back = hertzforge.import_file(path)
+    assert np.allclose(back.ordinate, source.ordinate, rtol=1e-4)
+
+
+def test_the_status_line_names_what_each_format_holds():
+    from hertzforge.io.exporters import units_written
+
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    for format in ('sdynpy_data', 'sdynpy_geometry', 'exodus', 'matlab'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s (g)', format
+    for format in ('unv', 'unv_binary'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s', format
 
 
 def test_the_164_names_the_coherent_system(tmp_path):
@@ -992,3 +1025,73 @@ def test_an_assignment_set_naming_a_frame_that_is_not_there_is_ignored(
             list('def_cs_9999'.ljust(width, '\0')), dtype='S1')
     back = hertzforge.import_file(path)
     assert set(back.node_def_cs) == {1}, 'nobody is placed in a frame the file lacks'
+
+
+def test_a_full_grid_of_frfs_is_written_as_a_matrix(tmp_path):
+    """Responses down the rows and references across, as a controller
+    reading a system's FRFs wants, in the order the FRF lists them."""
+    from hertzforge.io.sdynpy_data import dof_string
+
+    source = hertzforge.import_file(plate('frfs.npz'))
+    responses = list(dict.fromkeys(source.response_dof))
+    references = list(dict.fromkeys(source.reference_dof))
+    assert len(references) > 1
+    path = str(tmp_path / 'frfs.npz')
+    hertzforge.export_file(source, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        records = archive['data']
+    assert records.shape == (len(responses), len(references))
+    first = records[0, 1]['coordinate']
+    assert dof_string(
+        first['node'][1], first['direction'][1]) == references[1]
+    back = hertzforge.import_file(path)
+    order = [list(zip(source.response_dof, source.reference_dof)).index(pair)
+             for pair in zip(back.response_dof, back.reference_dof)]
+    assert np.allclose(back.ordinate, source.ordinate[order])
+
+
+def test_frfs_short_of_a_full_grid_stay_one_row(tmp_path):
+    some = hertzforge.import_file(plate('frfs.npz'))
+    some.delete_records([some.num_records - 1])
+    path = str(tmp_path / 'some.npz')
+    hertzforge.export_file(some, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (some.num_records,)
+#: a display system off its coherent base in length and mass, which the
+#: (g) systems, differing only in acceleration, cannot catch
+MM_LB = hertzforge.units.SI.with_units(length='mm', mass='lb')
+
+
+def test_geometry_is_written_in_the_display_length(tmp_path):
+    source = inch_plate()
+    path = str(tmp_path / 'mm.npz')
+    hertzforge.export_file(source, path, format='sdynpy_geometry',
+                           unit_system=MM_LB)
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['node']['coordinate'][:, 0].max() == pytest.approx(
+            RAW * 25.4, rel=1e-9)
+
+
+def test_shapes_are_written_in_the_display_mass(tmp_path):
+    source = hertzforge.import_file(survey('shapes.npy'), mass_unit='kg')
+    path = str(tmp_path / 'lb.npy')
+    hertzforge.export_file(source, path, format='sdynpy_shapes',
+                           unit_system=MM_LB)
+    back = hertzforge.import_file(path)
+    assert np.allclose(np.real(back.shape_matrix),
+                       np.real(source.shape_matrix) * np.sqrt(0.45359237))
+
+
+def test_frfs_with_one_pair_written_twice_stay_one_row(tmp_path):
+    """One pair repeated and another missing still counts responses times
+    references; only the check that every pair is unique keeps it flat."""
+    some = hertzforge.import_file(plate('frfs.npz'))
+    last = some.num_records - 1
+    some.response_dof[last] = some.response_dof[0]
+    some.reference_dof[last] = some.reference_dof[0]
+    assert len(set(some.response_dof)) * len(set(some.reference_dof)) == \
+        some.num_records
+    path = str(tmp_path / 'twice.npz')
+    hertzforge.export_file(some, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (some.num_records,)

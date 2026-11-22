@@ -8,7 +8,7 @@
 	 * selects its block (the report itself with a click outside the blocks), and the selected
 	 * block is outlined; read, nothing is selectable and unbound slots are left out.
 	 */
-	import type { ReportPageBlock, ReportPageData } from '$lib/protocol/types';
+	import type { ReportPageBlock, ReportPageData, View } from '$lib/protocol/types';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
 	interface Props {
@@ -23,12 +23,17 @@
 
 	const shown = $derived(editing ? page.blocks : page.blocks.filter((b) => b.kind !== 'unbound'));
 
-	/** The height a figure's view is given: a 3-D scene and a long bar chart want more. */
+	/** The height a figure's view is given: a 3-D scene wants more, and a matrix a row's worth per row. */
 	function height(block: ReportPageBlock): number {
 		const view = block.views?.[0];
 		if (!view) return 240;
-		if (view.view === 'shape3d' || view.view === 'waterfall') return 380;
+		if (view.view === 'shape3d') return 380;
+		// a stage of every channel in depth, as wide as the page: room to read it
+		if (view.view === 'waterfall') return 520;
 		if (view.view === 'table' || view.view === 'bars' || view.view === 'reading') return 0;
+		// a coherence map or a MAC: tall enough that every row is labeled (the pane thins its
+		// labels below 13 px a row), with room under it for the tilted ticks and the legend
+		if (view.view === 'matrix') return Math.max(300, 16 * view.rows.ticks.length + 160);
 		return 300;
 	}
 
@@ -38,6 +43,16 @@
 		onselect?.(block);
 	}
 
+	/**
+	 * A wheel over a figure scrolls the page, as a document's should, and zooms the plot only with
+	 * Cmd or Ctrl held or on a trackpad pinch (which the browser sends with Ctrl): the plots span
+	 * the page, so a wheel they all took left nowhere to scroll from. Caught on its way down, before
+	 * the plot's own handler, and left to the browser.
+	 */
+	function scrollsPage(e: WheelEvent) {
+		if (!e.ctrlKey && !e.metaKey) e.stopPropagation();
+	}
+
 	function keyed(e: KeyboardEvent, block: number | null) {
 		if (editing && (e.key === 'Enter' || e.key === ' ')) {
 			e.preventDefault();
@@ -45,6 +60,15 @@
 		}
 	}
 </script>
+
+<!-- the words for a plot's shaded zones and marks, under it: in a grid's cell and under a figure of one channel alike -->
+{#snippet zoneKey(view: View)}
+	{#if view.view === 'spectrum' && view.key?.length}
+		<p class="key">
+			{#each view.key as [code, words] (code)}<span class="keyed"><i class="swatch {code}"></i>{words}</span>{/each}
+		</p>
+	{/if}
+{/snippet}
 
 <!-- a click between the blocks selects the report itself; the blocks take the keyboard -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -70,12 +94,41 @@
 				<!-- the core's escaped subset of markdown: headings, emphasis, code and lists -->
 				<div class="text">{@html block.html ?? ''}</div>
 			{:else if block.kind === 'figure'}
-				<figure>
+				<figure onwheelcapture={scrollsPage}>
+					{#if block.grid}
+						<!-- a table of plots: a row a node, a column a direction -->
+						<div class="plotgrid" data-testid="report-grid" style:--columns={Math.max(1, block.grid.columns.length)}>
+							<div class="corner"></div>
+							{#each block.grid.columns as column, c (c)}<div class="colhead">{column}</div>{/each}
+							{#each block.grid.rows as row, r (r)}
+								<div class="rowhead">{row.label}</div>
+								{#each row.cells as cell, c (c)}
+									<div class="cell" data-testid="report-grid-cell">
+										{#each cell as placed (placed.view)}
+											{@const view = block.views?.[placed.view]}
+											{#if view}
+												<div class="view" style:height="260px">
+													<ViewRenderer {view} showTitle={false} minHeight={200} />
+												</div>
+												{@render zoneKey(view)}
+												<p class="celltitle"><b>{placed.caption}</b>{placed.note ? ` (${placed.note})` : ''}</p>
+												{#each placed.facts ?? [] as [label, text] (label)}
+													<p class="fact"><b>{label}:</b> {text}</p>
+												{/each}
+											{/if}
+										{/each}
+									</div>
+								{/each}
+							{/each}
+						</div>
+					{:else}
 					{#each block.views ?? [] as view, i (i)}
 						<div class="view" style:height={height(block) ? `${height(block)}px` : undefined}>
-							<ViewRenderer {view} showTitle={false} minHeight={height(block) || 160} />
+							<ViewRenderer {view} showTitle={false} minHeight={height(block) || 160} whole />
 						</div>
+						{@render zoneKey(view)}
 					{/each}
+					{/if}
 					{#if block.label || block.caption}
 						<figcaption><b>{block.label}</b>{block.label && block.caption ? '. ' : ''}{block.caption}</figcaption>
 					{/if}
@@ -92,9 +145,77 @@
 </article>
 
 <style>
+	.plotgrid {
+		display: grid;
+		grid-template-columns: max-content repeat(var(--columns), minmax(0, 1fr));
+		gap: var(--sp-2) var(--sp-3);
+		align-items: start;
+	}
+
+	.colhead {
+		font-weight: 650;
+		text-align: center;
+	}
+
+	.rowhead {
+		padding-top: var(--sp-2);
+		font-weight: 650;
+		white-space: nowrap;
+	}
+
+	.cell {
+		min-width: 0;
+	}
+
+	.key,
+	.celltitle,
+	.fact {
+		margin: 2px 0 0;
+		font-size: var(--text-xs);
+	}
+
+	.key {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px 12px;
+		color: var(--text-2);
+	}
+
+	.keyed {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.swatch {
+		display: inline-block;
+		width: 12px;
+		height: 10px;
+		border-radius: 2px;
+	}
+
+	.swatch.warning {
+		background: color-mix(in srgb, #d9a441 40%, transparent);
+	}
+
+	.swatch.above {
+		background: color-mix(in srgb, #d6453d 40%, transparent);
+	}
+
+	.swatch.below {
+		background: color-mix(in srgb, #3d7fd6 40%, transparent);
+	}
+
+	.swatch.exceed_over {
+		background: #d6453d;
+	}
+
+	.swatch.exceed_under {
+		background: #3d7fd6;
+	}
+
+	/* the window's whole width, so a large screen gives the plots their room */
 	.page {
-		max-width: 960px;
-		margin: 0 auto;
 		padding: var(--sp-4) var(--sp-5) var(--sp-6);
 		color: var(--text-1);
 		font-size: var(--text-sm);
@@ -170,7 +291,6 @@
 
 	@media print {
 		.page {
-			max-width: none;
 			padding: 0;
 		}
 

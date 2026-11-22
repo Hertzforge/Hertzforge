@@ -1,0 +1,130 @@
+{
+ "type": "response",
+ "id": 84,
+ "result": {
+  "run_id": "msine-0002",
+  "state": "running",
+  "phase": "engaged",
+  "title": "Four-Shaker Sweep, 1 g, 20 to 400 Hz",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": [],
+   "structure": "sine-base-article-6x4"
+  },
+  "grid": {
+   "fs_hz": 16384,
+   "tick_frames": 164,
+   "tick_s": 0.0100098,
+   "actual": true
+  },
+  "clock": "shared",
+  "test": "sweep",
+  "shape": "square",
+  "phase_specified": true,
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -6,
+   0
+  ],
+  "level_db": -6,
+  "rung": 1,
+  "frequency_hz": 97.25,
+  "direction": "up",
+  "sweeps": {
+   "done": 1,
+   "of": 2
+  },
+  "steps": null,
+  "held": false,
+  "request_held": false,
+  "elapsed_s": 81.25,
+  "at_level_s": 12,
+  "remaining_s": 178.1,
+  "alarm": false,
+  "notch": true,
+  "notch_scale": 0.75,
+  "identification": {
+   "level_db": -20,
+   "measured_level_db": -17.5,
+   "realizations": 24,
+   "line_spacing_hz": 0.25,
+   "duration_s": 200,
+   "drive_vrms": [
+    0.0625,
+    0.0625,
+    0.0625,
+    0.0625
+   ],
+   "coherence_mean": [
+    0.9921,
+    0.9844,
+    0.9922,
+    0.9766
+   ],
+   "limit_coherence_mean": [
+    0.9609,
+    0.9531
+   ],
+   "trusted_frac": 0.9688,
+   "condition_max": 12.5,
+   "lag_frames": 266,
+   "gate_coherence": 0.5,
+   "passed": true
+  },
+  "review": {
+   "resonances": [
+    {
+     "freq_hz": 40.5,
+     "bandwidth_hz": 0.81,
+     "time_constants": 1.25,
+     "flagged": true
+    },
+    {
+     "freq_hz": 230,
+     "bandwidth_hz": 9.2,
+     "time_constants": 8.5,
+     "flagged": false
+    }
+   ],
+   "acknowledged": null
+  },
+  "law": {
+   "id": "matrix",
+   "name": "matrix",
+   "version": "0.1.0",
+   "sha256": null,
+   "params": {
+    "carry": 0.67,
+    "gain_rule": "loop_speed",
+    "fixed_gain": 0.5,
+    "delay_estimate": "largest",
+    "regularization": 0.001,
+    "model": "modal",
+    "smoothing_lines": 8,
+    "free_phase": "in_phase",
+    "carry_outside_model": false
+   },
+   "misses": 0,
+   "capped_ticks": 3,
+   "over_ceiling": 1,
+   "rotation_max_deg": 4.25,
+   "requests": {
+    "asked": 0,
+    "granted": 0
+   }
+  },
+  "feasibility": {
+   "verdict": "not_evaluated",
+   "message": "No shaker was given, so the references were not checked against shaker ratings and the kinematic monitor is off."
+  },
+  "end": null,
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/20261117-140000_mimo_sine_msine-0002",
+   "streams": "on",
+   "problem": null
+  }
+ }
+}

@@ -1,0 +1,38 @@
+# hertzforge-modal-test - Modal Test, experimental modal acquisition by hammer impact or by
+# open-loop shakers: the setup and its refusals, the measurement plan and its roving
+# points, the shaker sources, the force and exponential windows, the hit checks, the
+# averages per measurement and the run host around the engine.
+#
+# This crate names no hardware backend. It is handed a finished station backend, and
+# the dependency firewall (`cargo deny check bans`) keeps a concrete backend out of it.
+
+[package]
+name = "hertzforge-modal-test"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# The channel table: the DOFs (node, direction, analysis role), ranges and aborts.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The cross spectra, H1, H2 and coherence of one reference, and the FFT and COLA random
+# synthesis the sources use.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The engine the run ticks, its watchdog and its lock-free rings.
+hertzforge-engine = { path = "../hertzforge-engine" }
+# The abstract hal trait crate (never a concrete backend).
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The arm gate.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# Matrix H1, multiple coherence and the condition number per line, for several
+# references.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+serde_json.workspace = true
+
+[dev-dependencies]
+# DEV-ONLY: the shared stop ramp is held to Playback's numbers.
+hertzforge-playback = { path = "../hertzforge-playback" }
+# DEV-ONLY, and it must stay that way: the run host's tests drive the simulator. The
+# host takes a finished `Box<dyn Backend>` and never names a backend.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

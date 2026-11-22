@@ -42,13 +42,17 @@ def test_an_operation_that_waits_to_be_told_says_which_param_tells_it(catalog):
     assert committing == dict.fromkeys(
         ('project.mate_surfaces', 'project.merge_coincident_nodes',
          'project.tie_elements', 'project.align_meshes', 'project.plan_instrumentation',
-         'project.generate_rigid_body_modes', 'project.rescale'), 'keep')
+         'project.generate_rigid_body_modes', 'project.rescale',
+         'project.create_sensors', 'project.set_filter'), 'keep')
     for op in catalog['operations']:
         named = {param['name']: param for param in op['params']}
         if 'commits' in op:
             assert named[op['commits']]['type'] == 'boolean', op['id']
         else:
             assert 'keep' not in named, f'{op["id"]} has a keep tickbox and no Preview'
+    # Fit Sensors opens on its preview, which asks nothing, and has only Apply
+    opening = [op['id'] for op in catalog['operations'] if op.get('opens_previewed')]
+    assert opening == ['project.create_sensors']
 
 
 def test_an_object_param_lists_no_options_of_its_own(catalog):

@@ -17,8 +17,7 @@ import {
 	surfaceIndex,
 	unfraction,
 	wallTriangles,
-	zoneTriangles
-} from './waterfall';
+	zoneTriangles, regionHandles, handleStrokes, levelAt, shownLabels, type ScreenLabel } from './waterfall';
 
 describe('segmentIndex', () => {
 	const offsets = [0, 4, 8];
@@ -198,5 +197,70 @@ describe('regions on the stage', () => {
 		expect(edges).toHaveLength(24);
 		expect(regionMarks(-1, -0.5).faces).toHaveLength(0);
 		expect(Math.max(...regionMarks(1, 9).faces.filter((_v, i) => i % 3 === 0))).toBeCloseTo(STAGE.x);
+	});
+});
+
+describe('the handles of a draggable region', () => {
+	it('puts one at each end and one in the middle, on the floor in front', () => {
+		const handles = regionHandles(1.2, 0.4, true);
+		expect(handles.map((h) => h.part)).toEqual(['low', 'move', 'high']);
+		expect(handles.map((h) => h.at[0])).toEqual([0.4, 0.8, 1.2]);
+		expect(handles.every((h) => h.at[1] === 0 && h.at[2] === 0)).toBe(true);
+	});
+
+	it('gives a span that only slides its middle handle alone', () => {
+		expect(regionHandles(0.4, 1.2, false)).toEqual([{ part: 'move', at: [0.8, 0, 0] }]);
+	});
+
+	it('keeps the handles of a span that runs past the stage on the part that shows', () => {
+		// the whole record, ending a sample past the last one drawn
+		const whole = regionHandles(-1e-9, STAGE.x + 1e-5, true);
+		expect(whole.map((h) => h.at[0])).toEqual([0, STAGE.x / 2, STAGE.x]);
+		expect(regionHandles(-3, 0.5, true).map((h) => h.at[0])).toEqual([0, 0.25, 0.5]);
+		expect(regionHandles(-3, -1, true)).toEqual([]);
+		expect(regionHandles(STAGE.x + 1, STAGE.x + 2, true)).toEqual([]);
+	});
+
+	it('draws an arrow out of each end and three bars on the middle', () => {
+		const tipOf = (part: 'low' | 'high') => handleStrokes(part)[1][2];
+		expect(tipOf('low')).toBeLessThan(0.5);
+		expect(tipOf('high')).toBeGreaterThan(0.5);
+		// every stroke of an arrow ends on its tip
+		for (const part of ['low', 'high'] as const) expect(new Set(handleStrokes(part).map((s) => `${s[2]},${s[3]}`)).size).toBe(1);
+		const bars = handleStrokes('move');
+		expect(bars).toHaveLength(3);
+		expect(bars.every(([x0, y0, x1, y1]) => y0 === y1 && x0 < x1)).toBe(true);
+	});
+});
+
+describe('the level axis', () => {
+	it('stands at the low end of the abscissa, on the back edge', () => {
+		const [x, y, z] = levelAt(0.5);
+		expect(x).toBeLessThan(0);
+		expect(y).toBe(STAGE.y);
+		expect(z).toBeCloseTo(STAGE.z / 2);
+	});
+
+	// a label ending 4 px left of its point, as the low labels do, 10 px tall and `width` wide
+	const ending = (sx: number, sy: number, thinned: ScreenLabel['thinned'], width = 40, front = true): ScreenLabel => ({
+		sx, sy, front, thinned, box: { left: sx - 4 - width, top: sy - 5, right: sx - 4, bottom: sy + 5 }
+	});
+
+	it('skips a level whose text would cross a record name, and keeps the name', () => {
+		// the levels come first in the page, the names after them, as the pane writes them; the
+		// first level's point is 14 px from the name's, past the gap, but a long name reaches it
+		const labels = [ending(100, 300, 'z'), ending(100, 200, 'z'), ending(100, 100, 'z'), ending(114, 309, 'rec', 60), ending(60, 400, 'rec')];
+		expect(shownLabels(labels)).toEqual([false, true, true, true, true]);
+	});
+
+	it('keeps a level beside a name it does not touch', () => {
+		const labels = [ending(100, 300, 'z'), ending(100, 312, 'rec')];
+		expect(shownLabels(labels)).toEqual([true, true]);
+	});
+
+	it('thins each kind on its own, and never a label of no kind', () => {
+		const at = (sx: number, thinned: ScreenLabel['thinned'], front = true) => ending(sx, 0, thinned, 2, front);
+		const labels = [at(0, 'rec'), at(5, 'rec'), at(20, 'rec'), at(30, 'z'), at(35, 'z'), at(5, null), at(6, null), at(40, 'rec', false)];
+		expect(shownLabels(labels)).toEqual([true, false, true, true, false, true, true, false]);
 	});
 });

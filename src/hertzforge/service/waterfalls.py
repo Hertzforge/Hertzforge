@@ -57,8 +57,9 @@ def unit_text(dimension: str) -> str | None:
 def axes(data: Any, first: int, component: str,
          arrays: dict[str, Any]) -> tuple[dict, dict]:
     """The abscissa and value axes of `data`'s records as `waterfall_arrays`
-    drew them, labeled by the first drawn record's quantity."""
-    from hertzforge.core.data import TimeHistory
+    drew them, labeled by the first drawn record's quantity. A PSD's frequency
+    axis is log whatever the arrays say."""
+    from hertzforge.core.data import Psd, TimeHistory
     from hertzforge.drawing.viz.waterfall import quantity_label
     from hertzforge.names import display_name
 
@@ -73,8 +74,11 @@ def axes(data: Any, first: int, component: str,
         label, unit = f'{label} phase', 'deg'
     elif signed:
         label = f'{label}, {COMPONENTS[component].lower()}'
+    # a PSD, and so a specification, opens on log frequency as it does on log level; the
+    # viewer's own choice for that kind of object is kept over this (Brandon, 2026-11-17)
+    density = isinstance(data, Psd) and data.abscissa_dim == 'frequency'
     x = v.axis(data.abscissa_dim.capitalize(), unit_text(data.abscissa_dim),
-               'log' if arrays['log_abscissa'] else 'linear')
+               'log' if arrays['log_abscissa'] or density else 'linear')
     z = v.axis(label, unit, 'log' if arrays['log_scaled'] else 'linear')
     return x, z
 

@@ -9,6 +9,7 @@
 	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
+	import { lonePlot } from './readingLayout';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
@@ -17,6 +18,7 @@
 	const TABLE_VIEWS: Record<string, string> = { channels: 'Channels', response: 'Response transformation', reference: 'Reference transformation' };
 
 	/** Where a shape set's values are read. */
+	const ARROW_CHOICES: Record<string, string> = { all: 'All channels', control: 'Control channels', reference: 'References', response: 'Responses', monitor: 'Monitors' };
 	const VALUES_CHOICES: Record<string, string> = {
 		all: 'All DOFs',
 		control: 'Control channels',
@@ -35,6 +37,11 @@
 	let { app, only, replacing }: Props = $props();
 
 	const a = $derived(app.analyze);
+	/** What the selection plots, as a plot's choice of scales is kept: the kinds of its objects. */
+	const scaleOf = $derived.by(() => {
+		const kinds = new Map((app.project.summary?.objects ?? []).map((o) => [o.name, o.kind]));
+		return [...new Set(app.project.selection.objects.map((name) => kinds.get(name) ?? 'object'))].sort().join('+');
+	});
 
 	// the action column's width, dragged by its edge and remembered; put away, it waits in the frame's header
 	const TABLE_KEY = 'hertzforge.actionTable';
@@ -73,6 +80,8 @@
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
 	$effect(() => a.followPreview());
+	// the Averaging form's frames are drawn on the history it is open on
+	$effect(() => a.followAveraging());
 
 	// a stage that reads at a line follows the frequency cursor of the plot beside it
 	$effect(() => {
@@ -131,10 +140,15 @@
 					<h3>{a.reading.title}</h3>
 					<p class="meta">{a.shown?.title ?? ''}</p>
 				</header>
-				<div class="svviews" class:several={a.reading.views.length > 1}>
+				<div class="svviews" class:several={a.reading.views.length > 1} class:lone={lonePlot(a.reading.views)} style:--beside={Math.max(a.reading.views.length - 1, 1)}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
-							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)}
+								onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editReadingCell(v.edit!, row, column, value) : undefined}
+								onnested={(edit, row, column, value) => a.editReadingCell(edit, row, column, value)}
+								onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeReadingRows(v.edit!.remove!, ids) : undefined}
+								onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
+								onrowpick={v.view === 'table' && v.select ? (id) => a.pickReadingRow(v.select!, id) : undefined} />
 						</div>
 					{/each}
 				</div>
@@ -151,8 +165,11 @@
 							{#if offers.flat}
 								<div class="seg" role="radiogroup" aria-label="Stage or plot">
 									<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="read-3d" title="The 3-D stage, every record at its own depth" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
-									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
+									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The 2-D plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>2D</button>
 								</div>
+							{/if}
+							{#if offers.limits && a.prefs.flat}
+								<button class="btn ghost sm" class:on={a.prefs.limits} aria-pressed={a.prefs.limits} data-testid="read-limits" title="Draw the specification's warning and abort limits on the plot" onclick={() => a.setPref('limits', !a.prefs.limits)}>Limits</button>
 							{/if}
 							{#if offers.complex}
 								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
@@ -161,9 +178,6 @@
 									<option value="imag">Imaginary part</option>
 									<option value="phase">Phase</option>
 								</select>
-							{/if}
-							{#if a.shown?.views.some((v) => v.view === 'shape3d' && v.overlays?.length)}
-								<button class="btn ghost sm" class:on={a.prefs.overlay} aria-pressed={a.prefs.overlay} data-testid="read-overlay" title="Animate the picked pair of modes over each other, the second phase-aligned to the first" onclick={() => a.setPref('overlay', !a.prefs.overlay)}>Overlay</button>
 							{/if}
 							{#if offers.projection}
 								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
@@ -216,7 +230,7 @@
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
-							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors))}
+							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors || (offers?.arrow_roles.length ?? 0) > 1 || (offers?.drives.length ?? 0) > 1))}
 							<div class="view pane {v.view}" data-testid="pane-{v.view}">
 								{#if headed && offers}
 									<!-- the pane's own header: its title and the controls that read this view; a lone view with nothing to set leaves its title to the frame -->
@@ -228,6 +242,21 @@
 										{#if v.view === 'shape3d'}
 											{#if offers.arrows}
 												<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
+											{/if}
+											<!-- a table picked with its geometry always has its arrows drawn, so only the choice shows -->
+											{#if offers.arrow_roles.length > 1 && (a.prefs.arrows || !offers.arrows)}
+												<select class="field sm" aria-label="Arrows drawn" data-testid="read-arrow-role" value={offers.arrow_roles.includes(a.prefs.arrow_role) ? a.prefs.arrow_role : 'all'} onchange={(e) => a.setPref('arrow_role', (e.currentTarget as HTMLSelectElement).value)} title="The channels whose DOF arrows are drawn: every channel of the table, its control channels, or the channels in one role">
+													{#each offers.arrow_roles as choice (choice)}
+														<option value={choice}>{ARROW_CHOICES[choice] ?? choice}</option>
+													{/each}
+												</select>
+											{/if}
+											{#if offers.drives.length > 1}
+												<select class="field sm" aria-label="Force at" data-testid="read-drive" value={a.prefs.drive && offers.drives.includes(a.prefs.drive) ? a.prefs.drive : offers.drives[0]} onchange={(e) => a.setPref('drive', (e.currentTarget as HTMLSelectElement).value)} title="Which of the channel table's force references the geometry is driven at">
+													{#each offers.drives as dof (dof)}
+														<option value={dof}>Force at {dof}</option>
+													{/each}
+												</select>
 											{/if}
 											{#if offers.sensors}
 												<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
@@ -262,16 +291,19 @@
 										minHeight={240}
 										scope="selection"
 										scaleToggle
+										scaleOf={scaleOf}
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
 										picks={v.view === 'matrix' && v.selects ? a.picks : []}
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
 										bars={v.view === 'matrix' && a.prefs.bars}
 										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
-										overlay={v.view === 'shape3d' && v.paired ? (a.prefs.overlay ? undefined : null) : v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
+										overlay={v.view === 'shape3d' && v.paired ? undefined : v.view === 'shape3d' && linked && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
 										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
+										regions={v.view === 'spectrum' || v.view === 'waterfall' ? a.averagingRegions : null}
+										onspan={v.view === 'spectrum' || v.view === 'waterfall' ? (k, x0, x1) => { const drag = (a.averagingRegions ?? v.regions)?.[k]?.drag; if (drag) void a.spanOnSelection(drag, x0, x1); } : undefined}
 									/>
 								</div>
 								{/if}
@@ -512,6 +544,17 @@
 		grid-column: 1 / -1;
 	}
 
+	/* a reading's views each take their own height and the reading scrolls: auto rows in a frame of
+	   fixed height shrank every table to a sliver, and its rows ran over the next table's */
+	.svviews.several:not(.panes) {
+		grid-auto-rows: max-content;
+		overflow-y: auto;
+	}
+
+	.svviews.several:not(.panes) .view.shape3d {
+		min-height: 440px;
+	}
+
 	@container (min-width: 900px) {
 		.svviews.several:has(.view.shape3d) {
 			grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -521,6 +564,16 @@
 		.svviews.several .view.shape3d {
 			grid-column: 1;
 			grid-row: 1 / span 2;
+			min-height: 520px;
+		}
+
+		/* an operation's views beside its 3-D view: each at its own height down the right, the 3-D view down the left beside all of them. Two rows shared between three tables laid them over each other */
+		.svviews.several:not(.panes):has(.view.shape3d) {
+			grid-auto-rows: max-content;
+		}
+
+		.svviews.several:not(.panes) .view.shape3d {
+			grid-row: 1 / span var(--beside, 2);
 			min-height: 520px;
 		}
 
@@ -602,6 +655,8 @@
 	/* the view fills what its pane leaves; a basis of auto keeps a pane with no set height at its content's */
 	.pbody {
 		display: grid;
+		/* no wider than the pane, so a wide table scrolls sideways inside it instead of being cut off */
+		grid-template-columns: minmax(0, 1fr);
 		flex: 1 1 auto;
 		min-height: 0;
 	}
@@ -632,6 +687,12 @@
 		white-space: nowrap;
 	}
 
+	/* a choice in the header is as wide as its words, so the title keeps its room */
+	.phead select.field {
+		flex: none;
+		width: auto;
+	}
+
 	.phead .btn.on {
 		color: var(--text-1);
 		background: var(--bg-3);
@@ -655,6 +716,17 @@
 
 	.view.spectrum {
 		height: 340px;
+	}
+
+	/* a reading's one plot fills its frame: the height a plot keeps in a column of them squeezed a
+	   lone CMIF into the top of an empty frame. A lone table still takes its rows */
+	.svviews.lone:not(.panes) {
+		grid-template-rows: minmax(0, 1fr);
+	}
+
+	.svviews.lone:not(.panes) .view {
+		height: auto;
+		min-height: 240px;
 	}
 
 	/* the 3-D views grow with the window; a plot keeps its height, which suits a column of them */

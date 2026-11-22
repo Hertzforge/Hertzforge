@@ -51,6 +51,7 @@ def waterfall(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 RECORDS = Param('records', 'Records', 'string', default='')
+LIMITS = Param('limits', 'Warning and abort limits', 'boolean', default=True)
 
 #: the records a plot draws when none are named
 FIRST_RECORDS = 8
@@ -66,8 +67,10 @@ def chosen_records(text: str, count: int) -> list[int]:
 
 def plot(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plot`: chosen records of a data object as curves on one
-    plot. Records of another quantity than the first are left out, since
-    they do not share an axis; the view's title says how many."""
+    plot, a density drawn flat across its bins (`_curve`). Records of another
+    quantity than the first are left out, since they do not share an axis; the
+    view's title says how many. With `limits`, the warning and abort limits of
+    an object that carries them follow its records (`_limit_lines`)."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
 
@@ -80,12 +83,63 @@ def plot(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} has no records to draw.')
     lines = []
     for record, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True):
-        kept = np.isfinite(x) & np.isfinite(y)
-        lines.append(v.series(data.record_label(record), 'measured', x[kept], y[kept]))
+        lines.append(_curve(data.record_label(record), 'measured', data, x, y,
+                            params['component']))
+    if params.get('limits', True) and params['component'] == 'magnitude':
+        lines += _limit_lines(data, arrays['drawn'])
     left = len(records) - len(arrays['drawn'])
     title = name if not left else f'{name} ({left} of another quantity left out)'
     return [v.spectrum(title, *axes(data, arrays['drawn'][0], params['component'], arrays),
                        lines)]
+
+
+def _curve(name: str, role: Any, data: Any, x: np.ndarray, y: np.ndarray,
+           component: str) -> dict:
+    """One record's curve as the 2-D plot draws it. A density per bin (a PSD, a
+    specification on a controller's lines, anything banded) is a `steps` series on its
+    bins' edges, flat across each bin, so the area drawn is the area the values stand
+    for. The stage's arrays give such a curve as an outline, two points a bin on its
+    edges; sent as points, the plot merged the two at each shared edge and drew a line
+    through the bins (Brandon, 2026-11-17). Anything else is its finite points."""
+    from hertzforge.drawing.plot import drawing_shape
+
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    outlined = (drawing_shape(data, component != 'magnitude') == 'steps' and x.size >= 4
+                and x.size % 2 == 0 and np.array_equal(x[1:-1:2], x[2::2])
+                and np.array_equal(y[::2], y[1::2], equal_nan=True))
+    if outlined and np.isfinite(x).all() and np.isfinite(y).all():
+        edges = np.concatenate([x[:1], x[1::2]])
+        return v.series(name, role, 0.5 * (edges[:-1] + edges[1:]), y[::2], 'steps', edges)
+    kept = np.isfinite(x) & np.isfinite(y)
+    return v.series(name, role, x[kept], y[kept])
+
+
+def _limit_lines(data: Any, records: list[int]) -> list[dict]:
+    """The warning and abort limits of the records drawn, for an object that carries
+    them (a specification): each drawn the way the specification is, as the object its
+    `limit` returns, and named by its record when more than one is drawn. A record with
+    no limit (not a control channel) adds no curve."""
+    import hertzforge as hz
+    from hertzforge.drawing.viz.waterfall import waterfall_arrays
+
+    from .spec_lines import NAMES, ROLES
+
+    lines: list[dict] = []
+    if not getattr(data, 'limits', None):
+        return lines
+    for key in data.LIMITS:
+        limit = data.limit(key)
+        if limit is None:
+            continue
+        arrays = waterfall_arrays(limit, records, unit_system=hz.SI, exponents=False,
+                                  component='magnitude')
+        for record, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True):
+            if not (np.isfinite(x) & np.isfinite(y)).any():
+                continue
+            name = (NAMES[key] if len(records) == 1
+                    else f'{data.record_label(record)}: {NAMES[key]}')
+            lines.append(_curve(name, ROLES[key], limit, x, y, 'magnitude'))
+    return lines
 
 
 def _derived(project: Any, call: Any) -> list[dict]:
@@ -316,13 +370,28 @@ TOP_FREQUENCY = Param('maximum_frequency', 'Highest frequency', 'number', defaul
                       unit='Hz', min=0.0, step=10.0, shown_with=('by', 'frequency'))
 MODAL_DAMPING = Param('damping', 'Damping', 'number', default=2.0, unit='%', min=0.0,
                       max=100.0, step=0.5)
-ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table|geometry')
 PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
                          options_from='objects:shape_set|channel_table')
-EXPAND_MATCH = Param('tolerance', 'Node match tolerance, on another geometry', 'number',
-                     default=2.0, unit='%', min=0.01, max=100.0, step=0.5)
-MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
-              min=0.01, max=100.0, step=0.5)
+#: how far a node may be from the nearest node of the other geometry, typed in the display
+#: system's length (or the model's own units); 0 for 2 % of the target geometry's size plus
+#: half its thickest plate (`Project.match_distance`), which the action table fills in
+MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
+              default=0.0, unit='m', min=0.0, step=0.001, length=True)
+#: Project for two shape sets on two geometries, the setting every comparison of the pair
+#: reads: the two sets, which is projected onto the other, and how far a node may be
+PAIR_FIRST = Param('first', 'First', 'enum', options_from='objects:shape_set')
+PAIR_SECOND = Param('second', 'Second', 'enum', options_from='objects:shape_set')
+PAIR_DIRECTION = Param('direction', 'Direction', 'enum', default='named', options=(
+    Option('named', 'First onto Second'), Option('reversed', 'Second onto First')))
+#: which of two shape sets is projected onto the other: as `source` and `onto` name them, or
+#: the other way. The action table opens on the way that can be made, words each way after
+#: the sets, and says why the other cannot be made when it cannot (`project.projection_why`)
+DIRECTION = Param('direction', 'Direction', 'enum', default='named', options=(
+    Option('named', 'Shape set onto Onto'), Option('reversed', 'Onto onto Shape set')))
+EXPAND_MATCH = Param('distance', 'Node match tolerance, on another geometry (0 for 2 % of '
+                     "the target's size)", 'number', default=0.0, unit='m', min=0.0,
+                     step=0.001, length=True)
 
 
 def _added_shapes(project: Any, call: Any) -> list[dict]:
@@ -413,12 +482,12 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.channel_table import ChannelTable
 
     source, partner = params['source'], params['shapes']
-    tolerance = float(params.get('tolerance', 2.0)) / 100.0
+    distance = float(params.get('distance') or 0.0) or None
     at_table = isinstance(project.get(partner), ChannelTable)
     if not at_table:
         return _derived(project, lambda: project.expand(source, partner))
     try:
-        added = project.expand(source, partner, tolerance=tolerance)
+        added = project.expand(source, partner, distance=distance)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     made = project[added]
@@ -448,12 +517,154 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
     return [view, v.reading(f'{source} at {partner}', rows)]
 
 
+#: how the node matches are drawn: a model node a test node was matched to is reached by a
+#: link; a test node matched, one with no model node within the distance, and one the
+#: projection does not read (no DOF of the target at it) each in their own color
+MATCHED_COLOR = (67, 160, 71)
+UNMATCHED_COLOR = (229, 57, 53)
+UNREAD_COLOR = (140, 140, 140)
+LINK_COLOR = (255, 193, 7)
+TARGET_LINE_COLOR = (120, 144, 156)
+
+
+def node_matches(project: Any, source: str, onto: str, report: dict) -> dict:
+    """Both geometries of a projection overlaid in one frame, as `project_shapes` measured
+    them (`core.correlate.si_points`): the model's mesh, the target's nodes, those matched
+    in one color and those with no model node within the distance in another, the target's
+    own lines, and a link from each matched node to the model node it was matched to
+    (`report['pairs']`). What Project onto Basis DOFs previews as the distance is typed."""
+    from hertzforge.core.correlate import si_points
+    from hertzforge.core.geometry import Geometry
+
+    home = (onto, project[onto]) if isinstance(project[onto], Geometry) else project.geometry_for(onto)
+    theirs = project.geometry_for(source)
+    model, target = theirs[1], home[1]
+    model_points, target_points = si_points(model), si_points(target)
+    rows, triangles, lines = drawn_mesh(model)
+    model_row = {int(node): k for k, node in enumerate(model.node_id)}
+    target_row = {int(node): k for k, node in enumerate(target.node_id)}
+    matched = [target_row[t] for t, _m in report.get('pairs', [])]
+    unmatched = [target_row[t] for t in report.get('unmatched', [])]
+    unread = sorted(set(range(target.num_nodes)) - set(matched) - set(unmatched))
+
+    def layer(picked: list[int], color: tuple, size: float) -> dict:
+        return {'xyz': np.ascontiguousarray(target_points[picked], np.float32),
+                'colors': np.tile(np.asarray(color, np.uint8), (len(picked), 1)), 'size': size}
+
+    links = np.asarray([[target_points[target_row[t]], model_points[model_row[m]]]
+                        for t, m in report.get('pairs', [])], dtype=np.float32).reshape(-1, 3)
+    # the model node each was matched to, in the link's color: a pair reads as two dots
+    ends = {'xyz': np.ascontiguousarray(links[1::2], np.float32),
+            'colors': np.tile(np.asarray(LINK_COLOR, np.uint8), (len(links) // 2, 1)),
+            'size': 5.0}
+    drawn = [layer(unread, UNREAD_COLOR, 4.0), layer(matched, MATCHED_COLOR, 7.0), ends,
+             layer(unmatched, UNMATCHED_COLOR, 10.0)]
+    _target_rows, _faces, target_lines = drawn_mesh(target)
+    edges = target_points[_target_rows][np.asarray(target_lines, dtype=np.int64)].reshape(-1, 3)
+    points = [held for held in drawn if len(held['xyz'])]
+    segments = [{'xyz': np.ascontiguousarray(xyz, np.float32), 'color': list(color)}
+                for xyz, color in ((edges, TARGET_LINE_COLOR), (links, LINK_COLOR)) if len(xyz)]
+    return v.shape3d(f'Node matches: {source} onto {onto}',
+                     'm' if model.units_defined else 'undefined', model_points[rows], [],
+                     triangles=triangles, lines=lines, node_ids=np.asarray(model.node_id)[rows],
+                     points=points, segments=segments)
+
+
+def projection_views(project: Any, source: str, onto: str) -> list[dict]:
+    """A shape set and a geometry it does not belong on, picked together: the projection
+    Project would make onto that geometry at the default distance, drawn and read and not
+    added (`node_matches`); or, when it cannot be made, why, and which set could be
+    projected the other way (`project.projection_why`)."""
+    from hertzforge.core.correlate import NoNodeMatched
+    from hertzforge.core.shapes import ShapeSet
+    from hertzforge.project import projection_why
+
+    from .ops_modal_plan import _report_rows
+
+    why = projection_why(project, source, onto)
+    if why:
+        rows = [v.row('Not projected', why, None, 'warn')]
+        # the way that works: a set on that geometry onto this one
+        others = [name for name in project.object_group_of(onto) or ()
+                  if isinstance(project.get(name), ShapeSet)
+                  and not projection_why(project, name, source)]
+        if others:
+            rows.append(v.row('Instead', f'project {others[0]} onto {source}', None, 'info'))
+        rows.append(v.row('Drawn on it', 'no: its DOFs are not that geometry\'s nodes, so '
+                          'they are not drawn there by number; Link them if they go together',
+                          None, 'info'))
+        return [v.reading(f'{source} cannot be projected onto {onto}', rows)]
+    try:
+        report = project.projected(source, onto).projection_report
+        title = f'{source} projected onto {onto}: what Project would match'
+    except NoNodeMatched as error:
+        report = error.report
+        title = f'No node of {onto} matched {source} within the default distance'
+    defined = project.geometry_for(source)[1].units_defined
+    return [node_matches(project, source, onto, report),
+            v.reading(title, _report_rows(report, defined))]
+
+
+def set_projection(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_projection`: how two shape sets on two geometries are projected when
+    compared (`Project.set_projection`), kept as it is changed: the two geometries overlaid
+    with the node pairs matched (`node_matches`) and what the projection matched. The MAC,
+    the matches and the animated projection under it read what it keeps."""
+    from hertzforge.core.correlate import NoNodeMatched
+
+    from .ops_modal_plan import _report_rows
+
+    first, second = params['first'], params['second']
+    source, onto = (first, second) if params['direction'] == 'named' else (second, first)
+    try:
+        project.set_projection(first, second, source=source,
+                               distance=params['distance'] or None)
+        report = project.compared_sets(first, second)[3]
+    except NoNodeMatched as error:
+        report = error.report
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    defined = project.geometry_for(source)[1].units_defined
+    return [node_matches(project, source, onto, report),
+            v.reading(f'{source} projected onto {onto}', _report_rows(report, defined))]
+
+
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
-    DOFs, or at a channel table's (`Project.project_onto_basis`), a node
-    matched within a share of the basis model's size, 2 %."""
-    return _added_shapes(project, lambda: project.project_onto_basis(
-        params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
+    DOFs, at a channel table's, or at every node of a geometry
+    (`Project.project_onto_basis`), a node matched within the distance
+    typed, or `Project.match_distance`'s for 0: the two geometries
+    overlaid with the node pairs matched and the nodes left out
+    (`node_matches`), what the projection matched, and the set it adds; when
+    no node is matched, the first two and nothing added, so the distance can
+    be set beside them."""
+    from hertzforge.core.correlate import NoNodeMatched
+    from hertzforge.core.shapes import ShapeSet
+
+    from .ops_modal_plan import _report_rows
+
+    source, onto = params['source'], params['onto']
+    if params.get('direction') == 'reversed':
+        if not isinstance(project[onto], ShapeSet):
+            raise refused(f'only a shape set is projected the other way; {onto} is not one')
+        source, onto = onto, source
+    try:
+        added = project.project_onto_basis(source, onto=onto,
+                                           distance=params['distance'] or None)
+    except NoNodeMatched as error:
+        defined = project.geometry_for(source)[1].units_defined
+        return [node_matches(project, source, onto, error.report),
+                v.reading(f'No node of {onto} matched, so nothing was added',
+                          _report_rows(error.report, defined))]
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    report = project[added].projection_report
+    found = project.geometry_for(added)
+    reading = v.reading(f'{added}: projection',
+                        _report_rows(report, project.geometry_for(source)[1].units_defined))
+    # the matches first: they are what the distance is set by, as it is typed
+    drawn = [_shape_view(project, added, found[0])] if found is not None else []
+    return [node_matches(project, source, onto, report), reading, *drawn]
 
 
 FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
@@ -550,12 +761,22 @@ MODAL_VERB_OPERATIONS = (
                 MODAL_DAMPING),
         outputs=('shape3d', 'reading'), run=solve_modes),
     Operation(
+        id='project.set_projection', title='Project', workspace='modal',
+        summary='How two shape sets on two geometries are projected when they are compared: '
+                'which is projected onto the other, and how far a node may be from the node '
+                'it is matched to. The MAC, the matches and the animated projection under it '
+                'read it, and the project keeps it.',
+        params=(PAIR_FIRST, PAIR_SECOND, PAIR_DIRECTION, MATCH),
+        # previewed as it opens and as it is typed, so the matches show before anything is kept
+        outputs=('shape3d', 'reading'), run=set_projection, edits=True, previews=True),
+    Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
         workspace='modal',
-        summary='A shape set sampled at another set\'s DOFs, or at a channel '
-                'table\'s sensors, by the nearest node and its direction.',
-        params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
-        outputs=('shape3d', 'reading'), run=onto_basis),
+        summary='A shape set sampled at another set\'s DOFs, at a channel table\'s '
+                'sensors, or at every node of another geometry, by the nearest node '
+                'within the tolerance and its direction.',
+        params=(_source('project_onto_basis', 'Shape set'), ONTO, DIRECTION, MATCH),
+        outputs=('shape3d', 'reading'), run=onto_basis, previews=True),
 )
 
 
@@ -709,9 +930,10 @@ OPERATIONS = (
         run=waterfall),
     Operation(
         id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
-        summary='Chosen records of any data object as curves on one plot, '
-                'numbered from 1 as "1-3, 7"; the first eight when none are named.',
-        params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
+        summary='Chosen records of any data object as curves on one plot, numbered from 1 '
+                'as "1-3, 7"; the first eight when none are named. A specification\'s '
+                'warning and abort limits are drawn with it.',
+        params=(DATA, RECORDS, COMPONENT, LIMITS), outputs=('spectrum',), run=plot),
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',
         summary='PSDs from a time history\'s averages, added to the project.',

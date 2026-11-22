@@ -5,7 +5,8 @@
 default `<run name>.hforge` inside the folder. Every control module of
 the control service writes a run folder for every run: Random, MIMO
 Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
-Explorer and the Recorder. This is the analysis side of that bridge.
+Explorer, the Recorder and Playback. This is the analysis side of that
+bridge.
 
 The project holds, in this order:
 
@@ -60,7 +61,18 @@ The project holds, in this order:
   law, the log, the end, each stream's and result's description, the
   arrays of results no analysis class holds (an Explorer run's survey
   line and amplitude spectra among them: magnitudes with no phase, kept
-  in the channels' units as written), and what the folder lacked.
+  in the channels' units as written; a Playback run's check of its drive
+  file, `playback_check`, and its outcome, `playback_outcome`, whose
+  drive file is named in the setup with its SHA-256 and sidecar), and
+  what the folder lacked. A Playback run has no specification: its
+  inputs and its drives as played are its time histories.
+
+A Modal Test run has no specification either, and its streams are not
+copied whole: its measurements become each measurement's accepted
+frames, its FRFs (turned round by reciprocity as well when the
+excitation roved), its coherence and its reference autospectra
+(`modal_run`, which says how); its frame lines and outcome stay in the
+run record.
 
 All of them are linked in one object group named for the run. A gap in
 a stream is not padded: the samples after it follow on, and each record
@@ -82,13 +94,14 @@ from typing import Any
 
 import numpy as np
 
-from . import native, run_folder
+from . import modal_run, native, run_folder
 from .rattlesnake import _stream_offsets, _unit_scale
 
 #: the project type each test is a run of; a test not here sets none
 PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration',
                  'sine': 'Sine Sweep', 'classical_shock': 'Shock', 'srs': 'Shock',
-                 'mimo_shock': 'Shock', 'twr': 'Transient', 'mixed': 'Random and Sine'}
+                 'mimo_shock': 'Shock', 'twr': 'Transient', 'mixed': 'Random and Sine',
+                 'mimo_sine': 'Sine Sweep', 'modal_test': 'Modal Test'}
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays
@@ -261,17 +274,21 @@ def environment_from_json(value: Any) -> Any:
     matrices = {f'{form}_transformation': value.get(f'{form}_transformation')
                 for form in TRANSFORMATION_FORMS}
     return Environment(controls=list(value.get('controls') or []),
-                       drives=list(value.get('drives') or []), **matrices)
+                       drives=list(value.get('drives') or []),
+                       kind=str(value.get('kind') or ''), **matrices)
 
 
 def environment_to_json(environment: Any) -> dict[str, Any]:
     """An `Environment` as JSON: its control and drive channel numbers in
-    the controller's order, and each transformation as a list of rows, or
-    None."""
+    the controller's order, each transformation as a list of rows, or
+    None, and the kind of test it ran when it is known."""
     from ..core.channel_table import TRANSFORMATION_FORMS
 
     out: dict[str, Any] = {'controls': [int(n) for n in environment.controls],
                            'drives': [int(n) for n in environment.drives]}
+    if environment.kind:
+        # only when known, so a loop sent without one comes back as sent
+        out['kind'] = environment.kind
     for form in TRANSFORMATION_FORMS:
         matrix = environment.matrix(form)
         out[f'{form}_transformation'] = None if matrix is None else matrix.tolist()
@@ -835,6 +852,84 @@ def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]
         comment='the Sine profile as the control service resolved it on the run\'s band')
 
 
+def _mimo_sine_specification(run: run_folder.RunFolder, table: Any,
+                             lacked: list[str]) -> Any:
+    """A MIMO Sine run's references as the analysis holds a requirement:
+    one tone, each control channel with its own amplitude, phase and
+    bands, in SI. A sweep's tone is one pass across the band in the
+    direction the run started, at the rate and on the law it swept at; a
+    dwell's holds its frequency for its dwell. The breakpoints are the
+    points the service resolved the references at (`results/reference`).
+    A stepped sine plays no one tone; its references stay in the run
+    record."""
+    from ..core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
+
+    resolved = run.setup.get('resolved') if isinstance(run.setup.get('resolved'),
+                                                       Mapping) else {}
+    test = resolved.get('test') if isinstance(resolved.get('test'), Mapping) else {}
+    kind = test.get('kind')
+    reference = run.results.get('reference')
+    if reference is None or 'frequency' not in reference.arrays:
+        lacked.append('the run has no resolved references (results/reference), so it has no '
+                      'sine specification')
+        return None
+    if kind not in ('sweep', 'dwell'):
+        lacked.append(f'a {kind or "MIMO Sine"} test\'s references are no tone the analysis '
+                      'holds, so the run has no sine specification; they stay in the run record')
+        return None
+    controls = [int(i) for i in (reference.description.get('channels') or {}).get(
+        'controls') or []]
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    if not controls or any(c not in row for c in controls):
+        lacked.append('the references do not name their control channels in the table, so '
+                      'the run has no sine specification')
+        return None
+    units = {a.get('name'): str(a.get('unit') or '') for a in
+             reference.description.get('arrays') or []}
+    scale, dim, _unit = _unit_scale(units.get('reference', ''))
+    if dim != 'acceleration':
+        lacked.append(f'the references are in a unit of {dim!r}, not acceleration, so the run '
+                      'has no sine specification')
+        return None
+    frequencies = np.asarray(reference.arrays['frequency'], dtype=np.float64)
+    # every array is controls by points; the tone holds points by controls
+    target = np.asarray(reference.arrays['reference'], dtype=np.float64).T * scale
+    phase = np.deg2rad(np.nan_to_num(np.asarray(reference.arrays['phase'],
+                                                dtype=np.float64).T))
+    names = {'warning_lower': 'alarm_low', 'warning_upper': 'alarm_high',
+             'abort_lower': 'abort_low', 'abort_upper': 'abort_high'}
+    limits = {limit: np.asarray(reference.arrays[array], dtype=np.float64).T * scale
+              for limit, array in names.items() if array in reference.arrays}
+    if kind == 'dwell':
+        dwell = test.get('dwell') or {}
+        frequency = float(test['freq_hz'])
+        seconds = (float(dwell['seconds']) if 'seconds' in dwell
+                   else float(dwell.get('cycles', 0)) / frequency)
+
+        def at(values: np.ndarray) -> np.ndarray:
+            return np.array([np.interp(frequency, frequencies, values[:, c])
+                             for c in range(values.shape[1])])
+
+        tone = SineTone.dwell(SINE_TONE, frequency, at(target), seconds, phase=at(phase),
+                              **{k: at(v) for k, v in limits.items()})
+    else:
+        rate = test.get('rate') or {}
+        law = LOG if rate.get('law') == 'log' else LINEAR
+        speed = float(rate['oct_per_min'] if law == LOG else rate['hz_per_s'])
+        order = np.argsort(frequencies)
+        if test.get('direction') == 'down':
+            order, speed = order[::-1], -speed
+        tone = SineTone(SINE_TONE, 0.0, frequencies[order], target[order],
+                        [law] * (len(order) - 1), [speed] * (len(order) - 1),
+                        phase=phase[order], **{k: v[order] for k, v in limits.items()})
+    dofs = table.dof_strings()
+    return SineSweepSpecification(
+        [tone], [dofs[row[c]] for c in controls], ordinate_dim='acceleration',
+        ordinate_unit='m/s**2',
+        comment='the MIMO Sine references as the control service resolved them on the '
+                'run\'s band, each control with its own amplitude, phase and bands')
+
+
 def _sine_levels(result: run_folder.Result, table: Any, units: Mapping[int, str],
                  test: str | None) -> tuple[Any, str]:
     """The inputs' tracked levels as a `SineLevelSet`, or (None, why
@@ -1240,11 +1335,29 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     lacked = list(run.missing)
     table = channel_table_from_rows(run.rows)
     objects: dict[str, Any] = {'Channel Table': table}
-    for name, history in _histories(run, table, lacked, progress):
+    modal = run.test == modal_run.WIRE['test']
+    if modal:
+        # a Modal Test's force gauges are input rows its setup names as references
+        rows = {int(i): k for k, i in enumerate(table['channel'])}
+        for index in modal_run.reference_rows(run):
+            if index in rows:
+                table.set_cell('role', rows[index], 'reference')
+    measured = (modal_run.frames(run, table, lacked) if modal
+                else _histories(run, table, lacked, progress))
+    for name, history in measured:
         objects[_unique(name, objects)] = history
     units = {int(row['index']): str(row.get('units', '') or '') for row in run.rows}
-    if run.test == 'sine':
+    handled: set[str] = set()
+    unmapped: dict[str, dict[str, np.ndarray]] = {}
+    if modal:
+        spec = None
+        held_objects, handled, unmapped = modal_run.results(run, table, lacked)
+        for name, held in held_objects:
+            objects[_unique(name, objects)] = held
+    elif run.test == 'sine':
         spec = _sine_specification(run, table, lacked)
+    elif run.test == 'mimo_sine':
+        spec = _mimo_sine_specification(run, table, lacked)
     elif run.test == 'mimo_random':
         spec = None
         reference = run.results.get('reference')
@@ -1264,15 +1377,18 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     if tones is not None:
         objects[_unique('Tones', objects)] = tones
     descriptions: dict[str, dict[str, Any]] = {}
-    unmapped: dict[str, dict[str, np.ndarray]] = {}
     for name, result in run.results.items():
         descriptions[name] = dict(result.description)
         if result.records is not None:
             descriptions[name]['records'] = result.records
+        if name in handled:
+            continue
         why = f'its kind {result.kind!r} has no analysis class'
         held = None
         if result.kind == 'sine_levels':
             test = ((run.setup.get('resolved') or {}).get('test') or {}).get('kind')
+            # a MIMO Sine stepped sine is a step test against frequency
+            test = 'step' if (run.test, test) == ('mimo_sine', 'stepped') else test
             held, why = _sine_levels(result, table, units, test)
             if held is not None:
                 for level in held:

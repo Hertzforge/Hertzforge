@@ -19,6 +19,7 @@ from typing import Any
 from . import projects, verbs
 from .actions import _fill, _object_params, _placed, _runs
 from .descriptors import Operation, Param
+from .parsing import ALL_PICKED
 
 #: what two objects draw together, the table of `show._pair`'s branches
 #: (tests/service/test_action_table.py holds the two to each other)
@@ -81,6 +82,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
                         'No signal can be made from it'),
     'solve_modes': (('geometry',), 'Its element groups have no properties yet'),
     'plan_instrumentation': (('shape_set',), 'It needs a mode above 0 Hz on a geometry with elements'),
+    'create_sensors': (('geometry',), 'It holds no points measured on accelerometers'),
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
     'synthesize_modal_frfs': (('shape_set',), 'It needs real modes'),
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
@@ -88,12 +90,19 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 
 #: the operations on the project row that run at once, asking nothing (Brandon, 2026-11-10)
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
+#: forms with no Apply: each change is stored as it is made, and drawn where it is seen
+LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
+
+#: params that number the channels, records or rows of the object an action runs on:
+#: several as text ('1-3, 7', blank for all), or one. They are filled from what is picked
+#: in the tree and left off the form.
+PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
+PICKED_ONE = frozenset({'record', 'drawn'})
+#: the actions whose `modes` are the modes picked under their shape set, named by the param
+#: that holds the set: every mode when the set is selected whole
+PICKED_MODES = {'project.synthesize_modal_frfs': 'source'}
 
 #: the rows that read a geometry's nodes, off until it has some
-#: operations whose blank records are every record, so that a row with none picked runs at
-#: once: CMIF plots the whole FRF (Brandon, 2026-11-14)
-EVERY_RECORD = frozenset(('project.cmif',))
-
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
 
 #: an object param that takes this many types takes anything: it says nothing
@@ -161,7 +170,7 @@ def _shocks_to_unmark(project: Any, name: str) -> str:
 
 
 def _span(project: Any, name: str) -> str:
-    return '' if project[name].truncation is not None else 'No span is set: Set Truncation sets one'
+    return '' if project[name].truncation is not None else 'No span is set: Truncation sets one'
 
 
 def _sensors_placed(project: Any, name: str) -> str:
@@ -170,6 +179,23 @@ def _sensors_placed(project: Any, name: str) -> str:
     except (TypeError, ValueError):
         placed = []
     return '' if placed else 'It names no sensor model at a node of its geometry'
+
+
+def _modal_test_frames(project: Any, name: str) -> str:
+    """Why Estimate Again cannot take this time history: it is not a Modal Test run's
+    measurement frames (its object group's run record a Modal Test's, holding the frame
+    lines), or it has no reference or no response channel to estimate between."""
+    from hertzforge.report.run_records import record_of
+
+    record = record_of(project, name)
+    if record is None or record.test != 'modal_test':
+        return "It is not a Modal Test run's measurement frames"
+    if 'modal_frames' not in record.results:
+        return 'Its run record holds no frame lines'
+    roles = set(project[name].channel_roles().values())
+    if not {'reference', 'response'} <= roles:
+        return 'It needs a reference and a response channel'
+    return ''
 
 
 #: what an operation needs of an object beyond its type, tested before the click so the row
@@ -184,6 +210,7 @@ WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
     'project.truncate_data': ('source', _span),
     'project.sensors': ('table', _sensors_placed),
     'project.fit_modes': ('frf', _fittable),
+    'project.reprocess_modal_test': ('source', _modal_test_frames),
 }
 
 #: why the core (`Project.selection_verbs`) turns down a pair, where the verb's own reason
@@ -202,6 +229,8 @@ def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
     reason = when[1](project, fill[when[0]]) if when else ''
     verb = op.id.removeprefix('project.')
     names = fill.values()
+    if op.id == 'project.set_projection':
+        return _pair_why(project, fill['first'], fill['second'])
     if op.id in _ONE_TYPE:
         said = mergeable([project[n] for n in names]) if len(fill) > 1 else None
         return said[0].upper() + said[1:] if said else ''
@@ -209,6 +238,10 @@ def _will_not_take(project: Any, op: Operation, fill: dict[str, str]) -> str:
         return reason
     if verb in dict(project.selection_verbs(*names)):
         return ''
+    if op.id == 'project.project_onto_basis':
+        from hertzforge.project import projection_why
+
+        return projection_why(project, fill['source'], fill['onto']) or 'It cannot take this selection'
     return (PAIR_WHY.get(op.id)
             or _why_not(op, [projects.kind_of(project[n]) for n in names])
             or 'It cannot take this selection')
@@ -294,6 +327,107 @@ def _on_geometry(project: Any, name: str) -> bool:
     from .show import _geometry_for
 
     return _geometry_for(project, name) is not None
+
+
+#: an action and the actions under it: the setting, or the reading, and what is computed
+#: from it or acts on what it shows, so a list reads by what depends on what. Compute
+#: PSDs is under Averaging because the averaging is what it computes with (Brandon,
+#: 2026-11-17).
+NESTS: dict[str, tuple[str, ...]] = {
+    'project.set_averaging': ('project.detect_averaging', 'project.compute_psds',
+                              'project.compute_cpsds', 'project.compute_frfs',
+                              'project.compute_multiple_coherence', 'project.compute_spectra'),
+    'project.set_truncation': ('project.truncate_data',),
+    'project.resample_reading': ('project.resample',),
+    'project.shocks': ('project.detect_shocks', 'project.set_shock', 'project.remove_shock',
+                       'project.pulse_check', 'project.compute_srs'),
+    'project.time_statistics': ('project.kurtosis', 'project.amplitude_spectrum',
+                                'project.overload'),
+    'project.edit_specification': ('project.set_breakpoint', 'project.add_breakpoint',
+                                   'project.remove_breakpoint', 'project.scale_specification',
+                                   'project.specification_areas'),
+    'project.octave_bands': ('project.compute_octave',),
+    'project.realizability': ('project.make_realizable', 'project.conditioning'),
+    'project.convert_to_specification': ('project.derive_specification',),
+    'project.sensors': ('project.set_sensor_model', 'project.calibration_check'),
+    'project.set_control': ('project.add_controller_settings',
+                            'project.remove_controller_settings'),
+    # two shape sets on two geometries: what reads how they are projected is under Project,
+    # which sets it, as the spectra are under Averaging (Brandon, 2026-11-21)
+    'project.set_projection': ('show.mac', 'project.projection_overlay', 'project.match_modes',
+                               'project.add_matches', 'project.project_onto_basis'),
+    # with nothing selected: the ways a file is brought in are under Import
+    'self.import': ('project.rattlesnake_preview', 'project.import_rattlesnake_part',
+                    'project.truncate_rattlesnake_file', 'project.text_preview',
+                    'project.import_text'),
+}
+#: the groups that open with their actions showing: the ones most selections are made for
+OPEN_AT_FIRST = frozenset({'project.set_averaging', 'project.set_projection'})
+#: the acts every object has, on the object itself and its group, under one row that is
+#: not an action
+OBJECT_GROUP = 'group.object'
+OBJECT_ROWS = ('project.save_as', 'self.units', 'project.set_role', 'self.name_group',
+               'self.basis', 'self.unlink', 'self.recompute', 'self.copy', 'self.rename')
+#: rows that are not actions and hold the ones that go together: its id, its words and
+#: what is under it. Each stands where the first of its rows stood, the object's own last.
+#: Auto Compute is the six per-test computations, one a kind of test (Brandon, 2026-11-17:
+#: under one row, and no longer called Work Up).
+HEADS: dict[str, tuple[str, tuple[str, ...]]] = {
+    'group.calculus': ('Calculus', ('project.integrate', 'project.differentiate')),
+    'group.auto_compute': ('Auto Compute', tuple(
+        f'project.work_up_{test}' for test in ('sysid', 'random', 'shock', 'transient',
+                                               'sine', 'modal'))),
+    'group.index': ('Data Index', ('project.index_file', 'project.unindex_file',
+                                   'project.verify_data_index')),
+    'group.reports': ('Reports', ('project.generate_from_template', 'project.reports_from_runs',
+                                  'project.attach_run_log')),
+    'group.new': ('New', ('project.new_channel_table', 'project.new_geometry')),
+    OBJECT_GROUP: ('Object', OBJECT_ROWS),
+}
+
+
+def nested(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A column's rows with each one told what it is under (`NESTS`, `HEADS`).
+
+    A row is put under an action only when that action is in the column and can run: a
+    row whose setting is not offered stays where it was. A row of `HEADS` is put under
+    its head, a row of kind `group` that is not an action, which is added where the
+    first of its rows stood (the object's own, `OBJECT_GROUP`, last). The rows keep
+    their order; the shell draws a group's rows under it.
+
+    Parameters
+    ----------
+    rows : list of dict
+        The column's rows, as `_row` makes them.
+
+    Returns
+    -------
+    list of dict
+        The rows, a nested one with `under` (the id of the row it is under), an action
+        that opens showing what is under it with `open`, and the head rows added.
+    """
+    ready = {row['id'] for row in rows if row.get('ready')}
+    parent_of = {child: parent for parent, children in NESTS.items() for child in children}
+    head_of = {child: head for head, (_words, children) in HEADS.items() for child in children}
+    out: list[dict[str, Any]] = []
+    placed: set[str] = set()
+    for row in rows:
+        parent = parent_of.get(row['id'])
+        head = head_of.get(row['id'])
+        if parent in ready and row['id'] != parent:
+            row = {**row, 'under': parent}
+        elif head is not None:
+            row = {**row, 'under': head}
+            if head != OBJECT_GROUP and head not in placed and row.get('ready'):
+                # the row that holds them stands where the first of them stood
+                placed.add(head)
+                out.append(_row(head, HEADS[head][0], 'group'))
+        if row['id'] in OPEN_AT_FIRST:
+            row = {**row, 'open': True}
+        out.append(row)
+    if any(row.get('under') == OBJECT_GROUP and row.get('ready') for row in out):
+        out.append(_row(OBJECT_GROUP, HEADS[OBJECT_GROUP][0], 'group'))
+    return out
 
 
 def _row(row_id: str, verb: str, kind: str, reason: str = '', **more: Any) -> dict[str, Any]:
@@ -416,11 +550,33 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
             continue
         picks = [records.get(name, []) for name in fill.values()]
-        if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
-            fill['records'] = _runs(next(r for r in picks if r))
-        elif op.id in EVERY_RECORD:
-            # nothing picked is every record: the row runs at once, with no form
-            fill['records'] = ''
+        # an action runs on what is picked in the tree: the channels, records or rows it
+        # would have asked for by number are the ones picked under the object, every one
+        # of them when the object is selected whole, and its form has no field for them
+        # (Brandon, 2026-11-17)
+        picked = next((r for r in picks if r), [])
+        unasked = []
+        for param in op.params:
+            if param.name == 'modes' and op.id in PICKED_MODES:
+                modes = records.get(fill[PICKED_MODES[op.id]], [])
+                fill['modes'] = _runs(modes) if modes else ''
+                unasked.append('modes')
+            elif param.name in PICKED_LISTS and param.type == 'string':
+                fill[param.name] = _runs(picked) if picked else ''
+                unasked.append(param.name)
+            elif param.name in PICKED_ONE and param.type == 'integer':
+                # Create Spec draws a channel of the sheet it makes, numbered among the
+                # rows picked, not a row of the table
+                if picked and op.id != 'project.create_specification':
+                    fill[param.name] = str(picked[0] + 1)
+                unasked.append(param.name)
+            elif param.name == 'picked':
+                # an operation on one channel that runs on every channel picked
+                # (`parsing.each_picked`): the param that numbers its one channel is not
+                # asked for either. A `row` is not taken for a channel anywhere else: a
+                # breakpoint's row is a breakpoint.
+                fill['picked'] = _runs(picked) if picked else ALL_PICKED
+                unasked += ['picked', getattr(op.run, 'picked_key', 'record')]
         if where in ('mate', 'solid', 'group') and part:
             # what is picked in the tree is what the row acts on
             picked = verbs.picked_ids(part)
@@ -439,13 +595,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if homes else {}
+        if unasked:
+            more['omit'] = list(dict.fromkeys(unasked))
         if where and part:
             # what the pick fills is not asked again: the groups, solids or mates picked are
             # the ones it acts on, and more are picked in the tree (Brandon, 2026-11-10)
             picked_fields = [key for key in dict.fromkeys(
                 (where, f'{where}s', 'family')) if key in fill]
             if picked_fields:
-                more['omit'] = picked_fields
+                more['omit'] = [*more.get('omit', []), *picked_fields]
         if op.id == 'project.view_entities':
             # a part's Edit opens its own table (Brandon, 2026-11-13)
             fill['kind'] = {'part:nodes': 'nodes', 'part:coordinate_systems': 'coordinate_systems',
@@ -453,8 +611,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             # every field filled, so the row opens the table at once rather than a form
             fill.setdefault('family', '')
             fill.setdefault('groups', '')
+            fill.setdefault('cs', 0)
             more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'kind', 'family',
-                                               'groups']))
+                                               'groups', 'cs']))
         if op.id == 'project.mesh_solids' and where == 'solid':
             # the solids picked, all at one size: the size they are likely to hold at,
             # as shells when every one is flat
@@ -467,6 +626,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'solids' and op.id in _adds():
             # a shape is made at once and then edited (Brandon, 2026-11-10)
             more['instant'] = True
+        if where == 'family' and op.id == 'project.add_element_group':
+            # a family's group is made at once, numbered next and unnamed: it is renamed
+            # in the tree
+            more['instant'] = True
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'name', 'id', 'family']))
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
         if op.id == 'project.mate_surfaces':
@@ -478,15 +642,46 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
                 continue
             more['omit'] = [*more.get('omit', []), 'mate']
-        rows.append(_op_row(op, fill=fill, **more))
+        if op.id == 'project.set_projection':
+            fill.update(_projection_fill(project, fill))
+            more['labels'] = {'direction': _direction_words(project, fill['first'],
+                                                            fill['second'])}
+        if op.id == 'project.project_onto_basis':
+            from hertzforge.core.shapes import ShapeSet
+
+            if isinstance(project[fill['onto']], ShapeSet):
+                # two sets go the way Project sets, and it asks nothing: it adds the set
+                source, onto, _distance = project.projection_of(fill['source'], fill['onto'])
+                fill.update({'source': source, 'onto': onto, 'direction': 'named',
+                             **_projection_fill(project, {'first': source, 'second': onto},
+                                                distance_only=True)})
+                more['omit'] = [*more.get('omit', []), 'direction', 'distance']
+                more['verb'] = 'Add Projected Set'
+            else:
+                more['omit'] = [*more.get('omit', []), 'direction']
+        if op.id in MATCHED:
+            fill.update(_match_fill(project, op.id, fill))
+        if op.id in LIVE:
+            more['live'] = True
+        said = more.pop('verb', None)
+        rows.append({**_op_row(op, fill=fill, **more), **({'verb': said} if said else {})})
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
         if edit is not None:
             rows = [edit, *(row for row in rows if row['id'] != 'project.edit_solid')]
+    if sorted(kinds) == ['geometry', 'shape_set'] and not where:
+        from hertzforge.project import drawn_elsewhere
+
+        shapes, geometry = sorted(names, key=lambda n: kinds[names.index(n)] != 'shape_set')
+        if drawn_elsewhere(project, shapes, geometry):
+            # a geometry the set does not belong on is not its stage: it is projected onto
+            # it, and the set's own acts and a drawing by DOF number are not offered with it.
+            # Link says they go together, after which it is the set's stage again
+            rows = [row for row in rows if row['id'] == 'project.project_onto_basis']
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
-    column: dict[str, Any] = {'kinds': kinds, 'current': True, 'rows': rows}
+    column: dict[str, Any] = {'kinds': kinds, 'current': True, 'rows': nested(rows)}
     if where:
         column['parts'] = [where] * len(verbs.picked_ids(part))
     return column
@@ -561,6 +756,81 @@ def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
     scale = display_units.words_in('length')[1] if held.units_defined else 1.0
     fill['size'] = f'{size * scale:.4g}'
     return fill
+
+
+def _pair_why(project: Any, first: str, second: str) -> str:
+    """Why two shape sets have no projection to set: one geometry between them, or none
+    (`project.projection_why`); '' when either can be projected onto the other."""
+    from hertzforge.project import projection_why
+
+    ways = [projection_why(project, first, second), projection_why(project, second, first)]
+    return '' if not all(ways) else ways[0]
+
+
+def _direction_words(project: Any, first: str, second: str) -> dict[str, str]:
+    """Project's two directions for two shape sets, worded after the sets, the one that
+    cannot be made with why (`project.projection_why`)."""
+    from hertzforge.project import projection_why
+
+    ways = {'named': (first, second), 'reversed': (second, first)}
+    return {key: f'{a} onto {b}' + (f' (not possible: {why})'
+                                    if (why := projection_why(project, a, b)) else '')
+            for key, (a, b) in ways.items()}
+
+
+def _projection_fill(project: Any, fill: dict[str, str], distance_only: bool = False
+                     ) -> dict[str, str]:
+    """Project's form for two shape sets as the pair is projected now
+    (`Project.projection_of`): the direction it goes, and the node match distance it keeps in
+    the display units, or 0 for 2 % of the target's size when it keeps none."""
+    from . import display_units
+
+    first, second = fill['first'], fill['second']
+    source, _onto, distance = project.projection_of(first, second)
+    out = {} if distance_only else {'direction': 'named' if source == first else 'reversed'}
+    if distance is None:
+        return {**out, 'distance': '0'}
+    defined = project.geometry_for(source)[1].units_defined
+    scale = display_units.words_in('length')[1] if defined else 1.0
+    return {**out, 'distance': f'{distance * scale:.6g}'}
+
+
+#: the projections whose node match tolerance, a distance, the row fills in
+MATCHED = frozenset(('project.project_onto_basis',
+                     'project.project_onto_channels', 'project.expand'))
+
+
+def _match_fill(project: Any, op_id: str, fill: dict[str, str]) -> dict[str, str]:
+    """A projection's node match tolerance as its form opens: the distance 2 % of the
+    target's size comes to for the pair the row projects (`Project.match_distance`), in
+    the display units, or in the model's own when its units are not defined. Nothing when
+    the pair would not be projected: one geometry between them, or none."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.shapes import ShapeSet
+
+    from . import display_units
+
+    if op_id == 'project.expand':
+        # a record through a shape set matches no nodes: only a table on another geometry does
+        if not isinstance(project.get(fill['shapes']), ChannelTable):
+            return {}
+        basis = project.modal_basis(fill['source'])
+        if basis is None:
+            return {}
+        pair = (basis, fill['shapes'])
+    elif isinstance(project[fill['onto']], ShapeSet) if 'onto' in fill else False:
+        # two sets: the distance is the pair's projection's, filled with it
+        return {}
+    else:
+        pair = (fill['source'], fill.get('onto') or fill['table'])
+        if fill.get('direction') == 'reversed':
+            pair = pair[::-1]
+    distance = project.match_distance(*pair)
+    if distance is None:
+        return {}
+    defined = project.geometry_for(pair[0])[1].units_defined
+    scale = display_units.words_in('length')[1] if defined else 1.0
+    return {'distance': f'{distance * scale:.4g}'}
 
 
 def _shells_among(geometry: Any, groups: list[Any]) -> bool:

@@ -1,0 +1,16 @@
+{
+ "type": "request",
+ "id": 64,
+ "method": "drive.convert",
+ "params": {
+  "path": "/Users/someone/tests/bracket/drives.npz",
+  "selections": [
+   "array:a",
+   {
+    "signal": "array:b",
+    "name": "Shaker 2"
+   }
+  ],
+  "rate_hz": 1000.0
+ }
+}

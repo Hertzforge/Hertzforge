@@ -8,6 +8,10 @@
  * the window's controls (measured and reference, packed) and each window control's own spectrum
  * (stepped, with its alarm and abort lines). Coherence, phase and magnitude are read from the
  * block element by element; no number is smoothed, fitted or rescaled.
+ *
+ * Every cell holds one value per spectral line, estimated over that line's bin, so every cell is
+ * drawn flat across its bins, the cross terms as the diagonal is (`steppedCellView` for a cell
+ * opened full size).
  */
 
 import { packedElement } from '$lib/protocol/mimo';
@@ -175,16 +179,30 @@ export function gridCells(n: number, off: OffDiagonal, sdm: SdmView | null, spec
 			if (own) {
 				for (const s of own.series) curves.push({ role: s.role, name: s.name, x: s.x, y: s.y, edges: s.edges });
 			} else if (sdm && r < nb && c < nb) {
-				const stepped = kind === 'psd' || kind === 'csd';
 				const m = elementCurve(sdm.measured, nb, lines, r, c, kind);
 				const ref = elementCurve(sdm.reference, nb, lines, r, c, kind);
-				if (ref) curves.push({ role: 'reference', name: 'Reference', x: sdm.x_values, y: ref, edges: stepped ? edges : undefined });
-				if (m) curves.push({ role: 'measured', name: 'Measured', x: sdm.x_values, y: m, edges: stepped ? edges : undefined });
+				if (ref) curves.push({ role: 'reference', name: 'Reference', x: sdm.x_values, y: ref, edges });
+				if (m) curves.push({ role: 'measured', name: 'Measured', x: sdm.x_values, y: m, edges });
 			}
 			cells.push({ r, c, kind, curves });
 		}
 	}
 	return cells;
+}
+
+/**
+ * A cell opened full size, drawn the way the grid draws it. The service sends a density (a
+ * spectrum, a cross-spectrum magnitude) with its bin edges; coherence and phase come as a value
+ * at each line (or at each column's center, decimated), and are given the bins of the points
+ * they sit on, as the grid's own cells are.
+ */
+export function steppedCellView(view: SpectrumView, kind: CellKind): SpectrumView {
+	if (kind !== 'coh' && kind !== 'phase') return view;
+	const log = view.x.scale === 'log';
+	return {
+		...view,
+		series: view.series.map((s) => (s.edges && s.edges.length === s.y.length + 1 ? s : { ...s, shape: 'steps', edges: edgesFromCenters(s.x, log) }))
+	};
 }
 
 // ---- axes ---------------------------------------------------------------------------------

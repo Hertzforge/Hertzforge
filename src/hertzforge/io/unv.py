@@ -992,6 +992,10 @@ def _geometry_datasets(geometry, unit_system=None):
                 continue
             ids = [int(n) for n in conn]
             descriptor = int(geometry.elem_type[i])
+            if descriptor == 203:
+                # a measured point is its node, which is written; the
+                # universal file has no element that only marks one
+                continue
             if descriptor >= 200:
                 from ..core.geometry import ELEMENT_TYPES
                 raise ValueError(
@@ -1276,6 +1280,9 @@ def save(obj: Any, path: str | os.PathLike,
     """
     from ..core.geometry import Geometry
 
+    # the units block cannot declare g, so UNV writes the coherent system
+    if unit_system is not None:
+        unit_system = unit_system.coherent
     blocks = []
     if getattr(obj, 'units_defined', False):
         blocks.append(_units_dataset(unit_system))

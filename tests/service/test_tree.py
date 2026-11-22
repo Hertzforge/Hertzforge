@@ -44,6 +44,19 @@ def test_a_geometry_opens_into_its_parts_and_families(plate, validate):
     parts = {p['id']: p['count'] for p in held['parts']}
     assert parts == {'nodes': len(geometry.node_id),
                      'coordinate_systems': len(geometry.cs_id)}
+    # the Nodes row lists its nodes when opened, the first of a large model's
+    listed = {p['id']: p.get('ids') for p in held['parts']}
+    assert listed['nodes'] == [int(n) for n in geometry.node_id[:tree.LISTED]]
+    assert listed['coordinate_systems'] == [int(cs) for cs in geometry.cs_id]
+    # the coordinate systems row lists a line a system, and a group its elements
+    systems = next(p for p in held['parts'] if p['id'] == 'coordinate_systems')
+    assert len(systems['rows']) == len(geometry.cs_id)
+    assert systems['rows'][0].startswith(f'CS {int(geometry.cs_id[0])}')
+    for family in held['families']:
+        for group in family['groups']:
+            mine = [int(e) for e, g in zip(geometry.elem_id, geometry.elem_group, strict=True)
+                    if int(g) == group['id']]
+            assert group['elements'] == mine[:tree.LISTED]
     families = {f['id']: f for f in held['families']}
     # the six always, and points too: a ground starts from one
     assert set(families) >= {'beams', 'triangles', 'quads', 'tetras', 'wedges', 'hexes', 'points'}
@@ -176,3 +189,61 @@ def test_sine_objects_open_into_their_control_dofs(validate):
     validate(held, 'children')
     assert held == {'kind': 'channels', 'channels': [
         {'dof': '101Z+', 'quantity': 'acceleration'}, {'dof': '102Z+', 'quantity': 'acceleration'}]}
+
+
+def test_every_object_that_holds_items_says_it_opens(plate, validate):
+    """The shell opens the rows the summary marks, and keeps no list of kinds."""
+    from hertzforge.core.prediction import Predictions
+    from hertzforge.core.report import Report
+
+    project = plate.project
+    project.add('Empty Report', Report())
+    filled = Report()
+    filled.blocks.append({'kind': 'text', 'text': 'What the test was for, in a few words.'})
+    project.add('Filled Report', filled)
+    project.add('No Predictions', Predictions())
+    listed = {entry['name']: entry for entry in projects.summary(plate)['objects']}
+    for name in project:
+        held = tree.children(project, name)
+        validate(held, 'children')
+        assert listed[name]['opens'] is (held['kind'] != 'none'), name
+    assert listed['Filled Report']['opens'] and not listed['Empty Report']['opens']
+    assert not listed['No Predictions']['opens']
+    rows = tree.children(project, 'Filled Report')
+    assert rows == {'kind': 'items', 'items': [
+        {'label': 'Text', 'detail': 'What the test was for, in a few words.'}]}
+    # picking a block shows what the report shows, not a refusal
+    shown = projects.show(plate, {'objects': ['Filled Report'],
+                                  'records': {'Filled Report': [0]}, 'part': None})
+    assert shown['views']
+
+
+def test_a_sine_specification_opens_onto_its_control_dofs():
+    from hertzforge.core.sine import SineSweepSpecification
+
+    project = Project()
+    project.add('Sweep', SineSweepSpecification([], ['1X+', '2Y+', '3Z+']))
+    assert tree.opens(project['Sweep'])
+    held = tree.children(project, 'Sweep')
+    assert [row['dof'] for row in held['channels']] == ['1X+', '2Y+', '3Z+']
+
+
+def test_asds_are_one_column_and_cross_terms_a_matrix():
+    from hertzforge.core.data import Psd
+
+    f = np.arange(10.0, 60.0, 10.0)
+    dofs = ['1X+', '2Y+', '3Z+']
+    project = Project()
+    # each record against itself: nothing to tell apart but the DOF
+    project.add('Autos', Psd(f, np.ones((3, f.size)), dofs, dofs, ordinate_dim='acceleration',
+                             ordinate_unit='g'))
+    held = tree.children(project, 'Autos')
+    assert held['columns'] == [''] and held['cells'] == [[0], [1], [2]]
+    assert [row['dof'] for row in held['rows']] == dofs
+    # with cross terms the references are the columns, as before
+    pairs = [(a, b) for a in dofs for b in dofs]
+    project.add('Matrix', Psd(f, np.ones((9, f.size)), [a for a, _b in pairs],
+                              [b for _a, b in pairs], ordinate_dim='acceleration',
+                              ordinate_unit='g'))
+    full = tree.children(project, 'Matrix')
+    assert full['columns'] == dofs and len(full['cells']) == 3 and len(full['cells'][0]) == 3

@@ -11,9 +11,11 @@ export const FILL = 0.9;
 
 /**
  * The distance from `centre`, looking from the direction `dir` with `up` on screen, at which
- * `box` fits a perspective camera of vertical field `fovDeg` and width-to-height `aspect`.
+ * `box` fits a perspective camera of vertical field `fovDeg` and width-to-height `aspect`. In
+ * `parallel` projection the picture is as tall as the perspective one is at `centre`, and a
+ * corner nearer the camera is drawn no larger, so the box is fitted by its width and height alone.
  */
-export function fitDistance(box: Box3, centre: Vector3, dir: Vector3, up: Vector3, fovDeg: number, aspect: number): number {
+export function fitDistance(box: Box3, centre: Vector3, dir: Vector3, up: Vector3, fovDeg: number, aspect: number, parallel = false): number {
 	const toward = dir.clone().normalize();
 	const right = new Vector3().crossVectors(up, toward).normalize();
 	const upright = new Vector3().crossVectors(toward, right);
@@ -23,7 +25,7 @@ export function fitDistance(box: Box3, centre: Vector3, dir: Vector3, up: Vector
 	const corner = new Vector3();
 	for (let k = 0; k < 8; k++) {
 		corner.set(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z).sub(centre);
-		const near = corner.dot(toward);
+		const near = parallel ? 0 : corner.dot(toward);
 		distance = Math.max(distance, near + Math.abs(corner.dot(right)) / tanH, near + Math.abs(corner.dot(upright)) / tanV);
 	}
 	return distance;

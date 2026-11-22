@@ -8,6 +8,8 @@ the local frame, and the uniaxial dot product all pin exactly.
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 
@@ -354,3 +356,287 @@ def test_a_pick_with_no_dof_or_no_table_is_refused():
         project.project_onto_basis('FEM Shapes', onto='Other Shapes',
                                    channels=[0])
     assert 'FEM Shapes @ Channels (1 channel)' not in project
+
+
+# ---- which set is projected -----------------------------------------------------
+
+
+def _set(dofs, modes=2):
+    rng = np.random.default_rng(len(dofs))
+    return ShapeSet(np.arange(1.0, modes + 1), np.zeros(modes), list(dofs),
+                    rng.normal(size=(modes, len(dofs))))
+
+
+def test_nodes_measured_in_fewer_than_three_directions_are_counted():
+    from hertzforge.core.correlate import partial_nodes
+
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '2X+', '2Y-', '2Z+'])) == 0
+    # a uni-axial node, a bi-axial one, and a skewed sensor named by one axis
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '2Z+', '3X+', '3Y+', '4X-'])) == 3
+    # a rotation is not a translation, and a modal coordinate is at no node
+    assert partial_nodes(_set(['1X+', '1Y+', '1RZ+'])) == 1
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '1RX+', 'M1'])) == 0
+
+
+def test_the_set_with_uniaxial_nodes_is_the_one_projected_onto():
+    """A node measured along one axis has no whole motion to sample at
+    another set's DOFs, so the other set is projected onto it, whichever
+    is named first (Brandon, 2026-11-16)."""
+    from hertzforge.core.correlate import projection_order
+
+    full = _set([f'{n}{a}+' for n in range(1, 9) for a in 'XYZ'])
+    uniaxial = _set(['101X+', '102X+', '103Z+'])
+    onto_second, why = projection_order(full, uniaxial)
+    assert onto_second and '3 nodes measured in fewer than three directions' in why
+    onto_second, why = projection_order(uniaxial, full)
+    assert not onto_second and '3 nodes measured' in why
+    # both whole: the one with more DOFs is projected onto the one with fewer
+    small = _set([f'{n}{a}+' for n in (201, 202) for a in 'XYZ'])
+    assert projection_order(full, small) == (True, 'it has the fewer DOFs')
+    assert projection_order(small, full) == (False, 'it has the fewer DOFs')
+    assert projection_order(small, small)[0] is False, 'as many DOFs: the second onto the first'
+    # both with uni-axial nodes: neither way is exact, and it says so
+    other = _set(['301X+', '302Y+', '303Z+', '304Z+'])
+    onto_second, why = projection_order(other, uniaxial)
+    assert onto_second and 'neither way is exact' in why
+
+
+def _two_geometries():
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    project = hertzforge.Project()
+    project.add('FEM Geometry', fem_geometry)
+    project.add('FEM Shapes', fem_shapes)
+    project.add('Test Geometry', test_geometry)
+    project.add('Test Shapes', test_shapes)
+    project.link('FEM Geometry', 'FEM Shapes')
+    project.link('Test Geometry', 'Test Shapes')
+    return project
+
+
+def test_the_mac_is_the_same_whichever_set_is_named_first():
+    from hertzforge.core.shapes import cross_mac
+
+    project = _two_geometries()
+    forward = project.comparison_mac('FEM Shapes', 'Test Shapes')
+    back = project.comparison_mac('Test Shapes', 'FEM Shapes')
+    assert np.allclose(forward, back.T, atol=1e-12)
+    # it is the model sampled at the test's DOFs, both ways
+    sampled, _report = project_shapes(project['FEM Shapes'], project['FEM Geometry'],
+                                      project['Test Shapes'], project['Test Geometry'])
+    assert np.allclose(back, cross_mac(project['Test Shapes'], sampled))
+    rows, columns, said, _report = project.compared_sets('FEM Shapes', 'Test Shapes')
+    assert list(rows.coordinate) == list(project['Test Shapes'].coordinate)
+    assert columns is project['Test Shapes']
+    assert said.startswith('FEM Shapes projected onto Test Shapes: it has 2 nodes')
+    rows, columns, said, _report = project.compared_sets('Test Shapes', 'FEM Shapes')
+    assert rows is project['Test Shapes']
+    assert said.startswith('FEM Shapes projected onto Test Shapes')
+    # on one geometry nothing is projected
+    assert project.compared_sets('FEM Shapes', 'FEM Shapes')[2:] == ('', None)
+
+
+def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
+    project = _two_geometries()
+    with pytest.raises(ValueError, match='Test Shapes cannot be projected onto FEM Shapes: '
+                                         'Test Shapes has 2 nodes measured in fewer than '
+                                         r'three directions\. Project FEM Shapes onto Test Shapes'):
+        project.project_onto_basis('Test Shapes', onto='FEM Shapes')
+    made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
+    assert list(project[made].coordinate) == list(project['Test Shapes'].coordinate)
+
+
+def test_a_distance_is_the_match_limit_itself():
+    """Node 101 sits 1 mm from the cube's corner and 102 1 mm from another: a limit a
+    little above that matches both, one a little below matches neither, and the limit the
+    report gives is the distance asked for, nothing added."""
+    from hertzforge.core.correlate import NoNodeMatched
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                       test_geometry, distance=0.0011)
+    assert report['limit'] == 0.0011
+    assert projected.coordinate == ['101X+', '102X+']
+    with pytest.raises(NoNodeMatched) as error:
+        project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry,
+                       distance=0.0009)
+    assert error.value.report['limit'] == 0.0009
+    # the distance takes the place of the share of the extent, however large that is
+    _projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                        test_geometry, tolerance=50.0, distance=0.0011)
+    assert report['limit'] == 0.0011
+
+
+def test_without_a_distance_the_limit_is_match_distance():
+    from hertzforge.core.correlate import match_distance
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    _projected, report = project_shapes(fem_shapes, fem_geometry, test_shapes,
+                                        test_geometry)
+    # two test nodes: the extent is half the distance between them
+    extent = 0.5 * float(np.linalg.norm(np.subtract([1.0, 1.0, 0.999], [0.001, 0.0, 0.0])))
+    assert report['limit'] == pytest.approx(0.02 * extent, rel=1e-12)
+    assert match_distance(fem_geometry, test_geometry) == report['limit']
+    assert match_distance(fem_geometry, test_geometry, 0.1) == pytest.approx(
+        0.1 * extent, rel=1e-12)
+
+
+@pytest.mark.parametrize('distance', [0.0, -0.001, float('nan'), float('inf')])
+def test_a_distance_that_is_not_above_zero_is_refused(distance):
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    with pytest.raises(ValueError, match='node match distance is .*above zero'):
+        project_shapes(fem_shapes, fem_geometry, test_shapes, test_geometry,
+                       distance=distance)
+
+
+def test_a_shape_set_projects_onto_every_node_of_another_geometry():
+    """The cube's modes put on the test geometry: X, Y and Z at each node, node 102's in
+    its rotated frame, whose X is global Y and whose Y is minus global X. Mode 1 moves a
+    node by (x+10, y+20, z+30), so 101 near (0, 0, 0) reads (10, 20, 30) and 102 near
+    (1, 1, 1) reads (21, -11, 31)."""
+    project = _two_geometries()
+    assert 'project_onto_basis' in dict(project.selection_verbs('FEM Shapes',
+                                                                'Test Geometry'))
+    name = project.project_onto_basis('FEM Shapes', onto='Test Geometry')
+    assert name == 'FEM Shapes @ Test Geometry'
+    made = project[name]
+    assert made.coordinate == ['101X+', '101Y+', '101Z+', '102X+', '102Y+', '102Z+']
+    assert made.shape_matrix[0] == pytest.approx([10.0, 20.0, 30.0, 21.0, -11.0, 31.0])
+    assert made.shape_matrix[1] == pytest.approx([0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    assert list(made.frequency) == [10.0, 20.0]
+    assert name in project.object_group_of('Test Geometry')
+    assert made.projection_report['matched'] == 2
+
+
+def test_a_geometry_takes_the_distance_and_drops_a_node_beyond_it():
+    project = _two_geometries()
+    project['Test Geometry'] = _test_model(extra_node=True)[0]
+    made = project[project.project_onto_basis('FEM Shapes', onto='Test Geometry',
+                                              distance=0.0011)]
+    assert made.projection_report['limit'] == 0.0011
+    assert made.projection_report['unmatched'] == [103]
+    assert [str(d) for d in made.coordinate if str(d).startswith('103')] == []
+
+
+def test_what_cannot_go_onto_a_geometry_is_refused_and_not_offered():
+    from hertzforge.project import projection_why
+
+    project = _two_geometries()
+    project.add('Empty', hertzforge.Geometry(node_id=[], node_xyz=np.zeros((0, 3))))
+    cases = [
+        ('FEM Shapes', 'FEM Geometry', 'FEM Shapes is on FEM Geometry already'),
+        # each test node holds one direction: its other two would be taken as no motion
+        ('Test Shapes', 'FEM Geometry',
+         'Test Shapes has 2 nodes measured in fewer than three directions'),
+        ('FEM Shapes', 'Empty', 'Empty has no nodes')]
+    for source, onto, why in cases:
+        assert projection_why(project, source, onto) == why
+        assert 'project_onto_basis' not in dict(project.selection_verbs(source, onto))
+        with pytest.raises(ValueError, match=f'{source} cannot be projected onto {onto}: {why}'):
+            project.project_onto_basis(source, onto=onto)
+    assert projection_why(project, 'FEM Shapes', 'Test Geometry') == ''
+
+
+def test_the_match_distance_is_said_for_the_pair_it_projects():
+    from hertzforge.core.correlate import match_distance
+
+    project = _two_geometries()
+    onto_set = project.match_distance('FEM Shapes', 'Test Shapes')
+    assert onto_set == match_distance(project['FEM Geometry'], project['Test Geometry'])
+    assert project.match_distance('FEM Shapes', 'Test Geometry') == onto_set
+    # the other way is the cube's size, not the test's
+    assert project.match_distance('Test Shapes', 'FEM Shapes') == pytest.approx(
+        0.02 * np.sqrt(3) / 2, rel=1e-12)
+    made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
+    assert project[made].projection_report['limit'] == onto_set
+    project['Test Geometry'].define_units('m')
+    assert project.match_distance('FEM Shapes', 'Test Shapes') is None, \
+        'one geometry in meters and one in its own units overlay in no frame'
+
+
+def test_a_pair_is_projected_the_way_it_is_set():
+    """Unset, the cube's modes go onto the test's (the test holds one direction at each node)
+    within 2 % of the test geometry's size; set, with the distance asked for, and the line that
+    replays it is in the journal."""
+    project = _two_geometries()
+    assert project.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  None)
+    default = project.compared_sets('FEM Shapes', 'Test Shapes')[3]['limit']
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    assert project.projection_of('FEM Shapes', 'Test Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  0.0011)
+    _rows, _columns, said, report = project.compared_sets('Test Shapes', 'FEM Shapes')
+    assert report['limit'] == 0.0011 != default
+    assert said.startswith('FEM Shapes projected onto Test Shapes')
+    assert project.journal[-1] == ("project.set_projection('Test Shapes', 'FEM Shapes', "
+                                   'distance=0.0011)')
+    # a distance asked for in the call still takes the place of the one set
+    assert project.compared_sets('FEM Shapes', 'Test Shapes', distance=0.002)[3]['limit'] == 0.002
+
+
+def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
+    project = _two_geometries()
+    project.add('Model B', copy.deepcopy(project['FEM Geometry']))
+    project.add('Modes B', copy.deepcopy(project['FEM Shapes']))
+    project.link('Model B', 'Modes B')
+    chosen = project.projection_of('FEM Shapes', 'Modes B')[0]
+    other = 'Modes B' if chosen == 'FEM Shapes' else 'FEM Shapes'
+    project.set_projection('FEM Shapes', 'Modes B', source=other)
+    assert project.projection_of('Modes B', 'FEM Shapes')[0] == other
+    said = project.compared_sets('FEM Shapes', 'Modes B')[2]
+    assert said == f'{other} projected onto {chosen}: the direction set in Project'
+
+
+@pytest.mark.parametrize(('first', 'second', 'given', 'refused'), [
+    ('Test Shapes', 'FEM Shapes', {'source': 'Test Shapes'},
+     'Test Shapes cannot be projected onto FEM Shapes: Test Shapes has 2 nodes'),
+    ('Test Shapes', 'FEM Shapes', {'source': 'FEM Geometry'}, 'is Test Shapes or FEM Shapes'),
+    ('Test Shapes', 'FEM Shapes', {'distance': -1.0}, 'must be above zero'),
+    ('FEM Shapes', 'FEM Geometry', {}, 'FEM Geometry is not a shape set'),
+])
+def test_a_projection_that_cannot_be_made_is_refused_and_not_kept(first, second, given, refused):
+    project = _two_geometries()
+    with pytest.raises((ValueError, TypeError), match=refused):
+        project.set_projection(first, second, **given)
+    assert project.projections == {}
+
+
+def test_two_sets_on_one_geometry_have_no_projection_to_set():
+    project = _two_geometries()
+    project.add('Other Modes', copy.deepcopy(project['FEM Shapes']))
+    project.link('FEM Geometry', 'Other Modes')
+    with pytest.raises(ValueError, match='Both are on FEM Geometry, so there is nothing'):
+        project.set_projection('FEM Shapes', 'Other Modes')
+
+
+def test_the_projection_is_kept_in_the_file_and_follows_a_rename(tmp_path):
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'kept.hforge')
+    project.save(path)
+    opened = hertzforge.Project.open(path)
+    assert opened.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                 0.0011)
+    opened.rename('FEM Shapes', 'Model Modes')
+    assert opened.projection_of('Test Shapes', 'Model Modes') == ('Model Modes', 'Test Shapes',
+                                                                  0.0011)
+    assert list(opened.projections) == [('Model Modes', 'Test Shapes')], 'the old name is gone'
+    opened.remove('Test Shapes')
+    assert opened.projections == {}, 'gone with either set'
+
+
+def test_a_file_written_before_projections_were_kept_opens_with_none(tmp_path):
+    import h5py
+
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'older.hforge')
+    project.save(path)
+    with h5py.File(path, 'a') as f:
+        del f.attrs['projections']
+    opened = hertzforge.Project.open(path)
+    assert opened.projections == {}
+    assert opened.projection_of('Test Shapes', 'FEM Shapes')[2] is None

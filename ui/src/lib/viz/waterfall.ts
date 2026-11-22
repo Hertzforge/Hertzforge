@@ -7,6 +7,56 @@
 
 import { logTicks } from './logTicks';
 
+/** Where a level tick stands on the stage, at a fraction `f` of the level axis: the back left
+ * edge, at the low end of the abscissa where the records are named, for every kind of data
+ * (Brandon, 2026-11-21). It first stood at the back right. */
+export function levelAt(f: number): [number, number, number] {
+	return [-0.02, STAGE.y, f * STAGE.z];
+}
+
+/** Closest two labels of one kind may stand on screen, in pixels; nearer ones are skipped. */
+export const LABEL_GAP_PX = 12;
+
+/** A label pinned over the stage: whether it is in front of the camera, where it lands on screen,
+ * the box its text takes there, and the kind it is thinned among ('rec' a record name, 'z' a
+ * level, null never thinned). */
+export interface ScreenLabel {
+	sx: number;
+	sy: number;
+	box: { left: number; top: number; right: number; bottom: number };
+	front: boolean;
+	thinned: 'rec' | 'z' | null;
+}
+
+/**
+ * Which labels are shown. Record names and levels are each thinned by where they land on screen,
+ * so forty names on a depth axis seen end-on, or a decade every few pixels, do not overprint. The
+ * levels stand by the record names at the back left edge: the names are placed first, and a
+ * level whose text would cross a name's is skipped.
+ */
+export function shownLabels(labels: ScreenLabel[], gap = LABEL_GAP_PX): boolean[] {
+	const shown = labels.map((l) => l.front);
+	const near = (a: ScreenLabel, b: ScreenLabel) => Math.hypot(a.sx - b.sx, a.sy - b.sy) < gap;
+	// a level and a name both end at their points, so their texts can cross while the points
+	// stand apart: they are judged by the boxes they take
+	const over = (a: ScreenLabel, b: ScreenLabel) =>
+		a.box.left < b.box.right && b.box.left < a.box.right && a.box.top < b.box.bottom && b.box.top < a.box.bottom;
+	const names: ScreenLabel[] = [];
+	for (const kind of ['rec', 'z'] as const) {
+		let last: ScreenLabel | null = null;
+		labels.forEach((l, i) => {
+			if (!shown[i] || l.thinned !== kind) return;
+			if ((last && near(l, last)) || (kind === 'z' && names.some((n) => over(l, n)))) {
+				shown[i] = false;
+				return;
+			}
+			last = l;
+			if (kind === 'rec') names.push(l);
+		});
+	}
+	return shown;
+}
+
 /** At most this many record labels; past it every nth record is named. */
 export const LABEL_LIMIT = 40;
 
@@ -322,4 +372,36 @@ export function regionMarks(a: number, b: number): { faces: number[]; edges: num
 	faces.push(lo, Y, 0, hi, Y, 0, hi, Y, Z, lo, Y, 0, hi, Y, Z, lo, Y, Z);
 	for (const x of [lo, hi]) edges.push(x, 0, 0, x, Y, 0, x, Y, 0, x, Y, Z);
 	return { faces, edges };
+}
+
+/** Which part of a draggable region a handle moves: its low edge, the whole of it, or its high edge. */
+export type HandlePart = 'low' | 'move' | 'high';
+
+/**
+ * The handles a draggable region is moved by on the stage, along the floor's front edge between
+ * stage x `a` and `b`: one at each end when the span has two edges to drag, and one in the middle
+ * that slides the whole of it. The rest of the stage stays the camera's. A span that runs past
+ * the stage keeps its handles on the part that shows; one wholly off it has none.
+ */
+export function regionHandles(a: number, b: number, two: boolean): { part: HandlePart; at: [number, number, number] }[] {
+	if (Math.max(a, b) < 0 || Math.min(a, b) > STAGE.x) return [];
+	const lo = Math.max(0, Math.min(a, b));
+	const hi = Math.min(STAGE.x, Math.max(a, b));
+	const middle: { part: HandlePart; at: [number, number, number] } = { part: 'move', at: [(lo + hi) / 2, 0, 0] };
+	return two ? [{ part: 'low', at: [lo, 0, 0] }, middle, { part: 'high', at: [hi, 0, 0] }] : [middle];
+}
+
+/**
+ * The strokes of a handle's face, in fractions of its width, as [x0, y0, x1, y1]: an arrow pointing
+ * left on the low end, one pointing right on the high end, and three bars on the middle.
+ */
+export function handleStrokes(part: HandlePart): [number, number, number, number][] {
+	if (part === 'move') return [0.36, 0.5, 0.64].map((y) => [0.3, y, 0.7, y]);
+	const tip = part === 'low' ? 0.26 : 0.74;
+	const back = part === 'low' ? 0.47 : 0.53;
+	return [
+		[1 - tip, 0.5, tip, 0.5],
+		[back, 0.29, tip, 0.5],
+		[back, 0.71, tip, 0.5]
+	];
 }

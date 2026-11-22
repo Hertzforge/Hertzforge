@@ -24,9 +24,12 @@ crates/hertzforge-mixed             Mixed Mode: its parts, setup, run state and 
 crates/hertzforge-shock-common      classical shock: pulse records, ladders and the pulse store
 crates/hertzforge-shock-host        the shock firer: its setup, pulses and run state
 crates/hertzforge-mimo-shock        multiple-drive shock: its setup, pulses and verdicts
+crates/hertzforge-mimo-sine         multiple-drive sine: its setup, run state and results
 crates/hertzforge-srs               SRS shock: its setup, pulses and results
 crates/hertzforge-twr               waveform replication: its reference, plays and results
 crates/hertzforge-explorer-host     Explorer: its setup, survey and records
+crates/hertzforge-playback          Playback: the drive file, its check report and the run outcome
+crates/hertzforge-modal-test        Modal Test: its setup, plan, hits, windows, FRF estimates and run outcome
 crates/hertzforge-recorder          the Recorder: what a recording holds on disk
 
 # What a run is recorded into, and what a setup is built from
@@ -38,6 +41,8 @@ crates/hertzforge-protocol          the control protocol's types: what a setup a
 
 # The control service: how each module's setup is accepted and its run reported
 crates/sds-control/src/explorer     Explorer's setup, run and records on the wire
+crates/sds-control/src/playback     Playback's setup, check, run and records on the wire
+crates/sds-control/src/modal_test   the Modal Test's setup, run and records on the wire
 crates/sds-control/src/mimo         multiple-output Random's setup, reference and run on the wire
 crates/sds-control/src/mimo_shock   multiple-drive shock's setup and run on the wire
 crates/sds-control/src/mixed        Mixed Mode's setup and run on the wire
@@ -54,6 +59,8 @@ crates/sds-control/src/server_explorer.rs  the Explorer methods
 crates/sds-control/src/server_mimo.rs      the multiple-output Random methods
 crates/sds-control/src/server_mimo_shock.rs  the multiple-drive shock methods
 crates/sds-control/src/server_mixed.rs     the Mixed Mode methods
+crates/sds-control/src/server_playback.rs  the Playback methods
+crates/sds-control/src/server_modal_test.rs  the Modal Test methods
 crates/sds-control/src/server_recorder.rs  the Recorder methods
 crates/sds-control/src/server_shock.rs     the classical shock methods
 crates/sds-control/src/server_srs.rs       the SRS shock methods
@@ -72,10 +79,13 @@ schema/PROTOCOL.md#classical-shock  the classical shock setup, run state and pul
 schema/PROTOCOL.md#srs-shock        the SRS shock setup, run state and pulses
 schema/PROTOCOL.md#mimo-shock       the multiple-drive shock setup, run state and pulses
 schema/PROTOCOL.md#sine             the Sine setup and run state
+schema/PROTOCOL.md#mimo-sine        the multiple-drive sine setup, run state and results
 schema/PROTOCOL.md#mixed-mode       the Mixed Mode setup and run state
 schema/PROTOCOL.md#time-waveform-replication  the waveform replication reference, setup and plays
 schema/PROTOCOL.md#explorer         the Explorer setup, run state and records
 schema/PROTOCOL.md#recorder         the Recorder setup, recordings and records
+schema/PROTOCOL.md#playback         the Playback setup, check report, run state and records
+schema/PROTOCOL.md#modal-test       the Modal Test setup, run state, display and records
 schema/PROTOCOL.md#control-laws     a run's law identity and parameters
 
 # The shell's test screens and table files
@@ -89,11 +99,13 @@ src/hertzforge/core/run_record.py         the control service's record of a run,
 src/hertzforge/core/test_setup.py         a test's setup, as a project holds it and a test screen opens it
 src/hertzforge/io/tables.py                channel and breakpoint tables as files, for both sides
 src/hertzforge/io/reference_convert.py     writes the controller's reference file from a specification
+src/hertzforge/io/drive_convert.py         writes Playback's drive file from any form the analysis side reads
 src/hertzforge/io/setup_convert.py         the one mapping between each control table kind and its analysis object
 src/hertzforge/io/seeds.py                 what an analysis object fills of a test's setup, and its origin
 src/hertzforge/core/channel_table.py       the channel table both sides use
 docs/hforge-format.md#channel_table        how a channel table is stored in a project
 docs/run-folder.md                         the run folder: what a control run leaves on disk
+docs/drive-file.md                         the drive file Playback plays: its layout and its provenance
 docs/hforge-format.md#breakpoint_table     how a profile's breakpoint table is stored in a project
 docs/hforge-format.md#test_setup           how a test's setup is stored in a project
 docs/hforge-format.md#mimo-random-runs   how a MIMO Random run reaches a project

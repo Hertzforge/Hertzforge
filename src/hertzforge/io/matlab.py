@@ -489,26 +489,42 @@ def _bare_kind(variables: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def _hdf5_refusal(path: str) -> str:
+    """Why an HDF5 `.mat` (version 7.3) is not read, naming what it holds.
+
+    Most such files were written by another program, so the names say
+    what the file is; telling everyone to save it again with '-v7' was
+    advice only a MATLAB user holding a Hertzforge file could take."""
+    import h5py
+
+    with h5py.File(path, 'r') as f:
+        # '#refs#' and '#subsystem#' are MATLAB's own bookkeeping
+        names = sorted(name for name in f if not name.startswith('#'))
+    found = ', '.join(names) or 'nothing'
+    return (f'{path} is a MATLAB version 7.3 file (HDF5), which is not read '
+            f'here; it holds {found}. A Hertzforge .mat saved again in '
+            "MATLAB with '-v7.3' reads once saved with '-v7'.")
+
+
 def load(path: str | os.PathLike, **_ignored: Any) -> Any:
     """Read a `.mat` written here, or a single struct built to the
     documented layout of one object.
 
     Returns the object the file holds, or a `Project` for a whole
     project. Values written in a display system are converted
-    back to SI. Raises ValueError for a version 7.3 file, for a schema
+    back to SI. Raises ValueError for a version 7.3 (HDF5) file, naming
+    the variables it holds, for a schema
     stamp newer than this version reads, and for a file that has no
     `hertzforge_schema` or `.vdyn` stamp and is not a
     single struct in the documented layout."""
+    import h5py
     from scipy.io import loadmat
 
     path = str(path)
-    try:
-        raw = loadmat(path, squeeze_me=False, struct_as_record=False,
-                      chars_as_strings=True)
-    except NotImplementedError:
-        raise ValueError(
-            f'{path} is a MATLAB version 7.3 file, which is HDF5; save it '
-            "with '-v7', or save the data as .hforge") from None
+    if h5py.is_hdf5(path):
+        raise ValueError(_hdf5_refusal(path))
+    raw = loadmat(path, squeeze_me=False, struct_as_record=False,
+                  chars_as_strings=True)
     variables = {name: _value_in(value) for name, value in raw.items()
                  if not name.startswith('__')}
     if STAMP not in variables and native.VDYN_STAMP not in variables:

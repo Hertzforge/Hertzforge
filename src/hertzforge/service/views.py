@@ -112,17 +112,32 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
     return out
 
 
-def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span'],
-           label: str | None = None, drag: dict[str, Any] | None = None) -> dict[str, Any]:
+def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span', 'over', 'under'],
+           label: str | None = None, drag: dict[str, Any] | None = None,
+           window: Sequence[float] | None = None, level: int = 0, rows: int = 1,
+           snap: dict[str, float] | None = None) -> dict[str, Any]:
     """A span of x behind a spectrum's curves: a `frame` averaged from, a
-    `cut` left out, or a `span` (its edges drawn, nothing shaded). With
+    `cut` left out, a `span` (its edges drawn, nothing shaded), or lines `over` or
+    `under` an abort limit, shaded in the limit's color. With
     `drag` (`dragging`) it is moved on the plot: its middle slides it and
-    an edge moves that edge."""
+    an edge moves that edge. A frame with `window` (its weights from 0 to 1,
+    evenly spaced from x0 to x1) has that window drawn on a rail above the
+    curves and its shading follow it; `level` is its row on the rail, of
+    `rows`, since frames that overlap cannot share one. A dragged span of frames
+    carries `snap`: a frame's length (`frame`) and the step from one frame to the
+    next (`hop`), in x, and the record's ends (`low`, `high`), so the plot can
+    draw the whole frames a drag would leave while it is still being dragged."""
     out: dict[str, Any] = {'x0': float(x0), 'x1': float(x1), 'kind': kind}
     if label:
         out['label'] = label
     if drag is not None:
         out['drag'] = drag
+    if window is not None:
+        out['window'] = [float(w) for w in window]
+        out['level'] = int(level)
+        out['rows'] = int(rows)
+    if snap is not None:
+        out['snap'] = {key: float(value) for key, value in snap.items()}
     return out
 
 
@@ -198,6 +213,12 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
                            'nodes': np.ascontiguousarray(nodes, np.float32)}
     if extra.get('node_ids') is not None:
         extra['node_ids'] = np.ascontiguousarray(extra['node_ids'], np.uint32)
+    if extra.get('overlay_triangles') is not None:
+        extra['overlay_triangles'] = np.ascontiguousarray(extra['overlay_triangles'],
+                                                          np.uint32).reshape(-1, 3)
+    if extra.get('overlay_lines') is not None:
+        extra['overlay_lines'] = np.ascontiguousarray(extra['overlay_lines'],
+                                                      np.uint32).reshape(-1, 2)
     if lines is not None and len(lines):
         out['lines'] = np.ascontiguousarray(lines, np.uint32).reshape(-1, 2)
     if triangles is not None and len(triangles):

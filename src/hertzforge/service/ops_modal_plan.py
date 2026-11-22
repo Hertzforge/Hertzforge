@@ -26,6 +26,7 @@ from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
 from .op_progress import hook
 from .ops_model import _family, _groups
+from .ops_project import MATCH as TOLERANCE
 from .ops_project import _shape_view
 from .parsing import parse_id_runs, parse_optional_picks
 from .protocol import refused
@@ -413,8 +414,6 @@ def export_state_space(project: Any, params: dict[str, Any]) -> list[dict]:
 
 PROJECTED = Param('source', 'Shape set', 'enum', options_from='objects:shape_set')
 ROWS = Param('rows', 'Channels (rows, blank: all)', 'string', default='')
-TOLERANCE = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
-                  min=0.01, max=100.0, step=0.5)
 BASIS = Param('first', 'Basis', 'enum', options_from='objects:shape_set')
 OTHER = Param('second', 'Projected', 'enum', options_from='objects:shape_set')
 
@@ -443,7 +442,7 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     rows = parse_optional_picks(params['rows'], count, 'row')
     try:
         added = project.project_onto_basis(source, onto=table, channels=rows,
-                                           tolerance=params['tolerance'] / 100.0)
+                                           distance=params['distance'] or None)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     found = project.geometry_for(added)
@@ -457,13 +456,12 @@ def project_onto_channels(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.projection_overlay`: two shape sets on two geometries,
-    the second projected onto the basis set's DOFs
-    (`core.correlate.project_shapes`), their MAC after projection
-    (`core.shapes.cross_mac`, as `Project.comparison_mac` reads it), and
-    the pair a cell picks drawn on the basis geometry, the projected
-    mode over the basis mode: Animate the Projection.
+    one projected onto the other's DOFs the way the pair's projection
+    says (`Project.compared_sets`, as Project sets it), their MAC after
+    projection (`core.shapes.cross_mac`, as `Project.comparison_mac`
+    reads it), and the pair a cell picks drawn on the geometry projected
+    onto, the projected mode over the other: Animate the Projection.
     Nothing is added."""
-    from hertzforge.core.correlate import project_shapes
     from hertzforge.core.shapes import cross_mac
 
     first, second = params['first'], params['second']
@@ -475,23 +473,25 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     if home[1] is theirs[1]:
         raise refused(f'{first} and {second} are both on {home[0]}, so there is nothing to '
                       'project; MAC overlays them there')
-    rows = project[first]
     try:
-        projected, report = project_shapes(project[second], theirs[1], rows, home[1],
-                                           tolerance=params['tolerance'] / 100.0)
-        values = cross_mac(rows, projected)
+        rows, columns, said, report = project.compared_sets(first, second)
+        values = cross_mac(rows, columns)
     except ValueError as error:
-        raise refused(str(error)) from None
+        # the cause is kept: the comparison tells no node matched from another refusal
+        raise refused(str(error)) from error
+    flipped = project.projection_of(first, second)[0] == first
+    basis = theirs if flipped else home
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
 
-    matrix = v.matrix(f'MAC of {first} Against {second} on {home[0]}', axis(first, rows),
-                      axis(f'{second}, projected', projected), values, 'MAC', (0.0, 1.0))
-    views = paired(home[1], matrix, rows, range(rows.num_shapes), projected,
-                   range(projected.num_shapes))
-    return [*views, v.reading(f'{second} projected onto {first}',
-                              _report_rows(report, home[1].units_defined))]
+    matrix = v.matrix(f'MAC of {first} Against {second} on {basis[0]}',
+                      axis(f'{first}, projected' if flipped else first, rows),
+                      axis(second if flipped else f'{second}, projected', columns),
+                      values, 'MAC', (0.0, 1.0))
+    views = paired(basis[1], matrix, rows, range(rows.num_shapes), columns,
+                   range(columns.num_shapes))
+    return [*views, v.reading(said, _report_rows(report, basis[1].units_defined))]
 
 
 OPERATIONS = (
@@ -521,9 +521,9 @@ OPERATIONS = (
         run=project_onto_channels),
     Operation(
         id='project.projection_overlay', title='Animate the Projection', workspace='modal',
-        summary='A shape set on another geometry projected onto the basis set\'s DOFs, their '
-                'MAC, and a pair drawn on the basis geometry, the projected mode over the basis '
-                'mode.',
-        params=(BASIS, OTHER, TOLERANCE), outputs=('matrix', 'shape3d', 'reading'),
+        summary='Two shape sets on two geometries, one projected onto the other\'s DOFs as '
+                'Project sets it, their MAC, and a pair drawn on the geometry projected onto, '
+                'the projected mode over the other.',
+        params=(BASIS, OTHER), outputs=('matrix', 'shape3d', 'reading'),
         run=projection_overlay),
 )

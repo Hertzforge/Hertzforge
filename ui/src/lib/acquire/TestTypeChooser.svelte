@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * The test-type chooser, where Acquire & Control opens: one card per test type, with what the
-	 * test is in a line, under three sections: Single Output, MIMO and Data Acquisition. A type still to come says so in words, keeps its place in the keyboard
+	 * test is in a line, under three sections: Single Output, MIMO and Specialized. A type still to come says so in words, keeps its place in the keyboard
 	 * order, and cannot be opened. While a run is live, its card says so and returns to it.
 	 */
 	import { onMount } from 'svelte';
@@ -87,6 +87,13 @@
 											{:else if t.id === 'recorder'}
 												<circle cx="8" cy="14" r="5" class="fill" />
 												<path d="M17 14l2.5-3 2.5 5 2.5-4 2.5 3 2.5-2 2.5 1h7" />
+											{:else if t.id === 'playback'}
+												<path d="M3 5v18l9-9z" class="fill" />
+												<path d="M16 14h2l2-6 3 12 3-9 2 5 2-4 2 2h7" />
+											{:else if t.id === 'modal_test'}
+												<path d="M2 4h9v5H2z" class="fill" />
+												<path d="M6.5 9v15" />
+												<path d="M15 14q1.5-11 3 0t3 0q1.5-7 3 0t3 0q1.5-4 3 0t3 0q1.5-2 3 0t3 0h4" />
 											{:else if t.id === 'mimo_random'}
 												<path d="M2 8l2.5-3 2.5 5 2.5-6 2.5 7 2.5-5 2.5 3 2.5-6 2.5 8 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" />
 												<path d="M2 21l2.5-4 2.5 6 2.5-7 2.5 8 2.5-5 2.5 3 2.5-7 2.5 9 2.5-6 2.5 4 2.5-5 2.5 4 2.5-2 2.5 3 2.5-3 2.5 1" class="faint" />

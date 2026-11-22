@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 213,
+ "method": "modal_test.select",
+ "params": {
+  "point": 1
+ }
+}

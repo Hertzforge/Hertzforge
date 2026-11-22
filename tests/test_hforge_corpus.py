@@ -297,3 +297,43 @@ def test_schema4_holds_test_setups():
     assert taken.origin == {'kind': 'run', 'run_uid': record.run_uid,
                             'run_id': record.run_id, 'name': 'Run Record'}
     assert taken.table['rows'] == record.table['rows']
+
+
+def test_schema5_scans_open_as_geometries():
+    """The schema 5 file is the schema 4 project plus two `scan/` groups,
+    which nothing writes any more. They open as geometries: the probed
+    points as nodes in meters with a feature an element group, and the
+    bare cloud as nodes with no unit."""
+    from hertzforge.core.geometry import Geometry
+
+    held = native.load(os.path.join(CORPUS, 'schema5.hforge'))
+    older = native.load(os.path.join(CORPUS, 'schema4.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema5.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.SCAN_SCHEMA
+    assert list(held)[:len(older)] == list(older)
+    probed, cloud = held['Probed Scan'], held['Cloud Scan']
+    assert isinstance(probed, Geometry) and isinstance(cloud, Geometry)
+    assert probed.length_unit == 'mm' and list(probed.group_name) == ['31_1', '31_2']
+    assert probed.node_id.tolist() == [1, 2, 3, 4, 5, 6, 7]
+    assert [int(c[0]) for c in probed.elem_conn] == [1, 2, 3, 4, 5, 6]
+    assert probed.elem_group.tolist() == [1, 1, 1, 2, 2, 2]
+    assert set(probed.elem_type.tolist()) == {203}
+    np.testing.assert_allclose(probed.node_xyz[2], [0.010, 0.002, 0.009])
+    assert cloud.length_unit is None and not len(cloud.elem_conn) and cloud.num_nodes == 8
+    np.testing.assert_allclose(cloud.node_xyz[1], [3.0, 2.0, 1.25])
+
+
+def test_a_project_saved_now_holds_measured_points_as_a_geometry(tmp_path):
+    """Measured points are a geometry, of an element type a build from
+    before them does not know, so the file is stamped for them and that
+    build says to update."""
+    from hertzforge.io.point_files import points_geometry
+
+    project = Project()
+    project.add('Probed', points_geometry([[1.0, 2.0, 3.0]], 'mm', ['a'], [0]))
+    path = tmp_path / 'probed.hforge'
+    project.save(path)
+    with h5py.File(path) as f:
+        assert f.attrs[native.STAMP] == native.MEASURED_POINT_SCHEMA
+        assert 'scan' not in f
+    np.testing.assert_allclose(Project.open(path)['Probed'].node_xyz, [[0.001, 0.002, 0.003]])

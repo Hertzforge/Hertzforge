@@ -664,18 +664,18 @@ impl ProfileTracer {
             0.5 - 0.5 * (std::f64::consts::TAU * ((i - start) as f64 + 0.5) / m as f64).cos()
         };
         let (mut sw, mut sum) = (0.0f64, 0.0f64);
-        for i in start..n {
+        for (i, &x) in self.window.iter().enumerate().take(n).skip(start) {
             let wi = w(i);
             sw += wi;
-            sum += wi * self.window[i];
+            sum += wi * x;
         }
         if sw <= 0.0 {
             return None;
         }
         let mean = sum / sw;
         let mut sq = 0.0f64;
-        for i in start..n {
-            let d = self.window[i] - mean;
+        for (i, &x) in self.window.iter().enumerate().take(n).skip(start) {
+            let d = x - mean;
             sq += w(i) * d * d;
         }
         let amp = (sq / sw).sqrt() * std::f64::consts::SQRT_2;

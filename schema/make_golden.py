@@ -5925,6 +5925,780 @@ MSHOCK_TEXT_GOLDENS = {
 }
 
 
+
+# --- MIMO Sine (PROTOCOL.md, "MIMO Sine") ---
+#
+# The configuration golden is the contract's example with every field given, on
+# the simulator's base and article (controls 1 to 4, the article's responses 5
+# and 6 as limit channels, drives 7 to 10); the configure response's `derived`
+# and state are what the control service computes for it (the Rust golden test
+# recomputes them). The binary goldens carry a running run's figures on three
+# points of the sweep grid, the third not reached yet, every value exact in
+# binary, laid out as the service's view builders lay them out. File names say
+# `mimo_sine`, and the law list's `sine_mimo`.
+
+MSINE_CONTROLS = [1, 2, 3, 4]
+MSINE_LIMITS = [5, 6]
+MSINE_DRIVES = [7, 8, 9, 10]
+
+
+def _msine_profile(g, alarm, abort, label='1 g'):
+    return {'label': label,
+            'rows': [{'freq_hz': 10, 'quantity': 'accel_g', 'value': g},
+                     {'freq_hz': 500, 'quantity': 'accel_g', 'value': g}],
+            'alarm_db': [alarm, alarm], 'abort_db': [abort, abort]}
+
+
+MSINE_CONFIG = {
+    'title': 'Four-Shaker Sweep, 1 g, 20 to 400 Hz',
+    'channels': {
+        'controls': [{'channel': c, 'profile': _msine_profile(1, 1.5, 6),
+                      'phase': [{'freq_hz': 10, 'phase_deg': 0}]} for c in MSINE_CONTROLS],
+        'drives': [{'channel': d, 'ceiling_vpk': 2, 'abort_vpk': 3} for d in MSINE_DRIVES],
+    },
+    'phase_specified': True,
+    'test': {'kind': 'sweep', 'band_hz': [20, 400], 'rate': {'law': 'log', 'oct_per_min': 2},
+             'start_hz': 20, 'direction': 'up', 'end': {'sweeps': 2, 'duration_s': None}},
+    'acquisition': {'fs_hz': None, 'tick_ms': 10},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -6, 0], 'start_db': -12,
+                 'per_level': {'sweeps': 1}, 'full_level': {'sweeps': 2}},
+    'identification': {'level_db': -20, 'resolution_hz': 0.25, 'frames': None,
+                       'trust_coherence': 0.5, 'gate_coherence': 0.5, 'review': True},
+    'control': {'tracking': {'kind': 'proportional', 'pct': 10, 'max_hz': 100},
+                'law': {'id': 'matrix', 'params': {'carry': 0.67}},
+                'law_budget': 0.25, 'law_misses': 3, 'max_step_db': 1,
+                'max_rise_db_per_s': 240, 'rotation_cap_deg': None, 'divergence_s': 1,
+                'abort_ticks': 3},
+    'requests': {'honour': False, 'max_hold_s': 2, 'min_slow_factor': 0.1},
+    'limits': {'kinematic_monitor': True,
+               'channels': [{'channel': c, 'profile': _msine_profile(3, 1.5, 3, 'Article bound')}
+                            for c in MSINE_LIMITS],
+               'notch': {'smoothing_ticks': 3, 'release_ramp_db_per_s': 10,
+                         'release_hysteresis_db': 1, 'near_bound_db': 3}},
+    'feasibility': None,
+    'simulator': {'structure': 'sine-base-article-6x4'},
+    'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': '',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.2'},
+    'record': {'streams': True},
+    'metadata': [],
+}
+
+MSINE_IDENTIFICATION = {
+    'level_db': -20, 'measured_level_db': -17.5, 'realizations': 24, 'line_spacing_hz': 0.25,
+    'duration_s': 200, 'drive_vrms': [0.0625, 0.0625, 0.0625, 0.0625],
+    'coherence_mean': [0.9921, 0.9844, 0.9922, 0.9766], 'limit_coherence_mean': [0.9609, 0.9531],
+    'trusted_frac': 0.9688, 'condition_max': 12.5, 'lag_frames': 266, 'gate_coherence': 0.5,
+    'passed': True,
+}
+
+MSINE_REVIEW = {
+    'resonances': [{'freq_hz': 40.5, 'bandwidth_hz': 0.81, 'time_constants': 1.25,
+                    'flagged': True},
+                   {'freq_hz': 230, 'bandwidth_hz': 9.2, 'time_constants': 8.5,
+                    'flagged': False}],
+    'acknowledged': None,
+}
+
+MSINE_RECORD = {'folder': '/home/operator/Hertzforge_Data/20261117-140000_mimo_sine_msine-0002',
+                'streams': 'on', 'problem': None}
+
+
+
+_MSINE_GRID = {'fs_hz': 16384, 'tick_frames': 164, 'tick_s': 0.0100098, 'actual': False}
+_MSINE_FEAS = {'verdict': 'not_evaluated',
+               'message': 'No shaker was given, so the references were not checked against '
+                          'shaker ratings and the kinematic monitor is off.'}
+_MSINE_LAW_PARAMS = {'carry': 0.67, 'gain_rule': 'loop_speed', 'fixed_gain': 0.5,
+                     'delay_estimate': 'largest', 'regularization': 0.001, 'model': 'modal',
+                     'smoothing_lines': 8, 'free_phase': 'in_phase',
+                     'carry_outside_model': False}
+_MSINE_SHAPES = ['square', 'more_controls_than_drives', 'fewer_controls_than_drives']
+
+MSINE_DERIVED = {
+    'band_hz': [20, 400], 'shape': 'square', 'controls': 4, 'drives': 4, 'limits': 2,
+    'grid': _MSINE_GRID,
+    'profiles': [{'crossovers': [], 'peak_accel_g': 1, 'peak_velocity_ips': 3.072,
+                  'peak_disp_pp_in': 0.0489, 'channel': c} for c in MSINE_CONTROLS],
+    'test_s': 259.3, 'identification_s': 200, 'call_budget_s': 0.0025024,
+    'stop_ramp_db_per_s': 120, 'safe_stop_s': 1.05,
+    'tracking': {'verdict': 'ok', 'ratio': 0.00361, 'at_hz': None, 'message': None},
+    'law': {'id': 'matrix', 'name': 'matrix', 'version': '0.1.0', 'sha256': None,
+            'shapes': _MSINE_SHAPES, 'test_types': ['sweep', 'dwell', 'stepped'],
+            'amplitude_only': True},
+    'feasibility': _MSINE_FEAS,
+}
+
+
+def _msine_state(**over):
+    """A MIMO Sine state object, configured unless `over` says otherwise."""
+    state = {
+        'run_id': 'msine-0002', 'state': 'configured', 'phase': 'idle',
+        'title': MSINE_CONFIG['title'], 'source': 'SIM',
+        'station': {'kind': 'sim', 'class': 'sim', 'devices': [],
+                    'structure': 'sine-base-article-6x4'},
+        'grid': _MSINE_GRID, 'clock': None, 'test': 'sweep', 'shape': 'square',
+        'phase_specified': True, 'mode': 'auto', 'levels_db': [-12, -6, 0], 'level_db': None,
+        'rung': None, 'frequency_hz': None, 'direction': None, 'sweeps': {'done': 0, 'of': 2},
+        'steps': None, 'held': False, 'request_held': False, 'elapsed_s': None,
+        'at_level_s': None, 'remaining_s': None, 'alarm': False, 'notch': False,
+        'notch_scale': 1, 'identification': None, 'review': None,
+        'law': {'id': 'matrix', 'name': 'matrix', 'version': '0.1.0', 'sha256': None,
+                'params': _MSINE_LAW_PARAMS, 'misses': 0, 'capped_ticks': 0,
+                'over_ceiling': 0, 'rotation_max_deg': 0,
+                'requests': {'asked': 0, 'granted': 0}},
+        'feasibility': _MSINE_FEAS, 'end': None, 'record': None,
+    }
+    state.update(over)
+    return state
+
+
+_MSINE_ACTUAL = {**_MSINE_GRID, 'actual': True}
+
+MSINE_RUNNING = _msine_state(
+    state='running', phase='engaged', grid=_MSINE_ACTUAL, clock='shared', level_db=-6,
+    rung=1, frequency_hz=97.25, direction='up', sweeps={'done': 1, 'of': 2}, elapsed_s=81.25,
+    at_level_s=12, remaining_s=178.1, notch=True, notch_scale=0.75,
+    identification=MSINE_IDENTIFICATION, review=MSINE_REVIEW,
+    law={'id': 'matrix', 'name': 'matrix', 'version': '0.1.0', 'sha256': None,
+         'params': _MSINE_LAW_PARAMS, 'misses': 0, 'capped_ticks': 3, 'over_ceiling': 1,
+         'rotation_max_deg': 4.25, 'requests': {'asked': 0, 'granted': 0}},
+    record=MSINE_RECORD)
+
+MSINE_REVIEW_STATE = _msine_state(
+    state='review', phase='awaiting_review', grid=_MSINE_ACTUAL, clock='shared',
+    identification=MSINE_IDENTIFICATION, review=MSINE_REVIEW, record=MSINE_RECORD)
+
+MSINE_SUBSCRIBE_PLOTS = [
+    {'id': 'ctl', 'quantity': 'control', 'channels': [1, 2]},
+    {'id': 'ph', 'quantity': 'phase', 'channels': [1]},
+    {'id': 'err', 'quantity': 'error'},
+    {'id': 'lim', 'quantity': 'limit', 'channels': 'all'},
+    {'id': 'drv', 'quantity': 'drive'},
+    {'id': 'dph', 'quantity': 'drive_phase'},
+    {'id': 'run', 'quantity': 'readings'},
+    {'id': 't', 'quantity': 'time', 'channels': [1, 5], 'points': 2048},
+    {'id': 'id', 'quantity': 'identification'},
+    {'id': 'law', 'quantity': 'law'},
+]
+MSINE_QUANTITIES = ['control', 'phase', 'error', 'limit', 'drive', 'drive_phase', 'readings',
+                    'time', 'identification', 'law']
+
+# The running run's figures: three points of the sweep grid, the third not
+# reached; per control its amplitude, phase, reference, reference phase, error
+# and notch depth; per limit channel its amplitude and bound; per drive its
+# amplitude and phase; the two readings.
+_MSINE_F = [100.0, 200.0, 400.0]
+_MSINE_REACHED = _MSINE_F[:2]
+
+
+def _msine_ctl_points(k):
+    a = 0.5 + 0.0625 * k
+    return {'amp': [a, a * 2], 'phase': [-12.5, -15.0], 'ref': [0.5, 0.5],
+            'ref_phase': [-10.0, -10.0], 'err': [0.25, -0.5], 'notch': [0.0, 0.0]}
+
+
+_MSINE_LIMIT_POINTS = [{'amp': [1.25, 2.5], 'bound': [3.0, 3.0]},
+                       {'amp': [1.5, 2.75], 'bound': [3.0, 3.0]}]
+_MSINE_DRIVE_POINTS = [{'amp': [0.25 + 0.125 * k, 0.5], 'phase': [33.0, 30.0]}
+                       for k in range(4)]
+_MSINE_READINGS = {'opp': [1.0625, 1.125], 'share': [0.3125, 0.375]}
+_MSINE_LOG_X = _axis('Frequency', 'Hz', 'log')
+
+
+# Each control's alarm (1.5 dB) and abort (6 dB) bands: name, role and dB from its reference.
+_MSINE_BANDS = [('Alarm high', 'tolerance', 1.5), ('Alarm low', 'tolerance', -1.5),
+                ('Abort high', 'abort', 6.0), ('Abort low', 'abort', -6.0)]
+
+
+def _msine_spec(a, title, y, series):
+    return _spectrum(title, _MSINE_LOG_X, y,
+                     [a.series(n, r, _MSINE_REACHED, v) for n, r, v in series], 'frequency')
+
+
+def _msine_pass_views(a, want=None):
+    """The views of a pass's figures in the service's order, only those `want` takes."""
+    out = []
+    ok = (lambda t: True) if want is None else want
+    for k, c in enumerate(MSINE_CONTROLS):
+        p = _msine_ctl_points(k)
+        if ok(f'Control {c}'):
+            out.append(_msine_spec(a, f'Control {c}', _axis('Amplitude', 'g', 'log'),
+                                   [('Measured', 'measured', p['amp']),
+                                    ('Reference', 'reference', p['ref']),
+                                    *[(n, r, [x * 10 ** (db / 20) for x in p['ref']])
+                                      for n, r, db in _MSINE_BANDS]]))
+        if ok(f'Phase {c}'):
+            out.append(_msine_spec(a, f'Phase {c}', _axis('Phase', 'deg', 'linear'),
+                                   [('Measured', 'measured', p['phase']),
+                                    ('Reference', 'reference', p['ref_phase'])]))
+        if ok(f'Error {c}'):
+            out.append(_msine_spec(a, f'Error {c}', _axis('Error', 'dB', 'linear'),
+                                   [('Error', 'measured', p['err']),
+                                    ('Notch depth', 'limit', p['notch']),
+                                    *[(n, r, [db] * len(p['err'])) for n, r, db in _MSINE_BANDS]]))
+    for c, p in zip(MSINE_LIMITS, _MSINE_LIMIT_POINTS):
+        if ok(f'Limit {c}'):
+            out.append(_msine_spec(a, f'Limit {c}', _axis('Amplitude', 'g', 'log'),
+                                   [('Measured', 'measured', p['amp']),
+                                    ('Bound', 'limit', p['bound'])]))
+    if ok('Drives'):
+        out.append(_msine_spec(a, 'Drives', _axis('Drive', 'V', 'log'),
+                               [(f'Drive {d}', 'drive', p['amp'])
+                                for d, p in zip(MSINE_DRIVES, _MSINE_DRIVE_POINTS)]))
+    if ok('Drive phase'):
+        out.append(_msine_spec(a, 'Drive phase', _axis('Phase', 'deg', 'linear'),
+                               [(f'Drive {d}', 'drive', p['phase'])
+                                for d, p in zip(MSINE_DRIVES, _MSINE_DRIVE_POINTS)]))
+    if ok('Readings'):
+        out.append(_msine_spec(a, 'Readings', _axis('Reading', None, 'linear'),
+                               [('Opposition', 'other', _MSINE_READINGS['opp']),
+                                ('Largest share', 'other', _MSINE_READINGS['share'])]))
+    return out
+
+
+def _msine_row(label, value, unit, status='info'):
+    return {'label': label, 'value': value, 'unit': unit, 'status': status}
+
+
+MSINE_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    _msine_row('Frequency', 97.25, 'Hz'), {'label': 'Direction', 'value': 'up', 'unit': None,
+                                           'status': 'info'},
+    _msine_row('Level', -6.0, 'dB'), _msine_row('Notch', 0.75, None, 'warn'),
+    _msine_row('Drive', 0.625, 'V'), _msine_row('Opposition', 1.063, None),
+    _msine_row('Largest share', 0.313, None),
+    {'label': 'Sweeps', 'value': '1 of 2', 'unit': None, 'status': 'info'},
+    _msine_row('Elapsed', 81.3, 's'), _msine_row('Remaining', 178.1, 's')]}
+
+_MSINE_VALUE_KEYS = ['gain', 'group_delay_s', 'condition', 'carried_share', 'rotation_deg',
+                     'unseen_share', 'modes_kept', 'candidates_left_out']
+_MSINE_VALUE_LABELS = [('Gain', ''), ('Structure delay', 's'), ('Condition', ''),
+                       ('Carried share', ''), ('Rotation', 'deg'), ('Unseen share', ''),
+                       ('Modes in the model', ''), ('Resonances left out', '')]
+_MSINE_VALUES = [0.125, 0, 0, 0, None, None, None, None]
+
+MSINE_LIVE_HEAD = {
+    'run_id': 'msine-0002', 'source': 'SIM', 'class': 'sim', 'state': 'running',
+    'phase': 'engaged', 'test': 'sweep', 'mode': 'auto', 't_s': 81.25, 'elapsed_s': 81.25,
+    'frequency_hz': 97.25, 'direction': 'up', 'sweep_rate_oct_per_min': 2,
+    'sweeps': {'done': 1, 'of': 2}, 'steps': None, 'held': False, 'request_held': False,
+    'level_db': -6, 'commanded_db': -6, 'notch': True, 'notch_scale': 0.75, 'alarm': False,
+    'controls': [{'channel': c, 'description': f'Channel {c}', 'unit': 'g',
+                  'amplitude': 0.5 + 0.0625 * k, 'phase_deg': -12.5, 'reference': 0.5,
+                  'reference_phase_deg': -10, 'error_db': 0.25, 'phase_error_deg': -2.5,
+                  'notch_depth_db': 0, 'overload': False}
+                 for k, c in enumerate(MSINE_CONTROLS)],
+    'limits': [{'channel': 5, 'description': 'Channel 5', 'unit': 'g', 'amplitude': 1.25,
+                'phase_deg': 171, 'bound': 3, 'margin_db': -7.5},
+               {'channel': 6, 'description': 'Channel 6', 'unit': 'g', 'amplitude': 1.5,
+                'phase_deg': 170, 'bound': 3, 'margin_db': -6}],
+    'drives': [{'channel': d, 'vpk': 0.25 + 0.125 * k, 'phase_deg': 33, 'ceiling_vpk': 2}
+               for k, d in enumerate(MSINE_DRIVES)],
+    'readings': {'opposition_ratio': 1.0625, 'largest_share': 0.3125, 'rotation_deg': 0.75},
+    'request': None,
+    'law': {'values': dict(zip(_MSINE_VALUE_KEYS, _MSINE_VALUES)), 'misses': 0,
+            'capped_ticks': 3, 'faulted': False},
+}
+
+
+def _msine_live_build() -> tuple[dict, dict]:
+    a = _Arr()
+    controls = []
+    for k, c in enumerate(MSINE_CONTROLS):
+        p = _msine_ctl_points(k)
+        controls.append(a.series(f'Control {c}', 'measured', _MSINE_REACHED, p['amp']))
+        controls.append(a.series(f'Reference {c}', 'reference', _MSINE_REACHED, p['ref']))
+    views = [
+        _spectrum('Controls', _MSINE_LOG_X, _axis('Amplitude', 'g', 'log'), controls,
+                  'frequency'),
+        _spectrum('Drives', _MSINE_LOG_X, _axis('Drive', 'V', 'log'),
+                  [a.series(f'Drive {d}', 'drive', _MSINE_REACHED, p['amp'])
+                   for d, p in zip(MSINE_DRIVES, _MSINE_DRIVE_POINTS)], 'frequency'),
+        MSINE_RUN_READING,
+    ]
+    data = {**MSINE_LIVE_HEAD, 'views': views}
+    return {'type': 'event', 'topic': 'mimo_sine.live', 'seq': 309, 'data': data}, a.arrays
+
+
+def _msine_sweep_build() -> tuple[dict, dict]:
+    a = _Arr()
+    data = {'run_id': 'msine-0002', 'pass': 1, 'level_db': -6, 'direction': 'up',
+            'views': _msine_pass_views(a)}
+    return {'type': 'event', 'topic': 'mimo_sine.sweep', 'seq': 310, 'data': data}, a.arrays
+
+
+def _msine_error_view(a):
+    series = []
+    for k, c in enumerate(MSINE_CONTROLS):
+        series.append(a.series(f'Control {c}', 'measured', _MSINE_REACHED,
+                               _msine_ctl_points(k)['err']))
+    # Every control shares its bands: drawn once.
+    series += [a.series(n, r, _MSINE_REACHED, [db] * len(_MSINE_REACHED))
+               for n, r, db in _MSINE_BANDS]
+    return _spectrum('Error', _MSINE_LOG_X, _axis('Error', 'dB', 'linear'), series, 'frequency')
+
+
+def _msine_ident_views(a):
+    """The identification plot of control 1: its gain and phase from every drive, every
+    row's coherence, on the identification's grid (empty in the golden: the figures are
+    the identification's, drawn once it is there)."""
+    return []
+
+
+MSINE_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
+    *[_msine_row(label, v, unit if unit else None)
+      for (label, unit), v in zip(_MSINE_VALUE_LABELS, _MSINE_VALUES)],
+    _msine_row('Unusable calls in a row', 0.0, None),
+    _msine_row('Ticks a cap bound', 3.0, None),
+    _msine_row('Largest rotation', 4.25, 'deg'),
+    {'label': 'Requests', 'value': '0 made, 0 granted', 'unit': None, 'status': 'info'}]}
+
+
+def _msine_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 'ctl', 'quantity': 'control', 'channels': [1, 2],
+         'views': _msine_pass_views(a, lambda t: t in ('Control 1', 'Control 2'))},
+        {'id': 'ph', 'quantity': 'phase', 'channels': [1],
+         'views': _msine_pass_views(a, lambda t: t == 'Phase 1')},
+        {'id': 'err', 'quantity': 'error', 'channels': None, 'views': [_msine_error_view(a)]},
+        {'id': 'lim', 'quantity': 'limit', 'channels': MSINE_LIMITS,
+         'views': _msine_pass_views(a, lambda t: t.startswith('Limit '))},
+        {'id': 'drv', 'quantity': 'drive', 'channels': None,
+         'views': _msine_pass_views(a, lambda t: t == 'Drives')},
+        {'id': 'dph', 'quantity': 'drive_phase', 'channels': None,
+         'views': _msine_pass_views(a, lambda t: t == 'Drive phase')},
+        {'id': 'run', 'quantity': 'readings', 'channels': None,
+         'views': [*_msine_pass_views(a, lambda t: t == 'Readings'), MSINE_RUN_READING]},
+        {'id': 't', 'quantity': 'time', 'channels': [], 'views': []},
+        {'id': 'id', 'quantity': 'identification', 'channels': 1, 'views': _msine_ident_views(a)},
+        {'id': 'law', 'quantity': 'law', 'channels': None, 'views': [MSINE_LAW_READING]},
+    ]
+    data = {**MSINE_LIVE_HEAD, 'plots': plots}
+    return {'type': 'event', 'topic': 'mimo_sine.data', 'seq': 311, 'data': data}, a.arrays
+
+
+MSINE_TEXT_GOLDENS = {
+    'request_mimo_sine_configure': {
+        'type': 'request', 'id': 81, 'method': 'mimo_sine.configure',
+        'params': {'config': MSINE_CONFIG},
+    },
+    'response_mimo_sine_configure': {
+        'type': 'response', 'id': 81,
+        'result': {'state': _msine_state(), 'derived': MSINE_DERIVED, 'warnings': []},
+    },
+    'request_mimo_sine_start': {'type': 'request', 'id': 82, 'method': 'mimo_sine.start',
+                                'params': {}},
+    'request_mimo_sine_proceed': {
+        'type': 'request', 'id': 83, 'method': 'mimo_sine.proceed',
+        'params': {'acknowledge': 'The 40 Hz resonance is flagged; the sweep stays at 2 oct/min.'},
+    },
+    'response_mimo_sine_state': {'type': 'response', 'id': 84, 'result': MSINE_RUNNING},
+    'event_mimo_sine_state': {'type': 'event', 'topic': 'mimo_sine.state', 'seq': 305,
+                              'data': MSINE_REVIEW_STATE},
+    'request_mimo_sine_level': {'type': 'request', 'id': 85, 'method': 'mimo_sine.level',
+                                'params': {'delta_db': -3}},
+    'request_mimo_sine_goto': {'type': 'request', 'id': 86, 'method': 'mimo_sine.goto',
+                               'params': {'hz': 120}},
+    'request_mimo_sine_jog': {'type': 'request', 'id': 87, 'method': 'mimo_sine.jog',
+                              'params': {'delta_hz': 5}},
+    'request_mimo_sine_subscribe': {
+        'type': 'request', 'id': 88, 'method': 'mimo_sine.subscribe',
+        'params': {'rate_hz': 2, 'plots': MSINE_SUBSCRIBE_PLOTS},
+    },
+    'response_mimo_sine_subscribe': {
+        'type': 'response', 'id': 88,
+        'result': {'default': False, 'rate_hz': 2,
+                   'plots': [{**p, 'channels': 'all'}
+                             if p['quantity'] == 'identification' else p
+                             for p in MSINE_SUBSCRIBE_PLOTS],
+                   'quantities': MSINE_QUANTITIES},
+    },
+    'response_error_mimo_sine_config_invalid': {
+        'type': 'response', 'id': 89,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'abort_below_ceiling', 'field': 'channels.drives[1].abort_vpk',
+                       'message': "Drive 8's abort of 1 V is not above its ceiling of 2 V and "
+                                  'at most 10 V.'},
+                      {'reason': 'law_test_type_not_accepted', 'field': 'control.law.id',
+                       'message': 'secant does not accept a sweep; it accepts dwell.'},
+                      {'reason': 'law_param_invalid', 'field': 'control.law.params.carry',
+                       'message': "secant's Carry along frequency is one of factor, plain."}],
+                      'warnings': []}},
+    },
+    'response_error_mimo_sine_reverse': {
+        'type': 'response', 'id': 90,
+        'error': {'code': 'refused', 'reason': 'reverse_not_available',
+                  'message': "A MIMO Sine sweep turns only at the band's edges; go to a "
+                             'frequency, or stop and start a sweep in the other direction.'},
+    },
+    'response_error_mimo_sine_not_a_sweep': {
+        'type': 'response', 'id': 91,
+        'error': {'code': 'refused', 'reason': 'not_a_sweep',
+                  'message': 'A go to applies to a sweep; this test is a dwell.',
+                  'detail': {'test': 'dwell'}},
+    },
+    'event_mimo_sine_log': {
+        'type': 'event', 'topic': 'mimo_sine.log', 'seq': 306,
+        'data': {'run_id': 'msine-0002', 'entries': [
+            {'seq': 14, 'at_unix': 1794240081.25, 'kind': 'notch',
+             'text': 'the limit channels hold the reference down to 0.75 of it at 97.25 Hz'},
+            {'seq': 15, 'at_unix': 1794240081.5, 'kind': 'request',
+             'text': 'the law asks to slow the sweep at 98.1 Hz; not honoured'}]},
+    },
+    'event_mimo_sine_report': {
+        'type': 'event', 'topic': 'mimo_sine.report', 'seq': 320,
+        'data': {'report': {
+            'run_id': 'msine-0002', 'title': MSINE_CONFIG['title'], 'source': 'SIM',
+            'grid': _MSINE_ACTUAL, 'test': 'sweep', 'shape': 'square', 'phase_specified': True,
+            'law': {'id': 'matrix', 'name': 'matrix', 'version': '0.1.0', 'sha256': None,
+                    'params': _MSINE_LAW_PARAMS},
+            'levels_db': [-12, -6, 0],
+            'controls': [{'channel': c, 'worst_error_db': 1.25, 'worst_error_hz': 40.5,
+                          'worst_phase_error_deg': 6.5, 'alarm_s': 0.5,
+                          'notch_depth_max_db': 2.5} for c in MSINE_CONTROLS],
+            'limits': [{'channel': c, 'worst_margin_db': -0.5, 'worst_margin_hz': 230,
+                        'notched_s': 3.25} for c in MSINE_LIMITS],
+            'drives': [{'channel': d, 'vpk_max': 1.5, 'vpk_max_hz': 40.5, 'ceiling_vpk': 2,
+                        'over_ceiling_ticks': 0} for d in MSINE_DRIVES],
+            'readings': {'opposition_ratio_max': 1.25, 'largest_share_max': 0.5},
+            'requests': {'asked': 0, 'granted': 0, 'held_s': 0},
+            'identification': MSINE_IDENTIFICATION,
+            'end': {'outcome': 'completed',
+                    'message': 'Test complete: the schedule ran its 259.3 s of test time and '
+                               'every drive ramped down with the controlled stop.',
+                    'at_s': 259.3, 'level_db': 0, 'at_hz': 400, 'ramp_s': 1, 'trip': None}}},
+    },
+}
+
+
+
+# Playback's drive files, by path on the analysis service: what a file holds,
+# the chosen signals written as a native drive folder (the golden folder
+# schema/golden/drive/basic/, which this conversion reproduces byte for byte),
+# its ends fixed into a new folder, and a refusal by name
+_DRIVE_CSV = '/Users/someone/tests/bracket/drive.csv'
+_DRIVE_FOLDER = '/Users/someone/Hertzforge_Data/drives/drive'
+_DRIVE_SHA256 = '2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540'
+_DRIVE_SIDECAR = {
+    'format': 'hertzforge-drive', 'version': 1, 'rate_hz': 1000.0, 'samples': 401,
+    'channels': [{'name': 'Drive 1', 'unit': 'V', 'source': 'column:2'},
+                 {'name': 'Drive 2', 'unit': 'V', 'source': 'column:3'}],
+    'sha256': _DRIVE_SHA256,
+    'source': {'path': _DRIVE_CSV,
+               'sha256': '08877c766433531155806dc91f8f69e27cb49110d6a8f0950b0b331601011594',
+               'format': 'delimited',
+               'selections': [{'signal': 'column:2', 'name': 'Drive 1'},
+                              {'signal': 'column:3', 'name': 'Drive 2'}]},
+    'fixes': [], 'tool': 'hertzforge 0.0.0', 'created_utc': '2026-11-15T00:00:00Z'}
+_DRIVE_FIXED_CHANNELS = [
+    {'name': 'Drive 1', 'a': -1.21109e-05, 'b': 5.18104e-18, 'rms_before': 0.216236,
+     'rms_after': 0.216236,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.5, 'velocity_end': 2.09664e-10,
+                'velocity_peak': 0.00395868, 'displacement_end': 4.19328e-11,
+                'displacement_peak': 3.31033e-05},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.500012, 'velocity_end': -5.75779e-19,
+               'velocity_peak': 0.00395884, 'displacement_end': -2.43797e-19,
+               'displacement_peak': 3.3292e-05}},
+    {'name': 'Drive 2', 'a': 6.42086e-07, 'b': -6.40497e-18, 'rms_before': 0.108118,
+     'rms_after': 0.108118,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.25, 'velocity_end': -2.54349e-11,
+                'velocity_peak': 0.000788997, 'displacement_end': -5.08699e-12,
+                'displacement_peak': 2.51054e-06},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.249999, 'velocity_end': 2.55435e-19,
+               'velocity_peak': 0.000788993, 'displacement_end': 6.23621e-20,
+               'displacement_peak': 2.5015e-06}}]
+DRIVE_TEXT_GOLDENS = {
+    'request_drive_inspect': {
+        'type': 'request', 'id': 61, 'method': 'drive.inspect', 'params': {'path': _DRIVE_CSV},
+    },
+    'response_drive_inspect': {
+        'type': 'response', 'id': 61,
+        'result': {
+            'source': {'path': _DRIVE_CSV, 'format': 'delimited'},
+            'signals': [
+                {'key': 'column:2', 'name': 'Drive 1', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 2', 'problem': None},
+                {'key': 'column:3', 'name': 'Drive 2', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 3', 'problem': None}],
+            'rate_hz': 1000.0, 'notes': []},
+    },
+    'request_drive_convert': {
+        'type': 'request', 'id': 62, 'method': 'drive.convert',
+        'params': {'path': _DRIVE_CSV, 'selections': ['column:2', 'column:3']},
+    },
+    'response_drive_convert': {
+        'type': 'response', 'id': 62,
+        'result': {'folder': _DRIVE_FOLDER, 'drive': _DRIVE_SIDECAR, 'notes': []},
+    },
+    'request_drive_fix_ends': {
+        'type': 'request', 'id': 63, 'method': 'drive.fix_ends',
+        'params': {'folder': _DRIVE_FOLDER},
+    },
+    'response_drive_fix_ends': {
+        'type': 'response', 'id': 63,
+        'result': {
+            'folder': _DRIVE_FOLDER + '-fixed',
+            'drive': {**_DRIVE_SIDECAR, 'sha256': (
+                'b5cea183468e5b7fa1b59683ef00f773a0f45847f7ef2350aa3aa5c0df84d210'),
+                'fixes': [{
+                    'kind': 'fix_ends', 'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+                    'taper_s': 0.01, 'taper_samples': 10,
+                    'correction': ('c(t) = a sin(pi t / T) + b sin(2 pi t / T), '
+                                   'T = (samples - 1) / rate_hz'),
+                    'channels': [{k: c[k] for k in ('name', 'a', 'b', 'rms_before',
+                                                    'rms_after')}
+                                 for c in _DRIVE_FIXED_CHANNELS]}]},
+            'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+            'taper_s': 0.01, 'taper_samples': 10, 'channels': _DRIVE_FIXED_CHANNELS},
+    },
+    'request_drive_convert_unequal': {
+        'type': 'request', 'id': 64, 'method': 'drive.convert',
+        'params': {'path': '/Users/someone/tests/bracket/drives.npz',
+                   'selections': ['array:a', {'signal': 'array:b', 'name': 'Shaker 2'}],
+                   'rate_hz': 1000.0},
+    },
+    'response_error_drive_refused': {
+        'type': 'response', 'id': 64,
+        'error': {'code': 'refused',
+                  'message': ('the drives differ in length (a has 401, Shaker 2 has 397 '
+                              'samples); every drive plays the same number of samples')},
+    },
+}
+
+
+
+# ---- Playback ---------------------------------------------------------------------
+
+PLAYBACK_SHA = 'f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02'
+PLAYBACK_CONFIG = {
+    'title': 'Golden Playback',
+    'drive': {'folder': '/home/operator/Hertzforge_Data/drives/burst', 'sha256': PLAYBACK_SHA},
+    'map': [2], 'level_db': -6, 'ceiling_v': 1, 'pre_roll_s': 0.125, 'post_roll_s': 0.125,
+    'capture': {'run_name': 'playback'},
+    'operator': 'A. Operator', 'article': 'Bracket, SN 0042', 'notes': '',
+    'specification': {'document': 'Test procedure', 'clause': '4.2'},
+    'record': {'streams': True},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
+}
+
+#: `playback.state` while the file plays: halfway through the golden burst.
+PLAYBACK_RUNNING = {
+    'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+    'title': 'Golden Playback', 'source': 'SIM', 'class': 'sim', 'fs_hz': 2048,
+    'drive': {'samples': 1024, 'duration_s': 0.5, 'sha256': PLAYBACK_SHA, 'map': [2]},
+    'level_db': -6, 'ceiling_v': 1,
+    'rolls': {'pre_frames': 256, 'post_frames': 256},
+    'progress': {'played': 512, 'samples': 1024, 'played_s': 0.25, 'fraction': 0.5,
+                 'elapsed_s': 0.375, 'buffered_s': 0.25},
+    'inputs': [{'index': 1, 'role': 'input', 'unit': 'g', 'description': 'Control'}],
+    'drives': [{'index': 2, 'role': 'drive', 'unit': 'V', 'description': 'Drive'}],
+    'overloads': [{'channel': 1, 'overload': False}],
+    'health': {'engine_ticks': 6, 'worst_tick_ms': 0.25, 'budget_ms': 62.5, 'health_faults': 0,
+               'ring_overruns': 0},
+    'record': {'folder': '/home/operator/Hertzforge_Data/playback', 'streams': 'on',
+               'problem': None},
+    'end': None,
+}
+
+PLAYBACK_LIVE_INPUT = [0.0, 0.25, -0.5, 0.125, 0.0625, -0.25]
+PLAYBACK_LIVE_DRIVE = [0.0, 0.125, -0.25, 0.0625, 0.03125, -0.125]
+
+
+def _playback_live_build() -> tuple[dict, dict]:
+    data = {
+        'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+        'progress': PLAYBACK_RUNNING['progress'],
+        'time': {'rate_hz': 2048, 't0_s': 0.125, 'channels': [
+            {'index': 1, 'role': 'input', 'unit': 'g', 'values': {'$array': 'c0'}},
+            {'index': 2, 'role': 'drive', 'unit': 'V', 'values': {'$array': 'c1'}},
+        ]},
+    }
+    arrays = {'c0': ('f32', [len(PLAYBACK_LIVE_INPUT)], PLAYBACK_LIVE_INPUT),
+              'c1': ('f32', [len(PLAYBACK_LIVE_DRIVE)], PLAYBACK_LIVE_DRIVE)}
+    return {'type': 'event', 'topic': 'playback.live', 'seq': 301, 'data': data}, arrays
+
+
+PLAYBACK_TEXT_GOLDENS = {
+    'request_playback_configure': {
+        'type': 'request', 'id': 131, 'method': 'playback.configure',
+        'params': {'config': PLAYBACK_CONFIG},
+    },
+    'request_playback_start': {
+        'type': 'request', 'id': 132, 'method': 'playback.start', 'params': {},
+    },
+    'request_playback_log': {
+        'type': 'request', 'id': 133, 'method': 'playback.log', 'params': {'since': 4},
+    },
+    'event_playback_state': {
+        'type': 'event', 'topic': 'playback.state', 'seq': 300, 'data': PLAYBACK_RUNNING,
+    },
+    'response_error_playback_config_invalid': {
+        'type': 'response', 'id': 134,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 1 error: Drive file channel 0 (drive) peaks '
+                             'at 2.000000 V, 1.002374 V at -6 dB, over the drive ceiling of '
+                             '1 V.',
+                  'detail': {'errors': [
+                      {'reason': 'peak_over_ceiling', 'field': 'level_db',
+                       'message': 'Drive file channel 0 (drive) peaks at 2.000000 V, 1.002374 V '
+                                  'at -6 dB, over the drive ceiling of 1 V.'}],
+                      'warnings': []}},
+    },
+}
+
+
+# ---- Modal Test -------------------------------------------------------------------
+
+#: The golden impact run's configuration (schema/golden/runs/modal_test/impact_roving/).
+MODAL_IMPACT_CONFIG = {
+    'title': 'Golden Roving Hammer', 'operator': 'A. Operator', 'article': 'Beam, SN 0007',
+    'specification': {'document': 'Test procedure', 'clause': '5.1'},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '1'}],
+    'mode': 'impact', 'fs_hz': 1024, 'block': 512, 'band': {'hi_hz': 200}, 'averages': 2,
+    'roving': {'channels': [1], 'points': {'start': 1, 'count': 3}},
+    'impact': {'holdoff_blocks': 0, 'exponential_window': {'on': True, 'end_pct': 10}},
+}
+
+_MODAL_RESPONSES = [{'index': 2, 'node': 4, 'direction': 'Z+', 'unit': 'g'},
+                    {'index': 3, 'node': 7, 'direction': 'Z+', 'unit': 'g'}]
+
+
+def _modal_decay(ratio: float) -> dict:
+    """A hit's decay check: response row 3, under the 2 percent warning."""
+    return {'row': 3, 'ratio': ratio, 'warning': False}
+
+
+def _modal_tile(n: int, seq: int, start_frame: int, peak: float, decay: float) -> dict:
+    return {'n': n, 'seq': seq, 'status': 'accepted', 'reason': None, 'overload': False,
+            'double_hit': False, 'start_frame': start_frame, 'decay': _modal_decay(decay),
+            'peak': peak, 'tip_warning': False, 'force_window_cut': False}
+
+
+def _modal_point_count(index: int) -> dict:
+    return {'index': index, 'accepted': 2, 'rejected': 0, 'taken': 2, 'measured': True}
+
+
+#: `modal_test.state` at the golden impact run's end: three points measured, two hits
+#: each, the last point selected.
+MODAL_FINISHED = {
+    'run_id': 'modal-test-0001', 'state': 'finished', 'mode': 'impact', 'source': 'SIM',
+    'station_class': 'sim', 'title': 'Golden Roving Hammer', 'drive_phase': 'idle',
+    'point': 2,
+    'point_dofs': {'references': [{'index': 1, 'node': 3, 'direction': 'Z+', 'unit': 'lbf'}],
+                   'responses': _MODAL_RESPONSES},
+    'counts': {'unit': 'hits',
+               'point': {'index': 2, 'accepted': 2, 'rejected': 0, 'asked': 2,
+                         'decay': _modal_decay(0.0004045332899574412)},
+               'points': [_modal_point_count(k) for k in range(3)],
+               'totals': {'accepted': 6, 'taken': 6, 'points_measured': 3,
+                          'points_planned': 3}},
+    'hits': [_modal_tile(1, 5, 6631, 18.478137969970703, 0.0004045332899574412),
+             _modal_tile(2, 6, 8167, 18.477951049804688, 0.0003918717610187733)],
+    'latest': {**_modal_tile(2, 6, 8167, 18.477951049804688, 0.0003918717610187733),
+               'point': 2,
+               'report': {'peak': 18.477951049804688, 'peak_frame': 27, 'overloaded': [],
+                          'double_hit': None, 'tip_drop_db': 6.021501954408373,
+                          'tip_warning': False, 'no_response': [False, False],
+                          'force_window_cut': None,
+                          'decay': _modal_decay(0.0003918717610187733),
+                          'rejected': None, 'reasons': [],
+                          'warnings': []}},
+    'record': {'folder': '/home/operator/Hertzforge_Data/golden_roving_hammer',
+               'streams': True, 'problem': None},
+    'end': {'outcome': 'ended',
+            'message': 'the test was ended (by Shell (controller))',
+            'emergency_stop': False, 'at_s': 16.0},
+}
+
+#: The live frame's time channels (the hammer and two responses), lines, FRF magnitude
+#: and phase per pair, and coherence per response: every value exact in binary.
+MODAL_LIVE_TIME = [[0.0, 18.5, 2.25, 0.0], [0.0, 0.5, -1.25, 0.75],
+                   [0.0, -0.25, 0.625, -0.375]]
+MODAL_LIVE_FREQS = [0.0, 2.0, 4.0, 6.0]
+MODAL_LIVE_MAG = [[0.03125, 0.0625, 0.125, 0.25], [0.015625, 0.03125, 0.0625, 0.125]]
+MODAL_LIVE_PHASE = [[0.0, -90.0, -180.0, 90.0], [180.0, 90.0, 0.0, -90.0]]
+MODAL_LIVE_COHERENCE = [[0.5, 0.75, 0.875, 1.0], [0.25, 0.5, 0.75, 1.0]]
+#: Each time channel's table index, part and unit.
+MODAL_LIVE_NAMES = [(1, 'reference', 'lbf'), (2, 'response', 'g'), (3, 'response', 'g')]
+#: The latest hit's force autospectrum on the same lines.
+MODAL_LIVE_FORCE_AUTO = [4.0, 2.0, 1.0, 0.5]
+
+
+def _modal_live_build() -> tuple[dict, dict]:
+    arrays: dict = {}
+
+    def put(ident: str, values: list) -> dict:
+        arrays[ident] = ('f32', [len(values)], values)
+        return {'$array': ident}
+
+    def named(prefix: str, k: int, values: list) -> dict:
+        index, role, unit = MODAL_LIVE_NAMES[k]
+        return {'index': index, 'role': role, 'unit': unit, 'values': put(f'{prefix}{k}', values)}
+
+    channels = [named('t', k, v) for k, v in enumerate(MODAL_LIVE_TIME)]
+    freqs = put('f', MODAL_LIVE_FREQS)
+    pairs = [{'response': i, 'reference': 0, 'magnitude': put(f'm{i}_0', MODAL_LIVE_MAG[i]),
+              'phase_deg': put(f'p{i}_0', MODAL_LIVE_PHASE[i])} for i in range(2)]
+    coherence = [{'response': i, 'values': put(f'c{i}', c)}
+                 for i, c in enumerate(MODAL_LIVE_COHERENCE)]
+    hit_channels = [named('h', k, v) for k, v in enumerate(MODAL_LIVE_TIME)]
+    hit = {'point': 1, 'n': 2, 'seq': 4, 'start_frame': 1536, 'start_s': 1.5,
+           'samples': 4, 'decimation': 1, 'step_s': 1 / 1024,
+           'channels': hit_channels,
+           'windows': {'force': {'pre_frames': 1, 'width_frames': 2, 'fall_frames': 1},
+                       'exponential': {'tau_s': 0.125, 'end': 0.0625}},
+           'force_spectrum': {'frequency_hz': put('hf', MODAL_LIVE_FREQS),
+                              'unit': 'lbf^2/Hz',
+                              'values': put('hs', MODAL_LIVE_FORCE_AUTO),
+                              'tip_drop_db': 9.5}}
+    data = {'run_id': 'modal-test-0001', 'state': 'armed', 'point': 1,
+            'time': {'rate_hz': 1024, 'channels': channels},
+            'frf': {'frequency_hz': freqs, 'averages': 2, 'pairs': pairs,
+                    'coherence': coherence},
+            'hit': hit}
+    return {'type': 'event', 'topic': 'modal_test.live', 'seq': 412, 'data': data}, arrays
+
+
+#: Refused with a force window of 99 percent of the 512-sample block.
+_MODAL_PAST_BLOCK = ("The force window runs past the block: the trigger at sample 26, 507 "
+                     "samples at one and a fall of 51 end at 584, after the block's 512 "
+                     "samples.")
+
+MODAL_TEXT_GOLDENS = {
+    'request_modal_test_configure': {
+        'type': 'request', 'id': 210, 'method': 'modal_test.configure',
+        'params': {'config': MODAL_IMPACT_CONFIG},
+    },
+    'request_modal_test_start': {
+        'type': 'request', 'id': 211, 'method': 'modal_test.start', 'params': {},
+    },
+    'request_modal_test_arm': {
+        'type': 'request', 'id': 212, 'method': 'modal_test.arm', 'params': {},
+    },
+    'request_modal_test_select': {
+        'type': 'request', 'id': 213, 'method': 'modal_test.select', 'params': {'point': 1},
+    },
+    'request_modal_test_sim_hit': {
+        'type': 'request', 'id': 215, 'method': 'modal_test.sim_hit',
+        'params': {'kind': 'double'},
+    },
+    'event_modal_test_state': {
+        'type': 'event', 'topic': 'modal_test.state', 'seq': 411, 'data': MODAL_FINISHED,
+    },
+    'response_error_modal_test_config_invalid': {
+        'type': 'response', 'id': 214,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': f'The configuration has 1 error: {_MODAL_PAST_BLOCK}',
+                  'detail': {'errors': [
+                      {'reason': 'out_of_range', 'field': 'config.impact.force_window',
+                       'message': _MODAL_PAST_BLOCK}],
+                      'warnings': [], 'check': None}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -6080,15 +6854,30 @@ def main() -> None:
     write('event_mimo_shock_pulse_spectrum', *_mshock_pulse_spectrum_build())
     write('event_mimo_shock_data', *_mshock_data_build())
 
+    # MIMO Sine: the live frame, a finished pass, a subscription's data
+    write('event_mimo_sine_live', *_msine_live_build())
+    write('event_mimo_sine_sweep', *_msine_sweep_build())
+    write('event_mimo_sine_data', *_msine_data_build())
+
     # Recorder: the live frame and a subscription's data (its golden run folder,
     # schema/golden/runs/recorder/, is written by the control service's own test)
     write('event_recorder_live', *_recorder_live_build())
     write('event_recorder_data', *_recorder_data_build())
 
+    # Playback: the live frame (its golden run folder, schema/golden/runs/playback/, is
+    # written by the control service's own test)
+    write('event_playback_live', *_playback_live_build())
+
+    # Modal Test: the live frame (its golden run folders, schema/golden/runs/modal_test/,
+    # are written by the control service's own test)
+    write('event_modal_test_live', *_modal_live_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
-                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS}.items():
+                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS, **MSINE_TEXT_GOLDENS,
+                          **PLAYBACK_TEXT_GOLDENS, **DRIVE_TEXT_GOLDENS,
+                          **MODAL_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

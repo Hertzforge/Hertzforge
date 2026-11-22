@@ -9,15 +9,18 @@
 	 * removes, Shift extends; a cell picks a record and stands for its object. No buttons live on
 	 * the rows: the acts on a selection are offered beside the tree. A double-click renames.
 	 */
-	import type { AppState } from '$lib/app/state.svelte';
+	import type { AppState, SubName } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import type { Modifiers } from './selection';
 	import { tick } from 'svelte';
 	import { spans, ticks } from './brackets';
+	import { draggedElements, movesInto } from './elementDrag';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 	import { partIsPicked } from './selection';
+	import { mark, marked } from '$lib/viz/marks.svelte';
+	import { markedBy, markedRun } from '$lib/viz/pick';
 	import { canDragOut } from './files';
 
 	interface Props {
@@ -31,11 +34,6 @@
 	const order = $derived(objects.map((o) => o.name));
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-	/** Kinds that open into something. */
-	const OPENS = new Set([
-		'geometry', 'time_history', 'spectrum', 'psd', 'specification', 'srs', 'shock_specification', 'transient_specification',
-		'sine_target', 'sine_level', 'frf', 'coherence', 'multiple_coherence', 'shape_set', 'channel_table', 'photos', 'matched_modes'
-	]);
 	const ROLE_WORD = { reference: 'ref', response: 'resp', monitor: 'mon' } as const;
 
 	function mods(e: MouseEvent) {
@@ -64,6 +62,36 @@
 		p.clickPart(name, kind, id, m, ids);
 	}
 
+	/** The rows opened onto what they list (a geometry's nodes, its coordinate systems, a group's elements), each by its key. */
+	let listsOpen = $state<string[]>([]);
+	const listKey = (name: string, kind: string, id: string | number) => `${name}\u0000${kind}\u0000${id}`;
+	const toggleList = (key: string) => (listsOpen = listsOpen.includes(key) ? listsOpen.filter((k) => k !== key) : [...listsOpen, key]);
+	/** What a geometry lists one a row, and marks one at a time. */
+	type Listed = 'nodes' | 'systems' | 'elements';
+	/** The link a list's marks are kept under, the service's `part_link`: the 3-D view and the node table mark with the same one. */
+	const partLink = (kind: Listed, name: string) => `${kind}:${name}`;
+	/** Where a Shift run starts in each list: the last row clicked there without Shift. */
+	const anchors: Record<string, number> = {};
+
+	/**
+	 * A listed row clicked (a node, a coordinate system, an element): it is marked, in the 3-D
+	 * view and for a node in the node table with it. Cmd (Ctrl) puts it in or takes it out, Shift
+	 * marks the run from the last one clicked in that list. What holds it (the nodes, the systems,
+	 * the element's group) is what is selected, unless it already is (its table may be open).
+	 */
+	function clickListed(name: string, kind: Listed, holder: { kind: string; id: string | number }, id: number, m: Modifiers, order: number[]) {
+		if (picking) return;
+		if (!partPicked(name, holder.kind, holder.id)) p.clickPart(name, holder.kind, holder.id);
+		const link = partLink(kind, name);
+		const from = anchors[link];
+		if (m.extend && from !== undefined) mark(link, markedRun(order, from, id));
+		else {
+			anchors[link] = id;
+			// the row it stands at among them, which a long table scrolls to
+			mark(link, markedBy(marked(link), id, !!m.toggle), m.toggle ? undefined : order.indexOf(id));
+		}
+	}
+
 	function subCandidate(kind: string, id: string | number): boolean {
 		return !!picking?.part && picking.part === kind && !!picking.row.candidates?.includes(String(id));
 	}
@@ -78,7 +106,7 @@
 			e.preventDefault();
 			if (pick(o)) return;
 			p.clickObject(o.name, order, { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey });
-		} else if (e.key === 'ArrowRight' && OPENS.has(o.kind) && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
+		} else if (e.key === 'ArrowRight' && o.opens && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
@@ -160,6 +188,45 @@
 		if (!place) return;
 		const order = reordered(drag.ids, drag.id, place.before);
 		if (order.some((id, k) => id !== drag.ids[k])) void p.reorderSolids(drag.name, order, drag.within);
+	}
+	/**
+	 * Elements dragged onto an element group: from an element's row, the elements marked (or that
+	 * one) move into the group let go on, of the same geometry; the group lights while it is under
+	 * the pointer.
+	 */
+	let elementDrag: { name: string; ids: number[]; x: number; y: number; moved: boolean } | null = null;
+	let elementDrop = $state<string | null>(null);
+	let elementDragged = false;
+	function elementDown(e: PointerEvent, name: string, id: number) {
+		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+		e.stopPropagation();
+		elementDrag = { name, ids: draggedElements(marked(partLink('elements', name)), id), x: e.clientX, y: e.clientY, moved: false };
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function elementMove(e: PointerEvent) {
+		const drag = elementDrag;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+		drag.moved = true;
+		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-group-of]');
+		elementDrop = row && row.dataset.groupOf?.startsWith(`${drag.name}|`) ? row.dataset.groupOf : null;
+	}
+	function elementUp(e: PointerEvent) {
+		const drag = elementDrag;
+		const target = elementDrop;
+		elementDrag = null;
+		elementDrop = null;
+		if (!drag) return;
+		e.stopPropagation();
+		if (!drag.moved) return;
+		elementDragged = true;
+		setTimeout(() => (elementDragged = false), 0);
+		if (!target) return;
+		const group = Number(target.slice(drag.name.length + 1));
+		const kids = p.children[drag.name];
+		const groups = kids?.kind === 'geometry' ? kids.families.flatMap((f) => f.groups) : [];
+		if (movesInto(groups, drag.ids, group)) void p.moveElements(drag.name, drag.ids, group);
 	}
 	let dragFrom: { name: string; x: number; y: number; id: number } | null = null;
 	let justDragged = false;
@@ -257,6 +324,30 @@
 		p.renamingPart = null;
 		if (part && to && to !== current) await p.renamePart(part.name, part.index, to);
 	}
+	// anything with a name of its own is named on its row: a double-click, or F2 on it (Brandon, 2026-11-17)
+	let subDone: ((to: string) => Promise<unknown>) | null = null;
+	function startSub(name: string, kind: SubName, id: number, current: string, done?: (to: string) => Promise<unknown>) {
+		p.renamingSub = { name, kind, id };
+		newName = current;
+		subDone = done ?? ((to) => p.renameSub(name, kind as Exclude<SubName, 'channel'>, id, to));
+	}
+	async function commitSub(current: string) {
+		const done = subDone;
+		const to = newName.trim();
+		const was = p.renamingSub;
+		p.renamingSub = null;
+		subDone = null;
+		if (was && done && to && to !== current) await done(to);
+	}
+	const naming = (name: string, kind: SubName, id: number) => p.renamingSub?.name === name && p.renamingSub.kind === kind && p.renamingSub.id === id;
+	/** F2 on a sub-item's row starts its name, as a double-click does. */
+	function subKey(e: KeyboardEvent, start: () => void, enter: () => void) {
+		if (e.key === 'Enter') enter();
+		else if (e.key === 'F2') {
+			e.stopPropagation();
+			start();
+		}
+	}
 	function focusAndSelect(node: HTMLInputElement) {
 		node.focus();
 		node.select();
@@ -311,9 +402,43 @@
 	const picked = (name: string, index: number) => (p.selection.records[name] ?? []).includes(index);
 	const partPicked = (name: string, kind: string, id: string | number) => partIsPicked(p.selection, name, kind, id);
 	const held = (name: string): ProjectChildren | undefined => p.children[name];
-	/** How many rows and columns a grid shows before it scrolls. */
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
 </script>
+
+<!-- what a row of a geometry lists, one a row: each is marked by a click, with its list's link -->
+{#snippet entries(name: string, kind: Listed, holder: { kind: string; id: string | number }, ids: number[], label: (id: number, i: number) => string, glyph: string, depth: number, more: string)}
+	{@const on = new Set(marked(partLink(kind, name)))}
+	<div class="entries" role="group" data-testid="{kind}-{name}{holder.kind === 'group' ? `-${holder.id}` : ''}">
+		{#each ids as id, i (id)}
+			<div class="sub" class:picked={on.has(id)} style="--depth: {depth}" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="{kind}-{name}-{id}"
+				onpointerdown={kind === 'elements' ? (e) => elementDown(e, name, id) : undefined} onpointermove={kind === 'elements' ? elementMove : undefined} onpointerup={kind === 'elements' ? elementUp : undefined}
+				onclick={(e) => !elementDragged && clickListed(name, kind, holder, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(name, kind, holder, id, {}, ids)}>
+				<Glyph name={glyph} of="child" parent="geometry" size={14} />
+				<span class="label">{label(id, i)}</span>
+			</div>
+		{/each}
+		{#if more}<p class="note" style="padding-left: {8 + 14 * depth}px">{more}</p>{/if}
+	</div>
+{/snippet}
+
+{#snippet subField(what: string, current: string)}
+	<input
+		class="field rename"
+		aria-label="New name for {what}"
+		data-testid="rename-sub-field"
+		bind:value={newName}
+		use:focusAndSelect
+		onclick={(e) => e.stopPropagation()}
+		ondblclick={(e) => e.stopPropagation()}
+		onpointerdown={(e) => e.stopPropagation()}
+		onkeydown={(e) => {
+			e.stopPropagation();
+			if (e.key === 'Enter') void commitSub(current);
+			if (e.key === 'Escape') p.renamingSub = null;
+		}}
+		onblur={() => (p.renamingSub = null)}
+	/>
+{/snippet}
 
 {#snippet solidRows(name: string, solids: SolidRow[], depth: number, within: number | null = null)}
 	{#each solids as solid (solid.id)}
@@ -335,10 +460,11 @@
 			onpointerup={solidUp}
 			onpointercancel={() => { solidDrag = null; solidPlace = null; }}
 			onclick={(e) => { if (solidDragged) { e.stopPropagation(); return; } clickSub(name, 'solid', solid.id, mods(e), solids.map((x) => x.id)); }}
-			onkeydown={(e) => e.key === 'Enter' && clickSub(name, 'solid', solid.id)}
+			ondblclick={() => startSub(name, 'solid', solid.id, solid.label)}
+			onkeydown={(e) => subKey(e, () => startSub(name, 'solid', solid.id, solid.label), () => clickSub(name, 'solid', solid.id))}
 		>
 			<Glyph name={solidIcon(solid.kind)} of="child" parent="geometry" size={14} />
-			<span class="label">{solid.label}</span>
+			{#if naming(name, 'solid', solid.id)}{@render subField(solid.label, solid.label)}{:else}<span class="label">{solid.label}</span>{/if}
 		</div>
 		{#if solid.children.length}{@render solidRows(name, solid.children, depth + 1, solid.id)}{/if}
 	{/each}
@@ -382,8 +508,8 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
-			{#if OPENS.has(o.kind)}
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={o.opens ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+			{#if o.opens}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
@@ -421,10 +547,23 @@
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
 					{#each kids.parts as part (part.id)}
-						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+						{@const lists = !!part.ids?.length || !!part.rows?.length}
+						{@const listed = lists && listsOpen.includes(listKey(o.name, 'part', part.id))}
+						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} aria-expanded={lists ? listed : undefined} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+							{#if lists}
+								<button class="twist inner" class:open={listed} aria-label={listed ? `Close the ${part.label.toLowerCase()} of ${o.name}` : `List the ${part.label.toLowerCase()} of ${o.name}`} tabindex="-1" data-testid="expand-{part.id}-{o.name}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'part', part.id)); }}>
+									<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+								</button>
+							{/if}
 							<Glyph name={part.id} of="child" parent="geometry" empty={!part.count} size={14} />
 							<span class="label">{part.label} ({part.count})</span>
 						</div>
+						{#if listed && part.id === 'nodes' && part.ids}
+							{@render entries(o.name, 'nodes', { kind: 'part', id: part.id }, part.ids, (id) => `Node ${id}`, 'nodes', 1, part.count > part.ids.length ? `${part.count - part.ids.length} more not listed: they are in the nodes' table (Edit).` : '')}
+						{:else if listed && part.rows}
+							{@const rows = part.rows}
+							{@render entries(o.name, 'systems', { kind: 'part', id: part.id }, part.ids ?? [], (_id, i) => rows[i], part.id, 1, '')}
+						{/if}
 					{/each}
 					{#each kids.families as family (family.id)}
 						<div class="sub" class:picked={partPicked(o.name, 'family', family.id)} role="treeitem" aria-selected={partPicked(o.name, 'family', family.id)} tabindex="-1" data-testid="family-{o.name}-{family.id}" onclick={() => clickSub(o.name, 'family', family.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'family', family.id)}>
@@ -432,10 +571,19 @@
 							<span class="label" class:dim={!family.count}>{family.label} ({family.count})</span>
 						</div>
 						{#each family.groups as group (group.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'group', group.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} class:drop={elementDrop === `${o.name}|${group.id}`} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" data-group-of="{o.name}|{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startSub(o.name, 'group', group.id, group.label)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'group', group.id, group.label), () => clickSub(o.name, 'group', group.id))}>
+								{#if group.elements?.length}
+									{@const shown = listsOpen.includes(listKey(o.name, 'group', group.id))}
+									<button class="twist inner" class:open={shown} aria-label={shown ? `Close the elements of ${group.label}` : `List the elements of ${group.label}`} tabindex="-1" data-testid="expand-group-{o.name}-{group.id}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'group', group.id)); }}>
+										<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+									</button>
+								{/if}
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
-								<span class="label">{group.label} ({group.count})</span>
+								{#if naming(o.name, 'group', group.id)}{@render subField(group.label, group.label)}{:else}<span class="label">{group.label} ({group.count})</span>{/if}
 							</div>
+							{#if group.elements?.length && listsOpen.includes(listKey(o.name, 'group', group.id))}
+								{@render entries(o.name, 'elements', { kind: 'group', id: group.id }, group.elements, (id) => `Element ${id}`, family.id, 2, group.count > group.elements.length ? `${group.count - group.elements.length} more not listed: they are in the group's table (Edit).` : '')}
+							{/if}
 						{/each}
 					{/each}
 					<div class="sub" class:picked={partPicked(o.name, 'solids', 0)} role="treeitem" aria-selected={partPicked(o.name, 'solids', 0)} tabindex="-1" data-testid="solids-{o.name}" title="Shapes to build parts from, before they are meshed" onclick={() => clickSub(o.name, 'solids', 0)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'solids', 0)}>
@@ -449,9 +597,9 @@
 							<span class="label">Mated Surfaces ({kids.mates.length})</span>
 						</div>
 						{#each kids.mates as mate (mate.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'mate', mate.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'mate', mate.id)} tabindex="-1" data-testid="mate-{o.name}-{mate.id}" onclick={() => clickSub(o.name, 'mate', mate.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'mate', mate.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'mate', mate.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'mate', mate.id)} tabindex="-1" data-testid="mate-{o.name}-{mate.id}" onclick={() => clickSub(o.name, 'mate', mate.id)} ondblclick={() => startSub(o.name, 'mate', mate.id, mate.name)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'mate', mate.id, mate.name), () => clickSub(o.name, 'mate', mate.id))}>
 								<Glyph name="mates" of="child" parent="geometry" size={14} />
-								<span class="label">{mate.label}</span>
+								{#if naming(o.name, 'mate', mate.id)}{@render subField(mate.name, mate.name)}{:else}<span class="label">{mate.label}</span>{/if}
 							</div>
 						{/each}
 					{/if}
@@ -511,19 +659,19 @@
 					</div>
 				{:else if kids.kind === 'modes'}
 					{#each kids.modes as mode (mode.index)}
-						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e), column(kids.modes.map((m) => m.index - 1)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, mode.index - 1)}>
+						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e), column(kids.modes.map((m) => m.index - 1)))} ondblclick={() => startSub(o.name, 'mode', mode.index, mode.description)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'mode', mode.index, mode.description), () => p.clickRecord(o.name, mode.index - 1))}>
 							<Glyph name="mode" of="child" parent="shape_set" size={14} />
 							<span class="label mono">M{mode.index}</span>
 							<span class="num">{mode.frequency.toPrecision(5)} Hz</span>
 							<span class="num dim">{(mode.damping * 100).toFixed(2)} %</span>
-							{#if mode.description}<span class="dim desc" title={mode.description}>{mode.description}</span>{/if}
+							{#if naming(o.name, 'mode', mode.index)}{@render subField(`mode ${mode.index}`, mode.description)}{:else if mode.description}<span class="dim desc" title={mode.description}>{mode.description}</span>{/if}
 						</div>
 					{/each}
 				{:else if kids.kind === 'channels'}
 					{#each kids.channels as channel, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.channels.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.channels.map((_, k) => k)))} ondblclick={() => startSub(o.name, 'channel', i, channel.dof, (to) => p.renameDof(o.name, channel.dof, to, channel.quantity))} onkeydown={(e) => subKey(e, () => startSub(o.name, 'channel', i, channel.dof, (to) => p.renameDof(o.name, channel.dof, to, channel.quantity)), () => p.clickRecord(o.name, i))}>
 							<Glyph name={channel.quantity} of="record" parent="channel_table" size={14} />
-							<span class="label mono">{channel.dof || `channel ${i + 1}`}</span>
+							{#if naming(o.name, 'channel', i)}{@render subField(`channel ${i + 1}`, channel.dof)}{:else}<span class="label mono">{channel.dof || `channel ${i + 1}`}</span>{/if}
 						</div>
 					{/each}
 				{:else if kids.kind === 'photos'}
@@ -557,6 +705,14 @@
 							<Glyph name="mode" of="child" parent="matched_modes" size={14} />
 							<span class="label mono">M{match.first} to M{match.second}</span>
 							<span class="num dim">MAC {match.mac.toFixed(3)}</span>
+						</div>
+					{/each}
+				{:else if kids.kind === 'items'}
+					{#each kids.items as item, i (i)}
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="item-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.items.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+							<Glyph name={icon} size={14} />
+							<span class="label">{item.label}</span>
+							{#if item.detail}<span class="dim desc" title={item.detail}>{item.detail}</span>{/if}
 						</div>
 					{/each}
 				{:else}
@@ -629,7 +785,8 @@
 		box-shadow: inset 0 0 0 1px var(--blue-line);
 	}
 
-	.row.drop {
+	.row.drop,
+	.sub.drop {
 		box-shadow: inset 0 0 0 1px var(--accent);
 	}
 
@@ -769,6 +926,16 @@
 	.sub.picked {
 		background: var(--blue-weak);
 		box-shadow: inset 0 0 0 1px var(--blue-line);
+	}
+
+	.twist.inner {
+		margin-left: -2px;
+	}
+
+	/* what a row lists, one a row (nodes, coordinate systems, a group's elements): past its height the list scrolls rather than the tree */
+	.entries {
+		max-height: 260px;
+		overflow-y: auto;
 	}
 
 	.label {

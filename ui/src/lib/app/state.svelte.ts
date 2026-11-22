@@ -5,7 +5,7 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
-import { pairsText, togglePick } from '$lib/viz/macBars';
+import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -17,6 +17,8 @@ import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
 import { MimoShockStore } from '$lib/acquire/mimoshock/msStore.svelte';
 import { MsViewsState } from '$lib/acquire/mimoshock/msViews.svelte';
+import { MimoSineStore } from '$lib/acquire/mimosine/msineStore.svelte';
+import { MsineViewsState } from '$lib/acquire/mimosine/msineViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
@@ -30,13 +32,16 @@ import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
 import { ExplorerViewsState } from '$lib/acquire/explorer/explorerViews.svelte';
 import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
+import { PlaybackStore } from '$lib/acquire/playback/playbackStore.svelte';
+import { PlaybackViewsState } from '$lib/acquire/playback/playbackViews.svelte';
+import { ModalTestStore } from '$lib/acquire/modal_test/modalTestStore.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -52,14 +57,15 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	SimProfile,
 	SimStateResult,
 	TableEdit,
+	TableView,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
-import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/project/files';
+import { baseName, confirmFirst, desktopRunFiles, isProjectFile, printsInBrowser } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace, STUDIES } from './workspaces';
+import { ANALYSIS, canOpen, isWorkspace, moduleOf, shownWorkspaces, STUDIES, type WorkspaceInfo } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -145,15 +151,29 @@ class AnalyzeState {
 		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
 	}
 
-	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	/**
+	 * Whether the geometry an operation's lengths are typed on has no units, its numbers its own: the
+	 * form's geometry, or else the one the first object it names is drawn on, as the service takes them.
+	 */
 	private undefinedGeometry(op: OperationDescriptor): boolean {
-		const name = this.values[op.id]?.geometry;
-		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+		const summary = this.app.project.summary;
+		const objects = summary?.objects ?? [];
+		const values = this.values[op.id] ?? {};
+		const named = 'geometry' in values ? [values.geometry] : op.params.filter((p) => p.options_from).map((p) => values[p.name]);
+		for (const name of named) {
+			const obj = objects.find((o) => o.name === name);
+			if (!obj) continue;
+			const geometry =
+				obj.kind === 'geometry' ? obj : (objects.find((o) => o.kind === 'geometry' && o.groups.some((g) => obj.groups.includes(g))) ?? objects.find((o) => o.name === summary?.active_geometry));
+			if (geometry) return geometry.units_defined === false;
+		}
+		return false;
 	}
 
 	/**
 	 * The display system changed: each form holds the same lengths, and the same amount of each
-	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new).
+	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new), and what is
+	 * drawn is drawn again in them.
 	 */
 	unitsChanged(ratio: number | null, ratios: Record<string, number>): void {
 		const next = { ...this.values };
@@ -163,6 +183,14 @@ class AnalyzeState {
 			if (op.params.some((p) => p.quantity)) next[op.id] = rescaledQuantities(op.params, next[op.id], ratios);
 		}
 		this.values = next;
+		// the same selection is read again, so its line, picks and Projection stay; a reading that
+		// was applied stays as it was answered, since running it again could change the project,
+		// but a preview only reads a copy and is asked for again
+		void this.showSelection(true, true);
+		if (this.reading && this.reading === this.previewDrawn) {
+			this.forgetPreview();
+			this.followPreview();
+		}
 	}
 
 	get params(): ParamDescriptor[] {
@@ -183,7 +211,12 @@ class AnalyzeState {
 			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
 			.filter((p) => p.name !== this.op?.commits)
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
-			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
+			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p))
+			.map((p) => {
+				// the row's own words for a param's options: Project's directions name the two sets
+				const words = row?.labels?.[p.name];
+				return words && p.options ? { ...p, options: p.options.map((o) => ({ ...o, label: words[String(o.value)] ?? o.label })) } : p;
+			});
 	}
 
 	get currentValues(): ParamValues {
@@ -228,20 +261,28 @@ class AnalyzeState {
 		this.values = next;
 	}
 
-	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
-	async showSelection(): Promise<void> {
+	/**
+	 * The tree's selection changed: ask the service what it shows, dropping answers overtaken by
+	 * later picks. `keepReading` redraws the selection under a reading without ending it.
+	 */
+	async showSelection(redraw = false, keepReading = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
-		this.reading = null;
-		this.readingId = null;
+		if (!keepReading) {
+			this.reading = null;
+			this.readingId = null;
+		}
 		if (this.lineFor !== selection.objects.join('\u0000')) {
 			this.lineFor = selection.objects.join('\u0000');
 			this.line = null;
 			this.pair = null;
 			this.picks = [];
 			this.shapeView = null;
+			// each selection opens as it is: Projection is asked for again, not carried over
+			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
 		}
-		void this.loadActions();
+		// a redraw of the same selection (the Averaging form typed into) offers what it did
+		if (!redraw) void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
 			this.shown = null;
 			this.showError = null;
@@ -259,27 +300,138 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
+						limits: this.prefs.limits,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
+						arrow_role: this.prefs.arrow_role,
+						drive: this.prefs.drive,
 						sensors: this.prefs.sensors,
 						environment: this.prefs.environment,
 						table_view: this.prefs.table_view,
 						tone: this.prefs.tone,
-						sine_reading: this.prefs.sine_reading
+						sine_reading: this.prefs.sine_reading,
+						averaging: this.averagingDraft
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (seq !== this.showSeq) return;
 			this.shown = res;
+			// two sets on two geometries: both are seen moving from the start, on the best pair;
+			// it is shown, not picked, so Add Matches keeps only what was clicked
+			const apart = res.views.some((v) => v.view === 'shape3d' && (v.overlay_triangles !== undefined || v.overlay_lines !== undefined));
+			const compared = res.views.find((v): v is MatrixView => v.view === 'matrix' && v.selects === 'shape3d');
+			if (apart && compared && !this.pair) this.pair = bestCell(compared.values, compared.columns.ticks.length);
+			// the views bring the averaging's frames themselves
+			this.averagingRegions = null;
 			this.showError = null;
 		} catch (err) {
 			if (seq !== this.showSeq) return;
 			this.shown = null;
 			this.showError = message(err);
 		}
+	}
+
+	/**
+	 * What the Averaging form holds while it is open on the one time history selected, which the
+	 * service draws on that history's plot (`prefs.averaging`); null otherwise.
+	 */
+	get averagingDraft(): Record<string, unknown> | null {
+		const objects = this.app.project.selection.objects;
+		const values = this.currentValues;
+		if (!this.formOpen || this.opId !== 'project.set_averaging' || objects.length !== 1 || values.source !== objects[0]) return null;
+		const draft: Record<string, unknown> = {};
+		for (const key of ['frame_length', 'overlap', 'window', 'frames', 'start', 'detrend']) {
+			if (values[key] !== undefined && values[key] !== null && values[key] !== '') draft[key] = values[key];
+		}
+		return draft;
+	}
+
+	/**
+	 * The averaging's frames drawn over the views the selection already shows, in place of the
+	 * views' own regions: asked for alone as the form is typed into (`project.averaging`), so the
+	 * plot is not sent or built again. Null while the views' own regions stand.
+	 */
+	averagingRegions = $state.raw<Region[] | null>(null);
+	private averagingKey = 'null';
+	/** The form's values as last stored on the history, so a field left unchanged stores nothing. */
+	private averagingStored = '';
+	private averagingSeq = 0;
+	private averagingTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** The Averaging form opened, closed or typed into: once the typing rests, its frames are drawn again on the plot that is there. */
+	followAveraging(): void {
+		const draft = this.averagingDraft;
+		const key = JSON.stringify(draft);
+		if (key === this.averagingKey) return;
+		const opening = this.averagingKey === 'null';
+		// the form opens on what the history holds
+		if (opening) this.averagingStored = JSON.stringify(this.currentValues);
+		this.averagingKey = key;
+		if (this.averagingTimer) clearTimeout(this.averagingTimer);
+		if (draft === null) {
+			// the form closed: its frames go
+			this.averagingSeq++;
+			if (this.shown) {
+				this.averagingRegions = [];
+				this.shown = { ...this.shown, note: '' };
+			}
+			return;
+		}
+		this.averagingTimer = setTimeout(() => void this.drawAveraging(), opening ? 0 : 250);
+	}
+
+	/** The frames of what the Averaging form holds, drawn over the plot that is there; the whole selection read when nothing is shown yet. */
+	async drawAveraging(): Promise<void> {
+		const draft = this.averagingDraft;
+		const name = this.app.project.selection.objects[0];
+		if (!draft || !name) return;
+		if (!this.shown) return this.showSelection(true);
+		const seq = ++this.averagingSeq;
+		try {
+			const res = await this.app.analysis.request<{ regions: Region[]; note: string }>('project.averaging', { name, averaging: draft });
+			if (seq !== this.averagingSeq || !this.shown) return;
+			this.averagingRegions = res.regions;
+			this.shown = { ...this.shown, note: res.note };
+		} catch (err) {
+			if (seq === this.averagingSeq) this.runError = message(err);
+		}
+	}
+
+	/** A draggable span on what the selection shows let go at new edges: its operation runs with them, and what it stored is drawn. */
+	async spanOnSelection(drag: { op: string; params: Record<string, unknown>; low: string; high?: string }, x0: number, x1: number): Promise<void> {
+		this.runError = null;
+		// a field being typed in keeps its own text; let go of it, so it shows what the drag stores
+		if (typeof document !== 'undefined' && document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
+			// the plot is the same records: only the frames over it are drawn again, below
+			if (res.project) this.app.project.apply(res.project, !this.averagingDraft);
+		} catch (err) {
+			this.runError = message(err);
+		}
+		// the form takes up what the drag stored, and its frames are drawn once: a drag that was
+		// refused goes back to where it was
+		this.followSource();
+		if (this.averagingDraft) {
+			this.averagingKey = JSON.stringify(this.averagingDraft);
+			if (!this.runError) this.averagingStored = JSON.stringify(this.currentValues);
+			if (this.averagingTimer) clearTimeout(this.averagingTimer);
+			const refused = this.runError;
+			await this.drawAveraging();
+			if (refused) this.runError = refused;
+		}
+	}
+
+	/** The row of the action table that runs the operation `id` on the selection, when it offers one. */
+	private rowOf(id: string): ActionRow | null {
+		for (const column of this.actions?.table.columns ?? []) {
+			const row = column.current ? column.rows.find((r) => r.id === id) : undefined;
+			if (row) return row;
+		}
+		return null;
 	}
 
 	/** What the selection can take; the current tool stays when it still applies, else the first reading. */
@@ -375,11 +527,15 @@ class AnalyzeState {
 		this.openRow(row);
 		const op = this.op;
 		if (!op) return;
-		const filled = new Set(Object.keys(row.fill ?? {}));
-		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
+		// a field the row fills is asked for nothing only when the form hides it: an object, or
+		// one the row omits. A value it opens on, such as a projection's distance, is still asked
+		const fill = row.fill ?? {};
+		const asks = this.paramsOf(op).filter((p) => !p.in_view && !(p.name in fill && (p.options_from || row.omit?.includes(p.name))));
 		// a form that applies as it goes is filled in full and opens all the same
 		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
+		// a preview that is quick and asks nothing is shown as the form opens
+		if (this.formOpen && op.commits && op.opens_previewed) await this.run(true);
 	}
 
 	/** A row's operation, filled from the selection, with a format the object can be written in. */
@@ -443,6 +599,14 @@ class AnalyzeState {
 
 	/** A form that applies as it goes (`live`): what it holds now is run, and it is filled again from what the change left. */
 	async applyLive(): Promise<void> {
+		if (this.opId === 'project.set_averaging') {
+			// the averaging is stored as it stands, and drawn on the plot that is there
+			const now = JSON.stringify(this.currentValues);
+			if (now === this.averagingStored) return;
+			await this.run();
+			if (!this.runError && !Object.keys(this.errors).length) this.averagingStored = JSON.stringify(this.currentValues);
+			return;
+		}
 		await this.run();
 		await this.loadActions();
 	}
@@ -502,8 +666,19 @@ class AnalyzeState {
 		}, 150);
 	}
 
+	/** The frequency the stage that reads at the cursor's line is drawn at; null with no such stage. */
+	private shownLine(): number | null {
+		for (const view of this.shown?.views ?? []) {
+			if (view.view === 'shape3d' && view.cursor === 'frequency') return view.modes[0]?.frequency_hz ?? null;
+		}
+		return null;
+	}
+
 	/** One of the bar's choices changed: kept, and the selection read again. */
 	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
+		// moving the force is the same question asked of another point: the line shown is kept,
+		// where a cursor never moved would leave each force at its own strongest line
+		if (key === 'drive' && this.line === null) this.line = this.shownLine();
 		this.prefs = { ...this.prefs, [key]: value };
 		try {
 			localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
@@ -511,7 +686,7 @@ class AnalyzeState {
 			// kept for this session only
 		}
 		// the shell's own choices redraw what is already here; the rest are the service's to answer
-		if (key !== 'bars' && key !== 'overlay') void this.showSelection();
+		if (key !== 'bars') void this.showSelection();
 	}
 
 	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */
@@ -577,11 +752,12 @@ class AnalyzeState {
 		this.previewDrawn = null;
 	}
 
-	/** Every field the form asks, but for what its row filled in, still holds its default. */
+	/** Every field the form asks still holds what it opened on: what its row filled in, or else its default. */
 	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
 		const defaults = defaultValues(this.paramsOf(op));
 		const filled = this.formRow?.fill ?? {};
-		return this.formParams.every((p) => p.name in filled || values[p.name] === defaults[p.name]);
+		// a filled field changed is typed into, as any other: Project's direction turned the way that cannot be made says why
+		return this.formParams.every((p) => (p.name in filled ? String(values[p.name]) === filled[p.name] : values[p.name] === defaults[p.name]));
 	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
@@ -714,14 +890,28 @@ class AnalyzeState {
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
+			// an averaging stored from the history's own plot leaves the plot as it is: only its frames are drawn again
+			const sameplot = !preview && op.id === 'project.set_averaging' && !!this.shown && this.app.project.selection.objects.length === 1 && params.source === this.app.project.selection.objects[0];
+			if (res.project) this.app.project.apply(res.project, !sameplot);
 			// an act's result joins the tree and is selected; a reading
 			// takes the view until Back
 			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+			const selected = this.app.project.selection.objects;
+			const onPlot = selected.length === 1 && params.source === selected[0] && !!this.shown;
 			if (added.length) {
 				const order = (res.project?.objects ?? []).map((o) => o.name);
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
+			} else if (!preview && onPlot && op.id === 'project.set_averaging') {
+				// the frames are on the history's own plot: it stays, with the form, and draws what was stored
+				this.followSource();
+				this.averagingKey = JSON.stringify(this.averagingDraft);
+				await this.drawAveraging();
+			} else if (!preview && onPlot && op.id === 'project.detect_averaging' && this.rowOf('project.set_averaging')) {
+				// what was found is shown where it can be seen and changed: the Averaging form, on the plot
+				this.openRow(this.rowOf('project.set_averaging')!);
+				this.formOpen = true;
+				this.followSource();
 			} else if (res.views.length) {
 				this.reading = { title: preview ? `${this.formTitle}, preview` : this.formTitle, views: res.views };
 				this.readingId = op.id;
@@ -793,6 +983,67 @@ class AnalyzeState {
 		}
 	}
 
+	/**
+	 * A cell typed into in an action's table (a part's Edit): the edit runs, and the views it answers
+	 * with take the reading's place, so the model drawn beside the table follows what was typed.
+	 */
+	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		// a preview typed into is still the preview: closing its form takes it away
+		const previewed = this.reading !== null && this.reading === this.previewDrawn;
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			this.reading = { title, views: res.views };
+			if (previewed) this.previewDrawn = this.reading;
+			const geometry = edit.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** Rows of an action's table of entities deleted: the views answered take the reading's place. */
+	async removeReadingRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			// a deletion may answer with a reading of what it kept: the drawn views and the table are what is edited
+			this.reading = { title, views: res.views.filter((v) => v.view !== 'reading') };
+			const geometry = remove.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/**
+	 * One row picked in an action's table that says what a row picked does (`select`): its operation
+	 * runs with the row's id, and the views answered that are not tables take the places of the ones
+	 * beside the table, which stays as it is with its selection.
+	 */
+	async pickReadingRow(select: NonNullable<TableView['select']>, id: string): Promise<void> {
+		const was = this.reading;
+		if (!was) return;
+		const number = Number(id);
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (this.reading !== was) return;
+			const others = res.views.filter((v) => v.view !== 'table');
+			let k = 0;
+			this.reading = { title: was.title, views: was.views.map((v) => (v.view === 'table' ? v : (others[k++] ?? v))) };
+		} catch (err) {
+			this.runError = message(err);
+		}
+	}
+
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
@@ -846,6 +1097,8 @@ const PART_DELETES: Record<string, { op: string; param: string; words: string }>
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
+/** How long a file dialog the service shows may stay open: it waits on the person, not on work. */
+const DIALOG_TIMEOUT_MS = 3_600_000;
 
 // ---------------------------------------------------------------------------------------------
 
@@ -1178,10 +1431,19 @@ export class ReportState {
 	/** The last issue recorded. */
 	issued = $state<Record<string, string> | null>(null);
 
+	/**
+	 * Whether Print is offered: in a browser, which prints the page in place and saves it as a PDF
+	 * from its dialog. The desktop app's web view does not print, so there the page would only be
+	 * opened in the browser to be printed; the saved HTML file does the same, opened there by hand.
+	 */
+	get canPrint(): boolean {
+		return !printsInBrowser();
+	}
+
 	/** Print the reader's page; the print dialog saves it as a PDF. */
 	async print(anyway = false): Promise<void> {
 		const name = this.name;
-		if (!name) return;
+		if (!name || !this.canPrint) return;
 		this.held = null;
 		await this.act('Preparing the page to print', async () => {
 			const res = await this.app.analysis.request<{ html: string | null; owed: string[]; index: { name: string; status: string }[] }>(
@@ -1201,9 +1463,9 @@ export class ReportState {
 		this.held = null;
 		const doing = { begin: 'Preparing the page to issue', record: 'Recording the issue', cancel: 'Cancelling the issue' }[step];
 		await this.act(doing, async () => {
-			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
+			const res = await this.app.analysis.request<{ html?: string; opened?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
-				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}) },
+				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}), ...(step === 'begin' && printsInBrowser() ? { browser: true } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			this.app.project.apply(res.project);
@@ -1212,7 +1474,7 @@ export class ReportState {
 			} else if (step === 'begin') {
 				this.issuing = res.status ?? 'issued';
 				this.issued = null;
-				this.printing = res.html ?? null;
+				this.printing = res.opened ? null : (res.html ?? null);
 			} else {
 				this.issuing = null;
 				if (res.entry) this.issued = res.entry;
@@ -1366,11 +1628,13 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
+		limits: true,
 		bars: true,
-		overlay: true,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
+		arrow_role: 'all',
+		drive: null,
 		sensors: true,
 		environment: null,
 		table_view: 'channels',
@@ -1380,16 +1644,22 @@ function readPrefs(): ShowPrefs {
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
-		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
+		// Projection is not kept: left on, two sets on two geometries open drawn on one of them
+		for (const key of ['bars', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
+		if (kept.arrow_role && ['all', 'control', 'reference', 'response', 'monitor'].includes(kept.arrow_role)) prefs.arrow_role = kept.arrow_role;
 		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
 	} catch {
 		// nothing kept, or no storage
 	}
 	return prefs;
 }
+
+/** What is renamed on its own row under an object in the tree. */
+export type SubName = 'group' | 'solid' | 'mate' | 'mode' | 'channel';
+const SUB_WORDS = { group: 'element group', solid: 'solid', mate: 'mated surfaces', mode: 'mode' } as const;
 
 export class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
@@ -1409,12 +1679,16 @@ export class ProjectState {
 	renaming = $state<string | null>(null);
 	/** The photo being renamed in place: its object and index, or null. */
 	renamingPart = $state<{ name: string; index: number } | null>(null);
+	/** The sub-item being renamed in place: its object, what it is and its id (a mode's number, a channel's row), or null. */
+	renamingSub = $state<{ name: string; kind: SubName; id: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the action table: the member it is reached by, or null. */
 	namingGroup = $state<string | null>(null);
 	/** The path a browser is asking for in the top bar, and what it is for. */
 	asking = $state<'open' | 'import' | 'save' | null>(null);
+	/** The analysis service said it shows no file dialogs (`files.choose`): the top bar asks for a path. */
+	private noDialogs = false;
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
 	private anchorRecord: Record<string, number> = {};
 	private childSeq = 0;
@@ -1426,7 +1700,7 @@ export class ProjectState {
 	}
 
 	/** A new summary from the service: the tree and Analyze's object choices follow. */
-	apply(summary: ProjectSummary): void {
+	apply(summary: ProjectSummary, show = true): void {
 		this.summary = summary;
 		if (this.units && !summary.objects.some((o) => o.name === this.units?.name)) this.units = null;
 		const names = summary.objects.map((o) => o.name);
@@ -1440,7 +1714,8 @@ export class ProjectState {
 		this.children = children;
 		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
-		void this.app.analyze.showSelection();
+		// a change that leaves what is shown as it was (an averaging stored) does not read it again
+		if (show) void this.app.analyze.showSelection();
 		void this.app.console.sync();
 	}
 
@@ -1470,6 +1745,7 @@ export class ProjectState {
 		this.selection = next;
 		this.renaming = null;
 		this.renamingPart = null;
+		this.renamingSub = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		this.units = null;
@@ -1587,6 +1863,11 @@ export class ProjectState {
 		return !this.summary?.modified || (await discardUnsaved(this.summary.title));
 	}
 
+	/** The project's own name typed over on its row. */
+	async retitle(title: string): Promise<boolean> {
+		return this.call('Renaming the project', 'project.retitle', { title }, false);
+	}
+
 	async rename(name: string, to: string): Promise<boolean> {
 		const ok = await this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
 		if (ok) {
@@ -1608,7 +1889,8 @@ export class ProjectState {
 
 	/**
 	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
-	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
+	 * which never gives the shell a file's path, the analysis service shows the system's dialog on its
+	 * own machine (`hertzforge` with no command), and where it shows none the top bar asks for a path.
 	 */
 	async fileAct(what: 'new' | 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
 		if (what === 'new') {
@@ -1630,7 +1912,32 @@ export class ProjectState {
 			if (paths) await (asked === 'import' ? this.importPaths(paths) : this.openPaths(paths));
 			return;
 		}
+		// a browser never gives the shell a file's path: the service on this machine shows the
+		// system's dialog instead, and where it shows none the top bar asks for a typed path
+		const chosen = await this.dialogPaths(asked, asked === 'save' ? `${this.summary?.title ?? 'Project'}.hforge` : '');
+		if (chosen !== null) {
+			if (!chosen.length) return;
+			if (asked === 'save') await this.save(chosen[0]);
+			else await (asked === 'import' ? this.importPaths(chosen) : this.openPaths(chosen));
+			return;
+		}
 		this.asking = this.asking === asked ? null : asked;
+	}
+
+	/**
+	 * The paths chosen in the system's dialog the analysis service shows (`files.choose`): none when
+	 * cancelled, null when the service shows none, which is remembered so the next act goes straight
+	 * to the typed path.
+	 */
+	private async dialogPaths(purpose: 'open' | 'import' | 'save', name: string): Promise<string[] | null> {
+		if (this.noDialogs) return null;
+		try {
+			const res = await this.app.analysis.request<{ paths: string[] }>('files.choose', name ? { purpose, name } : { purpose }, { timeoutMs: DIALOG_TIMEOUT_MS });
+			return res.paths;
+		} catch (err) {
+			if (err instanceof RequestError && (err.code === 'refused' || err.code === 'unknown_method')) this.noDialogs = true;
+			return null;
+		}
 	}
 
 	/** An act of the action table's on the selection itself, by its row's id. */
@@ -1782,6 +2089,13 @@ export class ProjectState {
 	}
 
 	/** A solid dragged among its siblings: the parts, or one boolean's solids, in their new order. */
+	/** Elements dragged onto an element group in the tree: they move into it (`project.move_elements`). */
+	async moveElements(name: string, ids: number[], group: number): Promise<boolean> {
+		const ok = await this.act(`Moving elements into element group ${group}`, 'project.move_elements', { geometry: name, elements: ids.join(', '), group });
+		if (ok) void this.loadChildren(name);
+		return ok;
+	}
+
 	async reorderSolids(name: string, ids: number[], within: number | null): Promise<boolean> {
 		const ok = await this.act(`Reordering ${name}'s solids`, 'project.reorder_solids', { geometry: name, solids: ids.join(', '), within: within ?? 0 });
 		if (ok) void this.loadChildren(name);
@@ -1886,6 +2200,16 @@ export class ProjectState {
 		return ok;
 	}
 
+	/** Rename one element group, solid or set of mated surfaces of a geometry, or describe one mode of a shape set, in place (`project.rename` with its kind). */
+	async renameSub(name: string, kind: Exclude<SubName, 'channel'>, id: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming ${SUB_WORDS[kind]} ${id} of ${name}`, 'project.rename', { name, to, [kind]: id }, false);
+		if (ok) {
+			if (this.expanded.has(name)) void this.loadChildren(name);
+			void this.app.analyze.showSelection();
+		}
+		return ok;
+	}
+
 	/** An act on the groups, run as the operation it is; the project it answers with is applied. */
 	async act(doing: string, op: string, params: Record<string, unknown>): Promise<boolean> {
 		this.busy = doing;
@@ -1931,8 +2255,8 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// a study keeps the window; any other workspace goes to Signal Processing, the recordings' module
-				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
+				// any other workspace goes to the analysis
+				if (!STUDIES.has(this.app.workspace)) this.app.workspace = ANALYSIS;
 				this.app.analyze.selectProject();
 			}
 			return true;
@@ -2031,6 +2355,8 @@ export class AppState {
 	readonly srsRunOpen: RunOpen;
 	/** A finished MIMO Shock run's way to its data: the Shock workspace. */
 	readonly mimoShockRunOpen: RunOpen;
+	/** A finished MIMO Sine run's way to its data: the Sine workspace. */
+	readonly mimoSineRunOpen: RunOpen;
 	/** A finished Sine run's way to its data on the analysis side. */
 	readonly sineRunOpen: RunOpen;
 	/** A finished Mixed Mode run's way to its data on the analysis side. */
@@ -2042,6 +2368,10 @@ export class AppState {
 	/** A finished TWR run's way to its data: the Transient Analysis workspace. */
 	readonly twrRunOpen: RunOpen;
 	readonly recorderRunOpen: RunOpen;
+	/** A finished Playback run's way to its data: its inputs and drives, in the Signals workspace. */
+	readonly playbackRunOpen: RunOpen;
+	/** A finished Modal Test's way to its FRFs: the modal fit, in the Modal workspace. */
+	readonly modalTestRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2058,6 +2388,10 @@ export class AppState {
 	readonly mimoShock: MimoShockStore;
 	/** The MIMO Shock run's pages and this window's subscription. */
 	readonly mimoShockViews: MsViewsState;
+	/** MIMO Sine's setup and run; the station and table are the Acquire store's. */
+	readonly mimoSine: MimoSineStore;
+	/** The MIMO Sine run's pages and this window's subscription. */
+	readonly mimoSineViews: MsineViewsState;
 	/** SRS shock's setup and run; the station and table are the Acquire store's. */
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
@@ -2082,6 +2416,12 @@ export class AppState {
 	readonly recorder: RecorderStore;
 	/** The Recorder run's pages and this window's subscription. */
 	readonly recorderViews: RecorderViewsState;
+	/** Playback's setup, drive file and run; the station and table are the Acquire store's. */
+	readonly playback: PlaybackStore;
+	/** The Playback run's pages, drawn from its live frames. */
+	readonly playbackViews: PlaybackViewsState;
+	/** The Modal Test's setup, its points, its hits and its live frame; the station and table (with each row's DOF) are the Acquire store's. */
+	readonly modalTest: ModalTestStore;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -2118,21 +2458,27 @@ export class AppState {
 		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
 		this.srsRunOpen = new RunOpen(runHost, 'srs');
 		this.mimoShockRunOpen = new RunOpen(runHost, 'mimo_shock');
+		this.mimoSineRunOpen = new RunOpen(runHost, 'mimo_sine');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mixedRunOpen = new RunOpen(runHost, 'mixed');
 		this.explorerRunOpen = new RunOpen(runHost, 'explorer');
 		this.mimoRunOpen = new RunOpen(runHost, 'mimo_random');
 		this.twrRunOpen = new RunOpen(runHost, 'twr');
 		this.recorderRunOpen = new RunOpen(runHost, 'recorder');
+		this.playbackRunOpen = new RunOpen(runHost, 'playback');
+		this.modalTestRunOpen = new RunOpen(runHost, 'modal_test');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mimoSine = new MimoSineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.modalTest = new ModalTestStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.playback = new PlaybackStore(this.acquire, config.popout ? { local: null, drafts: false } : { analysis: this.analysis, objects: () => this.project.summary?.objects ?? [] });
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			// The layout belongs to the setup the service holds, else to the one being edited here.
@@ -2167,6 +2513,12 @@ export class AppState {
 			},
 			this.mimoShock
 		);
+		const mimoSinePopout = config.popout && config.popoutTest === 'mimo_sine';
+		this.mimoSineViews = new MsineViewsState(this.control, {
+			setupTitle: () => this.mimoSine.status?.title ?? (config.popout ? null : this.mimoSine.setup.title),
+			showing: () => mimoSinePopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_sine' && this.mimoSine.step === 'run'),
+			page: mimoSinePopout ? config.page : null
+		});
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(
 			this.control,
@@ -2209,6 +2561,11 @@ export class AppState {
 			showing: () => recorderPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'recorder' && this.recorder.step === 'run'),
 			page: recorderPopout ? config.page : null
 		});
+		this.playbackViews = new PlaybackViewsState(this.control, {
+			setupTitle: () => this.playback.now?.title ?? (config.popout ? null : this.playback.setup.title),
+			showing: () => !config.popout && this.workspace === 'acquire' && this.tests.screen === 'playback' && this.playback.step === 'run',
+			runId: () => this.playback.now?.run_id ?? null
+		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
 
@@ -2234,7 +2591,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2257,6 +2614,7 @@ export class AppState {
 		const explorer = this.config.popoutTest === 'explorer';
 		const recorder = this.config.popoutTest === 'recorder';
 		const mimoShock = this.config.popoutTest === 'mimo_shock';
+		const mimoSine = this.config.popoutTest === 'mimo_sine';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -2306,6 +2664,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.mimoShock.sync();
 				});
 			}
+			if (mimoSine) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimoSine.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
@@ -2316,13 +2679,14 @@ export class AppState {
 		else if (explorer) this.explorerViews.watch();
 		else if (recorder) this.recorderViews.watch();
 		else if (mimoShock) this.mimoShockViews.watch();
+		else if (mimoSine) this.mimoSineViews.watch();
 		else this.display.watch();
-		this.control.connect();
+		if (this.config.control) this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine, this.modalTest);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2361,12 +2725,17 @@ export class AppState {
 		if (onRecorder || this.recorder.isLive) return this.recorder.source;
 		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
 		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
+		const onMimoSine = this.workspace === 'acquire' && this.tests.screen === 'mimo_sine';
+		if (onMimoSine || this.mimoSine.isLive) return this.mimoSine.source;
+		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
+		if (onPlayback || this.playback.isLive) return this.playback.source;
+		const onModal = this.workspace === 'acquire' && this.tests.screen === 'modal_test';
+		if (onModal || this.modalTest.isLive) return this.modalTest.source;
 		return null;
 	}
 
 	start(): void {
-		// an address from before the split (#analyze) opens the recordings' module, and #model
-		// opens the module shown as Model, whose id is geometry (Brandon, 2026-11-10)
+		// #analyze and #model are addresses the analysis had; any of its earlier ids opens it (`go`)
 		const named = (hash: string) => {
 			const h = hash.replace(/^#\/?/, '');
 			return h === 'analyze' ? 'signals' : h === 'model' ? 'geometry' : h;
@@ -2417,6 +2786,15 @@ export class AppState {
 				if (this.control.status === 'open') void this.mimoShock.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimoSine.sync();
+			});
+			$effect(() => {
+				if (this.control.status === 'open') void this.playback.sync();
+			});
+			$effect(() => {
+				if (this.control.status === 'open') void this.modalTest.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -2432,6 +2810,9 @@ export class AppState {
 		this.explorer.watch();
 		this.recorder.watch();
 		this.mimoShock.watch();
+		this.mimoSine.watch();
+		this.playback.watch();
+		this.modalTest.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -2443,13 +2824,21 @@ export class AppState {
 		this.explorerViews.watch();
 		this.recorderViews.watch();
 		this.mimoShockViews.watch();
+		this.mimoSineViews.watch();
+		this.playbackViews.watch();
 		this.analysis.connect();
-		this.control.connect();
+		if (this.config.control) this.control.connect();
+	}
+
+	/** The rail's workspaces: without a control service, the analysis and the report alone. */
+	get workspaces(): WorkspaceInfo[] {
+		return shownWorkspaces(this.config.control);
 	}
 
 	go(workspace: Workspace): void {
+		if (!canOpen(workspace, this.config.control)) workspace = ANALYSIS;
 		const entering = workspace === 'acquire' && this.workspace !== 'acquire';
-		this.workspace = workspace;
+		this.workspace = moduleOf(workspace);
 		if (entering) this.tests.open();
 	}
 

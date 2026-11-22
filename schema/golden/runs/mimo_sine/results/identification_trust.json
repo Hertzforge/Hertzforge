@@ -1,0 +1,31 @@
+{
+  "name": "identification_trust",
+  "kind": "mimo_sine_trust",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {},
+  "description": "1 where the identification's line is trusted, 0 where not",
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        10
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "trusted",
+      "dtype": "f8",
+      "shape": [
+        10
+      ],
+      "unit": "",
+      "offset": 80
+    }
+  ]
+}

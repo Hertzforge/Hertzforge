@@ -41,7 +41,48 @@
 		pressed = null;
 		holding = false;
 	}
+
+	/** Delete on the project row takes the project out of the tree: a new, empty one in its place, after asking when this one has unsaved changes. The row takes the focus on a click itself: the macOS app's web view does not focus a button that is clicked, and the key would go nowhere. */
+	function projectKey(e: KeyboardEvent) {
+		if (e.key === 'F2') return startTitle();
+		if ((e.key !== 'Delete' && e.key !== 'Backspace') || p.busy !== null) return;
+		e.preventDefault();
+		void p.newProject();
+	}
+
+	// the project's name typed over on its row: a double-click, or F2 on it (Brandon, 2026-11-17)
+	let titling = $state(false);
+	let newTitle = $state('');
+	function startTitle() {
+		if (!p.summary || p.busy !== null) return;
+		newTitle = p.summary.title;
+		titling = true;
+	}
+	async function commitTitle() {
+		if (!titling) return;
+		titling = false;
+		const to = newTitle.trim();
+		if (to && to !== p.summary?.title) await p.retitle(to);
+	}
+	function focusAndSelect(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
 </script>
+
+<!-- what Save writes to, said as that: the path alone read as where the project came from (Brandon, 2026-11-17). An older project file is read and not written back to, so it says so. -->
+{#snippet fileLine(file: string | null | undefined)}
+	{#if !file}
+		<span class="cdesc">Not saved yet</span>
+	{:else}
+		{@const old = file.endsWith('.vdyn')}
+		<span class="cline" title={old ? `Opened from ${file}. Save asks for a new file: this one is not written back to.` : `Save writes to ${file}`} data-testid="project-file">
+			<span class="clead">{old ? 'Opened from' : 'Saves to'}</span>
+			<span class="cdesc mono">{file}</span>
+		</span>
+	{/if}
+{/snippet}
+
 
 <section class="project" aria-labelledby="project-title" data-testid="project-panel">
 	<div class="head">
@@ -69,13 +110,31 @@
 
 	{#if p.summary}
 		<!-- the project itself, picked: nothing in the tree, and the action table offers the project's acts (Save, Open, Import) -->
-		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Drag it to a folder to save a copy there.' : 'The project: Save, Open, Import and the acts that take no object'} onclick={() => p.clearSelection()} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
-			<span class="ctitle">
-				{p.summary.title}
-				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
-			</span>
-			<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
-		</button>
+		{#if titling}
+			<div class="choice on titling">
+				<input
+					class="field rename"
+					aria-label="New name for the project"
+					data-testid="project-title-field"
+					bind:value={newTitle}
+					use:focusAndSelect
+					onkeydown={(e) => {
+						if (e.key === 'Enter') void commitTitle();
+						else if (e.key === 'Escape') titling = false;
+					}}
+					onblur={() => void commitTitle()}
+				/>
+				{@render fileLine(p.summary.file)}
+			</div>
+		{:else}
+			<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Delete starts a new, empty project.'} onclick={(e) => { p.clearSelection(); e.currentTarget.focus(); }} ondblclick={startTitle} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
+				<span class="ctitle">
+					{p.summary.title}
+					{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
+				</span>
+				{@render fileLine(p.summary.file)}
+			</button>
+		{/if}
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
 			{#if p.summary.objects.length}
 				<ProjectTree {app} />
@@ -202,6 +261,11 @@
 		font-size: var(--text-sm);
 	}
 
+	.titling .rename {
+		width: 100%;
+		font-weight: 600;
+	}
+
 	.choice {
 		display: flex;
 		flex-direction: column;
@@ -233,6 +297,24 @@
 		font-size: var(--text-sm);
 		font-weight: var(--weight-medium);
 		color: var(--text-1);
+	}
+
+	.cline {
+		display: flex;
+		align-items: baseline;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.clead {
+		flex: none;
+		font-size: var(--text-xs);
+		color: var(--text-4);
+		white-space: nowrap;
+	}
+
+	.cline .cdesc {
+		min-width: 0;
 	}
 
 	.cdesc {

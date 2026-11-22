@@ -1,7 +1,7 @@
 """The words and modules of the action table, in one place to edit.
 
 Every operation's title stays for its form and the palette; `VERBS` is what
-its row in the table says, in two words at most, since the table's column
+its row in the table says, in a few words, since the table's column
 already says what it acts on. `HIDDEN` lists the operations that have no
 row: what a selection draws by itself (a default row names it), a cell typed
 into a table, or an act the table offers as its own row.
@@ -28,8 +28,9 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'psd_overlay', 'srs_spectra', 'replication_waveforms', 'table', 'channel_table_view',
     'shape_values',
     # typed into a table
-    'set_entity', 'set_entity_cell', 'set_channel_cell', 'describe_mode',
+    'set_entity', 'set_entity_cell', 'set_channel_cell', 'set_sensor', 'set_scan_set', 'describe_mode',
     # dragged on the plot
+    'drag_averaging',
     'set_band_edge',
     # the table's own rows
     'link', 'unlink', 'set_basis', 'name_object_group',
@@ -45,9 +46,9 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'convert_to_specification': 'Make Spec', 'convert_to_psd': 'Make PSD',
     'detect_shocks': 'Detect Shocks', 'extract_sine': 'Extract Sine', 'transform': 'Transform',
     'expand': 'Expand', 'generate_rigid_body_modes': 'Rigid Modes', 'solve_modes': 'Solve',
-    'project_onto_basis': 'Project', 'set_averaging': 'Averaging',
-    'detect_averaging': 'Detect Averaging', 'set_filter': 'Set Filter',
-    'set_truncation': 'Set Truncation', 'group_properties': 'Set Properties',
+    'project_onto_basis': 'Project', 'set_projection': 'Project', 'set_averaging': 'Averaging',
+    'detect_averaging': 'Detect Averaging', 'set_filter': 'Filter',
+    'set_truncation': 'Truncation', 'group_properties': 'Set Properties',
     'merge_coincident_nodes': 'Merge Nodes', 'element_groups': 'Show Groups',
     'merge_element_groups': 'Merge Groups', 'delete_element_groups': 'Delete Groups',
     'tie_elements': 'Tie', 'align_meshes': 'Align', 'derive_specification': 'Derive Spec',
@@ -61,6 +62,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'import_rattlesnake_part': 'Import Part', 'truncate_rattlesnake_file': 'Trim Run',
     'text_preview': 'Preview Text', 'import_text': 'Import Text', 'generate_signal': 'Generate',
     'srs_synthesis': 'Synthesize', 'compute_modal_responses': 'Modal Responses', 'synthesize_modal_frfs': 'Modal FRFs',
+    'reprocess_modal_test': 'Estimate Again',
     'sweep_rate': 'Sweep Rate', 'fatigue': 'Fatigue', 'drive_prediction': 'Predict Drive',
     'notch_prediction': 'Predict Notch', 'conditioning': 'Conditioning',
     'realizability': 'Realizability', 'view_entities': 'Edit', 'add_node': 'Add Node',
@@ -68,12 +70,16 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'add_element_group': 'Add Group', 'delete_entities': 'Delete Picks',
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
     'reset_rotation': 'Reset Rotation', 'sensors': 'Sensors',
-    'work_up_sysid': 'Work Up', 'work_up_random': 'Work Up', 'work_up_shock': 'Work Up',
-    'work_up_transient': 'Work Up', 'work_up_sine': 'Work Up', 'work_up_modal': 'Work Up',
+    # one row per kind of test in the one analysis module, so each says which
+    'work_up_sysid': 'Auto Compute System ID', 'work_up_random': 'Auto Compute Random',
+    'work_up_shock': 'Auto Compute Shock', 'work_up_transient': 'Auto Compute Transient',
+    'work_up_sine': 'Auto Compute Sine', 'work_up_modal': 'Auto Compute Modal',
     'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
+    'move_elements': 'Move Elements',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',
     'plan_instrumentation': 'Plan Sensors', 'export_state_space': 'Export Model',
+    'create_sensors': 'Fit Sensors',
     'project_onto_channels': 'Project Channels', 'projection_overlay': 'Animate Projection',
     'merge': 'Merge', 'report_features': 'Features', 'report_requirement': 'Requirement',
     'report_finding': 'Finding', 'draft_finding_fact': 'Draft Fact',
@@ -162,9 +168,6 @@ PARTS = {f'project.{name}': part for name, part in {
     'add_node': 'part:nodes',
     'view_entities': ('part:nodes', 'part:coordinate_systems', 'family', 'group'),
     'add_coordinate_system': 'part:coordinate_systems',
-    'rotate_coordinate_system': 'part:coordinate_systems',
-    'slide_coordinate_system': 'part:coordinate_systems',
-    'reset_rotation': 'part:coordinate_systems',
     'edit_solid': 'solid',
     'move_solids': 'solid',
     'separate_solids': 'solid',
@@ -185,7 +188,20 @@ PARTS = {f'project.{name}': part for name, part in {
 #: and modes are fitted on the fitting screen alone, the band fit left to scripts and
 #: to recomputing what it made (2026-11-14)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
-                       'project.delete_entities', 'project.solids', 'project.fit_modes'})
+                       # elements are moved by dragging them onto a group in the tree
+                       'project.move_elements',
+                       'project.delete_entities', 'project.solids', 'project.fit_modes',
+                       # a coordinate system is slid and turned in its Edit: typed in its
+                       # row, or dragged by the arrows and rings on it (Brandon, 2026-11-17)
+                       'project.rotate_coordinate_system',
+                       'project.slide_coordinate_system', 'project.reset_rotation',
+                       # a filter is set and applied in its one action, Filter
+                       # (`project.set_filter` with `keep`); the verb stays for scripts
+                       # and for a filtered history's recipe (Brandon, 2026-11-17)
+                       'project.filter_data',
+                       # an element is added in its family's Edit, by clicking its nodes
+                       # in Add mode
+                       'project.add_element'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

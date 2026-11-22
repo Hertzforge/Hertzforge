@@ -99,6 +99,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
         if between:
             entry['between'] = between
         entry['holds'] = describe(obj)
+        entry['opens'] = tree.opens(obj)
         settings = settings_of(obj)
         if settings:
             entry['settings'] = settings
@@ -392,11 +393,27 @@ def _name(params: Mapping[str, Any], key: str, method: str) -> str:
     return value
 
 
+def retitle(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.retitle`: the project called `title`. Its file, if it has one, keeps its
+    name until it is saved somewhere else."""
+    state = _open(state, 'project.retitle')
+    title = _name(params, 'title', 'project.retitle').strip()
+    if not title:
+        raise bad_request('project.retitle "title" must be a name, not empty')
+    if title == state.project.name:
+        return
+    state.project.name = title
+    state.modified = True
+
+
 def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.rename`: the object `name` called `to`, and every group,
     provenance record and report block that names it following
     (`Project.rename`); with `index`, one photo of a Photos object
-    renamed instead, the report blocks that show it following."""
+    renamed instead, the report blocks that show it following; with
+    `group`, `solid` or `mate`, one element group, solid or set of mated
+    surfaces of a geometry, by its id; with `mode`, the description of
+    one mode of a shape set, numbered from 1."""
     state = _open(state, 'project.rename')
     old = _name(params, 'name', 'project.rename')
     new = _name(params, 'to', 'project.rename').strip()
@@ -404,10 +421,70 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         raise not_found(f'the project has no object named {old!r}')
     if params.get('index') is not None:
         return _rename_photo(state, old, params['index'], new)
+    for kind in SUB_ITEMS:
+        if params.get(kind) is not None:
+            return _rename_sub(state, old, kind, params[kind], new)
     if new == old:
         return
     try:
         state.project.rename(old, new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.modified = True
+
+
+#: what `project.rename` names inside an object, besides a photo
+SUB_ITEMS = ('group', 'solid', 'mate', 'mode')
+
+
+def _rename_sub(state: OpenProject, name: str, kind: str, which: Any, new: str) -> None:
+    """One sub-item of an object renamed, as the script call that does it:
+    an element group (`Geometry.rename_group`), a solid
+    (`Project.edit_solid`), a set of mated surfaces
+    (`Project.edit_mated_surfaces`) or a mode's description
+    (`ShapeSet.set_description`)."""
+    from hertzforge.core import mates, solids
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    project = state.project
+    obj = project[name]
+    if not isinstance(which, int) or isinstance(which, bool):
+        raise bad_request(f'project.rename "{kind}" is a whole number')
+    if kind == 'mode':
+        if not isinstance(obj, ShapeSet):
+            raise refused(f'{name} is not a shape set; only a shape set has modes')
+        if not 1 <= which <= obj.num_shapes:
+            raise not_found(f'{name} has {obj.num_shapes} modes; there is no mode {which}')
+        if str(obj.description[which - 1]).strip() == new:
+            return
+        obj.set_description(which - 1, new)
+        project.record_call(obj, 'set_description', which - 1, new)
+        state.modified = True
+        return
+    if not isinstance(obj, Geometry):
+        raise refused(f'{name} is not a geometry')
+    try:
+        if kind == 'group':
+            ids = [int(one) for one in obj.group_id]
+            if which not in ids:
+                raise not_found(f'{name} has no element group {which}')
+            if obj.group_name[ids.index(which)].strip() == new:
+                return
+            obj.rename_group(which, new)
+            project.record_call(obj, 'rename_group', which, new)
+        elif kind == 'solid':
+            if which not in {int(one.id) for one in obj.solids}:
+                raise not_found(f'{name} has no solid {which}')
+            if solids.solid(obj, which).name.strip() == new:
+                return
+            project.edit_solid(name, which, name=new)
+        else:
+            if which not in {int(one.id) for one in getattr(obj, 'mates', ())}:
+                raise not_found(f'{name} has no mated surfaces {which}')
+            if mates.find(obj, which).name.strip() == new:
+                return
+            project.edit_mated_surfaces(name, which, name=new)
     except ValueError as error:
         raise refused(str(error)) from None
     state.modified = True
@@ -635,6 +712,27 @@ def mesh_size(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str,
     return {'value': float(size), 'defined': state.project[name].units_defined}
 
 
+def averaging(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.averaging`: the regions that draw an averaging on a time history's
+    plot, without the plot (`show.averaging_drawn`): `averaging` holds what the
+    Averaging form holds, as `project.show`'s `prefs.averaging` does. The shell
+    asks this as the form is typed into, so only the frames are drawn again."""
+    from hertzforge.core.data import TimeHistory
+
+    from . import show as showing
+
+    state = _open(state, 'project.averaging')
+    name = _name(params, 'name', 'project.averaging')
+    if not isinstance(state.project[name], TimeHistory):
+        raise bad_request(f'{name} is not a time history')
+    drawn = params.get('averaging') or {}
+    if not isinstance(drawn, Mapping) or set(drawn) - set(showing.AVERAGING_FIELDS):
+        raise bad_request('project.averaging "averaging" holds '
+                          + ', '.join(showing.AVERAGING_FIELDS))
+    regions, note = showing.averaging_drawn(state.project, name, dict(drawn))
+    return {'regions': regions or [], 'note': note}
+
+
 def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
     """`project.show`: what a selection in the tree shows (`service.show`)."""
     from . import show as showing
@@ -664,13 +762,23 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "line" is a frequency in Hz, or null')
     if prefs.get('shape_view') not in (None, 'animate', 'table', 'mac', 'values'):
         raise bad_request('project.show "shape_view" is animate, table, mac or values, or null')
-    for key in ('projection', 'arrows', 'sensors'):
+    for key in ('projection', 'arrows', 'sensors', 'limits'):
         if key in prefs and not isinstance(prefs[key], bool):
             raise bad_request(f'project.show "{key}" is true or false')
     from .show import TABLE_VIEWS, VALUES_CHOICES, VALUES_FORMS
 
     if 'values_dofs' in prefs and prefs['values_dofs'] not in VALUES_CHOICES:
         raise bad_request('project.show "values_dofs" is all, control, reference, response or '
+                          'monitor')
+    drawn = prefs.get('averaging')
+    if drawn is not None and not (isinstance(drawn, Mapping)
+                                  and not set(drawn) - set(showing.AVERAGING_FIELDS)):
+        raise bad_request('project.show "averaging" is null or holds '
+                          + ', '.join(showing.AVERAGING_FIELDS))
+    if prefs.get('drive') is not None and not isinstance(prefs['drive'], str):
+        raise bad_request('project.show "drive" is a DOF or null')
+    if 'arrow_role' in prefs and prefs['arrow_role'] not in VALUES_CHOICES:
+        raise bad_request('project.show "arrow_role" is all, control, reference, response or '
                           'monitor')
     if 'values_form' in prefs and prefs['values_form'] not in VALUES_FORMS:
         raise bad_request('project.show "values_form" is shapes, response or reference')

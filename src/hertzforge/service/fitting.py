@@ -177,7 +177,7 @@ def delete(session: Any, indices: list[int]) -> None:
     """`fit.delete`: confirmed modes taken back: each leaves the modes and the replay list, and the
     preview, fitted against a residual that is gone, is dropped."""
     for k in sorted(set(indices), reverse=True):
-        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        pick = session.pick(k)
         if pick in session.confirmed:
             session.confirmed.remove(pick)
         del session.modes[k]
@@ -210,9 +210,10 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
         raise bad_request('fit.edit needs "damping" or "description"')
     if damping is not None:
         value = _damping(params, 'fit.edit')
-        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        pick = session.pick(k)
         if pick in session.confirmed:
             session.confirmed[session.confirmed.index(pick)] = (pick[0], value)
+        session.modes[k]['pick'] = (pick[0], value)
         session.modes[k]['damping'] = value
     if description is not None:
         if not isinstance(description, str):
@@ -223,9 +224,13 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
 def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
     """`fit.publish`: the confirmed modes added to the project as a shape
     set, or put in place of the set the fit was started from; its name."""
+    from hertzforge.core.modal_test import note_window_damping
+
     if not fit.session.modes:
         raise refused('confirm a mode before publishing the fit')
     shapes = fit.session.shape_set()
+    # an FRF estimated with an exponential window: each mode notes the damping it added
+    note_window_damping(shapes, project[fit.frf])
     # what a simulated run gives is simulated, however far it is carried
     if getattr(project[fit.frf], 'source', None) is not None:
         shapes.source = project[fit.frf].source

@@ -735,3 +735,19 @@ fn mimo_shock_the_world_is_named_and_its_law_files_are_listed_under_it() {
     assert!(cat.srs_law(&id).is_none());
     assert_eq!(wasm_files(cat.laws_dir()).len(), 1);
 }
+
+#[test]
+fn mimo_sine_the_world_is_named_and_lists_no_law_without_a_file() {
+    assert_eq!(LawWorld::SineMimo.as_str(), "sine_mimo");
+    assert_eq!(LawWorld::SineMimo.test_type(), "MIMO Sine");
+    let scratch = Scratch::new("catalog-sine-mimo");
+    let mut cat = open(scratch.path());
+    assert!(cat.entries_for(LawWorld::SineMimo).is_empty());
+    // A law file of another world is not listed under MIMO Sine.
+    let id = cat
+        .import(&law_file("hertzforge_law_mimo_shock_paired"))
+        .unwrap()
+        .id;
+    assert!(cat.entries_for(LawWorld::SineMimo).is_empty());
+    assert!(cat.sine_mimo_law(&id).is_none());
+}

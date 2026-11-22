@@ -17,7 +17,9 @@ from hertzforge.io import run_convert
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNS = os.path.join(ROOT, 'schema', 'golden', 'runs')
-MODULES = sorted(os.listdir(RUNS))
+#: every golden run folder, a module's own or one of the runs a module keeps several of
+MODULES = sorted(os.path.relpath(top, RUNS) for top, _, files in os.walk(RUNS)
+                 if 'run.json' in files)
 
 
 def _json(*parts):

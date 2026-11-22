@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 fn law_bytes(name: &str) -> Vec<u8> {
     let file = format!("{name}.wasm");
     let exe = std::env::current_exe().expect("the test binary knows its own path");
-    for dir in exe.ancestors().skip(1).take(4) {
+    for dir in exe.ancestors().skip(1) {
         let p: PathBuf = dir.join("wasm32-wasip2").join("release").join(&file);
         if p.is_file() {
             return std::fs::read(&p).unwrap();

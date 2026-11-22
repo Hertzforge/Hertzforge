@@ -74,6 +74,9 @@ class Report:
         ('dofs' + 'dofs_source' make a DOFs scene: labeled arrows at
         every DOF that one data object measures as that quantity)
       {'kind': 'table', 'source': name, 'caption': str}
+        (with 'environment' and 'form' 'response' or 'reference', a
+        channel table's block is that control loop's transformation
+        instead: `transformation_blocks`)
       {'kind': 'photo', 'source': Photos-name, 'photo': photo-name,
                         'caption': str}
       {'kind': 'pairs', 'source': MatchedModes-name, 'caption': str}
@@ -397,7 +400,8 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
     is rendered, so a report does not depend on what the objects are
     named: 'basis' is the first object of the type in the Basis object
     group, 'other' the first outside it, and 'any' the first anywhere.
-    Without a Basis group, 'basis' is the first of the type and 'other'
+    A geometry is the one exception: with none in the Basis group,
+    'basis' is the first geometry anywhere. Without a Basis group, 'basis' is the first of the type and 'other'
     the second, so a small project with no groups still renders.
 
     A specification never answers for the measurement it bounds:
@@ -451,6 +455,12 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
         if basis is None:
             return names[0] if names else None
         inside = [name for name in names if name in basis]
+        if not inside and cls.__name__ == 'Geometry':
+            # one article is under test, so its geometry serves the run
+            # wherever it sits: a geometry loaded beside a Basis group
+            # left the report's channel grid on the DOF letters
+            # (Brandon, 2026-11-18)
+            return names[0] if names else None
         return inside[0] if inside else None
     if role == 'other':
         if basis is None:
@@ -844,12 +854,14 @@ def instrumentation_text(objects: Mapping[str, Any],
     if resolve_binding('@basis:Geometry', objects, object_groups) in objects:
         excitation, response = dof_references(objects, object_groups,
                                               dofs_source)
-        return ('## Test Article and Instrumentation\n\nThe test geometry '
-                '({{figure:Test geometry and measurement locations}}) '
-                'shows where the article was instrumented.'
-                + dof_sentence(excitation, response,
-                               'in which direction it was driven',
-                               'every measured accelerometer direction')
+        return ('## Test Article and Instrumentation\n\n'
+                + (geometry_sentence(objects, object_groups, dofs_source,
+                                     'shows where the article was '
+                                     'instrumented.')
+                   + dof_sentence(excitation, response,
+                                  'in which direction it was driven',
+                                  'every measured accelerometer direction')
+                   ).lstrip()
                 + ' The channel table ({{table:Instrumentation}}) lists '
                 'the instrumentation at each location.')
     photos = resolve_binding('@basis:Photos', objects, object_groups)
@@ -1409,18 +1421,41 @@ def _lands_on(geometry: Any, dofs: Sequence[str]) -> bool:
     return False
 
 
+#: the caption of the geometry drawn alone, which the prose cites
+GEOMETRY_CAPTION = 'Test geometry and measurement locations'
+
+
+def geometry_sentence(objects: Mapping[str, Any],
+                      object_groups: Sequence[Mapping[str, Any]] | None,
+                      dofs_source: str, says: str) -> str:
+    """The sentence citing the geometry figure, 'The test geometry
+    (Figure n) `says`', when `front_matter` draws the geometry alone for
+    `dofs_source`; '' when the DOF scenes draw it instead."""
+    if not any(block['kind'] == 'scene' and not block.get('dofs')
+               for block in front_matter(objects, object_groups, dofs_source)):
+        return ''
+    return ('The test geometry ({{figure:' + GEOMETRY_CAPTION + '}}) '
+            + says)
+
+
 def front_matter(objects: Mapping[str, Any],
                  object_groups: Sequence[Mapping[str, Any]] | None,
-                 dofs_source: str) -> list[dict[str, Any]]:
+                 dofs_source: str, kind: str | None = None
+                 ) -> list[dict[str, Any]]:
     """The blocks every report opens with, always in the same order.
 
-    The test geometry, then a DOF scene for each quantity `dofs_source`
-    measures (excitations before responses; every quantity in
-    `DOF_SCENE_QUANTITIES` when the source is not there yet), then the
-    photographs, then the channel table: what was tested and where it
-    was instrumented, before any data. Every reference is symbolic, and
+    A DOF scene for each quantity `dofs_source` measures (excitations
+    before responses; every quantity in `DOF_SCENE_QUANTITIES` when the
+    source is not there yet), then the photographs, then the channel
+    table: what was tested and where it was instrumented, before any
+    data. Each DOF scene draws the whole geometry with its sensors, so
+    the plain geometry figure opens the list only when no DOF scene is
+    known to draw: a project with no source or no geometry yet, or one
+    whose DOFs land on no node of it. Every reference is symbolic, and
     an unbound or empty block is not rendered, so a bare project keeps
-    the outline without blank figures.
+    the outline without blank figures. `kind` picks the control loops
+    whose transformations follow the channel table
+    (`transformation_blocks`); every loop's when it is None.
     """
     # One order for every report (Brandon, 2026-08-23).
     geometry = '@basis:Geometry'
@@ -1435,9 +1470,6 @@ def front_matter(objects: Mapping[str, Any],
     else:
         photo_blocks = [{'kind': 'photo', 'source': photos, 'photo': '',
                          'caption': 'Test article as instrumented'}]
-    blocks: list[dict[str, Any]] = [
-        {'kind': 'scene', 'geometry': geometry, 'shapes': '',
-         'caption': 'Test geometry and measurement locations'}]
     # a DOF scene per quantity the source actually measures — a run
     # whose excitation is a load cell has no voltage scene to draw, and
     # the empty card it left in the editor read as a fault (Brandon,
@@ -1446,6 +1478,10 @@ def front_matter(objects: Mapping[str, Any],
     source_name = resolve_binding(dofs_source, objects, object_groups)
     source = objects.get(source_name) if source_name else None
     scenes = list(DOF_SCENE_QUANTITIES)
+    # the DOF scenes draw the geometry, so a figure of it alone repeated
+    # them (Brandon, 2026-11-19: three geometry figures where two say it
+    # all); it stays where none is known to draw
+    alone = True
     if source is not None and hasattr(source, 'known_dim'):
         held = set(series_dof_quantities([('', source, None)]))
         scenes = [quantity for quantity in scenes if quantity in held]
@@ -1460,6 +1496,11 @@ def front_matter(objects: Mapping[str, Any],
             scenes = [quantity for quantity in scenes
                       if _lands_on(drawn_on, series_quantity_dofs(
                           [('', source, None)], quantity))]
+            alone = not scenes
+    blocks: list[dict[str, Any]] = []
+    if alone:
+        blocks.append({'kind': 'scene', 'geometry': geometry, 'shapes': '',
+                       'caption': GEOMETRY_CAPTION})
     for quantity in scenes:
         role = ('Excitation' if quantity in EXCITATION_QUANTITIES
                 else 'Response')
@@ -1470,6 +1511,56 @@ def front_matter(objects: Mapping[str, Any],
     blocks += photo_blocks
     blocks.append({'kind': 'table', 'source': '@basis:ChannelTable',
                    'caption': 'Instrumentation'})
+    blocks += transformation_blocks(objects, object_groups, kind)
+    return blocks
+
+
+#: what each transformation's table caption calls it and its columns
+TRANSFORMATION_CAPTIONS = {
+    'response': ('Response transformation', 'control channel'),
+    'reference': ('Reference transformation', 'drive channel')}
+
+
+def transformation_blocks(objects: Mapping[str, Any],
+                          object_groups: Sequence[Mapping[str, Any]] | None,
+                          kind: str | None = None) -> list[dict[str, Any]]:
+    """A table block for each transformation a control loop of the
+    basis channel table ran, after the instrumentation table.
+
+    With `kind` ('random', 'sine', 'transient'), only the loops of that
+    kind count: a mixed run's random and sine may control through
+    different matrices, or one through a matrix and the other through
+    none, and each report shows its own. A loop whose kind is unknown
+    (a table saved before the kind was kept) counts only when it is the
+    table's one loop, since nothing else says which report it is for.
+
+    The response transformation's rows are what the controller
+    controlled in place of its control channels, and the reference
+    transformation's are what it drove in place of its drive channels;
+    the columns are those channels, headed by their DOFs
+    (`ChannelTable.transformation`). A loop with no transformation adds
+    nothing, and neither does a project with no channel table.
+    """
+    from .channel_table import TRANSFORMATION_FORMS, ChannelTable
+
+    source = '@basis:ChannelTable'
+    table = objects.get(resolve_binding(source, objects, object_groups) or '')
+    if not isinstance(table, ChannelTable):
+        return []
+    blocks = []
+    single = len(table.environments) == 1
+    for environment, held in table.environments.items():
+        if kind is not None and held.kind != kind and (held.kind or not single):
+            continue
+        for form in TRANSFORMATION_FORMS:
+            if held.matrix(form) is None:
+                continue
+            title, column = TRANSFORMATION_CAPTIONS[form]
+            blocks.append({
+                'kind': 'table', 'source': source,
+                'environment': environment, 'form': form,
+                'caption': f'{title}, {environment}: a row per transformed '
+                           f'degree of freedom, a column per {column}'})
     return blocks
 
 
@@ -1520,12 +1611,14 @@ def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
             'was measured where.'},
         {'kind': 'text', 'text':
             '## Test Setup\n\n'
-            'The test geometry ({{figure:Test geometry}}) shows every '
-            'measurement location and the wireframe used to visualize '
-            'the mode shapes.'
-            + dof_sentence(*dof_references(objects, object_groups, frf),
-                           'in which direction the structure was driven',
-                           'every measured accelerometer direction')
+            + (geometry_sentence(objects, object_groups, frf,
+                                 'shows every measurement location and the '
+                                 'wireframe used to visualize the mode '
+                                 'shapes.')
+               + dof_sentence(*dof_references(objects, object_groups, frf),
+                              'in which direction the structure was driven',
+                              'every measured accelerometer direction')
+               ).lstrip()
             + ' The channel table ({{table:Instrumentation}}) lists the '
             'instrumentation at each location: sensor, sensitivity, '
             'and calibration status.'},
@@ -1884,11 +1977,13 @@ def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
             f'{ref(srs, "max_frequency")}.'},
         {'kind': 'text', 'text':
             '## Test Article and Instrumentation\n\n'
-            'The test geometry ({{figure:Test geometry}}) shows where '
-            'the article was instrumented.'
-            + dof_sentence(excitation, response,
-                           'in which direction the shock was applied',
-                           'every measured direction')
+            + (geometry_sentence(objects, object_groups,
+                                 '@basis:TimeHistory',
+                                 'shows where the article was '
+                                 'instrumented.')
+               + dof_sentence(excitation, response,
+                              'in which direction the shock was applied',
+                              'every measured direction')).lstrip()
             + (' A shock is judged where it was measured, and a channel '
                'not on these figures is a channel this report says '
                'nothing about.' if excitation or response else '')
@@ -2136,19 +2231,21 @@ def sine_template(objects: Mapping[str, Any],
             f'{ref(time, "duration")}.'},
         {'kind': 'text', 'text':
             '## Test Article and Instrumentation\n\n'
-            'The test geometry ({{figure:Test geometry}}) shows where '
-            'the article was instrumented.'
-            + dof_sentence(*dof_references(objects, object_groups,
-                                           '@basis:TimeHistory'),
-                           'in which direction it was driven',
-                           'every measured direction')
+            + (geometry_sentence(objects, object_groups,
+                                 '@basis:TimeHistory',
+                                 'shows where the article was '
+                                 'instrumented.')
+               + dof_sentence(*dof_references(objects, object_groups,
+                                              '@basis:TimeHistory'),
+                              'in which direction it was driven',
+                              'every measured direction')).lstrip()
             + ' The photographs '
             'record the article as it was actually instrumented, and '
             'the channel table ({{table:Instrumentation}}) lists what '
             'was at each location — for a swept test the control '
             'channels are the ones the levels below are read from, '
             'and the table is where they are identified.'},
-        *front_matter(objects, object_groups, '@basis:TimeHistory'),
+        *front_matter(objects, object_groups, '@basis:TimeHistory', 'sine'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## The Recording\n\n'
@@ -2197,6 +2294,20 @@ def sine_template(objects: Mapping[str, Any],
     return Report('Sine Sweep Test Report', blocks)
 
 
+def _of_transformed_rows(objects: Mapping[str, Any], name: str) -> bool:
+    """Whether `name` is a control loop's transformed rows, or was
+    computed from them (`Project.transform_responses`): part of the
+    recording they came from, never a second recording."""
+    provenance = getattr(objects, 'provenance', None) or {}
+    seen = set()
+    while name in provenance and name not in seen:
+        seen.add(name)
+        if provenance[name].get('verb') == 'transform_responses':
+            return True
+        name = provenance[name].get('source')
+    return False
+
+
 def sysid_template(objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A system identification report: the measured plant, and its quality.
@@ -2223,7 +2334,8 @@ def sysid_template(objects: Mapping[str, Any],
     from .data import Psd, Specification, TimeHistory
     densities = [(name, obj) for name, obj in objects.items()
                  if isinstance(obj, Psd)
-                 and not isinstance(obj, Specification)]
+                 and not isinstance(obj, Specification)
+                 and not _of_transformed_rows(objects, name)]
     # the ratio binds the pair by name, louder over quieter — there is
     # no symbolic selector for "the second Psd", and a generated
     # template knows its own project's names
@@ -2239,7 +2351,8 @@ def sysid_template(objects: Mapping[str, Any],
     # draws with its own averaging frames so the figure says which
     # part of each stream the densities came from
     histories = [(name, obj) for name, obj in objects.items()
-                 if isinstance(obj, TimeHistory)]
+                 if isinstance(obj, TimeHistory)
+                 and not _of_transformed_rows(objects, name)]
     if len(histories) >= 2:
         by_level = sorted(
             histories,
@@ -2317,12 +2430,12 @@ def sysid_template(objects: Mapping[str, Any],
             'overlap.'},
         {'kind': 'text', 'text':
             '## Test Article and Instrumentation\n\n'
-            'The test geometry ({{figure:Test geometry}}) shows every '
-            'measurement location and the wireframe the article is '
-            'drawn on.'
-            + dof_sentence(excitation, response,
-                           'in which direction the article was driven',
-                           'every measured direction')
+            + (geometry_sentence(objects, object_groups, dofs_source,
+                                 'shows every measurement location and the '
+                                 'wireframe the article is drawn on.')
+               + dof_sentence(excitation, response,
+                              'in which direction the article was driven',
+                              'every measured direction')).lstrip()
             + (' Together they are the identification\'s reach, since '
                'a plant is only measured where something was driven '
                'and something was listening.' if excitation and response
@@ -2489,7 +2602,7 @@ def transient_template(objects: Mapping[str, Any],
             f'{ref(time, "duration")}.'},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'transient'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
@@ -2939,8 +3052,9 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
 
     The pass/fail box comes first, under the title, read off the
     octave-band comparison. Then the order every report follows: the
-    front matter (geometry, the DOF scenes with excitations first,
-    photographs, the channel table), the time data, the spectra, and
+    front matter (the DOF scenes with excitations first, each drawing
+    the geometry and its sensors, then photographs and the channel
+    table), the time data, the spectra, and
     the computed results. The specification is not drawn on its own:
     it is the target and the shaded limits behind each control
     comparison, one figure per control channel (a grid past
@@ -3021,7 +3135,7 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
                else '.')},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'random'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '
@@ -3033,7 +3147,11 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
             'Measured time histories, with the frames the spectra '
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
-            'the spectra are averaged over'),
+            'the spectra are averaged over',
+            # one 3-D figure a quantity, every channel in depth with the frames
+            # on the floor, as the app's averaging stage draws it, in place of
+            # flat pages of two dozen channels (Brandon, 2026-11-18)
+            mode='stage'),
         *_random_control_blocks(objects, object_groups),
         *([{'kind': 'text', 'text':
             '## The Sweep Under the Random\n\n'
@@ -3408,7 +3526,7 @@ def mimo_template(objects: Mapping[str, Any],
                else '.')},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'random'),
         *([run_record_block(objects, object_groups,
                             [('Control error', 'control_error')])]
           if record is not None else []),
@@ -3656,7 +3774,8 @@ def signals_template(objects: Mapping[str, Any],
 TEST_TEMPLATES = {'random': 'random', 'mimo_random': 'mimo', 'sine': 'sine',
                   'mixed': 'mixed_mode', 'classical_shock': 'shock', 'srs': 'shock',
                   'twr': 'transient', 'mimo_shock': 'mimo_shock',
-                  'explorer': 'explorer', 'recorder': 'recorder'}
+                  'explorer': 'explorer', 'recorder': 'recorder', 'playback': 'signals',
+                  'modal_test': 'modal'}
 
 #: the binding of the project's run record
 RUN_RECORD = '@basis:RunRecord'

@@ -265,8 +265,10 @@ fn mimo_shock_capture_pulse_rows_interleaves_every_row() {
     assert_eq!(sidecar.frames_written, 3);
     let bytes = std::fs::read(run_dir.join("telemetry.f32")).unwrap();
     let got: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|w| f32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|w| f32::from_le_bytes(*w))
         .collect();
     assert_eq!(got, vec![1.0, -1.0, 10.0, 2.0, -2.0, 20.0, 3.0, -3.0, 30.0]);
     let _ = std::fs::remove_dir_all(&tmp);

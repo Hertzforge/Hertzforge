@@ -144,14 +144,20 @@ fn read_f64(b: &[u8], a: &ArrayInfo) -> Result<Vec<f64>, String> {
     let s = b
         .get(a.offset_bytes..a.offset_bytes + a.len_bytes)
         .ok_or_else(|| format!("array {} runs past the payload", a.name))?;
-    Ok(s.chunks_exact(8)
-        .map(|c| f64::from_le_bytes(c.try_into().expect("8 bytes")))
+    Ok(s.as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| f64::from_le_bytes(*c))
         .collect())
 }
 
 fn read_c64(b: &[u8], a: &ArrayInfo) -> Result<Vec<C64>, String> {
     let v = read_f64(b, a)?;
-    Ok(v.chunks_exact(2).map(|p| C64::new(p[0], p[1])).collect())
+    Ok(v.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|p| C64::new(p[0], p[1]))
+        .collect())
 }
 
 fn find<'a>(arrays: &'a [ArrayInfo], name: &str) -> Result<&'a ArrayInfo, String> {

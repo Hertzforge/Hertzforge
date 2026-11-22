@@ -40,8 +40,11 @@ def test_the_descriptors_validate_and_open_on_settings(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
         assert op.edits
+        # a drag's span is where the pointer let go, not a setting to open on
         assert all('setting' in p.to_json() for p in op.params
-                   if p.name not in ('source', 'record'))
+                   if p.name not in ('source', 'record', 'keep')
+                   and not (op.id == 'project.drag_averaging'
+                            and p.name in ('start', 'stop', 'was_stop')))
 
 
 def test_averaging_set_is_stored_read_back_and_listed(state, validate):
@@ -52,10 +55,19 @@ def test_averaging_set_is_stored_read_back_and_listed(state, validate):
     rate = project['Time History'].sample_rate
     *frames, span = trace['regions']
     assert [r['kind'] for r in frames] == ['frame'] * 4
-    # the span over every frame slides them: the averaging again with the new start
-    assert span['kind'] == 'span' and span['drag']['op'] == 'project.set_averaging'
-    assert span['drag']['low'] == 'start' and 'high' not in span['drag']
-    assert span['drag']['params']['frame_length'] == 2048
+    # the span over every frame is dragged: its middle slides them, an edge adds or removes
+    history = project['Time History']
+    assert span['snap'] == pytest.approx({
+        'frame': 2048 / rate, 'hop': 1024 / rate, 'low': float(history.abscissa[0]),
+        'high': float(history.abscissa[0]) + len(history.abscissa) / rate})
+    assert span['kind'] == 'span' and span['drag'] == {
+        'op': 'project.drag_averaging', 'low': 'start', 'high': 'stop',
+        'params': {'source': 'Time History', 'frame_length': 2048, 'overlap': 0.5,
+                   'window': 'flattop', 'detrend': 'none', 'was_stop': span['x1']}}
+    # each frame carries its window and its row: at half overlap they alternate between two
+    assert [r['level'] for r in frames] == [0, 1, 0, 1] and {r['rows'] for r in frames} == {2}
+    window = frames[0]['window']
+    assert len(window) == 33 and max(window) == 1.0 and abs(window[0]) < 0.01
     assert frames[0]['x0'] == pytest.approx(0.5, abs=1 / rate)
     assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(1024 / rate)
     assert frames[0]['label'].startswith('Frame 1, ')
@@ -127,8 +139,11 @@ def test_a_span_outside_the_record_is_refused(state):
 def test_many_frames_shade_as_one_span(state):
     trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
                           overlap=0.0, frames=300)
+    assert len(trace['regions']) == 301 and 'window' in trace['regions'][0], 'each still drawn'
+    trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
+                          overlap=0.0, frames=1200)
     span, _drag = trace['regions']
-    assert span['label'].startswith('300 frames')
+    assert span['label'].startswith('1200 frames') and 'window' not in span
 
 
 def test_the_record_drawn_on_must_be_in_the_history(state):
@@ -140,8 +155,64 @@ def test_a_dragged_frame_span_slides_the_frames_and_keeps_the_rest(state):
     project = state.project
     trace, _ = run(project, 'project.set_averaging', frame_length=2048, overlap=0.5,
                    window='flattop', frames=4, start=0.5)
-    drag = trace['regions'][-1]['drag']
-    run(project, drag['op'], **{**drag['params'], drag['low']: 1.0})
-    averaging = project['Time History'].averaging
-    assert averaging.start == pytest.approx(1.0)
+    span = trace['regions'][-1]
+    drag = span['drag']
+    history = project['Time History']
+    rate = history.sample_rate
+    hop = 1024 / rate
+
+    def dragged(x0, x1, was_stop=-1.0):
+        run(project, drag['op'], **{**drag['params'], drag['low']: x0, drag['high']: x1,
+                                    'was_stop': was_stop})
+        return history.averaging
+
+    # the middle dragged: the same frames, half a second on
+    averaging = dragged(span['x0'] + 0.5, span['x1'] + 0.5)
+    assert averaging.start == pytest.approx(1.0, abs=1 / rate)
     assert (averaging.frame_length, averaging.window, averaging.frames) == (2048, 'flattop', 4)
+    assert averaging.overlap == 0.5 and averaging.start_set
+    # the right edge dragged out two and a half hops: two more whole frames
+    low = 1.0 + float(history.abscissa[0])
+    averaging = dragged(low, low + (2048 + 3 * 1024) / rate + 2.5 * hop)
+    assert averaging.frames == 6 and averaging.start == pytest.approx(1.0, abs=1 / rate)
+    # the left edge dragged out two and a half hops: two more whole frames before the first,
+    # and the frames end where they did
+    origin = float(history.abscissa[0])
+    stop = averaging.stop(rate, origin)
+    averaging = dragged(low - 2.5 * hop, stop, was_stop=stop)
+    assert averaging.frames == 8 and averaging.stop(rate, origin) == pytest.approx(stop)
+    assert averaging.start == pytest.approx(1.0 - 2 * hop, abs=1 / rate)
+    # dragged in three and a half hops, three frames go from the start
+    averaging = dragged(origin + averaging.start + 3.5 * hop, stop, was_stop=stop)
+    assert averaging.frames == 4 and averaging.stop(rate, origin) == pytest.approx(stop)
+    # dragged out past the start of the record, the frames that fit before the end
+    averaging = dragged(origin - 5.0, stop, was_stop=stop)
+    assert averaging.stop(rate, origin) == pytest.approx(stop) and averaging.start < hop
+    assert averaging.frames == 1 + round((stop - origin) * rate - 2048) // 1024
+    # an edge dragged in past one frame leaves one
+    assert dragged(low, low + 0.2 * hop).frames == 1
+    # slid past the end of the record, the frames stop at its end
+    end = float(history.abscissa[-1])
+    averaging = dragged(end, end + 2048 / rate)
+    assert averaging.frames == 1 and averaging.fits(len(history.abscissa), rate)
+    assert averaging.stop(rate, float(history.abscissa[0])) == pytest.approx(end, abs=2 / rate)
+    assert settings(state)['averaging']['frames'] == 1
+
+
+def test_filter_is_set_previewed_and_applied_in_one_action(state, validate):
+    project = state.project
+    before = list(project)
+    # the preview stores the settings and adds nothing
+    trace, reading = run(project, 'project.set_filter', kind='low-pass', high=300.0)
+    wire_views([trace, reading], validate)
+    assert list(project) == before
+    history = next(obj for obj in project.values() if type(obj).__name__ == 'TimeHistory')
+    assert history.filtering.describe() == reading['rows'][0]['value']
+    # Apply adds the filtered history, made with those settings
+    (drawn,) = run(project, 'project.set_filter', kind='low-pass', high=300.0, keep=True)
+    wire_views([drawn], validate)
+    added = [name for name in project if name not in before]
+    assert len(added) == 1 and added[0].endswith('Filtered')
+    assert drawn['view'] == 'waterfall' and drawn['title'] == added[0]
+    op = OPS['project.set_filter']
+    assert op.commits == 'keep' and op.title == 'Filter'

@@ -527,6 +527,11 @@ FORCE_LEVEL = 0.001
 FORCE_DF = 1.0
 FORCE_TOP = 4096.0
 LBF = 4.4482216152605      # N
+#: the study's specification limits about each ASD, dB (`specification`)
+WARNING_DB = 3.0
+ABORT_DB = 6.0
+#: the test geometry's trace line around the box's bottom through the drives
+BOX_TRACES = [[201, 202, 204, 203, 201]]
 
 
 def inward(point: tuple[float, float, float]) -> list[str]:
@@ -615,7 +620,9 @@ def solid_project(size: float = SIZE, solved: bool = False) -> Any:
 
     out = Project('BARC')
     out.add('BARC', model)
-    out.add('BARC Test Geometry', rc_plate.test_geometry(model, ids, fe_nodes, frames))
+    geometry = rc_plate.test_geometry(model, ids, fe_nodes, frames)
+    rc_plate.draw(geometry, {'Component': rc_plate.COMPONENT_TRACES, 'Box': BOX_TRACES})
+    out.add('BARC Test Geometry', geometry)
     out.add('BARC Channels', ChannelTable(columns))
     drives = [f"{row['node']}{row['direction']}" for row in rows if row['role'] == 'reference']
     out.add('BARC Force CPSD', force_cpsd(drives))
@@ -629,6 +636,32 @@ def solid_project(size: float = SIZE, solved: bool = False) -> Any:
         out.project_onto_basis(modes, onto='BARC Channels', channels=accel_rows,
                                name='BARC Modes @ Response DOFs')
     return out
+
+
+def specification(project: Any) -> str:
+    """The band-average study's specification, made in `project` (a solved
+    `solid_project`) the way a person makes it in the app: Compute Modal
+    Responses from the force CPSD through the modes at the drives, Expand them
+    through the modes at the accelerometers, and Convert to Specification,
+    with warning and abort limits `WARNING_DB` and `ABORT_DB` about each ASD
+    and none on the cross terms. The modal responses are left in the project.
+
+    Returns
+    -------
+    str
+        The specification's name, 'BARC Response Specification'.
+    """
+    modal = project.compute_modal_responses('BARC Force CPSD', 'BARC Modes @ Force DOFs')
+    response = project.expand(modal, 'BARC Modes @ Response DOFs', name='BARC Response CPSD')
+    project.convert_to_specification(response)
+    name = project.rename(response, 'BARC Response Specification')
+    spec = project[name]
+    auto = np.array([a == b for a, b in zip(spec.response_dof, spec.reference_dof, strict=True)])
+    asd = np.where(auto[:, None], np.real(spec.ordinate), np.nan)
+    spec.limits = {f'{kind}_{side}': asd * 10 ** (sign * db / 10)
+                   for kind, db in (('warning', WARNING_DB), ('abort', ABORT_DB))
+                   for side, sign in (('lower', -1), ('upper', 1))}
+    return name
 
 
 def describe(size: float = SIZE, modes: int = 10) -> None:

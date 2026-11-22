@@ -25,6 +25,7 @@ pub mod spectrum_ext;
 pub mod spectrum_offline;
 pub mod stats_ext;
 pub mod sweep;
+pub mod tone;
 pub mod tracking;
 pub mod window_ext;
 pub mod xcorr;

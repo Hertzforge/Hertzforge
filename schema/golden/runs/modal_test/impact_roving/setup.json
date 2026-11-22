@@ -1,0 +1,243 @@
+{
+  "config": {
+    "title": "Golden Roving Hammer",
+    "operator": "A. Operator",
+    "article": "Beam, SN 0007",
+    "specification": {
+      "document": "Test procedure",
+      "clause": "5.1"
+    },
+    "metadata": [
+      {
+        "key": "run_number",
+        "label": "Run Number",
+        "value": "1"
+      }
+    ],
+    "mode": "impact",
+    "fs_hz": 1024,
+    "block": 512,
+    "band": {
+      "hi_hz": 200
+    },
+    "averages": 2,
+    "roving": {
+      "channels": [
+        1
+      ],
+      "points": {
+        "start": 1,
+        "count": 3
+      }
+    },
+    "impact": {
+      "holdoff_blocks": 0,
+      "exponential_window": {
+        "on": true,
+        "end_pct": 10
+      }
+    }
+  },
+  "resolved": {
+    "control": "no drive: impact mode writes no drive sample",
+    "inputs": [
+      1,
+      2,
+      3
+    ],
+    "drives": [],
+    "windows": {
+      "analysis": "uniform",
+      "force": {
+        "pre_frames": 26,
+        "width_frames": 51,
+        "fall_frames": 5
+      },
+      "exponential": {
+        "tau_s": 0.21714724095162594,
+        "inv_tau_per_s": 4.605170185988091,
+        "end": 0.1,
+        "added_damping": "1/(2*pi*f_n*tau_s)"
+      }
+    },
+    "capture": {
+      "run_name": "modal_test"
+    },
+    "structure": {
+      "modes": [
+        {
+          "f_hz": 42,
+          "damping": 0.04
+        },
+        {
+          "f_hz": 118,
+          "damping": 0.03
+        },
+        {
+          "f_hz": 196,
+          "damping": 0.025
+        }
+      ],
+      "scale_g_per_lbf": 0.05,
+      "shape": "sin(m pi x), x = ((node - 1) mod 10 + 0.5) / 10; a direction ending in - flips the sign",
+      "force": {
+        "how": "a half-sine hammer pulse on the reference row",
+        "pulse_s": 0.004,
+        "peak_lbf": 20
+      },
+      "impulse_response_s": 1
+    }
+  },
+  "check": {
+    "source": "SIM",
+    "mode": "impact",
+    "fs_hz": 1024,
+    "block": 512,
+    "frame_s": 0.5,
+    "df_hz": 2,
+    "band": {
+      "lo_hz": 0,
+      "hi_hz": 200,
+      "first_line": 0,
+      "last_line": 100,
+      "lines": 101
+    },
+    "estimator": "H1",
+    "averages": 2,
+    "references": [
+      {
+        "index": 1,
+        "unit": "lbf",
+        "range": 100,
+        "node": 1,
+        "direction": "Z+",
+        "roves": true
+      }
+    ],
+    "responses": [
+      {
+        "index": 2,
+        "unit": "g",
+        "range": 50,
+        "node": 4,
+        "direction": "Z+",
+        "roves": false
+      },
+      {
+        "index": 3,
+        "unit": "g",
+        "range": 50,
+        "node": 7,
+        "direction": "Z+",
+        "roves": false
+      }
+    ],
+    "points": [
+      {
+        "index": 0,
+        "references": [
+          {
+            "index": 1,
+            "node": 1,
+            "direction": "Z+",
+            "unit": "lbf"
+          }
+        ],
+        "responses": [
+          {
+            "index": 2,
+            "node": 4,
+            "direction": "Z+",
+            "unit": "g"
+          },
+          {
+            "index": 3,
+            "node": 7,
+            "direction": "Z+",
+            "unit": "g"
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "references": [
+          {
+            "index": 1,
+            "node": 2,
+            "direction": "Z+",
+            "unit": "lbf"
+          }
+        ],
+        "responses": [
+          {
+            "index": 2,
+            "node": 4,
+            "direction": "Z+",
+            "unit": "g"
+          },
+          {
+            "index": 3,
+            "node": 7,
+            "direction": "Z+",
+            "unit": "g"
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "references": [
+          {
+            "index": 1,
+            "node": 3,
+            "direction": "Z+",
+            "unit": "lbf"
+          }
+        ],
+        "responses": [
+          {
+            "index": 2,
+            "node": 4,
+            "direction": "Z+",
+            "unit": "g"
+          },
+          {
+            "index": 3,
+            "node": 7,
+            "direction": "Z+",
+            "unit": "g"
+          }
+        ]
+      }
+    ],
+    "impact": {
+      "drives": "none: nothing is driven in impact mode",
+      "trigger": {
+        "level": 10,
+        "unit": "lbf",
+        "polarity": "positive",
+        "watches": "the force rising through 10 lbf (positive hammer); live once 26 pre-trigger frames are in",
+        "pretrigger_frames": 26
+      },
+      "holdoff_blocks": 0,
+      "accept": "auto",
+      "auto_advance": true,
+      "checks": {
+        "overload": "0.98 of each row's range rejects",
+        "double_hit": "a second impact of the hammer's polarity over 5 percent of the peak, or six times the pre-trigger RMS if larger, after the pulse falls below 5 percent of it, rejects",
+        "tip_warn_db": 20,
+        "target": null
+      },
+      "force_window": {
+        "pre_frames": 26,
+        "width_frames": 51,
+        "fall_frames": 5
+      },
+      "exponential_window": {
+        "tau_s": 0.21714724095162594,
+        "inv_tau_per_s": 4.605170185988091,
+        "end": 0.1,
+        "added_damping": "1/(2*pi*f_n*tau_s)"
+      }
+    }
+  }
+}

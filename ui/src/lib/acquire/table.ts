@@ -349,7 +349,10 @@ export type RowEdit =
 	| { field: 'sensitivity_mv_per_eu' | 'range_max'; value: number }
 	| { field: 'iepe_bias_v' | 'control_group'; value: number | null }
 	| { field: 'polarity'; value: 'positive' | 'negative' }
-	| { field: 'abort_accel_g' | 'abort_velocity_ips' | 'abort_displacement_mil'; value: number | null };
+	| { field: 'abort_accel_g' | 'abort_velocity_ips' | 'abort_displacement_mil'; value: number | null }
+	| { field: 'node'; value: number | null }
+	| { field: 'direction'; value: string }
+	| { field: 'analysis_role'; value: NonNullable<ChannelRow['analysis_role']> };
 
 /** Whether a row can take an edit: a role its hardware allows, and no IEPE or abort limit on an output. */
 export function canTake(s: SizedRow, edit: RowEdit): boolean {

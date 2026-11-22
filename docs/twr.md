@@ -198,7 +198,7 @@ the law and the run's log. It then holds, written as the run goes:
 
 With the time histories left out, the folder keeps everything but the shots.
 The **Records** on the Plays page come from the control service's memory, for
-the most recent eight plays; a finished run opens in Transient Analysis from
+the most recent eight plays; a finished run opens in Analysis from
 the run card with **Open in Analysis**.
 
 ## The Run

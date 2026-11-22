@@ -1,0 +1,32 @@
+{
+ "type": "response",
+ "id": 61,
+ "result": {
+  "source": {
+   "path": "/Users/someone/tests/bracket/drive.csv",
+   "format": "delimited"
+  },
+  "signals": [
+   {
+    "key": "column:2",
+    "name": "Drive 1",
+    "samples": 401,
+    "rate_hz": 1000.0,
+    "unit": "V",
+    "where": "column 2",
+    "problem": null
+   },
+   {
+    "key": "column:3",
+    "name": "Drive 2",
+    "samples": 401,
+    "rate_hz": 1000.0,
+    "unit": "V",
+    "where": "column 3",
+    "problem": null
+   }
+  ],
+  "rate_hz": 1000.0,
+  "notes": []
+ }
+}

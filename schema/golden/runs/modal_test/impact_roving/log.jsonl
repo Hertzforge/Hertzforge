@@ -1,0 +1,35 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Roving Hammer\" (impact mode) on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"records in golden-impact_roving"}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"state","text":"started on HERTZFORGE-SIM: impact mode, 1024 Hz, block 512, 3 points","data":{"event":"started","mode":"impact","fs_hz":1024,"block":512}}
+{"seq":3,"at_unix":1794240003.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":4,"at_unix":1794240004.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":5,"at_unix":1794240005.25,"frame":16384,"kind":"hit","text":"hit 1 at point 0: peak 18.477699279785156, accepted","data":{"point":0,"seq":1,"status":"accepted","reason":null}}
+{"seq":6,"at_unix":1794240006.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":7,"at_unix":1794240007.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":8,"at_unix":1794240008.25,"frame":16384,"kind":"hit","text":"hit 2 at point 0: peak 18.477542877197266, accepted","data":{"point":0,"seq":2,"status":"accepted","reason":null}}
+{"seq":9,"at_unix":1794240009.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":10,"at_unix":1794240010.25,"frame":16384,"kind":"result","text":"point 0 measured: 2 averages (measurement 1)","data":{"point":0,"measurement":1,"replaces":null}}
+{"seq":11,"at_unix":1794240011.25,"frame":16384,"kind":"state","text":"state point_done","data":{"event":"state","state":"point_done"}}
+{"seq":12,"at_unix":1794240012.25,"frame":16384,"kind":"state","text":"point 1 selected","data":{"event":"selected","point":1}}
+{"seq":13,"at_unix":1794240013.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":14,"at_unix":1794240014.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":15,"at_unix":1794240015.25,"frame":16384,"kind":"hit","text":"hit 1 at point 1: peak 18.47811508178711, accepted","data":{"point":1,"seq":3,"status":"accepted","reason":null}}
+{"seq":16,"at_unix":1794240016.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":17,"at_unix":1794240017.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":18,"at_unix":1794240018.25,"frame":16384,"kind":"hit","text":"hit 2 at point 1: peak 18.477876663208008, accepted","data":{"point":1,"seq":4,"status":"accepted","reason":null}}
+{"seq":19,"at_unix":1794240019.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":20,"at_unix":1794240020.25,"frame":16384,"kind":"result","text":"point 1 measured: 2 averages (measurement 2)","data":{"point":1,"measurement":2,"replaces":null}}
+{"seq":21,"at_unix":1794240021.25,"frame":16384,"kind":"state","text":"state point_done","data":{"event":"state","state":"point_done"}}
+{"seq":22,"at_unix":1794240022.25,"frame":16384,"kind":"state","text":"point 2 selected","data":{"event":"selected","point":2}}
+{"seq":23,"at_unix":1794240023.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":24,"at_unix":1794240024.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":25,"at_unix":1794240025.25,"frame":16384,"kind":"hit","text":"hit 1 at point 2: peak 18.478137969970703, accepted","data":{"point":2,"seq":5,"status":"accepted","reason":null}}
+{"seq":26,"at_unix":1794240026.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":27,"at_unix":1794240027.25,"frame":16384,"kind":"state","text":"state armed","data":{"event":"state","state":"armed"}}
+{"seq":28,"at_unix":1794240028.25,"frame":16384,"kind":"hit","text":"hit 2 at point 2: peak 18.477951049804688, accepted","data":{"point":2,"seq":6,"status":"accepted","reason":null}}
+{"seq":29,"at_unix":1794240029.25,"frame":16384,"kind":"state","text":"state arming","data":{"event":"state","state":"arming"}}
+{"seq":30,"at_unix":1794240030.25,"frame":16384,"kind":"result","text":"point 2 measured: 2 averages (measurement 3)","data":{"point":2,"measurement":3,"replaces":null}}
+{"seq":31,"at_unix":1794240031.25,"frame":16384,"kind":"state","text":"state point_done","data":{"event":"state","state":"point_done"}}
+{"seq":32,"at_unix":1794240032.25,"frame":16384,"kind":"operator","text":"end of test asked","data":{"action":"end"}}
+{"seq":33,"at_unix":1794240033.25,"frame":16384,"kind":"state","text":"state ended","data":{"event":"state","state":"ended"}}
+{"seq":34,"at_unix":1794240034.25,"frame":16384,"kind":"outcome","text":"ended (ended): the test was ended (by Shell (controller))","data":{"outcome":"ended","emergency_stop":false}}

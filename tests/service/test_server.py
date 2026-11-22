@@ -142,24 +142,48 @@ async def _study(client, socket, validate, seen):
     seen['project.fit_modes'] = shape
 
 
+def _checked_after(validate):
+    """`(collect, check_all)`: the study hands its messages to `collect`, and
+    `check_all` checks them against the schema once the session has closed.
+
+    The client shares the event loop the session measures, so a check made as
+    a message arrives is counted as the service holding the loop. Building the
+    validator for the catalog alone took 45-48 ms on an M-series Mac and about
+    twice that on CI's runners, where it failed the 100 ms bar by itself; with
+    the checks after the session the loop is held about 6 ms locally."""
+    taken = []
+
+    def collect(instance, name=None):
+        taken.append((instance, name))
+
+    def check_all():
+        assert taken, 'the study handed over nothing to check'
+        for instance, name in taken:
+            validate(instance, name)
+
+    return collect, check_all
+
+
 # Beside other workers: what it holds to does not rest on the wall clock.
 @pytest.mark.xdist_group('serving')
 def test_smoke(validate):
     seen = {}
+    collect, check_all = _checked_after(validate)
 
     async def check(client, socket):
-        await _study(client, socket, validate, seen)
+        await _study(client, socket, collect, seen)
 
     imported = set()
     lag = asyncio.run(_session(check, imported))
+    check_all()
     assert seen['project.plot'][0]['view'] == 'spectrum'
     assert seen['project.waterfall'][0]['view'] == 'waterfall'
     # Nothing heavy was first imported while serving: that is what stalls the
     # loop on a cold machine (server.PRELOAD), however fast this one is.
     assert not imported, f'imported while serving: {sorted(imported)}'
     # heavy work ran off the loop: what the loop's thread itself spent between two ticks, which
-    # other processes sharing the cores do not add to as they do to the wall clock. Encoding and
-    # checking frames here came to 60-70 ms under load; a fit run on the loop would be seconds.
+    # other processes sharing the cores do not add to as they do to the wall clock. Encoding
+    # frames here comes to a few milliseconds; a fit run on the loop would be seconds.
     print(f'longest stretch on the event loop {lag["busy"] * 1000:.1f} ms of its thread')
     assert lag['busy'] < 0.25, f'event loop kept busy for {lag["busy"]:.3f} s'
 
@@ -174,11 +198,13 @@ def test_smoke(validate):
 @pytest.mark.xdist_group('serving')
 def test_the_event_loop_is_not_held_up_for_long(validate):
     seen = {}
+    collect, check_all = _checked_after(validate)
 
     async def check(client, socket):
-        await _study(client, socket, validate, seen)
+        await _study(client, socket, collect, seen)
 
     lag = asyncio.run(_session(check))
+    check_all()
     print(f'longest event-loop stall {lag["held"] * 1000:.1f} ms')
     assert lag['held'] < 0.1, f'event loop held for {lag["held"]:.3f} s'
 
@@ -462,5 +488,89 @@ def test_a_run_that_journals_marks_the_project_and_a_reading_does_not():
         state.project.project_type = None
         asyncio.run(connection.project_op({'op': 'project.work_up_random', 'params': {}}))
         assert state.project.project_type == 'Random Vibration' and state.modified
+    finally:
+        service.close()
+
+
+def test_a_plain_request_gets_the_shells_pages_beside_the_protocol(tmp_path):
+    """`hertzforge` with no command opens the interface from the service's
+    own port: a plain GET is a page of the shell's build, a path with no
+    suffix is the single-page app's index, a missing file and a path
+    outside the folder are 404s, and a WebSocket on the same port still
+    speaks the protocol."""
+    import urllib.error
+    import urllib.request
+
+    (tmp_path / 'index.html').write_text('<html>shell</html>')
+    (tmp_path / '_app' / 'immutable').mkdir(parents=True)
+    (tmp_path / '_app' / 'immutable' / 'start.js').write_text('export {}')
+    (tmp_path.parent / 'secret.txt').write_text('outside')
+    service = Service()
+
+    def get(url):
+        try:
+            with urllib.request.urlopen(url) as reply:
+                return reply.status, reply.headers, reply.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.headers, error.read()
+
+    async def run():
+        server = await start(service, '127.0.0.1', 0, shell=tmp_path)
+        port = server.sockets[0].getsockname()[1]
+        base = f'http://127.0.0.1:{port}'
+        try:
+            loop = asyncio.get_running_loop()
+            index = await loop.run_in_executor(None, get, f'{base}/?analysis=x&control=none')
+            route = await loop.run_in_executor(None, get, f'{base}/report')
+            script = await loop.run_in_executor(None, get, f'{base}/_app/immutable/start.js')
+            missing = await loop.run_in_executor(None, get, f'{base}/_app/gone.js')
+            outside = await loop.run_in_executor(None, get, f'{base}/%2E%2E/secret.txt')
+            async with connect(f'ws://127.0.0.1:{port}/', max_size=None) as socket:
+                said = frames.decode(await socket.recv())
+        finally:
+            server.close()
+            await server.wait_closed()
+        return index, route, script, missing, outside, said
+
+    try:
+        index, route, script, missing, outside, said = asyncio.run(run())
+    finally:
+        service.close()
+    assert index[0] == 200 and index[2] == b'<html>shell</html>'
+    assert index[1]['Content-Type'] == 'text/html; charset=utf-8'
+    assert index[1]['Cache-Control'] == 'no-cache'
+    assert route[0] == 200 and route[2] == b'<html>shell</html>'
+    assert script[0] == 200 and script[1]['Content-Type'] == 'text/javascript; charset=utf-8'
+    assert script[1]['Cache-Control'] == 'max-age=31536000, immutable'
+    assert missing[0] == 404
+    assert outside[0] == 404 and b'outside' not in outside[2]
+    assert said['type'] == 'hello'
+
+
+def test_without_the_shell_a_plain_request_is_refused_as_before():
+    """A service started with no shell folder (the desktop app's, which
+    draws its own) answers a plain GET as a WebSocket server does."""
+    import urllib.error
+    import urllib.request
+
+    service = Service()
+
+    async def run():
+        server = await start(service, '127.0.0.1', 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            def get():
+                try:
+                    urllib.request.urlopen(f'http://127.0.0.1:{port}/')
+                except urllib.error.HTTPError as error:
+                    return error.code
+                return 200
+            return await asyncio.get_running_loop().run_in_executor(None, get)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    try:
+        assert asyncio.run(run()) == 426
     finally:
         service.close()

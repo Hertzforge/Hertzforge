@@ -11,6 +11,8 @@
 	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
 	import SrsScreen from '$lib/acquire/srs/SrsScreen.svelte';
 	import MimoShockScreen from '$lib/acquire/mimoshock/MimoShockScreen.svelte';
+	import MimoSineScreen from '$lib/acquire/mimosine/MimoSineScreen.svelte';
+	import { MSINE_STATE_WORDS } from '$lib/acquire/mimosine/msineWords';
 	import { MS_STATE_WORDS } from '$lib/acquire/mimoshock/msWords';
 	import SineScreen from '$lib/acquire/sine/SineScreen.svelte';
 	import MixedScreen from '$lib/acquire/mixed/MixedScreen.svelte';
@@ -19,6 +21,9 @@
 	import ExplorerScreen from '$lib/acquire/explorer/ExplorerScreen.svelte';
 	import { EXPLORER_STATE_WORDS } from '$lib/acquire/explorer/explorerWords';
 	import RecorderScreen from '$lib/acquire/recorder/RecorderScreen.svelte';
+	import PlaybackScreen from '$lib/acquire/playback/PlaybackScreen.svelte';
+	import ModalTestScreen from '$lib/acquire/modal_test/ModalTestScreen.svelte';
+	import { MODAL_CHIP_WORDS, chipState } from '$lib/acquire/modal_test/modalTestWords';
 	import { RECORDER_STATE_WORDS } from '$lib/acquire/recorder/recorderWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
@@ -50,7 +55,11 @@
 										? RECORDER_STATE_WORDS[app.recorder.status.state]
 										: app.mimoShock.isLive && app.mimoShock.status
 											? MS_STATE_WORDS[app.mimoShock.status.state]
-											: null
+											: app.mimoSine.isLive && app.mimoSine.status
+												? MSINE_STATE_WORDS[app.mimoSine.status.state]
+												: app.modalTest.isLive && app.modalTest.now
+													? MODAL_CHIP_WORDS[chipState(app.modalTest.now.state)]
+													: null
 	);
 </script>
 
@@ -64,6 +73,8 @@
 	<ShockScreen {app} />
 {:else if tests.screen === 'mimo_shock'}
 	<MimoShockScreen {app} />
+{:else if tests.screen === 'mimo_sine'}
+	<MimoSineScreen {app} />
 {:else if tests.screen === 'srs'}
 	<SrsScreen {app} />
 {:else if tests.screen === 'sine'}
@@ -76,6 +87,10 @@
 	<ExplorerScreen {app} />
 {:else if tests.screen === 'recorder'}
 	<RecorderScreen {app} />
+{:else if tests.screen === 'playback'}
+	<PlaybackScreen {app} />
+{:else if tests.screen === 'modal_test'}
+	<ModalTestScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

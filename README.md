@@ -4,17 +4,34 @@ Hertzforge is one toolset for structural dynamics testing, from acquiring
 the data to analyzing it. It joins Kevin Cross's data acquisition software
 with Brandon Zwink's structural dynamics analysis.
 
-The analysis core is under `src/hertzforge/`. The `hertzforge` package on PyPI
-at 0.0.1 predates it and installs only a command that prints its version;
-0.1.0 is the release that carries the core, and the desktop app of the same
-number is on [hertzforge.com](https://hertzforge.com).
+Hertzforge comes two ways.
 
-If you used Visual Dynamics, your `.vdyn` projects open here.
+The desktop app, from [hertzforge.com](https://hertzforge.com) or the
+[releases](https://github.com/Hertzforge/Hertzforge/releases), is the whole
+toolset: the interface, the analysis and control services, and its own Python.
+It needs nothing else installed, and it is the only way to run a test.
+
+The `hertzforge` package on PyPI is the analysis side. Run `hertzforge` with no
+command and it opens the interface in your browser, with everything but
+Acquire & Control and Simulate: projects, imports, processing, specifications,
+reports and export. The same core is there for scripts, and the command line
+converts files and records animations (`hertzforge --help`). The control
+service is Rust and needs the hardware drivers, so it comes only with the app.
 
 ```
 pip install hertzforge
-hertzforge --version
+hertzforge
 ```
+
+The interface opens at `http://127.0.0.1:8791/`, or on another port when the
+desktop app already holds that one. It stops a few seconds after its browser tab
+is closed, or with Ctrl-C. On a machine with no
+browser, such as over SSH, the command prints the address to open instead. Open,
+Import and Save As show your system's file dialog, since a browser does not hand
+a page the paths of the files it picks; where no dialog can be shown, as over SSH,
+they take a typed path.
+
+If you used Visual Dynamics, your `.vdyn` projects open here.
 
 ## The First Vertical Slice
 
@@ -106,8 +123,11 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/mimo-shock.md`](docs/mimo-shock.md) | MIMO Shock: classical pulses and SRS with several shakers |
 | [`docs/explorer.md`](docs/explorer.md) | Explorer: one sine tone steered by hand |
 | [`docs/recorder.md`](docs/recorder.md) | Recorder: the station's inputs recorded, nothing driven |
+| [`docs/playback.md`](docs/playback.md), [`docs/drive-file.md`](docs/drive-file.md) | Playback: a drive file you made, played open loop on every drive; and the drive folder's layout |
+| [`docs/modal-test.md`](docs/modal-test.md) | Modal Test: FRFs at every point of a structure, by hammer or by shakers, for the modal fit |
 | [`docs/control-laws.md`](docs/control-laws.md), [`docs/control-law-spec.md`](docs/control-law-spec.md) | Writing a control law as a law file, and the interface it is written against |
 | [`docs/reference-file.md`](docs/reference-file.md), [`docs/reference-from-field-data.md`](docs/reference-from-field-data.md) | Reference files, and references from field data |
+| [`docs/sensor-positions.md`](docs/sensor-positions.md) | Sensor positions from a measuring arm: accelerometers fitted to probed points, and the test geometry and channel table made from them |
 | [`docs/hforge-format.md`](docs/hforge-format.md) | The layout inside a `.hforge` file (projects, measurements, tables), for reading one without Hertzforge |
 | [`docs/run-folder.md`](docs/run-folder.md) | The run folder a control run leaves on disk, and what a Random run saves |
 | [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |

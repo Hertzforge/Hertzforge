@@ -50,6 +50,8 @@ mod srs_methods;
 #[path = "server_mimo_shock.rs"]
 mod mimo_shock_methods;
 
+#[path = "server_mimo_sine.rs"]
+mod mimo_sine_methods;
 #[path = "server_mixed.rs"]
 mod mixed_methods;
 #[path = "server_sine.rs"]
@@ -57,6 +59,10 @@ mod sine_methods;
 
 #[path = "server_explorer.rs"]
 mod explorer_methods;
+#[path = "server_modal_test.rs"]
+mod modal_test_methods;
+#[path = "server_playback.rs"]
+mod playback_methods;
 #[path = "server_recorder.rs"]
 mod recorder_methods;
 #[path = "server_twr.rs"]
@@ -83,7 +89,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 56] = [
+const DRIVE_METHODS: [&str; 68] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -133,6 +139,10 @@ const DRIVE_METHODS: [&str; 56] = [
     "explorer.start",
     "explorer.steer",
     "explorer.sweep",
+    "playback.start",
+    "modal_test.start",
+    "modal_test.arm",
+    "modal_test.drive_start",
     "recorder.start",
     "recorder.arm",
     "recorder.record",
@@ -140,6 +150,14 @@ const DRIVE_METHODS: [&str; 56] = [
     "mimo_shock.start",
     "mimo_shock.proceed",
     "mimo_shock.fire",
+    "mimo_sine.arm",
+    "mimo_sine.start",
+    "mimo_sine.proceed",
+    "mimo_sine.level",
+    "mimo_sine.mode",
+    "mimo_sine.resume",
+    "mimo_sine.jog",
+    "mimo_sine.goto",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -162,6 +180,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_shock.proceed, mimo_shock.fire, mimo_shock.stop, mimo_shock.abort, mimo_shock.reset, \
     mimo_shock.clear, mimo_shock.state, mimo_shock.log, mimo_shock.subscribe, \
     mimo_shock.pulses, mimo_shock.pulse, \
+    mimo_sine.configure, mimo_sine.config, mimo_sine.arm, mimo_sine.start, mimo_sine.proceed, \
+    mimo_sine.level, mimo_sine.mode, mimo_sine.hold, mimo_sine.resume, mimo_sine.reverse, \
+    mimo_sine.jog, mimo_sine.goto, mimo_sine.stop, mimo_sine.abort, mimo_sine.reset, \
+    mimo_sine.clear, mimo_sine.state, mimo_sine.log, mimo_sine.report, mimo_sine.subscribe, \
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
@@ -177,7 +199,14 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     explorer.subscribe, recorder.configure, recorder.config, recorder.start, recorder.arm, \
     recorder.disarm, recorder.record, recorder.cut, recorder.stop, recorder.abort, \
     recorder.recordings, recorder.marks, recorder.reset, recorder.clear, recorder.state, \
-    recorder.log, recorder.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
+    recorder.log, recorder.subscribe, playback.configure, playback.config, \
+    playback.start, playback.stop, playback.abort, playback.reset, playback.clear, \
+    playback.state, playback.log, modal_test.configure, modal_test.config, \
+    modal_test.start, modal_test.select, modal_test.next, modal_test.previous, \
+    modal_test.arm, modal_test.disarm, modal_test.accept, modal_test.reject, \
+    modal_test.undo, modal_test.clear_point, modal_test.target_from_hit, modal_test.drive_start, \
+    modal_test.drive_stop, modal_test.sim_hit, modal_test.end, modal_test.abort, \
+    modal_test.reset, modal_test.clear, modal_test.state, modal_test.log, laws.list, laws.import, laws.check, sim.profiles, \
     sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -310,6 +339,7 @@ pub enum Feed {
     Shock,
     Srs,
     MimoShock,
+    MimoSine,
     Sine,
     Mixed,
     Twr,
@@ -424,6 +454,14 @@ struct Inner {
     mimo_shock_log_sent: (String, u64),
     mimo_shock_rows_sent: u64,
     mimo_shock_ident_sent: bool,
+    /// The MIMO Sine configuration and its run, beside the others, and what of
+    /// it has been sent.
+    mimo_sine: Option<Arc<crate::mimo_sine::MsineRun>>,
+    mimo_sine_runs: u64,
+    mimo_sine_state_key: String,
+    mimo_sine_log_sent: (String, u64),
+    mimo_sine_pass_sent: (String, u64),
+    mimo_sine_report_sent: String,
     /// The Sine configuration and its run, beside the others, and what of it has
     /// been sent.
     sine: Option<Arc<crate::sine::SineRun>>,
@@ -455,6 +493,17 @@ struct Inner {
     recorder_runs: u64,
     recorder_state_key: String,
     recorder_log_sent: (String, u64),
+    /// The Playback configuration and its run, beside the others, and what of it has
+    /// been sent.
+    playback: Option<Arc<crate::playback::run::PlaybackRun>>,
+    playback_runs: u64,
+    playback_state_key: String,
+    playback_log_sent: (String, u64),
+    /// The Modal Test's configuration and its run, and what of it has been sent.
+    modal_test: Option<Arc<crate::modal_test::run::ModalRun>>,
+    modal_test_runs: u64,
+    modal_test_state_key: String,
+    modal_test_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -492,6 +541,12 @@ impl Inner {
         self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
+    fn mimo_sine_live(&self) -> bool {
+        self.mimo_sine
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     fn mixed_live(&self) -> bool {
         self.mixed
             .as_ref()
@@ -514,6 +569,16 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
+    fn playback_live(&self) -> bool {
+        self.playback
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
+    fn modal_test_live(&self) -> bool {
+        self.modal_test.as_ref().is_some_and(|s| s.view().is_live())
+    }
+
     /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
     /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
@@ -522,11 +587,14 @@ impl Inner {
             || self.shock_live()
             || self.srs_live()
             || self.mimo_shock_live()
+            || self.mimo_sine_live()
             || self.sine_live()
             || self.mixed_live()
             || self.twr_live()
             || self.explorer_live()
             || self.recorder_live()
+            || self.playback_live()
+            || self.modal_test_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -608,6 +676,21 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.mimo_sine {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "MIMO Sine run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         if let Some(s) = &self.sine {
             let v = s.view();
             if v.state.is_live() {
@@ -656,6 +739,32 @@ impl Inner {
                         s.id,
                         v.state.name()
                     ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.playback {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Playback run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.modal_test {
+            let v = s.view();
+            if v.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!("Modal Test {} is {}; end it first.", s.id, v.state),
                 )
                 .with_detail(json!({"run_id": s.id})));
             }
@@ -728,6 +837,12 @@ pub struct Service {
             mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::mimo_shock::view::MsView>>,
         >,
     >,
+    /// The connections with a MIMO Sine display subscription.
+    mimo_sine_displays: std::sync::Mutex<HashMap<ConnId, mimo_sine_methods::MsineDisplay>>,
+    /// MIMO Sine runs' publishes, in order.
+    mimo_sine_notify: mpsc::UnboundedSender<crate::mimo_sine::run::Notice>,
+    mimo_sine_notices:
+        std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::mimo_sine::run::Notice>>>,
     /// The connections with a Sine display subscription.
     sine_displays: std::sync::Mutex<HashMap<ConnId, sine_methods::SineDisplay>>,
     /// Sine runs' publishes, in order.
@@ -764,6 +879,24 @@ pub struct Service {
         Option<
             mpsc::UnboundedReceiver<
                 crate::pulse::rails::Notice<crate::recorder::view::RecorderView>,
+            >,
+        >,
+    >,
+    /// Modal Test runs' publishes, in order.
+    modal_test_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::modal_test::run::ModalView>>,
+    modal_test_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::modal_test::run::ModalView>>,
+        >,
+    >,
+    /// Playback runs' publishes, in order.
+    playback_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::playback::run::PlaybackView>>,
+    playback_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<
+                crate::pulse::rails::Notice<crate::playback::run::PlaybackView>,
             >,
         >,
     >,
@@ -850,10 +983,13 @@ impl Service {
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         let (mimo_shock_notify, mimo_shock_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
+        let (mimo_sine_notify, mimo_sine_notices) = mpsc::unbounded_channel();
         let (mixed_notify, mixed_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
+        let (playback_notify, playback_notices) = mpsc::unbounded_channel();
+        let (modal_test_notify, modal_test_notices) = mpsc::unbounded_channel();
         let stations = Stations::new(opts.scanner.clone());
         let table = Self::starting_table(&opts, &stations);
         Arc::new(Service {
@@ -883,6 +1019,12 @@ impl Service {
                 mimo_shock_log_sent: (String::new(), 0),
                 mimo_shock_rows_sent: 0,
                 mimo_shock_ident_sent: false,
+                mimo_sine: None,
+                mimo_sine_runs: 0,
+                mimo_sine_state_key: String::new(),
+                mimo_sine_log_sent: (String::new(), 0),
+                mimo_sine_pass_sent: (String::new(), 0),
+                mimo_sine_report_sent: String::new(),
                 sine: None,
                 sine_runs: 0,
                 sine_state_key: String::new(),
@@ -905,6 +1047,14 @@ impl Service {
                 recorder_runs: 0,
                 recorder_state_key: String::new(),
                 recorder_log_sent: (String::new(), 0),
+                playback: None,
+                playback_runs: 0,
+                playback_state_key: String::new(),
+                playback_log_sent: (String::new(), 0),
+                modal_test: None,
+                modal_test_runs: 0,
+                modal_test_state_key: String::new(),
+                modal_test_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -927,6 +1077,9 @@ impl Service {
             mimo_shock_displays: std::sync::Mutex::new(HashMap::new()),
             mimo_shock_notify,
             mimo_shock_notices: std::sync::Mutex::new(Some(mimo_shock_notices)),
+            mimo_sine_displays: std::sync::Mutex::new(HashMap::new()),
+            mimo_sine_notify,
+            mimo_sine_notices: std::sync::Mutex::new(Some(mimo_sine_notices)),
             sine_displays: std::sync::Mutex::new(HashMap::new()),
             sine_notify,
             sine_notices: std::sync::Mutex::new(Some(sine_notices)),
@@ -943,6 +1096,10 @@ impl Service {
             recorder_notify,
             recorder_notices: std::sync::Mutex::new(Some(recorder_notices)),
             recorder_signal: std::sync::Mutex::new(None),
+            playback_notify,
+            playback_notices: std::sync::Mutex::new(Some(playback_notices)),
+            modal_test_notify,
+            modal_test_notices: std::sync::Mutex::new(Some(modal_test_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -1006,6 +1163,7 @@ impl Service {
             Feed::Srs => self.srs_displays().contains_key(&conn),
             Feed::MimoShock => self.mimo_shock_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
+            Feed::MimoSine => self.mimo_sine_displays().contains_key(&conn),
             Feed::Mixed => self.mixed_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
@@ -1126,6 +1284,19 @@ impl Service {
                 }
             });
         }
+        let msine_notices = self
+            .mimo_sine_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = msine_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, _view)) = notices.recv().await {
+                    svc.mimo_sine_changed(&run_id).await;
+                }
+            });
+        }
         let sine_notices = self.sine_notices.lock().ok().and_then(|mut n| n.take());
         if let Some(mut notices) = sine_notices {
             let svc = self.clone();
@@ -1159,6 +1330,28 @@ impl Service {
             tokio::spawn(async move {
                 while let Some((run_id, view)) = notices.recv().await {
                     svc.explorer_changed(&run_id, &view).await;
+                }
+            });
+        }
+        let playback_notices = self.playback_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = playback_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.playback_changed(&run_id, &view).await;
+                }
+            });
+        }
+        let modal_test_notices = self
+            .modal_test_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = modal_test_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.modal_test_changed(&run_id, &view).await;
                 }
             });
         }
@@ -1241,12 +1434,30 @@ impl Service {
                 .clone()
                 .filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
+            let msine = inner.mimo_sine.clone().filter(|s| s.view().state.is_live());
             let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
+            let playback = inner.playback.clone().filter(|s| s.view().state.is_live());
+            let modal = inner.modal_test.clone().filter(|s| s.view().is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = msine {
+                mimo_sine_methods::stop_mimo_sine(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = playback {
+                playback_methods::stop_playback(&s, "the service (nobody held control)".into());
+            }
+            if let Some(s) = modal {
+                modal_test_methods::end_modal_test(&s, "the service (nobody held control)".into());
+            }
             if let Some(s) = recorder {
                 recorder_methods::stop_recorder(
                     &s,
@@ -1352,6 +1563,60 @@ impl Service {
                 while s.view().state.is_live() {
                     if asked.elapsed() > patience {
                         mixed_methods::stop_mixed(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
+        let playback = self.inner.lock().await.playback.clone();
+        // A Playback run takes its controlled stop, the shared ramp. Should it still be
+        // live well after, it is aborted.
+        let playback_said = match playback.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                playback_methods::stop_playback(&s, rrun::SHUTDOWN_BY.into());
+                let asked = Instant::now();
+                let patience = playback_methods::wait_for(&s);
+                let mut aborted = false;
+                while s.view().state.is_live() {
+                    if !aborted && asked.elapsed() > patience {
+                        aborted = true;
+                        playback_methods::abort_playback(&s, rrun::SHUTDOWN_BY.into());
+                    }
+                    if asked.elapsed() > patience + Duration::from_secs(5) {
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
+        let modal = self.inner.lock().await.modal_test.clone();
+        // A Modal Test takes its controlled end (in shaker mode the shared stop ramp).
+        // Should it still be live well after, it is aborted.
+        let modal_said = match modal.filter(|s| s.view().is_live()) {
+            None => None,
+            Some(s) => {
+                modal_test_methods::end_modal_test(&s, rrun::SHUTDOWN_BY.into());
+                let asked = Instant::now();
+                let patience = modal_test_methods::wait_for(&s);
+                let mut aborted = false;
+                while s.view().is_live() {
+                    if !aborted && asked.elapsed() > patience {
+                        aborted = true;
+                        modal_test_methods::abort_modal_test(&s, rrun::SHUTDOWN_BY.into());
+                    }
+                    if asked.elapsed() > patience + Duration::from_secs(5) {
                         break;
                     }
                     tokio::time::sleep(SHUTDOWN_POLL).await;
@@ -1487,6 +1752,37 @@ impl Service {
                 })
             }
         };
+        // A MIMO Sine run takes its controlled stop, the 120 dB/s ramp on every
+        // drive at once. Should it still be live well after the ramp, it is
+        // aborted.
+        let msine = self.inner.lock().await.mimo_sine.clone();
+        let msine_said = match msine.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mimo_sine_methods::stop_mimo_sine(
+                    &s,
+                    Some("safe_stop"),
+                    rrun::SHUTDOWN_BY.into(),
+                    true,
+                )
+                .await;
+                let asked = Instant::now();
+                let patience = mimo_sine_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        mimo_sine_methods::stop_mimo_sine(&s, None, rrun::SHUTDOWN_BY.into(), true)
+                            .await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
         // A MIMO Shock run takes its controlled stop the same way.
         let mshock = self.inner.lock().await.mimo_shock.clone();
         let mshock_said = match mshock.filter(|s| s.view().state.is_live()) {
@@ -1572,11 +1868,14 @@ impl Service {
             return shock_said
                 .or(srs_said)
                 .or(mshock_said)
+                .or(msine_said)
                 .or(sine_said)
                 .or(mixed_said)
                 .or(twr_said)
                 .or(explorer_said)
-                .or(recorder_said);
+                .or(recorder_said)
+                .or(playback_said)
+                .or(modal_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -1627,6 +1926,7 @@ impl Service {
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
         self.mimo_shock_displays().remove(&conn.id);
+        self.mimo_sine_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
         self.mixed_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
@@ -1742,6 +2042,8 @@ impl Service {
             "mimo_shock.configure" => self.mimo_shock_configure(conn, params).await,
             "mimo_shock.config" => Ok(self.mimo_shock_config().await),
             "mimo_shock.pulse" => self.mimo_shock_pulse(params).await,
+            "mimo_sine.configure" => self.mimo_sine_configure(conn, params).await,
+            "mimo_sine.config" => Ok(self.mimo_sine_config().await),
             "sine.configure" => self.sine_configure(conn, params).await,
             "sine.config" => Ok(self.sine_config().await),
             "sine.profile.validate" => self.sine_profile_validate(params).await,
@@ -1895,6 +2197,24 @@ impl Service {
             "mimo_shock.log" => self.mimo_shock_log(params).await,
             "mimo_shock.subscribe" => self.mimo_shock_subscribe(conn, params).await,
             "mimo_shock.pulses" => self.mimo_shock_pulses(params).await,
+            "mimo_sine.arm" => self.mimo_sine_arm(conn, params, false).await,
+            "mimo_sine.start" => self.mimo_sine_arm(conn, params, true).await,
+            "mimo_sine.proceed" => self.mimo_sine_proceed(conn, params).await,
+            "mimo_sine.level" => self.mimo_sine_level(conn, params).await,
+            "mimo_sine.mode" => self.mimo_sine_mode(conn, params).await,
+            "mimo_sine.hold" => self.mimo_sine_hold(conn, true).await,
+            "mimo_sine.resume" => self.mimo_sine_hold(conn, false).await,
+            "mimo_sine.reverse" => self.mimo_sine_reverse(conn).await,
+            "mimo_sine.jog" => self.mimo_sine_goto(conn, params, true).await,
+            "mimo_sine.goto" => self.mimo_sine_goto(conn, params, false).await,
+            "mimo_sine.stop" => self.mimo_sine_end(conn, false).await,
+            "mimo_sine.abort" => self.mimo_sine_end(conn, true).await,
+            "mimo_sine.reset" => self.mimo_sine_reset(conn).await,
+            "mimo_sine.clear" => self.mimo_sine_clear(conn).await,
+            "mimo_sine.state" => Ok(self.mimo_sine_state_now().await),
+            "mimo_sine.log" => self.mimo_sine_log(params).await,
+            "mimo_sine.report" => Ok(self.mimo_sine_report().await),
+            "mimo_sine.subscribe" => self.mimo_sine_subscribe(conn, params).await,
             "sine.profile.import" => self.sine_profile_import(params).await,
             "sine.arm" => self.sine_arm(conn, params, false).await,
             "sine.start" => self.sine_arm(conn, params, true).await,
@@ -1947,6 +2267,39 @@ impl Service {
             "explorer.state" => Ok(self.explorer_state_now().await),
             "explorer.log" => self.explorer_log(params).await,
             "explorer.subscribe" => self.explorer_subscribe(conn, params).await,
+            "playback.configure" => self.playback_configure(conn, params).await,
+            "playback.config" => Ok(self.playback_config().await),
+            "playback.start" => self.playback_start(conn).await,
+            "playback.stop" => self.playback_end(conn, false).await,
+            "playback.abort" => self.playback_end(conn, true).await,
+            "playback.reset" => self.playback_reset(conn).await,
+            "playback.clear" => self.playback_clear(conn).await,
+            "playback.state" => Ok(self.playback_state_now().await),
+            "playback.log" => self.playback_log(params).await,
+            "modal_test.configure" => self.modal_test_configure(conn, params).await,
+            "modal_test.config" => Ok(self.modal_test_config().await),
+            "modal_test.start" => self.modal_test_start(conn).await,
+            "modal_test.select" => self.modal_test_call(conn, "select", params).await,
+            "modal_test.next" => self.modal_test_call(conn, "next", params).await,
+            "modal_test.previous" => self.modal_test_call(conn, "previous", params).await,
+            "modal_test.arm" => self.modal_test_call(conn, "arm", params).await,
+            "modal_test.disarm" => self.modal_test_call(conn, "disarm", params).await,
+            "modal_test.accept" => self.modal_test_call(conn, "accept", params).await,
+            "modal_test.reject" => self.modal_test_call(conn, "reject", params).await,
+            "modal_test.undo" => self.modal_test_call(conn, "undo", params).await,
+            "modal_test.clear_point" => self.modal_test_call(conn, "clear_point", params).await,
+            "modal_test.target_from_hit" => {
+                self.modal_test_call(conn, "target_from_hit", params).await
+            }
+            "modal_test.drive_start" => self.modal_test_call(conn, "drive_start", params).await,
+            "modal_test.drive_stop" => self.modal_test_call(conn, "drive_stop", params).await,
+            "modal_test.sim_hit" => self.modal_test_call(conn, "sim_hit", params).await,
+            "modal_test.end" => self.modal_test_end(conn, false).await,
+            "modal_test.abort" => self.modal_test_end(conn, true).await,
+            "modal_test.reset" => self.modal_test_reset(conn).await,
+            "modal_test.clear" => self.modal_test_clear(conn).await,
+            "modal_test.state" => Ok(self.modal_test_state_now().await),
+            "modal_test.log" => self.modal_test_log(params).await,
             "recorder.configure" => self.recorder_configure(conn, params).await,
             "recorder.config" => Ok(self.recorder_config().await),
             "recorder.start" => self.recorder_start(conn, params).await,
@@ -1975,6 +2328,16 @@ impl Service {
             "laws.import" => self.laws_import(conn, params).await,
             "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
                 self.mixed_laws_check(conn, params).await
+            }
+            "laws.check" if self.mimo_sine_law_id(conn, params).await.is_some() => {
+                let id = self
+                    .mimo_sine_law_id(conn, params)
+                    .await
+                    .unwrap_or_default();
+                let mut p = params.clone();
+                p.remove("path");
+                p.insert("id".into(), Value::from(id));
+                self.mimo_sine_laws_check(conn, &p).await
             }
             "laws.check" if self.mimo_shock_law_id(conn, params).await.is_some() => {
                 let id = self
@@ -2543,7 +2906,10 @@ impl Service {
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
+                || inner.playback_live()
+                || inner.modal_test_live()
                 || inner.mimo_shock_live()
+                || inner.mimo_sine_live()
             {
                 inner.run_active()?;
             }
@@ -2825,7 +3191,10 @@ impl Service {
             || inner.twr_live()
             || inner.explorer_live()
             || inner.recorder_live()
+            || inner.playback_live()
+            || inner.modal_test_live()
             || inner.mimo_shock_live()
+            || inner.mimo_sine_live()
         {
             inner.run_active()?;
         }
@@ -3036,7 +3405,7 @@ async fn connection(
     stream: TcpStream,
     peer: String,
     service: Arc<Service>,
-) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+) -> Result<(), Box<tokio_tungstenite::tungstenite::Error>> {
     let ws = tokio_tungstenite::accept_async(stream).await?;
     let (mut sink, mut source) = ws.split();
     sink.send(Message::Text(protocol::hello().to_string()))

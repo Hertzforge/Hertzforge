@@ -30,12 +30,13 @@ export const TABLE_FORMATS: TableFormat[] = [
 	{ form: 'xlsx', label: 'Excel Workbook', suffix: '.xlsx', extensions: ['xlsx'] }
 ];
 
-/** A channel table's control loop, as the analysis side holds it: channel numbers in the controller's order, and its transformations. */
+/** A channel table's control loop, as the analysis side holds it: channel numbers in the controller's order, its transformations, and the kind of test it ran ('' when unknown). */
 export interface ChannelEnvironment {
 	controls: number[];
 	drives: number[];
 	response_transformation: number[][] | null;
 	reference_transformation: number[][] | null;
+	kind?: string;
 }
 
 /**

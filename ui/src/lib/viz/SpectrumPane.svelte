@@ -1,14 +1,11 @@
-<script lang="ts" module>
-	/** Each scope's choice of a linear or log frequency axis, kept as the selection changes. */
-	const keptLogX = new Map<string, boolean>();
-</script>
-
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
+	import { chooseScale, scaleChoice, scaleKey } from './plotScales.svelte';
 	/**
 	 * x-y line view (spectra and anything else on two axes), drawn with uPlot.
 	 *
-	 * Log or linear axes come from the view. Each series' role sets its dash pattern and width;
+	 * Log or linear axes come from the view, or with `scaleToggle` from the choice kept for what
+	 * is plotted (`plotScales`). Each series' role sets its dash pattern and width;
 	 * color is the second cue, and the legend names the line style in words. Panes with the same
 	 * `link` share a cursor on x through the CursorHub, and a shape view of the same result with
 	 * that `link` puts its playback time on the plot as a line that drags to seek. Live updates keep the axes still: the
@@ -20,6 +17,8 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { Series, SpectrumView, SpectrumHandle } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { glyphBox, windowStrips, draggedSpan, framesText, previewFrames, railShare, windowGlyph, windowGradient, type DragPart } from './frames';
+	import type { Region } from '$lib/protocol/types';
 	import { alignSeries, valueAt } from './align';
 	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
@@ -49,8 +48,10 @@
 		scope?: string;
 		/** A click on the plot (not a drag), with the x it landed on: a cursor the caller places. */
 		onPick?: (x: number) => void;
-		/** A draggable region released at new edges: its index in `view.regions`, and the edges in x. */
+		/** A draggable region released at new edges: its index in the regions drawn, and the edges in x. */
 		onspan?: (region: number, x0: number, x1: number) => void;
+		/** Regions drawn in place of the view's own: they change without the plot being built again. */
+		regions?: Region[] | null;
 		/** The x range on screen, each time it changes: a zoom the caller reads as a band. */
 		onRange?: (low: number, high: number) => void;
 		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
@@ -72,10 +73,12 @@
 		/** The Copy Image button above the plot. */
 		copyButton?: boolean;
 		/**
-		 * A Lin/Log choice for a frequency axis above the plot, as the 3D stage has, kept for the
-		 * `scope` (Brandon, 2026-11-14: it was the bar's Log f, a second control for the stage's).
+		 * A Lin/Log choice for each axis above the plot, kept for what is plotted (`scaleOf`) and
+		 * not for the window: a PSD's log axes say nothing of a time history's.
 		 */
 		scaleToggle?: boolean;
+		/** What is plotted, as the choice of scales is kept: the kinds of the objects selected. */
+		scaleOf?: string;
 		/**
 		 * The series the y axis is ranged on, by index into `view.series`; every series shown when
 		 * absent. The fit ranges on the measured CMIFs, so a synthesis or a pending mode moving
@@ -126,12 +129,14 @@
 		onMarkerDrag,
 		onhandle,
 		onspan,
+		regions = null,
 		grid = 'major',
 		legend = 'outside',
 		legendCorner = 'top-right',
 		readout = true,
 		copyButton = true,
 		scaleToggle = false,
+		scaleOf,
 		rangeOn,
 		styles = [],
 		onlegend,
@@ -155,6 +160,13 @@
 		else if (!untrack(() => frozenView)) frozenView = untrack(() => viewIn);
 	});
 	const view = $derived(frozenView ?? viewIn);
+	/** The regions drawn: the caller's when it gives some, else the view's own. */
+	const shownRegions = $derived(regions ?? view.regions ?? []);
+	/**
+	 * While a span of frames is there to drag (the Averaging form is open) the pointer reads nothing:
+	 * a cursor line following it hides the edges it is reaching for.
+	 */
+	const quiet = $derived(shownRegions.some((r) => r.snap));
 
 	/** Zooms are taken in by the pane itself and not left to uPlot: y zooms, wheel zooms, or the caller holds the ranges. */
 	/** A y range zoomed to on the pane, when the pane holds its own zoom. */
@@ -187,15 +199,14 @@
 	const shownGroup = $derived(view.groups?.length ? view.groups[Math.min(group, view.groups.length - 1)] : null);
 	const inGroup = (i: number) => !shownGroup || shownGroup.series.includes(i);
 
-	/** The frequency axis chosen on the plot, or null to take the view's scale. */
-	let logXChoice = $state<boolean | null>(untrack(() => (scope ? (keptLogX.get(scope) ?? null) : null)));
-	const choosesX = $derived(scaleToggle && view.x.unit === 'Hz');
-	const logX = $derived(choosesX && logXChoice !== null ? logXChoice : view.x.scale === 'log');
-	function setLogX(log: boolean) {
-		logXChoice = log;
-		if (scope) keptLogX.set(scope, log);
-	}
-	const logY = $derived(view.y.scale === 'log');
+	/** The scales chosen on the plot for what it shows; an axis never chosen takes the view's. */
+	const scalesAt = $derived(scaleKey(scaleOf ?? scope, view.x.unit ?? ''));
+	const chosen = $derived(scaleChoice(scalesAt));
+	const choosesX = $derived(scaleToggle);
+	/** Values at or under zero cannot go on a log axis, so it is offered only where none are, or where the view is log already. */
+	const choosesY = $derived(scaleToggle && (view.y.scale === 'log' || view.series.every((s, i) => !inGroup(i) || s.y.every((value) => !(value <= 0)))));
+	const logX = $derived(choosesX && chosen.x !== undefined ? chosen.x : view.x.scale === 'log');
+	const logY = $derived(choosesY && chosen.y !== undefined ? chosen.y : view.y.scale === 'log');
 
 	/**
 	 * Per-series style, with measured series stepping through the blue family and followers dashed;
@@ -230,7 +241,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey, logX]);
+		return JSON.stringify([v.x, v.y, xs, theme.version, optionsKey, logX, logY]);
 	}
 
 	/**
@@ -269,11 +280,17 @@
 	}
 
 	/** y range for data, snapped; with `live`, only moves when the data leaves it or shrinks far inside. */
-	function nextYRange(cols: ArrayLike<number | null>[]): [number, number] {
+	function nextYRange(cols: ArrayLike<number | null>[], xs?: ArrayLike<number>): [number, number] {
 		if (yFixed) return yFixed;
 		if (yZoom) return yZoom;
-		const ext = finiteExtent(shownCols(cols), logY) ?? (logY ? [1e-4, 1] : [0, 1]);
-		const target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
+		// a plot that opens on part of its x (`x_home`) is ranged on what that part holds
+		const home = view.x_home;
+		const within = home && xs ? shownCols(cols).map((col) => Array.from(col, (value, i) => (xs[i] >= home[0] && xs[i] <= home[1] ? value : null))) : shownCols(cols);
+		const ext = finiteExtent(within, logY) ?? (logY ? [1e-4, 1] : [0, 1]);
+		let target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
+		// the windows of averaging frames stand on a rail along the top: the curves keep clear of it
+		const rail = logY ? 0 : railShare(shownRegions);
+		if (rail) target = [target[0], target[0] + (target[1] - target[0]) / (1 - rail)];
 		if (!live || !yRange) return target;
 		const [a, b] = yRange;
 		const inside = ext[0] >= a && ext[1] <= b;
@@ -310,7 +327,20 @@
 	/** The plot, axes and curves, as an image on the clipboard. */
 	async function copyImage() {
 		if (!plot) return;
-		copiedImage = await copyCanvas(plot.ctx.canvas, plotBackground(plotEl), undefined, view.title);
+		// the regions are elements over the canvas: they are painted onto a copy of it
+		let source = plot.ctx.canvas;
+		if (drawnRegions.length) {
+			const copy = document.createElement('canvas');
+			copy.width = source.width;
+			copy.height = source.height;
+			const ctx = copy.getContext('2d');
+			if (ctx) {
+				ctx.drawImage(source, 0, 0);
+				paintRegions(ctx, { left: plot.bbox.left, top: plot.bbox.top, width: plot.bbox.width, height: plot.bbox.height }, devicePixelRatio || 1);
+				source = copy;
+			}
+		}
+		copiedImage = await copyCanvas(source, plotBackground(plotEl), undefined, view.title);
 		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
 	}
 
@@ -318,6 +348,10 @@
 	let markerLine: HTMLDivElement | null = null;
 	/** The view's regions, shaded behind the curves, one element each. */
 	let regionEls: HTMLDivElement[] = [];
+	/** The regions `regionEls` draw, one for one: the ones shown, or the frames a drag would leave. */
+	let drawnRegions: Region[] = [];
+	/** The share of the plot's height the window rail had when the plot was built. */
+	let builtRail = 0;
 	/** Where a press on the plot began, to tell a click from a drag. */
 	let pressedAt: number | null = null;
 
@@ -336,7 +370,7 @@
 		destroyPlot();
 		const data = alignSeries(view.series, logX, logY);
 		const [xs, ...cols] = data;
-		yRange = nextYRange(cols);
+		yRange = nextYRange(cols, xs as ArrayLike<number>);
 		const axisColor = cssVar('--plot-axis');
 		const gridColor = cssVar('--plot-grid');
 		const tickFont = font(11);
@@ -440,7 +474,7 @@
 				}))
 			],
 			hooks: {
-				drawAxes: [drawMinorGrid, drawEnvelopes],
+				drawAxes: [drawMinorGrid, drawBands, drawEnvelopes],
 				draw: [placePlayLine, placeMarker, placeGuides, placeRegions, placeHandles, drawSeriesMarkers, drawMarks],
 				setScale: [
 					(u, key) => {
@@ -451,7 +485,7 @@
 				setCursor: [
 					(u) => {
 						const left = u.cursor.left ?? -1;
-						if (left < 0) {
+						if (left < 0 || quiet) {
 							cursorIsLocal = false;
 							if (view.link) cursors.clear(view.link, paneId);
 							else cursorX = null;
@@ -501,20 +535,9 @@
 		}
 		guideEls = [];
 		placeGuides();
-		regionEls = (view.regions ?? []).map((r, k) => {
-			const el = document.createElement('div');
-			el.className = `region ${r.kind}`;
-			if (r.label) el.title = r.label;
-			if (r.drag && onspan) {
-				// dragged in the top layer, so the press is the span's and not a zoom
-				el.classList.add('drag');
-				el.addEventListener('mousedown', (e) => e.stopPropagation());
-				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
-				plot!.over.appendChild(el);
-			} else plot!.under.appendChild(el);
-			return el;
-		});
-		placeRegions();
+		regionEls = [];
+		builtRail = logY ? 0 : railShare(shownRegions);
+		drawRegions(shownRegions);
 		handleEls = [];
 		placeHandles();
 		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
@@ -526,6 +549,8 @@
 		});
 		if (xFixed) plot.setScale('x', { min: xFixed[0], max: xFixed[1] });
 		else if (kept) plot.setScale('x', kept);
+		// it opens on the range the view names (a requirement's own band), not on all its data
+		else if (view.x_home && (!logX || view.x_home[0] > 0)) plot.setScale('x', { min: view.x_home[0], max: view.x_home[1] });
 		appliedX = xFixed;
 		measureArea();
 		resizeObs = new ResizeObserver(() => {
@@ -541,7 +566,7 @@
 		if (!plot) return;
 		if (keyOf(view) !== structureKey) return build();
 		const [xs, ...cols] = alignSeries(view.series, logX, logY);
-		const next = nextYRange(cols);
+		const next = nextYRange(cols, xs as ArrayLike<number>);
 		const plotData = [xs, ...drawOrder.map((o) => cols[o.index])] as uPlot.AlignedData;
 		// Without its scale reset, setData only swaps the data and draws nothing; setting the y range
 		// (held for live data, or moved) is what draws it. `redraw()` is not used: before the first
@@ -580,14 +605,16 @@
 		if (!plot) return;
 		if (change.x) plot.setScale('x', { min: change.x[0], max: change.x[1] });
 		else if (change.x === null) {
+			// View All goes back to the range the plot opened on: a requirement's own band when it names one
 			const xs = plot.data[0];
-			if (xs.length) plot.setScale('x', { min: xs[0], max: xs[xs.length - 1] });
+			if (view.x_home && (!logX || view.x_home[0] > 0)) plot.setScale('x', { min: view.x_home[0], max: view.x_home[1] });
+			else if (xs.length) plot.setScale('x', { min: xs[0], max: xs[xs.length - 1] });
 		}
 		if (change.y !== undefined) {
 			yZoom = change.y;
 			if (!yZoom) yRange = null;
-			const [, ...cols] = alignSeries(view.series, logX, logY);
-			const next = nextYRange(cols);
+			const [xs, ...cols] = alignSeries(view.series, logX, logY);
+			const next = nextYRange(cols, xs as ArrayLike<number>);
 			yRange = next;
 			plot.setScale('y', { min: next[0], max: next[1] });
 		}
@@ -722,6 +749,57 @@
 			}
 		});
 		ctx.stroke();
+		ctx.restore();
+	}
+
+	/** The zones a response must not be in (`view.bands`), shaded under the curves: warm past a warning limit, red over an abort and blue under one. */
+	const BAND_COLORS = { warning: '#d9a441', over: '#d6453d', under: '#3d7fd6' };
+	function drawBands(u: uPlot) {
+		const bands = view.bands;
+		if (!bands?.length) return;
+		const ctx = u.ctx;
+		const { left, top, width, height } = u.bbox;
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(left, top, width, height);
+		ctx.clip();
+		for (const band of bands) {
+			// shaded only where its edges are: each run of points where every edge it has is drawn,
+			// its far side the plot's own (its top, or its bottom) for a zone with one edge
+			const usable = (values: (number | null)[] | null, i: number) => {
+				if (!values) return true;
+				const value = values[i];
+				return value !== null && value !== undefined && Number.isFinite(value) && (!logY || value > 0);
+			};
+			const runs: number[][] = [];
+			let run: number[] = [];
+			band.x.forEach((x, i) => {
+				if (x !== null && !(logX && x <= 0) && usable(band.upper, i) && usable(band.lower, i)) run.push(i);
+				else if (run.length) (runs.push(run), (run = []));
+			});
+			if (run.length) runs.push(run);
+			const at = (values: (number | null)[] | null, i: number, fallback: number) =>
+				values ? u.valToPos(values[i] as number, 'y', true) : fallback;
+			for (const indices of runs) {
+				if (indices.length < 2) continue;
+				ctx.beginPath();
+				indices.forEach((i, k) => {
+					const x = u.valToPos(band.x[i] as number, 'x', true);
+					const y = at(band.upper, i, top);
+					if (k) ctx.lineTo(x, y);
+					else ctx.moveTo(x, y);
+				});
+				for (let k = indices.length - 1; k >= 0; k--) {
+					const i = indices[k];
+					ctx.lineTo(u.valToPos(band.x[i] as number, 'x', true), at(band.lower, i, top + height));
+				}
+				ctx.closePath();
+				ctx.globalAlpha = band.kind === 'warning' ? 0.16 : 0.2;
+				ctx.fillStyle = BAND_COLORS[band.kind];
+				ctx.fill();
+			}
+		}
+		ctx.globalAlpha = 1;
 		ctx.restore();
 	}
 
@@ -999,7 +1077,7 @@
 	 * edge. It follows the pointer and, on release, its new edges in x go to `onspan`.
 	 */
 	function startSpan(e: PointerEvent, k: number, el: HTMLDivElement) {
-		const region = view.regions?.[k];
+		const region = shownRegions[k];
 		if (!plot || !region?.drag || e.button !== 0) return;
 		e.preventDefault();
 		e.stopPropagation();
@@ -1007,33 +1085,82 @@
 		const b = plot.valToPos(region.x1, 'x');
 		const at = e.clientX - plot.over.getBoundingClientRect().left;
 		const two = !!region.drag.high;
-		const part = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
+		const part: DragPart = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
 		const x = e.clientX;
 		let left = a;
 		let right = b;
 		const move = (m: PointerEvent) => {
+			if (!plot) return;
 			const d = m.clientX - x;
 			if (part === 'move') [left, right] = [a + d, b + d];
 			else if (part === 'low') left = Math.min(a + d, right - 2);
 			else right = Math.max(b + d, left + 2);
 			el.style.left = `${left}px`;
 			el.style.width = `${right - left}px`;
+			if (region.snap) {
+				// the whole frames this would leave, drawn as it is dragged, and how many
+				const kept = draggedSpan(region.snap, part, region, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
+				el.dataset.count = framesText(kept.count);
+				drawRegions(previewFrames(shownRegions, region.snap, kept), el);
+			}
 		};
 		const up = () => {
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', up);
-			if (!plot || (left === a && right === b)) return placeRegions();
+			delete el.dataset.count;
+			if (!plot || (left === a && right === b)) return drawRegions(shownRegions);
+			// what was dragged to stays drawn until the answer's regions take its place
 			onspan?.(k, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
 		};
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', up);
 	}
 
+	/** The span being dragged, kept on the plot apart from the regions drawn under it. */
+	let heldRegion: HTMLDivElement | null = null;
+
+	/**
+	 * Draw `list` as the plot's regions, in place of the ones drawn. `held` is a span being dragged:
+	 * it stays as it is, and the draggable regions of `list` are left out.
+	 */
+	function drawRegions(list: Region[], held: HTMLDivElement | null = null) {
+		if (!plot) return;
+		for (const el of regionEls) if (el !== held) el.remove();
+		// a span that was held through a drag is no longer among the regions drawn: it goes too
+		if (heldRegion !== held) heldRegion?.remove();
+		heldRegion = held;
+		regionEls = [];
+		drawnRegions = [];
+		list.forEach((r, k) => {
+			if (held && r.drag) return;
+			const el = document.createElement('div');
+			el.className = `region ${r.kind}`;
+			if (r.label) el.title = r.label;
+			if (r.window?.length) {
+				// the shading follows the window, so it shows the weight each part of the record carries;
+				// where two frames overlap their shadings add
+				el.classList.add('windowed');
+				el.style.background = windowGradient(r.window);
+				el.insertAdjacentHTML('beforeend', windowGlyph(r.window, r.level ?? 0, r.rows ?? 1));
+			}
+			if (r.drag && onspan) {
+				// dragged in the top layer, so the press is the span's and not a zoom
+				el.classList.add('drag');
+				el.addEventListener('mousedown', (e) => e.stopPropagation());
+				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
+				plot!.over.appendChild(el);
+			} else plot!.under.appendChild(el);
+			regionEls.push(el);
+			drawnRegions.push(r);
+		});
+		placeRegions();
+	}
+
 	/** Shade each region over the part of it on the plot. */
 	function placeRegions() {
 		if (!plot) return;
 		const width = plot.under.clientWidth;
-		(view.regions ?? []).forEach((r, i) => {
+		drawnRegions.forEach((r, i) => {
 			const el = regionEls[i];
 			if (!el) return;
 			const a = Math.max(0, Math.min(width, plot!.valToPos(r.x0, 'x')));
@@ -1160,6 +1287,18 @@
 		untrack(applyXFixed);
 	});
 
+	// the regions change without the plot being built again, unless the window rail needs other room
+	$effect(() => {
+		const list = shownRegions;
+		untrack(() => {
+			if (!plot) return;
+			if ((logY ? 0 : railShare(list)) !== builtRail) {
+				yRange = null;
+				build();
+			} else drawRegions(list);
+		});
+	});
+
 	const marksKey = $derived(marks ? JSON.stringify(marks) : '');
 	$effect(() => {
 		void marksKey;
@@ -1173,6 +1312,68 @@
 			return sc && sc.min != null && sc.max != null ? [sc.min, sc.max] : null;
 		};
 		return { x: get('x'), y: get('y') };
+	}
+
+	/**
+	 * The regions painted on an image of the plot as they are drawn on screen, where they are
+	 * elements over the canvas: a frame shaded by its window with the window on the rail, a cut
+	 * shaded, a span's two edges.
+	 */
+	function paintRegions(ctx: CanvasRenderingContext2D, box: Area, r: number) {
+		if (!plot || !drawnRegions.length) return;
+		const edge = cssVar('--region-frame-edge');
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(box.left, box.top, box.width, box.height);
+		ctx.clip();
+		const line = (x: number, width: number, alpha: number) => {
+			ctx.globalAlpha = alpha;
+			ctx.fillStyle = edge;
+			ctx.fillRect(x - (width * r) / 2, box.top, width * r, box.height);
+		};
+		for (const region of drawnRegions) {
+			const a = plot.valToPos(region.x0, 'x', true);
+			const b = plot.valToPos(region.x1, 'x', true);
+			if (!(b > a) || b < box.left || a > box.left + box.width) continue;
+			if (region.window?.length) {
+				for (const band of windowStrips(region.window)) {
+					ctx.globalAlpha = band.alpha;
+					ctx.fillStyle = edge;
+					// whole pixels, so neighboring strips neither overlap nor leave a seam
+					const from = Math.round(a + (b - a) * band.from);
+					ctx.fillRect(from, box.top, Math.round(a + (b - a) * band.to) - from, box.height);
+				}
+				line(a, 1, 0.45);
+				// its window in its slot on the rail
+				const slot = glyphBox(region.level ?? 0, region.rows ?? 1);
+				const top = box.top + slot.top * box.height;
+				const tall = slot.height * box.height;
+				const last = region.window.length - 1;
+				ctx.beginPath();
+				ctx.moveTo(a, top + tall);
+				region.window.forEach((w, k) => ctx.lineTo(a + ((b - a) * k) / Math.max(1, last), top + tall * (1 - Math.min(1, Math.max(0, w)))));
+				ctx.lineTo(b, top + tall);
+				ctx.closePath();
+				ctx.globalAlpha = 0.43;
+				ctx.fillStyle = edge;
+				ctx.fill();
+				ctx.globalAlpha = 1;
+				ctx.strokeStyle = edge;
+				ctx.lineWidth = 1.25 * r;
+				ctx.stroke();
+			} else if (region.kind === 'span') {
+				line(a, 1.5, 1);
+				line(b, 1.5, 1);
+			} else {
+				ctx.globalAlpha = 1;
+				if (region.kind === 'over' || region.kind === 'under') ctx.globalAlpha = 0.45;
+				ctx.fillStyle = region.kind === 'over' || region.kind === 'under' ? BAND_COLORS[region.kind] : cssVar(region.kind === 'cut' ? '--region-cut' : '--region-frame');
+				ctx.fillRect(a, box.top, b - a, box.height);
+				ctx.globalAlpha = 1;
+				if (region.kind === 'frame') line(a, 1, 1);
+			}
+		}
+		ctx.restore();
 	}
 
 	/**
@@ -1193,6 +1394,7 @@
 		ctx.drawImage(src, 0, 0);
 		const r = devicePixelRatio || 1;
 		const box: Area = { left: plot.bbox.left, top: plot.bbox.top, width: plot.bbox.width, height: plot.bbox.height };
+		paintRegions(ctx, box, r);
 		const colors = { ink: cssVar('--text-1'), muted: cssVar('--text-2'), fill: plotBackground(plotEl), edge: cssVar('--line-2') };
 		const font = `${Math.round(11 * r)}px ${cssVar('--font-ui')}`;
 		if (legend !== 'off') {
@@ -1211,6 +1413,16 @@
 		unsubscribeCursor?.();
 		unsubscribePlayhead?.();
 		destroyPlot();
+	});
+
+	// a cursor standing when the frames come to be dragged is taken away
+	$effect(() => {
+		if (!quiet) return;
+		untrack(() => {
+			cursorIsLocal = false;
+			if (view.link) cursors.clear(view.link, paneId);
+			else cursorX = null;
+		});
 	});
 
 	function readoutText(v: number | null): string {
@@ -1236,7 +1448,7 @@
 	/** The marks' readout sits in a top corner the legend does not take. */
 	const marksCorner = $derived<Corner>(legend === 'inside' && legendCorner === 'top-left' ? 'top-right' : 'top-left');
 
-	const showHead = $derived(showTitle || copyButton || choosesX || (legend === 'outside' && readout) || !!view.groups?.length);
+	const showHead = $derived(showTitle || copyButton || choosesX || choosesY || (legend === 'outside' && readout) || !!view.groups?.length);
 
 	/** A note being dragged: where it is, as fractions of the plot area. */
 	let dragNote = $state<{ id: string; fx: number; fy: number } | null>(null);
@@ -1291,7 +1503,7 @@
 	{#if readout}<span class="val num">{readoutText(readouts[e.index])}</span>{/if}
 {/snippet}
 
-<div class="spectrum" class:live data-testid="view-spectrum">
+<div class="spectrum" class:live class:quiet data-testid="view-spectrum">
 	{#if showHead}
 	<div class="head">
 		{#if showTitle}
@@ -1316,9 +1528,9 @@
 			{/each}
 		</select>
 		{/if}
-		{#if shownGroup?.readouts?.length}
+		{#if (shownGroup?.readouts ?? view.readouts)?.length}
 		<span class="group-readouts">
-			{#each shownGroup.readouts as r, k (k)}
+			{#each shownGroup?.readouts ?? view.readouts ?? [] as r, k (k)}
 				<span class="group-readout" data-status={r.status}>{r.label}: <b>{r.text}</b> <span class="word">{r.status}</span></span>
 			{/each}
 		</span>
@@ -1326,27 +1538,21 @@
 		{#if choosesX}
 		<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
 			<span class="lbl">{view.x.label}</span>
-			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear frequency axis" onclick={() => setLogX(false)}>Lin</button>
-			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log frequency axis" onclick={() => setLogX(true)}>Log</button>
+			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear {view.x.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'x', false)}>Lin</button>
+			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log {view.x.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'x', true)}>Log</button>
+		</div>
+		{/if}
+		{#if choosesY}
+		<div class="seg" role="radiogroup" aria-label="{view.y.label} scale">
+			<span class="lbl">{view.y.label}</span>
+			<button role="radio" aria-checked={!logY} class:on={!logY} data-testid="spectrum-y-linear" title="Linear {view.y.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'y', false)}>Lin</button>
+			<button role="radio" aria-checked={logY} class:on={logY} data-testid="spectrum-y-log" title="Log {view.y.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'y', true)}>Log</button>
 		</div>
 		{/if}
 		{#if copyButton}
 		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 		{/if}
 	</div>
-	{/if}
-	{#if legend === 'outside'}
-	<ul class="legend" aria-label="Legend">
-		{#each legendEntries as e (e.index)}
-			<li class:off={!e.shown} title={legendLabel(e.series, e.styleWords, e.shown)} onmouseenter={() => focusSeries(e.index)} onmouseleave={() => focusSeries(null)}>
-				{#if onlegend}
-					<button class="entry" aria-pressed={e.shown} onclick={() => onlegend?.(e.index)}>{@render entry(e)}</button>
-				{:else}
-					{@render entry(e)}
-				{/if}
-			</li>
-		{/each}
-	</ul>
 	{/if}
 	<div class="plot" bind:this={plotEl} style:min-height="{minHeight}px">
 		{#if area}
@@ -1388,6 +1594,20 @@
 			</div>
 		{/if}
 	</div>
+	<!-- under the plot, in a box of its own that scrolls: many records never push the plot away -->
+	{#if legend === 'outside'}
+	<ul class="legend" aria-label="Legend">
+		{#each legendEntries as e (e.index)}
+			<li class:off={!e.shown} title={legendLabel(e.series, e.styleWords, e.shown)} onmouseenter={() => focusSeries(e.index)} onmouseleave={() => focusSeries(null)}>
+				{#if onlegend}
+					<button class="entry" aria-pressed={e.shown} onclick={() => onlegend?.(e.index)}>{@render entry(e)}</button>
+				{:else}
+					{@render entry(e)}
+				{/if}
+			</li>
+		{/each}
+	</ul>
+	{/if}
 </div>
 
 <style>
@@ -1526,8 +1746,12 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 2px var(--sp-4);
+		flex: 0 1 auto;
+		min-height: 0;
+		max-height: 40%;
+		overflow-y: auto;
 		margin: 0;
-		padding: 0 var(--sp-1) var(--sp-2);
+		padding: var(--sp-2) var(--sp-1) 0;
 		list-style: none;
 		font-size: var(--text-xs);
 	}
@@ -1622,8 +1846,37 @@
 		border-left: 1px solid var(--region-frame-edge);
 	}
 
+	/* a windowed frame's shading is its window's gradient, set on the element */
+	.plot :global(.region.frame.windowed) {
+		border-left-color: color-mix(in srgb, var(--region-frame-edge) 45%, transparent);
+	}
+
+	/* a frame's window in its slot on the rail along the top */
+	.plot :global(.region .glyph) {
+		position: absolute;
+		left: 0;
+		width: 100%;
+		overflow: visible;
+	}
+
+	.plot :global(.region .glyph path) {
+		fill: color-mix(in srgb, var(--region-frame-edge) 43%, transparent);
+		stroke: var(--region-frame-edge);
+		stroke-width: 1.25;
+		vector-effect: non-scaling-stroke;
+	}
+
 	.plot :global(.region.cut) {
 		background: var(--region-cut);
+	}
+
+	/* a line outside an abort limit, across its bin: red over, blue under */
+	.plot :global(.region.over) {
+		background: color-mix(in srgb, #d6453d 45%, transparent);
+	}
+
+	.plot :global(.region.under) {
+		background: color-mix(in srgb, #3d7fd6 45%, transparent);
 	}
 
 	.plot :global(.region.span) {
@@ -1634,6 +1887,23 @@
 	.plot :global(.region.drag) {
 		pointer-events: auto;
 		cursor: grab;
+	}
+
+	/* how many frames a drag would leave, said on the span while it is dragged */
+	.plot :global(.region.drag[data-count]::after) {
+		content: attr(data-count);
+		position: absolute;
+		left: 50%;
+		bottom: 10px;
+		translate: -50% 0;
+		padding: 2px 8px;
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
+		white-space: nowrap;
+		color: var(--text-1);
+		background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm, 4px);
 	}
 
 	.plot :global(.region.drag:hover) {
@@ -1672,6 +1942,12 @@
 	.plot :global(.marker.draggable) {
 		margin-left: -1.5px;
 		border-left: 3px solid #e5534b;
+	}
+
+	.spectrum.quiet .plot :global(.u-cursor-x),
+	.spectrum.quiet .plot :global(.u-cursor-y),
+	.spectrum.quiet .plot :global(.u-cursor-pt) {
+		display: none;
 	}
 
 	.plot :global(.u-cursor-x) {

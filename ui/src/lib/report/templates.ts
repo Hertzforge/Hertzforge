@@ -51,7 +51,13 @@ const BY_TEST: Record<string, Template> = {
 	mixed: 'mixed_mode',
 	explorer: 'explorer',
 	recorder: 'recorder',
-	mimo_shock: 'mimo_shock'
+	mimo_shock: 'mimo_shock',
+	// a MIMO Sine run's controls against their references, as the Sine sweep template reports them
+	mimo_sine: 'sine',
+	// a Playback run is its time histories, as the analysis side's Signals reports them
+	playback: 'signals',
+	// a Modal Test's FRFs, as the modal fit reports them
+	modal_test: 'modal'
 };
 
 /** The modules whose report is not a test's: a model, a specification, signals. */

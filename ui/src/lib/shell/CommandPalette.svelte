@@ -6,7 +6,7 @@
 	import { checkForUpdates, hasUpdater } from './updates';
 	import { tick } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
-	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
+	import { workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import { fuzzyMatch, highlightRuns } from './fuzzy';
 	import Icon, { type IconName } from './Icon.svelte';
@@ -158,7 +158,7 @@
 			)
 		];
 
-		WORKSPACES.forEach((w, i) =>
+		app.workspaces.forEach((w, i) =>
 			out.push({
 				id: `ws:${w.id}`,
 				group: 'Workspaces',

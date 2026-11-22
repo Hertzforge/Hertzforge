@@ -222,3 +222,18 @@ def test_the_project_export_speaks_them_too(tmp_path):
         out = tmp_path / f'out{suffix}'
         project.export('Geometry', out)
         assert os.path.getsize(out) > 0
+
+
+def test_stl_is_written_in_the_display_length_not_its_coherent_base():
+    """A display system in millimeters on an SI base writes millimeters;
+    the (g) systems change acceleration only, so they cannot show this."""
+    import tempfile
+
+    from hertzforge.io import stl
+    from hertzforge.units import SI
+
+    mm = SI.with_units(length='mm', mass='lb')
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, 'mm.stl')
+        stl.save(_two_block_geometry(), path, mm)
+        assert import_file(path).node_xyz.max() == pytest.approx(3000.0)

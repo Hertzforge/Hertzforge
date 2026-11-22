@@ -68,10 +68,12 @@ STAMP = 'hertzforge_schema'
 #: the newest .hforge schema this build reads. Schema 1 holds everything
 #: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
 #: another file; schema 3 adds the run record; schema 4 adds the test
-#: setup. The schema grows by addition, and a file is stamped
+#: setup; schema 5 adds measured points: elements of a geometry
+#: (`MEASURED_POINT`), and for a few days a `scan/` group, which is
+#: still read (as a geometry) and no longer written. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: the stamp of a file with no object held by reference
 BASE_SCHEMA = 1
@@ -86,6 +88,14 @@ RUN_RECORD_SCHEMA = 3
 #: the stamp of a file holding a test setup (`core.test_setup`), one test
 #: module's configuration as the control service accepts it
 TEST_SETUP_SCHEMA = 4
+
+#: the stamp of a file holding a `scan/` group, which no build writes any
+#: more: measured points are a geometry (`load_scan`)
+SCAN_SCHEMA = 5
+
+#: the stamp of a file holding a geometry with measured points, an
+#: element type a build that reads up to schema 4 does not know
+MEASURED_POINT_SCHEMA = 5
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -376,6 +386,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         import json
 
         group.attrs['mates'] = json.dumps([m.as_record() for m in mates])
+    # what was chosen for the accelerometers its measured points locate;
+    # absent when nothing was, so a file from before it reads back the same
+    choices = getattr(geom, 'sensor_choices', None) or {}
+    if choices:
+        import json
+
+        group.attrs['sensor_choices'] = json.dumps(choices)
     # which solids each element group was meshed from; absent when there are
     # none, so a file from before it reads back the same
     tied = getattr(geom, 'group_solids', None) or {}
@@ -383,6 +400,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         import json
 
         group.attrs['group_solids'] = json.dumps({str(k): list(v) for k, v in tied.items()})
+    # the family each element group was made for, which places an empty one; absent when
+    # none was, so a file from before it reads back the same
+    families = getattr(geom, 'group_family', None) or {}
+    if families:
+        import json
+
+        group.attrs['group_family'] = json.dumps({str(k): v for k, v in families.items()})
     # what each element group is made of, one subgroup per element group that has it:
     # the material's numbers, and a thickness or a section — the model
     # a geometry can build of itself (2026-09-25) — or, for an element group of
@@ -502,7 +526,7 @@ def load_geometry(group: h5py.Group) -> Geometry:
     element group of two-node lines, and element groups are split by
     family.
     """
-    from ..core.geometry import Geometry
+    from ..core.geometry import ELEMENT_TYPES, Geometry
 
     data = {name: group[_on_disk(group, name)][()] for name in (
         'node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
@@ -515,6 +539,14 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data['group_properties'] = _load_group_properties(group)
     data['from_deck'] = bool(group.attrs.get('from_deck', False))
     data['mass_unit'] = group.attrs.get('mass_unit', '') or None
+    unknown = sorted({int(code) for code in data['elem_type']} - set(ELEMENT_TYPES))
+    if unknown:
+        # an element type this build does not know was added by a newer one
+        raise ValueError(
+            'The geometry holds elements of type '
+            f'{", ".join(str(code) for code in unknown)}, which this build '
+            'does not read: it was written by a newer Hertzforge. Update '
+            'Hertzforge to open it.')
     geometry = Geometry(**data)
     if 'traceline_conn' in group:
         # a file from before 2026-09-30 carried tracelines apart from
@@ -551,11 +583,21 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
         geometry.mates = [MatedSet.from_record(r)
                           for r in json.loads(group.attrs['mates'])]
+    if 'sensor_choices' in group.attrs:
+        import json
+
+        geometry.sensor_choices = {str(sensor): dict(choice) for sensor, choice
+                                   in json.loads(group.attrs['sensor_choices']).items()}
     if 'group_solids' in group.attrs:
         import json
 
         geometry.group_solids = {int(k): tuple(v)
                                  for k, v in json.loads(group.attrs['group_solids']).items()}
+    if 'group_family' in group.attrs:
+        import json
+
+        geometry.group_family = {int(k): str(v)
+                                 for k, v in json.loads(group.attrs['group_family']).items()}
     return geometry
 
 
@@ -658,7 +700,7 @@ def _save_data_fields(data: DataArray, group: h5py.Group) -> None:
     if getattr(data, 'tone_exclusion', None) is not None:
         group.attrs['tone_exclusion'] = float(data.tone_exclusion)
     for name, values in getattr(data, 'limits', {}).items():
-        group.create_dataset(f'limit_{name}', data=values)
+        _write_array(group, f'limit_{name}', values)
     # how a time history is to be cut into frames, when something has
     # said — from the file it was imported from, or from the averaging
     # view. Five attributes rather than a group: it is five numbers.
@@ -930,6 +972,8 @@ def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
     for k, (name, environment) in enumerate(table.environments.items()):
         sub = loops.create_group(str(k))
         sub.attrs['name'] = name
+        if environment.kind:
+            sub.attrs['kind'] = environment.kind
         sub.create_dataset('controls', data=np.asarray(environment.controls,
                                                       dtype=np.int64))
         sub.create_dataset('drives', data=np.asarray(environment.drives,
@@ -969,14 +1013,17 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
                     if 'response_transformation' in sub else None),
                 reference_transformation=(
                     sub['reference_transformation'][()]
-                    if 'reference_transformation' in sub else None))
+                    if 'reference_transformation' in sub else None),
+                # a table saved before the kind was kept has none
+                kind=str(sub.attrs.get('kind', '')))
     return ChannelTable(columns, environments=environments)
 
 
 def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     """Write a shape set into `group`: frequencies, damping, shape matrix
     and modal mass as datasets with its strings, mass unit and unscaled
-    flag; modal damping only when the set has it."""
+    flag; modal damping and the reference-only DOFs only when the set has
+    them."""
     group.attrs['mass_unit'] = shapes.mass_unit or ''
     group.attrs['unscaled'] = bool(getattr(shapes, 'unscaled', False))
     group.create_dataset('frequency', data=shapes.frequency)
@@ -990,6 +1037,8 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     _write_strings(group, 'coordinate', shapes.coordinate)
     _write_strings(group, 'comment', shapes.comment)
     _write_strings(group, 'description', shapes.description)
+    if getattr(shapes, 'reference_only', None):
+        _write_strings(group, 'reference_only', shapes.reference_only)
 
 
 def load_shapes(group: h5py.Group) -> ShapeSet:
@@ -1009,6 +1058,8 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
         unscaled=bool(group.attrs['unscaled']),
         modal_damping=(group['modal_damping'][()]
                        if 'modal_damping' in group else None),
+        reference_only=(_read_strings(group, 'reference_only')
+                        if 'reference_only' in group else None),
     )
 
 
@@ -1472,6 +1523,24 @@ def load_test_setup(group: h5py.Group) -> TestSetup:
                      origin=json.loads(held_origin) if held_origin else None)
 
 
+def load_scan(group: h5py.Group) -> Geometry:
+    """Read a `scan/` group as a geometry. Schema 5 stored measured points
+    as an object of their own for a few days in November 2026; they are a
+    geometry now (`io.point_files.points_geometry`), and a file that holds
+    the old group opens as one. Nothing writes the group."""
+    from .point_files import points_geometry
+
+    unit = group.attrs.get('length_unit', '')
+    unit = unit.decode('utf-8') if isinstance(unit, bytes) else str(unit)
+    geometry = points_geometry(
+        group['points'][()].T,
+        features=_read_strings(group, 'features') if 'features' in group else None,
+        feature_of=group['feature_of'][()] if 'feature_of' in group else None)
+    # the points were stored in meters once a unit was declared
+    geometry.length_unit = unit or None
+    return geometry
+
+
 def _savers():
     from ..core.channel_table import ChannelTable
     from ..core.data import DataArray
@@ -1510,6 +1579,7 @@ _LOADERS = {'geometry': load_geometry,
             'shapes': load_shapes,
             'report': load_report,
             'photos': load_photos,
+            'scan': load_scan,
             'matches': load_matches,
             'channel_table': load_channel_table,
             'predictions': load_predictions,
@@ -1531,7 +1601,14 @@ def _loader(kind: str, name: str, path: str) -> Callable[[h5py.Group], Any]:
     return loader
 
 
-def schema_for(kinds: Iterable[str], references: bool = False) -> int:
+def _has_measured_points(obj: Any) -> bool:
+    from ..core.geometry import MEASURED_POINT, Geometry
+
+    return isinstance(obj, Geometry) and bool(np.any(obj.elem_type == MEASURED_POINT))
+
+
+def schema_for(kinds: Iterable[str], references: bool = False,
+               measured_points: bool = False) -> int:
     """The schema a file holding objects of `kinds` is stamped with: the
     earliest that holds everything in it.
 
@@ -1541,16 +1618,21 @@ def schema_for(kinds: Iterable[str], references: bool = False) -> int:
         The kinds of the objects in the file, held or referred to.
     references : bool, optional
         Whether any object is held by reference to another file.
+    measured_points : bool, optional
+        Whether any geometry in the file holds measured points.
 
     Returns
     -------
     int
-        `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
+        `MEASURED_POINT_SCHEMA` when a geometry holds measured points,
+        otherwise `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
         `RUN_RECORD_SCHEMA` when any is a run record, otherwise
         `REFERENCE_SCHEMA` for a file with references, otherwise
         `BASE_SCHEMA`.
     """
     kinds = set(kinds)
+    if measured_points:
+        return MEASURED_POINT_SCHEMA
     if 'test_setup' in kinds:
         return TEST_SETUP_SCHEMA
     if 'run_record' in kinds:
@@ -1615,7 +1697,7 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs[STAMP] = schema_for([group_name])
+    f.attrs[STAMP] = schema_for([group_name], measured_points=_has_measured_points(obj))
     saver(obj, f.create_group(group_name))
 
 
@@ -1794,6 +1876,7 @@ def save_test(path: str | os.PathLike, name: str,
               provenance: Mapping[str, Any] | None = None,
               data_index: Sequence[Mapping[str, Any]] | None = None,
               compress: bool = False,
+              projections: Sequence[Mapping[str, Any]] | None = None,
               references: Mapping[str, Reference] | None = None) -> None:
     """Save a whole test, every named object, to one .hforge file.
 
@@ -1821,7 +1904,7 @@ def save_test(path: str | os.PathLike, name: str,
     with (_replaced(hforge_path(path)) as partial,
           h5py.File(partial, 'w') as f, compressed(compress)):
         save_test_into(f, name, objects, active_geometry, project_type,
-                       object_groups, provenance, data_index, references)
+                       object_groups, provenance, data_index, references, projections)
 
 
 def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
@@ -1830,7 +1913,8 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None,
                    provenance: Mapping[str, Any] | None = None,
                    data_index: Sequence[Mapping[str, Any]] | None = None,
-                   references: Mapping[str, Reference] | None = None
+                   references: Mapping[str, Reference] | None = None,
+                   projections: Sequence[Mapping[str, Any]] | None = None
                    ) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`).
     References are written relative to the folder the file is in."""
@@ -1838,7 +1922,9 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     f.attrs[STAMP] = schema_for(
         [*(_saver_for(obj)[0] for name, obj in objects.items() if name not in references),
          *(reference.kind for reference in references.values())],
-        bool(references))
+        bool(references),
+        any(_has_measured_points(obj) for name, obj in objects.items()
+            if name not in references))
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
@@ -1847,6 +1933,11 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     # how each derived object was computed, for the staleness
     # badges — settings fingerprints, so they survive the file
     f.attrs['provenance'] = json.dumps(provenance or {})
+    if projections:
+        # how each pair of shape sets on two geometries is projected when compared, set by
+        # Project; written only when one is set, so a project with none is stored as it
+        # always was
+        f.attrs['projections'] = json.dumps(list(projections))
     if data_index:
         # the files the project rests on, by name, size and SHA-256. A
         # dataset, not an attribute: an attached settings list rides in
@@ -1969,7 +2060,8 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
                           json.loads(f.attrs['links' if VDYN_STAMP in f.attrs
                                              else 'object_groups']),
                           provenance=json.loads(f.attrs['provenance']),
-                          data_index=indexed)
+                          data_index=indexed,
+                          projections=json.loads(f.attrs.get('projections', '[]')))
         for name, reference in followed.items():
             project.hold_by_reference(name, reference)
         project.unresolved = unresolved

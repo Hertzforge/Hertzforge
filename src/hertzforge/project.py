@@ -246,7 +246,7 @@ _PARAMS_NAMING: dict[str, tuple[str, ...]] = {
     'compute_modal_responses': ('shapes',),
     'extract_sine': ('specification',),
     'derive_specification': ('sources',),
-    'plan_instrumentation': ('geometry',)}
+    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',)}
 
 
 def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
@@ -566,7 +566,8 @@ class Project(dict):
                  object_groups: Iterable[ObjectGroup] | None = None,
                  provenance: dict[str, dict[str, Any]] | None = None,
                  data_index: DataIndex | Iterable[Mapping[str, Any]]
-                 | None = None
+                 | None = None,
+                 projections: Iterable[Mapping[str, Any]] | None = None
                  ) -> None:
         super().__init__(objects or {})
         self.name: str = str(name)
@@ -588,6 +589,7 @@ class Project(dict):
             for group in (object_groups or [])]
         #: what the last Work Up could not compute, (slot, why)
         self.last_work_up_skipped: list[tuple[str, str]] = []
+        self.last_work_up_refreshed: list[str] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -599,6 +601,15 @@ class Project(dict):
         #: offers (Brandon, 2026-08-23: explicit, never automatic —
         #: a report must not rewrite itself).
         self.provenance: dict[str, dict[str, Any]] = dict(provenance or {})
+        #: how each pair of shape sets on two geometries is projected when compared, set by
+        #: Project and read by every comparison of the pair (`set_projection`): {(a, b): {
+        #: 'source': the set projected, 'distance': the node match distance or None}}, the
+        #: pair's names sorted
+        self.projections: dict[tuple[str, str], dict[str, Any]] = {
+            tuple(sorted((str(held['first']), str(held['second'])))): {
+                'source': str(held['source']),
+                'distance': None if held.get('distance') is None else float(held['distance'])}
+            for held in (projections or [])}
         #: every file the project rests on, by name, size and SHA-256:
         #: each file imported, and each document attached (`index_file`).
         #: One index, whatever adds to it; saved in the `.hforge`, and
@@ -794,7 +805,8 @@ class Project(dict):
         from .io import project_type_of, run_convert, run_folder
         from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
-        if run_folder.folder_of(path) is not None:
+        converted = run_folder.folder_of(path) is not None
+        if converted:
             # a control run's folder is imported as the project file it
             # converts to, so a large stream is held by reference to it
             path = run_convert.converted(path)
@@ -853,7 +865,10 @@ class Project(dict):
                 self.project_type = result.project_type
                 if result.active_geometry in mapping:
                     self.active_geometry = mapping[result.active_geometry]
-            return list(mapping.values())
+            # a run converted just now has its loops' rows made here, as a
+            # read run does; a project opened has them saved in it
+            return list(mapping.values()) + (
+                self._transformed_on_import(list(mapping.values())) if converted else [])
         if isinstance(result, dict):
             # a reader's keys are for code; the name is what the object
             # *is*, and the key stays available on the result
@@ -872,7 +887,29 @@ class Project(dict):
             if large:
                 refer(added[0], '')
         self._index_import(local, result, added, checksum)
-        return added
+        # computed from the file's objects, not read from it, so the
+        # index lists what the file holds and these follow it
+        return added + self._transformed_on_import(added)
+
+    def _transformed_on_import(self, added: Sequence[str]) -> list[str]:
+        """For a run read with its channel table, the rows of each
+        environment's response transformation as a history of their own
+        (`transform_responses`). A recording that lacks one of a loop's
+        control channels (a subset of the channels read) cannot give
+        that loop's rows, and they are left out rather than made up."""
+        tables = [name for name in added if isinstance(self[name], ChannelTable)]
+        histories = [name for name in added if isinstance(self[name], TimeHistory)]
+        made = []
+        for table in tables:
+            for environment, loop in self[table].environments.items():
+                if loop.response_transformation is None:
+                    continue
+                for history in histories:
+                    try:
+                        made.append(self.transform_responses(history, environment, table))
+                    except ValueError:
+                        continue
+        return made
 
     def _adopt_provenance(self, records: Mapping[str, dict[str, Any]],
                           mapping: Mapping[str, str]) -> None:
@@ -944,6 +981,8 @@ class Project(dict):
                      if isinstance(obj, Geometry)), None)
         self._prune_links()
         self._prune_provenance()
+        for pair in [pair for pair in self.projections if set(pair) & set(names)]:
+            del self.projections[pair]
 
     def _prune_provenance(self) -> None:
         """Forget the recipe of every removed object that nothing left
@@ -1002,6 +1041,11 @@ class Project(dict):
         for record in self.provenance.values():
             _retarget_record(record, {old: new})
         self.data_index.rename_object(old, new)
+        for pair, held in list(self.projections.items()):
+            if old in pair:
+                del self.projections[pair]
+                self.projections[tuple(sorted(new if n == old else n for n in pair))] = {
+                    **held, 'source': new if held['source'] == old else held['source']}
         if old in self.references:
             self.references[new] = self.references.pop(old)
             self._reference_prints[new] = self._reference_prints.pop(old)
@@ -1862,6 +1906,281 @@ class Project(dict):
             raise ValueError(f'{name!r} has no geometry — link one')
         return place(table, home[1])
 
+    def fit_sensors(self, name: Any) -> tuple[list, list[str]]:
+        """The accelerometers a geometry's measured points locate
+        (`core.scan_fit.fit_sensors`): a plane fitted to each face probed
+        with a measuring arm, a cylinder to each round side, and from
+        them each accelerometer's axes, where it is and how good the fit
+        is. Nothing is changed.
+
+        The features are the geometry's element groups of measured
+        points (`io.point_files`), named ``<sensor>_<label>``. Renaming
+        a group changes what its surface is taken for, and deleting a
+        sensor's groups leaves it out.
+
+        Parameters
+        ----------
+        name : str or object
+            The geometry holding the measured points.
+
+        Returns
+        -------
+        fits : list of SensorFit
+            One per sensor, in the order the sensors first appear, with
+            its frame, its anchor, the fitted surfaces and its flags.
+            Lengths are in meters when the geometry's units are
+            declared, and in its own numbers when they are not.
+        notes : list of str
+            The features left out and why, and that roughness was not
+            judged when the geometry has no length unit.
+
+        Raises
+        ------
+        TypeError
+            If the object is not a geometry.
+        ValueError
+            If the geometry holds no measured points.
+        """
+        from .core.scan_fit import fit_sensors, measured_features
+
+        name = self.name_of(name)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        rows = measured_features(geometry)
+        if not rows:
+            raise ValueError(f'{name!r} holds no measured points to fit')
+        defined = geometry.units_defined
+        fits, notes = fit_sensors({label: geometry.node_xyz[held]
+                                   for label, held in rows.items()},
+                                  meters=1.0 if defined else None)
+        if not defined:
+            notes.append(f'{name} has no length unit, so the roughness of the surfaces '
+                         'was not judged')
+        return fits, notes
+
+    def set_sensor(self, source: Any, sensor: Any, **chosen: Any) -> dict[str, Any]:
+        """Choose what a measured accelerometer is made as: its node, its
+        model, and its length and diameter. The choice is kept on the geometry holding
+        the measured points and is what `create_sensors` makes it from.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points.
+        sensor : str or int
+            The sensor's name, the part of its features' names before
+            the last underscore.
+        **chosen
+            Any of ``node`` (a whole number above 0), ``model`` (a
+            catalog model, a size written as one such as
+            ``'Block 17.5 mm'``, or any name), ``length`` (a cube's
+            side, or a round body's length) and ``diameter`` (a round
+            body's diameter), the last two in meters once the
+            geometry's unit is declared and in its own numbers before.
+            None takes a choice back, leaving it to the fit and the
+            catalog. Naming a model takes back a length and a diameter
+            typed before it, so the model's own are used.
+
+        Returns
+        -------
+        dict
+            What is now chosen for the sensor, named as it is typed.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If the geometry holds no measured points, the sensor is not
+            among them, a choice is not one of the four, a diameter is
+            given for a cube, or a value is not one its choice can hold.
+        """
+        from .core.scan_sensors import TYPED, kept_as_typed, typed_choice
+
+        source = self.name_of(source)
+        fits, _notes = self.fit_sensors(source)
+        sensor = str(sensor).strip()
+        kinds = {fit.sensor: fit.kind for fit in fits}
+        if sensor not in kinds:
+            raise ValueError(f'{source!r} has no sensor {sensor} among its measured points')
+        stray = sorted(set(chosen) - set(TYPED))
+        if stray:
+            raise ValueError(f'a sensor\'s {stray[0]} is not chosen; its '
+                             f'{", ".join(TYPED)} are')
+        kind = kinds[sensor]
+        kept = {typed_choice(kind, word) for word in chosen}
+        held = dict(self[source].sensor_choices.get(sensor, {}))
+        for word, value in chosen.items():
+            key = typed_choice(kind, word)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                held.pop(key, None)
+            elif key == 'node':
+                if int(value) != float(value) or int(value) < 1:
+                    raise ValueError('a node is a whole number above 0')
+                held[key] = int(value)
+            elif key == 'model':
+                held[key] = str(value).strip()
+                for size in ('size', 'length'):
+                    if size not in kept:
+                        held.pop(size, None)
+            else:
+                if not float(value) > 0:
+                    raise ValueError(f'a {word} is a length above 0')
+                held[key] = float(value)
+        if held:
+            self[source].sensor_choices[sensor] = held
+        else:
+            self[source].sensor_choices.pop(sensor, None)
+        return kept_as_typed(kind, held)
+
+    def set_scan_set(self, source: Any, scan_set: str, sensor: Any = None,
+                     surface: str | None = None) -> str:
+        """Say which sensor a set of measured points belongs to, or which
+        of its surfaces it is, where the name it was measured under is
+        wrong. The set is renamed ``<sensor>_<label>``, which is all that
+        says what it is.
+
+        When the sensor already has a set for that surface, the two
+        exchange: the other takes the sensor and surface this one had.
+        That is the whole correction for two sets measured under each
+        other's names.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points.
+        scan_set : str
+            The set's name, an element group of measured points.
+        sensor : str or int, optional
+            The sensor it belongs to; unchanged when omitted. A set not
+            yet named for a sensor, given one and no surface, takes the
+            first surface that sensor lacks: the top beside a cylinder
+            with no flat face, else X+, Y+ or Z+.
+        surface : str, optional
+            What it is: 'X+', 'X-', 'Y+', 'Y-', 'Z+', 'Z-', 'Cylinder',
+            'Uni-axial Top' or 'Uni-axial Bottom', or the label itself
+            ('1', '-2', 'c', 'p', 'b'). Unchanged when omitted.
+
+        Returns
+        -------
+        str
+            The set's new name.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If the geometry has no such set of measured points, the
+            surface is not one, a set not yet named for a sensor is
+            given a surface and no sensor, or the set to exchange with
+            has no sensor and surface to hand back.
+        """
+        from .core.scan_fit import label_of, measured_features, written_label
+
+        source = self.name_of(source)
+        geometry = self[source]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{source!r} is not a geometry')
+        scan_set = str(scan_set)
+        if scan_set not in measured_features(geometry):
+            raise ValueError(f'{source!r} has no set of measured points named {scan_set!r}')
+        was = written_label(scan_set)
+        if was is None and sensor is None:
+            raise ValueError(f'{scan_set} is not named for a sensor yet; give its sensor first')
+        to_sensor = str(sensor).strip() if sensor is not None else was[0]   # type: ignore[index]
+        if surface is not None:
+            to_label = label_of(surface)
+        elif was is not None:
+            to_label = was[1]
+        else:
+            # a set with no name of its own takes the first surface its sensor lacks: the
+            # top beside a cylinder with no flat face, else X+, Y+ or Z+
+            held = {found[1] for name in geometry.group_name
+                    if (found := written_label(str(name))) and found[0] == to_sensor}
+            flat = held - {'c'}
+            to_label = ('p' if 'c' in held and not flat
+                        else next((label for label in ('1', '2', '3')
+                                   if not {label, f'-{label}'} & held), '1'))
+        if not to_sensor or '_' in to_sensor and not to_sensor.replace('_', ''):
+            raise ValueError('a sensor needs a name')
+        named = f'{to_sensor}_{to_label}'
+        names = [str(name) for name in geometry.group_name]
+        if named == scan_set:
+            return named
+        holder = next((k for k, name in enumerate(names)
+                       if written_label(name) == (to_sensor, to_label)), None)
+        if holder is not None:
+            if was is None:
+                raise ValueError(f'{names[holder]} is already sensor {to_sensor}\'s; rename it '
+                                 f'first, since {scan_set} has no sensor and surface to hand '
+                                 'back')
+            geometry.group_name[holder] = scan_set
+        geometry.group_name[names.index(scan_set)] = named
+        return named
+
+    def create_sensors(self, source: Any, name: str | None = None) -> dict[str, Any]:
+        """Make a geometry and a channel table of the accelerometers a
+        geometry's measured points locate (`fit_sensors`,
+        `core.scan_sensors.assemble`).
+
+        Each accelerometer is one node at the center of its body, with a
+        coordinate system of its own whose axes are the accelerometer's.
+        A tri-axial accelerometer gives channels X+, Y+ and Z+ whatever
+        faces were measured; a uni-axial one gives the one axis its top
+        was labelled with. The two objects are linked into one group.
+        The measured points are left as they are, and the result is not
+        made again when they change: call this again.
+
+        The center is half the body's size back from each measured face.
+        The node, model and size of each sensor are what `set_sensor`
+        chose for it; where nothing was chosen the size is that of the
+        smallest tri-axial catalog model the points fit in, else the
+        measured one, which the notes say.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points. Its length unit
+            must be declared.
+        name : str, optional
+            What the results are named after; the source's name when
+            omitted.
+
+        Returns
+        -------
+        dict
+            The names added, under 'geometry' and 'channels', and under
+            'notes' the sensors left out and the sizes that were assumed.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If it holds no measured points or has no length unit, or no
+            accelerometer can be placed.
+        """
+        from .core.scan_sensors import assemble
+
+        source = self.name_of(source)
+        fits, notes = self.fit_sensors(source)
+        scan = self[source]
+        if not scan.units_defined:
+            raise ValueError(f'{source!r} has no length unit; declare it before the '
+                             'accelerometers are sized')
+        known = {fit.sensor for fit in fits}
+        choices = {sensor: choice for sensor, choice in scan.sensor_choices.items()
+                   if sensor in known}
+        geometry, table, _placed, said = assemble(fits, scan.length_unit, choices=choices)
+        base = name or f'{source} Sensors'
+        added: dict[str, Any] = {'geometry': self.add(f'{base} Geometry', geometry),
+                                 'channels': self.add(f'{base} Channels', table)}
+        self.link(added['geometry'], added['channels'])
+        added['notes'] = [*notes, *said]
+        return added
+
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
         """(name, table) for the channel table linked with an object:
         the one lookup the overload check and the shape values share.
@@ -1891,6 +2210,12 @@ class Project(dict):
         if isinstance(obj, TimeHistory):
             for other, _rows in self._role_partners(name):
                 return other, self[other]
+            # transformed rows name no channel of a table: theirs is the
+            # one whose matrix made them
+            if self.transformed_from(name) is not None:
+                table = self.provenance[name]['params'].get('table')
+                if isinstance(self.get(table), ChannelTable):
+                    return table, self[table]
             return None
         if obj is None or isinstance(obj, ChannelTable):
             return None
@@ -2048,6 +2373,7 @@ class Project(dict):
         target is read whole."""
         from .core.data import TransientSpecification
 
+        self._borrow_averaging(source)
         history = self[source]
         if (history.averaging is None
                 and not isinstance(history, TransientSpecification)
@@ -2074,6 +2400,171 @@ class Project(dict):
         source = self.name_of(source)
         return self._derive(source, self._framed(source).compute_psds(),
                             f'{source} PSDs', recipe=('compute_psds', {}))
+
+    def transform_responses(self, source: Any, environment: str,
+                            table: Any = None) -> str:
+        """The rows a control loop's response transformation made of a
+        recording, as a time history of their own
+        (`ChannelTable.transformed_responses`).
+
+        A Rattlesnake run that controlled a virtual response has its
+        specification and spectra over the matrix's rows, numbered from
+        1, and the import adds these rows for each such environment, so
+        each specification is compared with the history that holds its
+        own rows. They are kept apart from the hardware channels, and
+        from another environment's rows, which are numbered from 1 too.
+        The new history takes its source's averaging and keeps taking
+        it (`follow_averaging`); an averaging set on it alone is
+        refused, so its rows are framed as the channels they come from.
+
+        Parameters
+        ----------
+        source : str or object
+            The recording, holding every control channel of the loop.
+        environment : str
+            The loop, by the name the controller gave it.
+        table : str or object, optional
+            The channel table holding the loop; by default the one
+            linked with the recording (`channel_table_for`).
+
+        Returns
+        -------
+        str
+            The name the history was added under: '<source> Transformed',
+            or '<source> Transformed (<environment>)' when the table holds
+            more than one loop with a response transformation.
+
+        Raises
+        ------
+        ValueError
+            If there is no channel table, the loop holds no response
+            transformation, or the recording lacks a control channel.
+        """
+        source = self.name_of(source)
+        if table is None:
+            found = self.channel_table_for(source)
+            if found is None:
+                raise ValueError(f'{source!r} has no linked channel table')
+            table = found[0]
+        table = self.name_of(table)
+        held = self[table]
+        rows = held.transformed_responses(self[source], environment)
+        transformed = [name for name, loop in held.environments.items()
+                       if loop.response_transformation is not None]
+        name = (f'{source} Transformed' if len(transformed) < 2
+                else f'{source} Transformed ({environment})')
+        return self._derive(source, rows, name, recipe=(
+            'transform_responses', {'environment': environment, 'table': table}))
+
+    def _borrow_averaging(self, name: str) -> None:
+        """Frame a history of transformed responses as its recording is:
+        the recording's averaging, detected on the recording first when it
+        is one capture with none, so the rows are never framed on their
+        own. Anything else is left as it is."""
+        source = self.transformed_from(name)
+        if source is None or source not in self:
+            return
+        recording = self[source]
+        if (recording.averaging is None
+                and max(recording.records_per_channel.values(), default=0) <= 1):
+            recording.averaging = recording.suggest_averaging()
+        self.follow_averaging(source)
+
+    def transformed_from(self, name: Any) -> str | None:
+        """The recording a history of transformed responses
+        (`transform_responses`) was made from.
+
+        Parameters
+        ----------
+        name : str or object
+            The object.
+
+        Returns
+        -------
+        str or None
+            The recording's name, or None for any other object.
+        """
+        record = self.provenance.get(self.name_of(name)) or {}
+        return record.get('source') if record.get('verb') == 'transform_responses' else None
+
+    def recording_for(self, specification: Any, source: Any) -> str:
+        """The history a specification is read against, among a
+        recording and the histories of transformed responses made from
+        it: the recording when it holds every channel the specification
+        names, else the one transformed history that holds them all (a
+        loop that controlled its transformation's rows).
+
+        Parameters
+        ----------
+        specification : str or object
+            The specification.
+        source : str or object
+            The recording.
+
+        Returns
+        -------
+        str
+            The history's name.
+
+        Raises
+        ------
+        ValueError
+            If neither the recording nor exactly one of its transformed
+            histories holds every channel the specification names.
+        """
+        source = self.name_of(source)
+        wanted = set(self[self.name_of(specification)].response_dof)
+        if wanted <= set(self[source].response_dof):
+            return source
+        holding = [name for name in self.names if self.transformed_from(name) == source
+                   and wanted <= set(self[name].response_dof)]
+        if len(holding) > 1:
+            # every loop numbers its rows from 1: the loop that ran this
+            # kind of test is the one whose rows the specification is over
+            kind = _specification_kind(self[self.name_of(specification)])
+            holding = [name for name in holding
+                       if self._loop_of(name).kind in ('', kind)] or holding
+        if len(holding) != 1:
+            named = ', '.join(sorted(wanted))
+            raise ValueError(
+                f'{source!r} has no record of {named}' if not holding else
+                f'{len(holding)} histories made from {source!r} hold {named}: '
+                f'{", ".join(repr(name) for name in holding)}')
+        return holding[0]
+
+    def _loop_of(self, name: str) -> Any:
+        """The control loop (`Environment`) a transformed history's rows
+        are the rows of."""
+        params = self.provenance[name]['params']
+        return self[params['table']].environments[params['environment']]
+
+    def follow_averaging(self, source: Any) -> list[str]:
+        """Give a recording's averaging to every history of transformed
+        responses made from it (`transform_responses`), so they are
+        framed as the channels they come from. The app does this after
+        every averaging it stores on a recording. An averaging assigned
+        by a script marks those histories stale until this is called or
+        they are refreshed (`refresh`), which gives it to them too.
+
+        Parameters
+        ----------
+        source : str or object
+            The recording.
+
+        Returns
+        -------
+        list of str
+            The histories given it.
+        """
+        source = self.name_of(source)
+        out = []
+        for name in list(self.provenance):
+            if name in self and self.transformed_from(name) == source:
+                self[name].averaging = self[source].averaging
+                self.provenance[name]['state'] = self._analysis_state(
+                    source, 'transform_responses')
+                out.append(name)
+        return out
 
     def averaging_of(self, name: Any) -> Any:
         """The `Averaging` a computed spectrum was made with, from its
@@ -2770,12 +3261,73 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
+        self._borrow_averaging(source)
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
         return self._derive(source, history.compute_frfs(method=method),
                             f'{source} {method} FRFs',
                             recipe=('compute_frfs', {'method': method}))
+
+    def reprocess_modal_test(self, source: Any, method: str = 'H1', *,
+                             force: float | None = None,
+                             exponential: float | None = None,
+                             block: int | None = None,
+                             captures: Sequence[int] | None = None,
+                             shaker_window: str | None = None,
+                             name: str | None = None) -> tuple[str, str]:
+        """Estimate a Modal Test measurement's FRFs and coherence again from
+        its frames, with the estimator, windows, block and frames chosen
+        (`core.modal_test.reprocess`), into two new objects beside the
+        frames; the run's own FRFs are left as they are.
+
+        Parameters
+        ----------
+        source : str or object
+            A measurement's frames (a converted Modal Test run's
+            'Measurement k frames').
+        method : str, default 'H1'
+            'H1', 'H2' or 'Hv'.
+        force : float, optional
+            The force window's width as a fraction of the block, on the
+            references.
+        exponential : float, optional
+            The exponential window's end value, on every channel.
+        block : int, optional
+            Samples of each frame to use, from its first.
+        captures : sequence of int, optional
+            Which frames, by capture number from 0; every frame when
+            omitted.
+        shaker_window : str, optional
+            A window on every channel instead of the transient ones.
+        name : str, optional
+            What to call the FRFs; the coherence takes the same name with
+            'coherence' in place of 'FRFs'. Defaults to the source's name
+            followed by the estimator.
+
+        Returns
+        -------
+        (str, str)
+            The names the FRFs and the coherence were added under.
+
+        Raises
+        ------
+        ValueError
+            In the core's words, for what `core.modal_test.reprocess`
+            refuses.
+        """
+        from .core.modal_test import reprocess
+
+        source = self.name_of(source)
+        frf, coherence = reprocess(self[source], method=method, force=force,
+                                   exponential=exponential, block=block,
+                                   captures=captures, shaker_window=shaker_window)
+        base = name or f'{source} {method}'
+        made = self._derive(source, frf, f'{base} FRFs' if name is None else base)
+        said = (f'{base} coherence' if name is None
+                else base.replace('FRFs', 'coherence') if 'FRFs' in base
+                else f'{base} coherence')
+        return made, self._derive(source, coherence, said)
 
     def read_transmissibility(self, name: Any, record: int = 0) -> Any:
         """The ASD-ratio transmissibility behind one record of an FRF,
@@ -2922,6 +3474,7 @@ class Project(dict):
             project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
+        self._borrow_averaging(source)
         history = self[source]
         if history.averaging is None:
             history.averaging = history.suggest_averaging()
@@ -3293,7 +3846,7 @@ class Project(dict):
         source = self.name_of(source)
         history = self[source]
         if history.truncation is None:
-            raise ValueError('no span set: Set Truncation sets one')
+            raise ValueError('no span set: Truncation sets one')
         return self._derive(source, history.truncate(),
                             f'{source} Truncated',
                             recipe=('truncate_data', {}))
@@ -3431,6 +3984,7 @@ class Project(dict):
     def expand(self, source: Any, shapes: Any, *,
                records: Sequence[int] | None = None,
                tolerance: float = 0.02,
+               distance: float | None = None,
                name: str | None = None) -> str:
         """Expand modal responses through a shape set back to physical
         responses (Expand to Physical Responses): `u = Φq` at every DOF
@@ -3467,6 +4021,9 @@ class Project(dict):
             With a channel table on another geometry, how far the
             nearest node may be, as a fraction of the table's geometry's
             extent (as `project_onto_basis`).
+        distance : float, optional
+            The same as a distance (`project_onto_basis`); it takes the
+            place of `tolerance` when given.
         name : str, optional
             What to call the result. Defaults to the record's name with
             'Modal Coordinates' replaced by 'Physical Responses', and the
@@ -3484,7 +4041,7 @@ class Project(dict):
         source, shapes = self.name_of(source), self.name_of(shapes)
         if isinstance(self[shapes], ChannelTable):
             return self._expand_at_table(source, shapes, records, tolerance,
-                                         name)
+                                         name, distance)
         data, shape_set = self._transform_pair(source, shapes)
         picked = None if records is None else [int(i) for i in records]
         result, report = to_physical(data, shape_set, picked)
@@ -3508,7 +4065,8 @@ class Project(dict):
 
     def channel_frfs(self, source: Any, table: Any, *,
                      records: Sequence[int] | None = None,
-                     tolerance: float = 0.02) -> Frf:
+                     tolerance: float = 0.02,
+                     distance: float | None = None) -> Frf:
         """The physical FRFs `expand` makes from modal FRFs at a channel
         table's channels, without adding them to the project: what
         Expand to Physical Responses previews.
@@ -3522,6 +4080,8 @@ class Project(dict):
         records : sequence of int, optional
             Which modal records; all of them when omitted.
         tolerance : float, default 0.02
+            As `expand`.
+        distance : float, optional
             As `expand`.
 
         Returns
@@ -3540,9 +4100,11 @@ class Project(dict):
         if records is not None:
             params['records'] = [int(i) for i in records]
         params['tolerance'] = float(tolerance)
+        if distance is not None:
+            params['distance'] = float(distance)
         return _at_channels(self, self.name_of(source), params)
 
-    def _expand_at_table(self, source, table, records, tolerance, name):
+    def _expand_at_table(self, source, table, records, tolerance, name, distance=None):
         """`expand` with a channel table: modal FRFs to physical FRFs
         between the table's channels."""
         params: dict[str, Any] = {'table': table}
@@ -3550,6 +4112,8 @@ class Project(dict):
             params['records'] = [int(i) for i in records]
         if tolerance != 0.02:
             params['tolerance'] = float(tolerance)
+        if distance is not None:
+            params['distance'] = float(distance)
         result = _at_channels(self, source, params)
         params['shapes'] = result.transform_report.basis
         added = self._derive(source, result, name or f'{source} @ {table}',
@@ -3559,7 +4123,8 @@ class Project(dict):
         return added
 
     def channel_shapes(self, shapes: Any, table: Any, *,
-                       tolerance: float = 0.02) -> tuple[ShapeSet, dict]:
+                       tolerance: float = 0.02,
+                       distance: float | None = None) -> tuple[ShapeSet, dict]:
         """A shape set at a channel table's DOFs, for the FRFs between
         its channels (`expand` with a table).
 
@@ -3578,6 +4143,9 @@ class Project(dict):
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the table's
             geometry's extent.
+        distance : float, optional
+            The same as a distance (`project_onto_basis`); it takes the
+            place of `tolerance` when given.
 
         Returns
         -------
@@ -3603,7 +4171,109 @@ class Project(dict):
         dofs = list(dict.fromkeys(d for d in table_obj.dof_strings() if d))
         target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
         return project_shapes(set_obj, self[theirs], target, self[home],
-                              tolerance=tolerance)
+                              tolerance=tolerance, distance=distance)
+
+    def drive_points(self, table: Any) -> list[str]:
+        """The DOFs a channel table says a force is applied at: its
+        reference channels that measure force, in the table's order,
+        each DOF once.
+
+        Parameters
+        ----------
+        table : str or object
+            The channel table.
+
+        Returns
+        -------
+        list of str
+            The DOFs, such as '101Z+'.
+        """
+        channels = self[self.name_of(table)]
+        if not isinstance(channels, ChannelTable):
+            raise TypeError(f'{self.name_of(table)!r} is not a channel table')
+        return list(dict.fromkeys(
+            dof for dof, role, kind in zip(channels.dof_strings(),
+                                           channels.roles(), channels.types())
+            if dof and role == 'reference' and kind == 'force'))
+
+    def driven_modes(self, source: Any, drive: str | None = None, *,
+                     table: Any = None,
+                     records: Sequence[int] | None = None,
+                     tolerance: float = 0.02,
+                     distance: float | None = None) -> tuple[str, Any]:
+        """Each modal coordinate's response to a unit force at one DOF,
+        from modal FRFs and the shape set they are of (`modal_basis`):
+        what the operating deflection shape of modal FRFs is made from
+        (`deform.modal_ods_deflection`).
+
+        Parameters
+        ----------
+        source : str or object
+            The modal FRFs.
+        drive : str, optional
+            The DOF the force is at. Left out, the one force reference
+            of `table`.
+        table : str or object, optional
+            A channel table. Its force reference is the drive when
+            `drive` is left out, and when the table and the shape set
+            are linked to different geometries the set is read at the
+            drive as `channel_shapes` reads it, at the nearest node.
+        records : sequence of int, optional
+            Which modal records; all of them when omitted. Leaving the
+            rigid-body modes' records out gives the elastic response.
+        tolerance : float, default 0.02
+            As `channel_shapes`.
+        distance : float, optional
+            As `channel_shapes`.
+
+        Returns
+        -------
+        tuple of (str, DrivenModes)
+            The shape set's name, and the modal coordinates per unit
+            force (`core.modal_frf.DrivenModes`).
+
+        Raises
+        ------
+        TypeError, ValueError
+            If the source is not modal FRFs with a shape set behind
+            them, neither a drive nor a table is given, the table has
+            no force reference or more than one and no drive is named,
+            or the set does not cover the drive.
+        """
+        from .core.modal_frf import driven_modes
+
+        source = self.name_of(source)
+        basis, at_drive, dof = self._drive(source, drive, table, records,
+                                           tolerance, distance)
+        return basis, driven_modes(self[source], at_drive, dof, records)
+
+    def _drive(self, source, drive, table, records, tolerance, distance=None):
+        """(the modal FRFs' shape set by name, the set to read at the
+        drive, the drive DOF) for `driven_modes`."""
+        if not isinstance(self[source], Frf):
+            raise TypeError(f'{source!r} is not an FRF')
+        basis = self.modal_basis(source, records)
+        if basis is None:
+            raise ValueError(f'nothing says which shape set {source!r} is of')
+        at_drive = self[basis]
+        if table is not None:
+            table = self.name_of(table)
+            if drive is None:
+                points = self.drive_points(table)
+                if not points:
+                    raise ValueError(f'{table!r} has no reference channel '
+                                     'measuring force')
+                if len(points) > 1:
+                    raise ValueError(f'{table!r} has {len(points)} force '
+                                     f'references ({", ".join(points)}); '
+                                     'name one as drive=')
+                drive = points[0]
+            at_drive, _projection = self.channel_shapes(
+                basis, table, tolerance=tolerance, distance=distance)
+        if drive is None:
+            raise ValueError('give the DOF the force is at as drive=, or a '
+                             'channel table with a force reference as table=')
+        return basis, at_drive, drive
 
     def _transform_pair(self, source, shapes):
         from .core.sine import SineLevelSet
@@ -5731,8 +6401,10 @@ class Project(dict):
             interactive session is replayed. `bounds` and `limit` are
             ignored when picks are given.
         refine : int, default 0
-            How many times to run the joint residue refinement after the
-            confirms (the screen's Refine All).
+            How many times to refine the fit after the confirms (the
+            screen's Refine): modes whose half-power bands overlap get
+            their poles searched together and their residues fitted
+            together (`ModalFitSession.refine_residues`).
         records : sequence of int, optional
             Fit these records only; the screen fits the records picked
             in the tree. Every record when omitted.
@@ -5754,6 +6426,7 @@ class Project(dict):
         # silently skipped the second mode of a repeated pair that
         # `suggest` had offered on purpose.
         from .core.modal_fit import ModalFitSession
+        from .core.modal_test import note_window_damping
 
         source = self.name_of(source)
         if at is None and bounds is not None:
@@ -5786,8 +6459,10 @@ class Project(dict):
                     break
         for _ in range(int(refine)):
             session.refine_residues()
-        return self._derive(source, session.shape_set(),
-                            name or f'{source} Modes')
+        # an FRF estimated with an exponential window: each mode notes the
+        # damping it added, and the mode less it (`core.modal_test`)
+        shapes = note_window_damping(session.shape_set(), self[source])
+        return self._derive(source, shapes, name or f'{source} Modes')
 
     def fit_replay_line(self, source: str, name: str, session: Any,
                         coherence: str | None = None) -> str:
@@ -5827,10 +6502,11 @@ class Project(dict):
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            channels: Iterable[int] | None = None,
                            tolerance: float = 0.02,
+                           distance: float | None = None,
                            name: str | None = None) -> str:
-        """Sample a shape set at the Basis shape set's DOFs, or at a
-        channel table's (Project onto Basis DOFs). Returns the new shape
-        set's name.
+        """Sample a shape set at the Basis shape set's DOFs, at a
+        channel table's, or at every node of a geometry (Project onto
+        Basis DOFs). Returns the new shape set's name.
 
         For each target DOF, the nearest node of the source's geometry
         is found, and the displacement there is dotted with the DOF's
@@ -5842,16 +6518,20 @@ class Project(dict):
         to compare with: its channels' DOFs, on the geometry the table
         answers to. `channels` narrows a channel table to some of its
         rows, such as the drives alone; each row's values are the same as
-        in the projection onto the whole table. With no target, or the
-        source or the target without a geometry, this raises ValueError.
+        in the projection onto the whole table. A geometry as the target
+        puts the set on another model: its X, Y and Z at each of the
+        geometry's nodes, in the node's own coordinate system, which only
+        a set holding three directions at its nodes can give. With no
+        target, or the source or the target without a geometry, this
+        raises ValueError.
 
         Parameters
         ----------
         source : str
             The shape set to project.
         onto : str, optional
-            The shape set or channel table to project onto. Defaults to
-            the shape set in the project's Basis.
+            The shape set, channel table or geometry to project onto.
+            Defaults to the shape set in the project's Basis.
         channels : iterable of int, optional
             Rows of the channel table `onto` (0-based, the table's
             order) whose DOFs are the target. Rows with no node or
@@ -5859,10 +6539,15 @@ class Project(dict):
         tolerance : float, default 0.02
             How far the nearest node may be, as a fraction of the Basis
             geometry's extent (the largest distance of a node from the
-            nodes' mean position).
+            nodes' mean position), when no `distance` is given.
+        distance : float, optional
+            How far the nearest node may be, in meters when the
+            geometries' units are defined and in the model's own units
+            otherwise. Left out, `match_distance` says.
         name : str, optional
             What to call the result. Defaults to the source's name
-            followed by '@ Basis DOFs', or by '@' and the table's name,
+            followed by '@ Basis DOFs', or by '@' and the table's or the
+            geometry's name,
             with the number of channels in parentheses when `channels`
             picks some.
 
@@ -5872,6 +6557,44 @@ class Project(dict):
             The name the result was added under, unique within the
             project. A name already taken gets a numbered suffix.
         """
+        projected, basis_name, named = self._projected(
+            source, onto, channels=channels, tolerance=tolerance, distance=distance)
+        return self._derive(basis_name, projected, name or named)
+
+    def projected(self, source: str, onto: str, *, tolerance: float = 0.02,
+                  distance: float | None = None) -> ShapeSet:
+        """The shape set `project_onto_basis` would add, without adding it:
+        `source` sampled at the DOFs of `onto` (a shape set, a channel
+        table or a geometry), its `projection_report` saying what matched.
+        What a view shows of a projection before one is made.
+
+        Parameters
+        ----------
+        source : str
+            The shape set to project.
+        onto : str
+            The shape set, channel table or geometry to project onto.
+        tolerance, distance : float, optional
+            As `project_onto_basis`.
+
+        Returns
+        -------
+        ShapeSet
+            The projected set.
+
+        Raises
+        ------
+        ValueError
+            As `project_onto_basis`; `core.correlate.NoNodeMatched`, with
+            its report, when no node is matched.
+        """
+        return self._projected(self.name_of(source), self.name_of(onto),
+                               tolerance=tolerance, distance=distance)[0]
+
+    def _projected(self, source, onto, *, channels=None, tolerance=0.02, distance=None,
+                   name=None):
+        """(the projected set, what it belongs with, its default name) for
+        `project_onto_basis` and `projected`."""
         from .core.correlate import project_shapes
 
         source = self.name_of(source)
@@ -5908,6 +6631,9 @@ class Project(dict):
         elif channels is not None:
             raise ValueError('channels picks rows of a channel table; '
                              f'{onto or "the Basis"} is not one')
+        elif onto is not None and isinstance(self[onto], Geometry):
+            target = _geometry_target(self, source, onto)
+            name = name or f'{source} @ {onto}'
         else:
             target = None
         basis = ((onto, target if target is not None else self[onto])
@@ -5916,19 +6642,29 @@ class Project(dict):
             raise ValueError('name the set to project onto, or declare a '
                              'Basis holding one')
         basis_name, basis_shapes = basis
-        home = self.geometry_for(basis_name)
+        # a geometry is its own home, linked to a group or not
+        home = ((basis_name, self[basis_name])
+                if isinstance(self[basis_name], Geometry)
+                else self.geometry_for(basis_name))
         theirs = self.geometry_for(source)
         if home is None or theirs is None:
             raise ValueError(f'{source} and {basis_name} each need a '
                              'geometry — link one to each side')
+        if target is None:
+            # a set measured in fewer than three directions at a node has
+            # no whole motion there to sample at another set's DOFs
+            why = _measured_why(self, source, basis_name)
+            if why:
+                raise ValueError(f'{source} cannot be projected onto {basis_name}: '
+                                 f'{why}. Project {basis_name} onto {source}')
         projected, report = project_shapes(self[source], theirs[1],
                                            basis_shapes, home[1],
-                                           tolerance=tolerance)
+                                           tolerance=tolerance,
+                                           distance=distance)
         # how it was made travels with it: matched and dropped counts,
         # the worst distance accepted
         projected.projection_report = report
-        return self._derive(basis_name, projected,
-                            name or f'{source} @ Basis DOFs')
+        return projected, basis_name, name or f'{source} @ Basis DOFs'
 
     def match_modes(self, first: str, second: str, *,
                     pairs: Iterable[tuple[int, int]] | None = None,
@@ -6025,16 +6761,198 @@ class Project(dict):
             The MAC matrix, with `first`'s shapes down the rows and
             `second`'s across the columns.
         """
-        from .core.correlate import project_shapes
         from .core.shapes import cross_mac
+
+        rows, columns, _said, _report = self.compared_sets(first, second)
+        return cross_mac(rows, columns)
+
+    def compared_sets(self, first: str, second: str, *, tolerance: float = 0.02,
+                      distance: float | None = None
+                      ) -> tuple[ShapeSet, ShapeSet, str, dict | None]:
+        """Two shape sets as they are compared: on DOFs they share.
+
+        Sets on one geometry are compared as they are. Sets on two
+        geometries share no DOF, so one is projected onto the other's
+        DOFs, the way the pair's projection says (`projection_of`): as
+        Project set it (`set_projection`), or else the way
+        `core.correlate.projection_order` decides from what the sets
+        measure, not the order they are named in. The MAC, the matches
+        and the angle that aligns a pair are all read from these.
+
+        Parameters
+        ----------
+        first : str
+            One shape set, by name.
+        second : str
+            The other shape set, by name.
+        tolerance : float, default 0.02
+            How far the nearest node may be, as a share of the extent
+            of the geometry projected onto, when neither `distance` nor
+            the pair's projection gives a distance.
+        distance : float, optional
+            How far the nearest node may be, in place of the pair's
+            projection's (`project_onto_basis`).
+
+        Returns
+        -------
+        tuple of (ShapeSet, ShapeSet, str, dict or None)
+            The first set and the second, one of them projected when
+            they are on two geometries; which was projected onto which
+            and why ('' on one geometry); and what the projection
+            matched (`core.correlate.project_shapes`' report, None on
+            one geometry).
+        """
+        from .core.correlate import project_shapes
 
         first, second = self.name_of(first), self.name_of(second)
         home, theirs = self.geometry_for(first), self.geometry_for(second)
         if (home is None or theirs is None or home[1] is theirs[1]):
-            return cross_mac(self[first], self[second])
-        projected, _report = project_shapes(self[second], theirs[1],
-                                            self[first], home[1])
-        return cross_mac(self[first], projected)
+            return self[first], self[second], '', None
+        source, _onto, held, why = self._projection(first, second)
+        distance = held if distance is None else distance
+        if source == first:
+            projected, report = project_shapes(self[first], home[1], self[second],
+                                               theirs[1], tolerance=tolerance,
+                                               distance=distance)
+            return (projected, self[second], f'{first} projected onto {second}: {why}',
+                    report)
+        projected, report = project_shapes(self[second], theirs[1], self[first],
+                                           home[1], tolerance=tolerance,
+                                           distance=distance)
+        return self[first], projected, f'{second} projected onto {first}: {why}', report
+
+    def set_projection(self, first: str, second: str, *, source: str | None = None,
+                       distance: float | None = None) -> None:
+        """Set how two shape sets on two geometries are projected when they
+        are compared (Project): which set is projected onto the other, and
+        how far its nodes may be from the nodes they are matched to. The
+        MAC, the matches, the animated projection and a Matched Modes
+        object of the pair all read it (`compared_sets`), and the project
+        file keeps it.
+
+        Parameters
+        ----------
+        first, second : str
+            The two shape sets, by name, in either order.
+        source : str, optional
+            The set projected onto the other's DOFs, `first` or `second`.
+            Left out, the one `core.correlate.projection_order` chooses.
+        distance : float, optional
+            How far a node may be from the node it is matched to, in
+            meters when the geometries' units are defined and in their own
+            units otherwise. Left out, `match_distance`'s.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        TypeError
+            If either is not a shape set.
+        ValueError
+            If the two are on one geometry, either has
+            no geometry, `source` is neither of them or holds too little
+            motion to be projected onto the other (`projection_why`), or
+            `distance` is not above zero.
+        """
+        from .core.correlate import projection_order
+
+        first, second = self.name_of(first), self.name_of(second)
+        for name in (first, second):
+            if not isinstance(self[name], ShapeSet):
+                raise TypeError(f'{name} is not a shape set')
+        if source is None:
+            flipped, _why = projection_order(self[first], self[second])
+            source = first if flipped else second
+        source = self.name_of(source)
+        if source not in (first, second):
+            raise ValueError(f'the set projected is {first} or {second}, not {source}')
+        onto = second if source == first else first
+        why = projection_why(self, source, onto)
+        if why:
+            raise ValueError(f'{source} cannot be projected onto {onto}: {why}')
+        if distance is not None and not (np.isfinite(distance) and distance > 0):
+            raise ValueError(f'the node match distance is {distance}; it must be above zero')
+        self.projections[tuple(sorted((first, second)))] = {
+            'source': source, 'distance': None if distance is None else float(distance)}
+
+    def projection_of(self, first: str, second: str) -> tuple[str, str, float | None]:
+        """How two shape sets are projected when compared (`compared_sets`):
+        (the set projected, the one it is projected onto, the node match
+        distance or None for `match_distance`'s), as Project set it
+        (`set_projection`), or else the way
+        `core.correlate.projection_order` decides, with no distance.
+
+        Parameters
+        ----------
+        first, second : str
+            The two shape sets, by name, in either order.
+
+        Returns
+        -------
+        tuple of (str, str, float or None)
+        """
+        source, onto, distance, _why = self._projection(self.name_of(first),
+                                                        self.name_of(second))
+        return source, onto, distance
+
+    def _projection(self, first: str, second: str) -> tuple[str, str, float | None, str]:
+        """`projection_of` with why it goes that way."""
+        from .core.correlate import projection_order
+
+        held = self.projections.get(tuple(sorted((first, second))))
+        flipped, why = projection_order(self[first], self[second])
+        chosen = first if flipped else second
+        if held is not None:
+            source = held['source']
+            if source != chosen:
+                why = 'the direction set in Project'
+            return source, second if source == first else first, held['distance'], why
+        return chosen, second if chosen == first else first, None, why
+
+    def projection_records(self) -> list[dict[str, Any]]:
+        """The pairs' projections as the project file holds them: one
+        `{'first', 'second', 'source', 'distance'}` per pair set."""
+        return [{'first': pair[0], 'second': pair[1], **held}
+                for pair, held in self.projections.items()]
+
+    def match_distance(self, source: Any, onto: Any, *,
+                       tolerance: float = 0.02) -> float | None:
+        """How far a node may be from the nearest node of `source`'s
+        geometry when `source` is projected onto `onto` and no distance
+        is given (`core.correlate.match_distance`): `tolerance` of the
+        extent of `onto`'s geometry, plus half the thickest plate of
+        `source`'s. What a projection form opens on.
+
+        Parameters
+        ----------
+        source : str or object
+            The shape set that would be projected.
+        onto : str or object
+            The shape set, channel table or geometry it would be
+            projected onto.
+        tolerance : float, default 0.02
+            The share of the extent.
+
+        Returns
+        -------
+        float or None
+            In meters when the geometries' units are defined, in the
+            model's own units otherwise. None when either has no
+            geometry or their units do not agree, so no projection
+            would be made.
+        """
+        from .core.correlate import match_distance
+
+        source, onto = self.name_of(source), self.name_of(onto)
+        home = ((onto, self[onto]) if isinstance(self[onto], Geometry)
+                else self.geometry_for(onto))
+        theirs = self.geometry_for(source)
+        if (home is None or theirs is None
+                or home[1].units_defined != theirs[1].units_defined):
+            return None
+        return match_distance(theirs[1], home[1], tolerance)
 
     def merge(self, *names: str, name: str | None = None) -> str:
         """Combine compatible objects into one (Merge). The merged object
@@ -8057,7 +8975,10 @@ class Project(dict):
         computation the data refuses (no drive channel for a coherence)
         is skipped, with its reason in `last_work_up_skipped`, and the
         rest still run. Nothing already present is made again, so calling
-        this twice adds nothing the second time.
+        this twice adds nothing the second time; but an object already
+        present that is out of date (its source's settings or values
+        changed since it was made, `stale`) is recomputed first, and its
+        name is in `last_work_up_refreshed`.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -8097,6 +9018,11 @@ class Project(dict):
                              'to work up: name the kind of test')
         added: list[str] = []
         self.last_work_up_skipped = []
+        # what is already here is brought up to date first: PSDs made
+        # before the averaging or the scale was changed were left as they
+        # were, and the report read them while it named the new frames
+        # (Brandon, 2026-11-18)
+        self.last_work_up_refreshed = self.refresh_stale()
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -8150,10 +9076,22 @@ class Project(dict):
         def settled(record):
             # the FRFs and the coherence adopt the suggested averaging,
             # so PSDs made ahead of them on no averaging were one window
-            # over the whole record, and stale as soon as they were made
-            if self[record].averaging is None:
+            # over the whole record, and stale as soon as they were made.
+            # A random run's frames also go to its steady stretch when
+            # nobody chose where they start: a run folder's setup names
+            # the recipe and a count from the record's beginning, and
+            # that came through to the report undetected (Brandon,
+            # 2026-11-18). A burst record has no steady stretch to find.
+            if self.transformed_from(record) is not None:
+                # framed as its recording is, never on its own
+                self._borrow_averaging(record)
+                return
+            own = self[record].averaging
+            random = project_type in ('Random Vibration', 'Random and Sine')
+            if own is None or (random and not own.start_set):
                 with contextlib.suppress(ValueError):
                     self[record].averaging = self[record].suggest_averaging()
+            self.follow_averaging(record)
 
         for slot in project_expectations(project_type):
             _label, _cls, icon, ordinal, _optional, side = slot
@@ -8186,6 +9124,12 @@ class Project(dict):
                         else:
                             settled(record)
                         make(self.compute_psds, record)
+                        # a transformed loop's specification is over its
+                        # rows, so their PSDs are what it is read against
+                        for rows in self.names:
+                            if (self.transformed_from(rows) == record
+                                    and derived(rows, 'compute_psds') is None):
+                                make(self.compute_psds, rows)
                 elif icon == 'Specification':
                     # a transient's target is a recording too, and its
                     # spectrum is the requirement the run is read against
@@ -8613,6 +9557,19 @@ class Project(dict):
         else:
             spec_name = self.name_of(specification)
             spec = self[spec_name]
+        held = set(self[source].response_dof)
+        if not set(spec.response_dof) <= held:
+            # a sweep that controlled a transformation's rows is read from
+            # the history holding them; it is named rather than read in its
+            # place, so the result is filed under the history it came from
+            try:
+                rows = self.recording_for(spec_name, source)
+            except ValueError:
+                rows = None
+            if rows is not None:
+                raise ValueError(f'{spec_name!r} is over the rows of a response '
+                                 f'transformation, which are in {rows!r}: '
+                                 'extract from that')
         history = self[source]
         # the settings are the history's own; with none set, the
         # suggestion is adopted the way `filter_data` adopts its filter,
@@ -8679,6 +9636,9 @@ class Project(dict):
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
         'filter_data': 'filtering', 'truncate_data': 'truncation',
+        # the rows are the recording's values through the matrix, framed
+        # by the recording's averaging, which they keep taking
+        'transform_responses': 'transform',
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
@@ -8706,7 +9666,7 @@ class Project(dict):
     #: were kept still compares its settings and opens with nothing stale
     _READS_VALUES_TOO: ClassVar[frozenset[str]] = frozenset({
         'averaging', 'averaging+roles', 'shocks', 'filtering', 'truncation',
-        'sine_extraction'})
+        'sine_extraction', 'transform'})
 
     def _source_values(self, source: str, verb: str) -> str | None:
         """The digest of the source's values when `verb` reads them and
@@ -8781,6 +9741,9 @@ class Project(dict):
                                          (dof, quantity), role
                                          in resolved.items())})
             return ('averaging', state)
+        if reads == 'transform':
+            averaging = getattr(obj, 'averaging', None)
+            return ('transform', None if averaging is None else asdict(averaging))
         if reads == 'filtering':
             filtering = getattr(obj, 'filtering', None)
             return ('filtering', None if filtering is None
@@ -8856,8 +9819,9 @@ class Project(dict):
     def refresh(self, name: Any) -> str:
         """Recompute a derived object in place, under its own name.
 
-        Links, the report's figures and the grids all refer to the
-        object by name, so replacing the value under that name keeps
+        What was set on the object itself (its comparison scale, its run
+        identity) is kept. Links, the report's
+        figures and the grids all refer to the object by name, so replacing the value under that name keeps
         every reference correct. Objects derived from this one then
         become stale by content, and are refreshed one at a time or all
         together with `refresh_stale`, never automatically. An object
@@ -8885,6 +9849,15 @@ class Project(dict):
                 f"{name!r} was computed from {source!r}, which is gone")
         verb, params = record['verb'], record.get('params', {})
         rebuilt = _RECOMPUTE[verb](self, source, params)
+        # what was set on the object itself is the user's, not the
+        # recipe's: a comparison scale lost on a refresh put a -6 dB run
+        # back on detection and the report read it as an under-test
+        # (Brandon, 2026-11-18)
+        was = self[name]
+        for setting in _HELD_ON_REFRESH:
+            value = getattr(was, setting, None)
+            if value is not None and hasattr(rebuilt, setting):
+                setattr(rebuilt, setting, value)
         self[name] = rebuilt
         record['state'] = self._analysis_state(source, verb, params)
         record.pop('source_print', None)
@@ -8965,7 +9938,7 @@ class Project(dict):
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
-                  provenance=self.provenance,
+                  provenance=self.provenance, projections=self.projection_records(),
                   data_index=self.data_index.records(), compress=compress,
                   references={**kept, **self.unresolved})
         # an object edited since it was read is in this file now, whole
@@ -9305,6 +10278,15 @@ def _has_dims(obj, wanted):
         {obj.known_dim(i) for i in range(obj.num_records)} & wanted)
 
 
+def _has_measured_points(project, obj) -> bool:
+    """Whether a geometry holds points measured on accelerometers
+    (`io.point_files`), which `create_sensors` fits."""
+    from .core.geometry import MEASURED_POINT
+
+    return isinstance(obj, Geometry) and bool(
+        np.any(np.asarray(obj.elem_type, dtype=np.int64) == MEASURED_POINT))
+
+
 def _plannable(project, obj) -> bool:
     """Whether a shape set can plan a test's instrumentation: it has a
     mode above 0 Hz and is drawn on a geometry with solids, plates or
@@ -9474,6 +10456,9 @@ _VERB_APPLIES: tuple = (
     # finite element modes on a model to put sensors on (Brandon,
     # 2026-10-21, Plan Instrumentation)
     ('plan_instrumentation', _plannable),
+    # points measured on accelerometers with a measuring arm, to make the
+    # test geometry and channel table of (Brandon, 2026-11-16)
+    ('create_sensors', _has_measured_points),
     # coincident nodes matter to connectivity, so a geometry of elements;
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
@@ -9575,6 +10560,63 @@ def _pair_reads(project, objects, direction):
             and _goes(data[0], sets[0], direction))
 
 
+def projection_why(project: Project, source: Any, onto: Any) -> str:
+    """Why the shape set `source` cannot be projected onto `onto` (a shape
+    set, channel table or geometry), as far as the objects say before
+    any node is matched; '' when it can be. The action table greys
+    Project out with it, and `project_onto_basis` refuses a geometry
+    with it."""
+    source, onto = project.name_of(source), project.name_of(onto)
+    on_geometry = isinstance(project[onto], Geometry)
+    theirs = project.geometry_for(source)
+    home = (onto, project[onto]) if on_geometry else project.geometry_for(onto)
+    for name, found in ((source, theirs), (onto, home)):
+        if found is None:
+            return f'{name} has no geometry; link one to it'
+    if theirs[1] is home[1]:
+        return (f'{source} is on {onto} already' if on_geometry else
+                f'Both are on {home[0]}, so there is nothing to project')
+    if on_geometry and not home[1].num_nodes:
+        return f'{onto} has no nodes'
+    return _measured_why(project, source, onto)
+
+
+def drawn_elsewhere(project: Project, shapes: Any, geometry: Any) -> bool:
+    """Whether the shape set `shapes` belongs on a geometry other than
+    `geometry`, or on none (`Project.geometry_for`). Picked together, a
+    geometry the set does not belong on is not where its DOFs are, and
+    drawing the set there by DOF name would move nodes that only share a
+    number: it is projected onto that geometry instead, or said why not."""
+    found = project.geometry_for(shapes)
+    return found is None or found[1] is not project[project.name_of(geometry)]
+
+
+def _measured_why(project: Project, source: str, onto: str) -> str:
+    """Why `source` holds too little motion to be projected onto `onto`; '' when it
+    holds enough. What a node did not measure would be taken as no motion there, so a set
+    held in fewer than three directions is not projected onto a geometry, nor onto a set
+    that holds every direction, which is projected onto it instead (`projection_order`)."""
+    from .core.correlate import partial_nodes
+
+    partial = partial_nodes(project[source])
+    target = project[onto]
+    if partial and (isinstance(target, Geometry) or (isinstance(target, ShapeSet)
+                                                     and not partial_nodes(target))):
+        return (f'{source} has {partial} node{"s" * (partial != 1)} measured in '
+                'fewer than three directions')
+    return ''
+
+
+def _geometry_target(project, source, onto):
+    """What `project_onto_basis` samples `source` at on the geometry `onto`:
+    X, Y and Z at each of its nodes, as a shape set of no modes."""
+    why = projection_why(project, source, onto)
+    if why:
+        raise ValueError(f'{source} cannot be projected onto {onto}: {why}')
+    dofs = [f'{int(node)}{axis}+' for node in project[onto].node_id for axis in 'XYZ']
+    return ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
+
+
 def _two_sets_on_two_geometries(project, objects):
     """Two shape sets, each answering to its own geometry — the
     projection samples one model's field at the other's points."""
@@ -9604,6 +10646,16 @@ def _set_and_table_apart(project, objects):
     homes = [project.geometry_for(sets[0]), project.geometry_for(tables[0])]
     return (all(home is not None for home in homes)
             and homes[0][1] is not homes[1][1])
+
+
+def _set_and_geometry_apart(project, objects):
+    """A shape set and a geometry it is not on, which it holds the whole motion to
+    be put on: the set on another model, at every node of the geometry."""
+    sets = [o for o in objects if isinstance(o, ShapeSet)]
+    geometries = [o for o in objects if isinstance(o, Geometry)]
+    if len(objects) != 2 or len(sets) != 1 or len(geometries) != 1:
+        return False
+    return not projection_why(project, sets[0], geometries[0])
 
 
 def _mergeable(project, objects):
@@ -9670,7 +10722,8 @@ _SELECTION_APPLIES: tuple = (
     ('expand', lambda p, o: (_pair_reads(p, o, 'modal')
                              or _modal_frfs_and_table(p, o))),
     ('project_onto_basis', lambda p, o: (_two_sets_on_two_geometries(p, o)
-                                         or _set_and_table_apart(p, o))),
+                                         or _set_and_table_apart(p, o)
+                                         or _set_and_geometry_apart(p, o))),
     ('match_modes', lambda p, o: (len(o) == 2 and all(
         isinstance(x, ShapeSet) for x in o))),
     # a shape set at a channel table's channels, for Rattlesnake's
@@ -9725,11 +10778,12 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
+    'reprocess_modal_test',
     'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'rescale',
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation',
+    'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
@@ -9741,9 +10795,10 @@ _JOURNALED_VERBS = (
     'tie_elements', 'mate_surfaces', 'add_mated_surfaces',
     'edit_mated_surfaces', 'delete_mated_surfaces',
     'merge_groups', 'set_view', 'set_comparison_scale',
+    'transform_responses', 'follow_averaging',
     'convert_to_specification', 'convert_to_psd',
     'author_specification', 'derive_specification',
-    'transform', 'expand', 'project_onto_basis', 'match_modes',
+    'transform', 'expand', 'project_onto_basis', 'set_projection', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',
@@ -9796,6 +10851,10 @@ def _extract_again(project, source, params):
 
 #: how each verb rebuilds its object from the source, for `refresh` —
 #: the same core calls the verbs make, minus the add
+#: what a refresh carries from the object it replaces to the one it makes:
+#: settings made on the object itself, which its recipe does not hold
+_HELD_ON_REFRESH = ('scale_db', 'run_identity')
+
 _RECOMPUTE = {
     'compute_spectra': lambda p, s, k: p[s].compute_spectra(),
     'compute_psds': lambda p, s, k: p[s].compute_psds(),
@@ -9814,6 +10873,8 @@ _RECOMPUTE = {
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
+    'transform_responses': lambda p, s, k: p[k['table']].transformed_responses(
+        p[s], k['environment']),
     'extract_sine': lambda p, s, k: _extract_again(p, s, k),
     'fit_modes': lambda p, s, k: _fitted_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
@@ -9916,7 +10977,8 @@ def _at_channels(project, source, params):
     if basis is None:
         raise ValueError(f'nothing says which shape set {source!r} is of')
     shapes, projection = project.channel_shapes(
-        basis, table, tolerance=params.get('tolerance', 0.02))
+        basis, table, tolerance=params.get('tolerance', 0.02),
+        distance=params.get('distance'))
     roles, kinds = channels.roles(), channels.types()
     dofs = channels.dof_strings()
     references, responses, skipped = [], [], {}
@@ -10124,6 +11186,9 @@ def _summarize_state(state):
         named = _named_state(kind, value)
         return (f'{named["frames"]} frames of {named["frame_length"]} '
                 f'({named["window"]})')
+    if kind == 'transform':
+        # what a transformed history keeps taking from its recording
+        return _summarize_state(('averaging', value))
     if kind == 'averaging+roles':
         framing = _summarize_state(('averaging', value['averaging']))
         named = ', '.join(f'{dof} {quantity}' for dof, quantity, role
@@ -10179,6 +11244,30 @@ def _state_story(was, now):
         return 'computed before its shock windows moved'
     return (f'computed with {_summarize_state(was)}; the recording '
             f'now says {_summarize_state(now)}')
+
+
+def _specification_kind(specification) -> str:
+    """The kind of test a specification is for, as a control loop names
+    its kind (`Environment.kind`)."""
+    from .core.data import TransientSpecification
+    from .core.sine import SineSweepSpecification
+
+    if isinstance(specification, SineSweepSpecification):
+        return 'sine'
+    if isinstance(specification, TransientSpecification):
+        return 'transient'
+    return 'random'
+
+
+def _sweep_recording(project, history):
+    """The history the project's sine sweep specification is read from:
+    `history`, or the transformed history made from it that holds the
+    sweep's control rows (`Project.recording_for`)."""
+    from .core.sine import SineSweepSpecification
+
+    sweeps = [name for name, obj in project.items()
+              if isinstance(obj, SineSweepSpecification)]
+    return project.recording_for(sweeps[0], history) if len(sweeps) == 1 else history
 
 
 def _last_window(run, last):
@@ -10295,6 +11384,11 @@ def random_vibration_run(run: str | os.PathLike,
                           if isinstance(obj, Specification)), None)
     if specification is not None:
         project.compute_octave(specification, per_octave)
+        # a loop that controlled its transformation's rows is judged on
+        # their PSDs, framed as the recording is
+        against = project.recording_for(specification, history)
+        if against != history:
+            project.compute_octave(project.compute_psds(against), per_octave)
     project.compute_multiple_coherence(history)
     extras: list[str] = []
     if geometry is not None:
@@ -10317,8 +11411,9 @@ def _quiet_and_driven(project: Project) -> tuple[str | None, str]:
     A file holding one recording has no ambient, and the report's
     signal-to-noise stands down on its own.
     """
+    # a loop's transformed rows are part of the recording they came from
     names = [name for name, obj in project.items()
-             if isinstance(obj, TimeHistory)]
+             if isinstance(obj, TimeHistory) and project.transformed_from(name) is None]
     if not names:
         raise ValueError('no time data to work up')
     ranked = sorted(names, key=lambda name: float(
@@ -10570,7 +11665,7 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
         raise ValueError(
             f'{run} holds no sine sweep specification: it is not a random '
             'and sine run — random_vibration_run is the call for it')
-    project.extract_sine(project.time_history)
+    project.extract_sine(_sweep_recording(project, project.time_history))
     return project
 
 
@@ -10626,7 +11721,7 @@ def sine_run(run: str | os.PathLike, *,
                     if isinstance(obj, TimeHistory)), None)
     if history is None:
         raise ValueError(f'{run} holds no time data to work up')
-    project.extract_sine(history)
+    project.extract_sine(_sweep_recording(project, history))
     extras: list[str] = []
     if geometry is not None:
         options = {} if length_unit is None else {'length_unit': length_unit}

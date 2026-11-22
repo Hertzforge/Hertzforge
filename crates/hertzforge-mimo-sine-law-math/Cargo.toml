@@ -1,0 +1,26 @@
+[package]
+name = "hertzforge-mimo-sine-law-math"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+description = "The mathematics of the multiple-drive sine control laws"
+
+# The arithmetic of the MIMO Sine built-in laws (`matrix`, `paired`), the
+# loop-speed rule, the model the carry runs through, the regularized inverse by
+# shape and the readings for several shakers, with nothing around it: plain
+# records in, plain records out. It depends only on `hertzforge-sdm`, which
+# builds for `wasm32-wasip2`, and must keep building there:
+# `cargo build -p hertzforge-mimo-sine-law-math --target wasm32-wasip2`.
+
+[features]
+# The exact linear modal reference structure with the tracking filter's lag,
+# for tests. Not part of any law: a law file builds without it.
+reference-structure = []
+
+[dependencies]
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+
+[dev-dependencies]
+hertzforge-mimo-sine-law-math = { path = ".", features = ["reference-structure"] }
+serde_json = { workspace = true }

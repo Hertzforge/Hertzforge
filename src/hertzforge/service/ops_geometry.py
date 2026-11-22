@@ -1,7 +1,7 @@
 """Editing a geometry and what is drawn on it, and the project's own
 structure: the entity tables, the coordinate system gizmo,
 the DOF arrows and sensors of the 3-D view,
-Work Up, channel roles and DOF names, a channel table's
+Auto Compute, channel roles and DOF names, a channel table's
 control loops, and the object groups.
 
 A geometry's nodes, coordinate systems, elements and element groups are
@@ -22,13 +22,15 @@ from typing import Any
 
 import numpy as np
 
-from . import group_cells
+from hertzforge.drawing.viz.geometry import dof_arrow_solids
+
+from . import display_units, group_cells
 from . import views as v
-from .descriptors import Operation, Option, Param, Workspace
-from .mesh import drawn_mesh
+from .descriptors import TREE_PICKS, Operation, Option, Param, Workspace
+from .mesh import drawn_mesh, element_colors
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
-from .parsing import parse_id_runs
+from .parsing import each_picked, parse_id_runs
 from .protocol import refused
 
 ANY = 'objects:' + '|'.join(SAVED_KINDS)
@@ -74,8 +76,17 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     if len(soup):
         triangles = np.vstack([triangles, len(nodes) + np.arange(len(soup)).reshape(-1, 3)])
         nodes = np.vstack([nodes, soup])
+    from . import scans
+
+    # the nodes no line or face is drawn through, as points, so a geometry of measured
+    # points shows while its coordinate system is moved or one of its groups is picked
+    points, _note = scans.layers(geometry)
+    # the first rows are the geometry's own nodes, so their ids caption and number them;
+    # every element in its own color, as the plot of the geometry draws it
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
-                     triangles=triangles, lines=lines)
+                     triangles=triangles, lines=lines, node_ids=np.asarray(geometry.node_id),
+                     element_colors=element_colors(geometry),
+                     **({'points': points} if points else {}))
 
 
 def _solid_surfaces(geometry: Any) -> np.ndarray:
@@ -104,21 +115,6 @@ def frames(geometry: Any, drawn: Any = None) -> list[dict[str, Any]]:
     return [{'origin': [float(c) for c in matrix[3]],
              'axes': [[float(c) for c in matrix[axis]] for axis in range(3)],
              'length': float(length)} for matrix in matrices]
-
-
-def _arrow(start: np.ndarray, end: np.ndarray, nodes: list, lines: list) -> None:
-    """A shaft from `start` to `end` and a head of two barbs at `end`."""
-    along = end - start
-    length = float(np.linalg.norm(along))
-    if not length > 0:
-        return
-    unit = along / length
-    side = np.cross(unit, (0.0, 0.0, 1.0) if abs(unit[2]) < 0.9 else (1.0, 0.0, 0.0))
-    side /= np.linalg.norm(side)
-    base = len(nodes)
-    nodes += [start, end, end - 0.25 * length * unit + 0.12 * length * side,
-              end - 0.25 * length * unit - 0.12 * length * side]
-    lines += [(base, base + 1), (base + 1, base + 2), (base + 1, base + 3)]
 
 
 # ---- tables -------------------------------------------------------------------------
@@ -156,6 +152,26 @@ def _number(value: Any) -> str:
 PAGE_ROWS = 1000
 
 
+def part_link(kind: str, name: str) -> str:
+    """What ties the views of one kind of a geometry's entities: one marked in one view
+    (a row of the node table, a click in the 3-D view, a row of the tree) is marked in the
+    others. The shell's tree builds the same words for its rows.
+
+    Parameters
+    ----------
+    kind : str
+        'nodes', 'systems' or 'elements'.
+    name : str
+        The geometry's name in the project.
+
+    Returns
+    -------
+    str
+        The link the views carry, as `marks.link` or a `mark_sets` entry's `link`.
+    """
+    return f'{kind}:{name}'
+
+
 def picked_rows(geometry: Any, kind: str, family: str = '', groups: str = '') -> np.ndarray | None:
     """The rows, by index, of the part an entity table is about: a family's elements, or
     element groups' elements or the groups themselves. None for every row."""
@@ -182,7 +198,7 @@ def entity_columns(geometry: Any, kind: str) -> list[str]:
         return ['CS', 'Name', 'Type', *(f'Origin {a} [{unit}]' for a in 'XYZ'),
                 *(f'Rotation {a} [°]' for a in 'XYZ')]
     if kind == 'elements':
-        return ['Element', 'Type', 'Element group', 'Nodes']
+        return ['Element', 'Type', 'Element group', 'Nodes', 'Color']
     return ['Element group', 'Name', 'Elements', 'Elements are', 'Count',
             *group_cells.titles(geometry)]
 
@@ -191,6 +207,7 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
     """The cells of the entities at `indices`, and of no others: a page of a long table
     is written without writing the rest."""
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
+    from hertzforge.drawing.viz.geometry import color_text
     from hertzforge.rotate import angles_of
 
     indices = [int(k) for k in indices]
@@ -212,7 +229,8 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
         return [[str(int(geometry.elem_id[k])),
                  ELEMENT_TYPES.get(int(geometry.elem_type[k]), ('unknown',))[0],
                  labels.get(int(geometry.elem_group[k]), ''),
-                 ' '.join(str(int(n)) for n in geometry.elem_conn[k])] for k in indices]
+                 ' '.join(str(int(n)) for n in geometry.elem_conn[k]),
+                 color_text(int(geometry.elem_color[k]))] for k in indices]
     elem_group = np.asarray(geometry.elem_group)
     rows = []
     for k in indices:
@@ -222,6 +240,26 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
                      group_cells.family(geometry, group) or 'empty', str(len(members)),
                      *group_cells.cells(geometry, group)])
     return rows
+
+
+def _element_choices(geometry: Any, picked: Any) -> dict[str, list[str]]:
+    """What an element table's Type and Color cells offer: the types of the families its
+    rows hold (every family when it has none), and the palette's colors."""
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
+    from hertzforge.drawing.viz.geometry import PALETTE, color_text
+
+    codes = np.asarray(geometry.elem_type, dtype=int)
+    shown = codes if picked is None else codes[picked]
+    families = {element_family(int(c)) for c in np.unique(shown)} or set(FAMILY_ADD_TYPES)
+    return {'type': [word for c, (word, _n, _r) in ELEMENT_TYPES.items()
+                     if element_family(c) in families],
+            'color': [color_text(k) for k in range(len(PALETTE))]}
+
+
+def _hex(index: int) -> str:
+    from hertzforge.drawing.viz.geometry import color_rgb
+
+    return '#' + ''.join(f'{round(255 * c):02x}' for c in color_rgb(index))
 
 
 def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
@@ -234,21 +272,38 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
     it sends its first and its count, the rest asked for as they are
     scrolled to. `family` or `groups` keeps a part's rows (`picked_rows`),
     and its edits and pages say the same part, so a row is the part's."""
+    from hertzforge.drawing.viz.geometry import color_index
+
     picked = picked_rows(geometry, kind, family, groups)
     count = len(getattr(geometry, ID_ARRAYS[kind])) if picked is None else len(picked)
     sent = min(count, PAGE_ROWS) if name is not None else count
     indices = np.arange(sent) if picked is None else picked[:sent]
     rows = entity_rows(geometry, kind, indices)
     part = {key: value for key, value in (('family', family), ('groups', groups)) if value}
+    choices, kinds = (group_cells.choices(), None) if kind == 'groups' else (None, None)
+    if kind == 'elements':
+        choices, kinds = _element_choices(geometry, picked), {'type': 'choice', 'color': 'choice'}
     edit = None if name is None else v.editing(
         'project.set_entity_cell', {'geometry': name, 'kind': kind, **part}, FIELDS[kind],
-        group_cells.choices() if kind == 'groups' else None)
+        choices, kinds)
+    if edit is not None and kind == 'elements':
+        # each color's cell shows its swatch
+        edit['swatches'] = {'color': {choice: _hex(color_index(choice))
+                                      for choice in choices['color']}}
     if edit is not None:
         # the rows are the entities, so Delete takes rows, not cells: each by its id,
         # the first column
         edit['remove'] = {'op': 'project.delete_entities',
-                          'params': {'geometry': name, 'kind': kind}, 'column': 0}
+                          'params': {'geometry': name, 'kind': kind, **part}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
+    if name is not None and kind in ('nodes', 'elements'):
+        # its rows and the nodes or elements of the view beside it are marked together
+        table['marks'] = {'link': part_link(kind, name), 'column': 0}
+    if name is not None and kind == 'coordinate_systems':
+        # the row picked is the system the arrows and rings in the view are on
+        table['select'] = {'op': 'project.view_entities',
+                           'params': {'geometry': name, 'kind': kind}, 'param': 'cs',
+                           'column': 0}
     if name is not None and count > sent:
         table['total'] = count
         table['more'] = {'method': 'project.entity_rows',
@@ -264,27 +319,64 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
     ids = [int(n) for n in geometry.node_id]
     if kind == 'nodes':
         return v.picking('project.add_node', {'geometry': name}, 'point',
-                         'Click in the view to place a node', ids=ids)
+                         'Click in the view to place a node', ids=ids, in_display=True)
     if kind == 'coordinate_systems':
         return v.picking('project.add_coordinate_system', {'geometry': name}, 'point',
-                         'Click in the view to place a coordinate system', ids=ids)
+                         'Click in the view to place a coordinate system', ids=ids, in_display=True)
     if kind != 'elements':
         return None
-    from hertzforge.core.geometry import ELEMENT_TYPES
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
 
     element = element or {'family': FAMILY.default, 'type': '', 'group': 0}
     family = element['family']
-    code, count = FAMILY_ADD_TYPES[family]
-    chained = ELEMENT_TYPES[code][2] == 'line'
-    hint = (f'Click nodes in order, then press Enter for the line of {family}' if chained
-            else f'Click {count} node{"s" * (count != 1)} to make one of the {family}')
-    return v.picking('project.add_element', {'geometry': name, **element}, 'nodes', hint,
-                     ids=ids, count=0 if chained else count,
-                     param='nodes')
+    # the type Add mode makes: the one picked in its Type list, or the family's own
+    wanted = str(element.get('type') or '').strip().lower()
+    code = next((c for c, (word, _n, _r) in ELEMENT_TYPES.items()
+                 if word == wanted and element_family(c) == family), FAMILY_ADD_TYPES[family][0])
+    word = ELEMENT_TYPES[code][0]
+    count, hint = _clicks(code)
+    pick = v.picking('project.add_element', {'geometry': name, **element, 'type': word},
+                     'nodes', hint, ids=ids, count=count, param='nodes')
+    pick['settings'] = _add_settings(geometry, family)
+    return pick
+
+
+def _clicks(code: int) -> tuple[int, str]:
+    """How many clicked nodes make an element of this type (0: a line through as many as
+    are clicked, then Enter), and the hint that says so."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    word, count, render = ELEMENT_TYPES[code]
+    if render == 'line':
+        return 0, f'Click nodes in order, then press Enter for the line of {word} elements'
+    return count, f'Click {count} node{"s" * (count != 1)} to make a {word}'
+
+
+def _add_settings(geometry: Any, family: str) -> list[dict[str, Any]]:
+    """What Add mode asks beside the clicks: the type of the family to make, and the
+    element group it goes in, of the groups that hold that family, or hold nothing yet and
+    were made for it or for no family (`Geometry.group_family`)."""
+    from hertzforge.core.geometry import ELEMENT_TYPES, element_family
+
+    held: dict[int, set[str]] = {int(g): set() for g in geometry.group_id}
+    for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
+        held.setdefault(int(group), set()).add(element_family(int(code)))
+    made_for = geometry.group_family
+    groups = [{'value': int(g), 'label': _group_label(geometry, k)}
+              for k, g in enumerate(geometry.group_id)
+              if held[int(g)] == {family}
+              or (not held[int(g)] and made_for.get(int(g), family) == family)]
+    return [
+        {'param': 'type', 'label': 'Type',
+         # each type says how many clicks make one, so the view counts them as it is picked
+         'options': [{'value': word, 'label': word, 'count': _clicks(c)[0], 'hint': _clicks(c)[1]}
+                     for c, (word, _n, _r) in ELEMENT_TYPES.items() if element_family(c) == family]},
+        {'param': 'group', 'label': 'Element group',
+         'options': [{'value': 0, 'label': 'First or new'}, *groups]}]
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '',
-           element: dict[str, Any] | None = None, **part: str) -> list[dict]:
+           element: dict[str, Any] | None = None, adds: bool = True, **part: str) -> list[dict]:
     """The geometry drawn, with its coordinate systems' axes when they are
     the entities in hand and what a click in it adds (`_pick`), and the
     table of `kind` (of a part's rows, when `family` or `groups` names one)."""
@@ -295,9 +387,46 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     if kind == 'coordinate_systems':
         drawn['frames'] = frames(geometry, drawn['nodes'])
     pick = _pick(name, geometry, kind, element)
-    if pick is not None:
+    # a node or a coordinate system is placed by a click only while one is being added
+    # (`adds`): a click while their table was edited placed one nobody asked for
+    # (Brandon, 2026-11-17)
+    if pick is not None and (adds or kind not in ('nodes', 'coordinate_systems')):
         drawn['pick'] = pick
+    if kind == 'nodes':
+        drawn['marks'] = {'link': part_link('nodes', name)}
+    if kind == 'elements':
+        # in Select mode a click in the view marks the element under it, as its row does
+        # and Delete there removes the elements marked, as it does in the table
+        drawn['mark_sets'] = [{**_table_element_marks(name, geometry, **part), 'clicks': True,
+                               'remove': {'op': 'project.delete_entities',
+                                          'params': {'geometry': name, 'kind': 'elements', **part}}}]
+        if len(drawn['mark_sets'][0]['ids']) == MARKED_ELEMENTS:
+            drawn['note'] = (f'Rows after the first {MARKED_ELEMENTS} are not highlighted '
+                             'in the view.')
     return [drawn, entity_table(geometry, kind, title, name, **part)]
+
+
+#: the most elements of an element table the 3-D view beside it highlights
+MARKED_ELEMENTS = 10_000
+
+
+def _table_element_marks(name: str, geometry: Any, family: str = '', groups: str = ''
+                         ) -> dict[str, Any]:
+    """The elements of an element table as the view beside it highlights the ones whose
+    rows are selected: each element's id, the rows of its nodes (ringed), and its faces and
+    edges (`mesh.element_highlights`), for the table's first `MARKED_ELEMENTS` rows."""
+    from .mesh import element_highlights
+
+    picked = picked_rows(geometry, 'elements', family, groups)
+    elements = np.arange(len(geometry.elem_id)) if picked is None else picked
+    elements = elements[:MARKED_ELEMENTS]
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    faces, edges = element_highlights(geometry, elements)
+    return {'link': part_link('elements', name),
+            'ids': [int(geometry.elem_id[element]) for element in elements],
+            'rows': [[rows[int(node)] for node in geometry.elem_conn[element]
+                      if int(node) in rows] for element in elements],
+            'faces': faces, 'edges': edges}
 
 
 def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:
@@ -305,25 +434,61 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
     coordinate systems' axes when they are the part, and no table: a part's table is its
     Edit verb (`view_entities`), not its plot (Brandon, 2026-11-13). None for a part
     drawn another way (solids, mated surfaces)."""
-    from .verbs import part_key
+    from .verbs import part_key, picked_ids
 
     where = part_key(part)
     if where not in ('part:nodes', 'part:coordinate_systems', 'family', 'group'):
         return None
     drawn = _drawn(name, geometry)
-    if where == 'part:coordinate_systems':
+    if where == 'part:nodes':
+        drawn['marks'] = {'link': part_link('nodes', name)}
+    elif where == 'part:coordinate_systems':
         drawn['frames'] = frames(geometry, drawn['nodes'])
+        # a system's row in the tree marks its origin among the frames drawn
+        drawn['mark_sets'] = [{'link': part_link('systems', name), 'frames': True,
+                               'ids': [int(cs) for cs in geometry.cs_id]}]
+    elif where == 'group':
+        _mark_points(drawn, geometry, picked_ids(part))
+        drawn['mark_sets'] = [_element_marks(name, geometry, picked_ids(part))]
     return [drawn]
+
+
+def _element_marks(name: str, geometry: Any, groups: Any) -> dict[str, Any]:
+    """The elements of the groups picked, as the view marks them one at a time: each
+    element's id and the rows of its nodes, which an element's row in the tree rings. The
+    first of a large group's, the ones the tree lists (`tree.listed_elements`)."""
+    from .tree import listed_elements
+
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    listed = listed_elements(geometry)
+    # in the geometry's order, as the tree lists them group by group
+    elements = sorted(element for group in {int(group) for group in groups}
+                      for element in listed.get(group, ()))
+    return {'link': part_link('elements', name),
+            'ids': [int(geometry.elem_id[element]) for element in elements],
+            'rows': [[rows[int(node)] for node in geometry.elem_conn[element]
+                      if int(node) in rows] for element in elements]}
+
+
+def _mark_points(drawn: dict, geometry: Any, groups: Any) -> None:
+    """The points of the element groups picked, drawn over the rest in their own color."""
+    from . import scans
+
+    layer = scans.picked_layer(geometry, [int(g) for g in groups])
+    if layer is not None:
+        drawn['points'] = [*drawn.get('points', ()), layer]
 
 
 # ---- View Entities and the edits ----------------------------------------------------
 
 def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.view_entities`, a part's Edit: its entities as a table beside the geometry
-    drawn, cells typed over and rows deleted in place, and a click in the view adding one
-    (Brandon, 2026-11-13: the table is editing's, not the plot's). The nodes or coordinate
-    systems; a family's elements (`family`); element groups and their elements, with
-    their connections (`groups`)."""
+    drawn, cells typed over and rows deleted in place (Brandon, 2026-11-13: the table is
+    editing's, not the plot's). The nodes or coordinate systems; a family's elements
+    (`family`), a click on its nodes adding one; element groups and their elements, with
+    their connections (`groups`). The coordinate system on the row picked (`cs`), or the
+    only one, has the arrows and rings on it: dragging them slides and turns it, as typing
+    in its row does (Brandon, 2026-11-17)."""
     from hertzforge.core.geometry import FAMILY_LABELS
 
     name = params['geometry']
@@ -332,15 +497,43 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
     if runs:
         groups = parse_id_runs(runs)
         runs = id_runs_text(groups)
-        said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
-        drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
-        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
-                                    name, groups=runs), elements]
+        return _group_views(name, geometry, groups,
+                            ('element group ' if len(groups) == 1 else 'element groups ') + runs)
     if family:
-        element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
         return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
-                      element, family=family)
-    return _shown(name, geometry, params['kind'])
+                      _family_element(family), family=family)
+    views = _shown(name, geometry, params['kind'], adds=False)
+    if params['kind'] == 'coordinate_systems':
+        ids = [int(c) for c in geometry.cs_id]
+        cs = params['cs'] or (ids[0] if len(ids) == 1 else 0)
+        if cs:
+            views = _with_gizmo(views, name, geometry, cs)
+    return views
+
+
+def _group_views(name: str, geometry: Any, groups: list[int], said: str) -> list[dict]:
+    """Element groups' Edit: the geometry drawn, the groups' table and their elements'
+    table. Add mode makes an element of the groups' family, in the group when one is
+    picked, and shows the groups again."""
+    from hertzforge.core.geometry import element_family
+
+    runs = id_runs_text(groups)
+    rows = picked_rows(geometry, 'elements', groups=runs)
+    families = {element_family(int(geometry.elem_type[r])) for r in rows}
+    family = families.pop() if len(families) == 1 else ''
+    element = None
+    if family in FAMILY_ADD_TYPES:
+        element = {'family': family, 'type': '', 'group': groups[0] if len(groups) == 1 else 0,
+                   'groups': runs}
+    drawn, elements = _shown(name, geometry, 'elements', said, element, groups=runs)
+    _mark_points(drawn, geometry, groups)
+    return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
+                                name, groups=runs), elements]
+
+
+def _family_element(family: str) -> dict[str, Any] | None:
+    """What a click adds while a family's table is open: an element of that family."""
+    return {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
 
 
 def _optional_id(value: int) -> int | None:
@@ -357,9 +550,9 @@ def _system(geometry: Any, cs: int) -> int:
     return cs
 
 
-X = Param('x', 'X', 'number', default=0.0, unit='m', step=0.001)
-Y = Param('y', 'Y', 'number', default=0.0, unit='m', step=0.001)
-Z = Param('z', 'Z', 'number', default=0.0, unit='m', step=0.001)
+X = Param('x', 'X', 'number', default=0.0, unit='m', step=0.001, length=True)
+Y = Param('y', 'Y', 'number', default=0.0, unit='m', step=0.001, length=True)
+Z = Param('z', 'Z', 'number', default=0.0, unit='m', step=0.001, length=True)
 NODE_ID = Param('id', 'Id (0: one more than the highest)', 'integer', default=0, min=0,
                 step=1)
 PLACEMENT_CS = Param('placement_cs', 'Placement CS (0: the first)', 'integer', default=0,
@@ -487,8 +680,12 @@ def add_element(project: Any, params: dict[str, Any]) -> list[dict]:
                     f'{int(geometry.elem_id[row])}')
     except ValueError as error:
         raise refused(str(error)) from None
+    if params['groups'].strip():
+        # added from element groups' Edit: those groups again
+        return _group_views(name, geometry, parse_id_runs(params['groups']), said)
+    # the family's own table again, as its Edit opened it, not every element
     return _shown(name, geometry, 'elements', said,
-                  {key: params[key] for key in ('family', 'type', 'group')})
+                  {key: params[key] for key in ('family', 'type', 'group')}, family=family)
 
 
 GROUP_NAME = Param('name', 'Name', 'string', default='')
@@ -497,15 +694,38 @@ GROUP_NAME = Param('name', 'Name', 'string', default='')
 def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_element_group`: an empty element group
     (`Geometry.add_group`), added outright since
-    an element group is not placed in space."""
+    an element group is not placed in space. With `family` it is that family's, listed
+    under it in the tree while it is empty and offered in its Edit's Add mode."""
     name = params['geometry']
     geometry = project[name]
+    family = params['family'].strip()
     try:
-        group = geometry.add_group(params['name'], _optional_id(params['id']))
+        group = geometry.add_group(params['name'], _optional_id(params['id']), family=family)
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_call(name, 'add_group', params['name'], int(group))
-    return _shown(name, geometry, 'groups', f'added element group {group}')
+    project.record_call(name, 'add_group', params['name'], int(group), family=family)
+    return _shown(name, geometry, 'groups', f'added element group {group}'
+                  + (f' for the {family}' if family else ''))
+
+
+def move_elements(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.move_elements`: elements put in another element group
+    (`Geometry.move_elements`), as dragging them onto it in the tree does; the group's
+    Edit views show after."""
+    name = params['geometry']
+    geometry = project[name]
+    ids = parse_id_runs(params['elements'])
+    if not ids:
+        raise refused('name the elements to move, such as 1-3, 7')
+    try:
+        moved = geometry.move_elements(ids, params['group'])
+    except ValueError as error:
+        raise refused(str(error)) from None
+    project.record_call(name, 'move_elements', ids, int(params['group']))
+    views = view_entities(project, {'geometry': name, 'kind': 'elements', 'family': '',
+                                    'groups': str(params['group']), 'cs': 0})
+    views[-1]['title'] += f' ({moved} element{"s" * (moved != 1)} moved in)'
+    return views
 
 
 ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
@@ -513,7 +733,7 @@ FIELDS = {
     'nodes': ('id', 'x', 'y', 'z', 'placement_cs', 'displacement_cs'),
     'coordinate_systems': ('id', 'name', 'type', 'origin_x', 'origin_y', 'origin_z',
                            'rotation_x', 'rotation_y', 'rotation_z'),
-    'elements': ('id', 'type', 'group', 'nodes'),
+    'elements': ('id', 'type', 'group', 'nodes', 'color'),
     'groups': ('id', 'name', 'elements', None, None, *group_cells.KEYS),
 }
 FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
@@ -523,7 +743,8 @@ FIELD = Param('field', 'Field', 'enum', default='id', options=tuple(
         ('name', 'Name'), ('type', 'Type'), ('origin_x', 'Origin X'),
         ('origin_y', 'Origin Y'), ('origin_z', 'Origin Z'), ('rotation_x', 'Rotation X (°)'),
         ('rotation_y', 'Rotation Y (°)'), ('rotation_z', 'Rotation Z (°)'),
-        ('group', 'Element group'), ('nodes', 'Nodes'), ('elements', 'Elements'),
+        ('group', 'Element group'), ('nodes', 'Nodes'), ('color', 'Color'),
+        ('elements', 'Elements'),
         *((key, title) for key, title, *_rest in group_cells.COLUMNS))))
 VALUE = Param('value', 'Value', 'string', default='')
 
@@ -626,13 +847,17 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
                     geometry.elem_group[row] = int(group)
                     return
             raise ValueError(f'no element group {wanted!r}; add it first')
-        else:
+        elif field == 'nodes':
             nodes = parse_id_runs(text, 'a node id')
             missing = set(nodes) - set(geometry.node_id.tolist())
             if missing:
                 raise ValueError(f'unknown nodes {sorted(missing)}')
             _check_nodes(int(geometry.elem_type[row]), nodes)
             geometry.elem_conn[row] = np.asarray(nodes, dtype=np.int64)
+        elif field == 'color':
+            from hertzforge.drawing.viz.geometry import color_index
+
+            geometry.elem_color[row] = color_index(text)
     else:
         if field == 'id':
             geometry.renumber_group(row, _whole(text, 1))
@@ -692,9 +917,11 @@ def set_entity(project: Any, params: dict[str, Any]) -> list[dict]:
                        params['field'], params['value'])
 
 
-def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str
-                ) -> list[dict]:
-    """One field of the entity on `row` written; ids may repeat, so the row says which."""
+def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value: str,
+                part: dict[str, str] | None = None) -> list[dict]:
+    """One field of the entity on `row` written; ids may repeat, so the row says which.
+    The table shown after is the `part`'s (`family` or `groups`) when one is named."""
+    part = part or {}
     geometry = project[name]
     if field not in FIELDS[kind]:
         raise refused(f'a {LABELS[kind]} has the fields {", ".join(filter(None, FIELDS[kind]))}; '
@@ -713,7 +940,12 @@ def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value:
         if said.startswith(('could not convert', 'invalid literal')):
             said = f'{value!r} is not a number'
         raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
-    return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
+    views = _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set',
+                   _family_element(part.get('family', '')), adds=False, **part)
+    if kind == 'coordinate_systems':
+        # the arrows and rings stay on the system just typed into
+        views = _with_gizmo(views, name, geometry, int(geometry.cs_id[row]))
+    return views
 
 
 def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -729,13 +961,9 @@ def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'the {LABELS[kind]} table has {count} rows; there is no row '
                       f'{params["row"]}')
     at = params['row'] - 1 if picked is None else int(picked[params['row'] - 1])
-    views = _set_at_row(project, params['geometry'], kind, at, params['column'],
-                        params['value'])
-    part = {key: value for key, value in part.items() if value}
-    if part:
-        # the part's own table again, not every row of the kind
-        views[-1] = entity_table(geometry, kind, views[-1]['title'], params['geometry'], **part)
-    return views
+    # the part's own table again, not every row of the kind
+    return _set_at_row(project, params['geometry'], kind, at, params['column'],
+                       params['value'], {key: value for key, value in part.items() if value})
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
@@ -781,7 +1009,10 @@ def delete_entities(project: Any, params: dict[str, Any]) -> list[dict]:
                 'coordinate_systems': 'coordinate system'}
     removed = ', '.join(f'{count} {singular[key]}{"s" * (count != 1)}'
                         for key, count in report.items() if count and key in singular)
-    return _shown(name, geometry, kind, f'removed {removed}' if removed else '')
+    # the table the rows were deleted from: a family's or element groups' own
+    part = {key: params[key] for key in ('family', 'groups') if params[key]}
+    return _shown(name, geometry, kind, f'removed {removed}' if removed else '',
+                  _family_element(part.get('family', '')), adds=False, **part)
 
 
 # ---- turning and sliding a coordinate system ----------------------------------------
@@ -792,7 +1023,8 @@ AXIS = Param('axis', 'About its own axis', 'enum', default='z', options=(
 SLIDE_AXIS = Param('axis', 'Along its own axis', 'enum', default='x', options=(
     Option('x', 'X'), Option('y', 'Y'), Option('z', 'Z')))
 ANGLE = Param('angle', 'Angle', 'number', default=0.0, unit='°', step=1.0)
-DISTANCE = Param('distance', 'Distance', 'number', default=0.0, unit='m', step=0.001)
+DISTANCE = Param('distance', 'Distance', 'number', default=0.0, unit='m', step=0.001,
+                 length=True)
 
 
 def _frame(geometry: Any, cs: int) -> tuple[int, np.ndarray]:
@@ -808,7 +1040,7 @@ def _with_gizmo(views: list[dict], name: str, geometry: Any, cs: int) -> list[di
     held = {'geometry': name, 'cs': cs}
     views[0]['gizmo'] = v.gizmo(
         matrix[3], matrix[:3],
-        {'op': 'project.slide_coordinate_system', 'params': held,
+        {'op': 'project.slide_coordinate_system', 'params': held, 'in_display': True,
          'values': dict.fromkeys('xyz', 'distance'), 'adds': {a: {'axis': a} for a in 'xyz'}},
         {'op': 'project.rotate_coordinate_system', 'params': held,
          'values': dict.fromkeys('xyz', 'angle'), 'adds': {a: {'axis': a} for a in 'xyz'}})
@@ -830,14 +1062,15 @@ def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]
                         angles=[float(a) for a in angles_of(turned)])
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
                               f'turned {cs} {params["angle"]:+g}° about its '
-                              f'{params["axis"].upper()}'), name, geometry, cs)
+                              f'{params["axis"].upper()}', adds=False), name, geometry, cs)
 
 
 def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.slide_coordinate_system`: a coordinate system's origin
     moved a typed distance along one of its own axes
-    (`rotate.translate_frame`, `Geometry.place_coordinate_system`). The distance is in the
-    geometry's stored length unit, meters once its units are declared."""
+    (`rotate.translate_frame`, `Geometry.place_coordinate_system`). The distance is typed
+    in the display system's length unit and arrives here in meters; a geometry whose units are
+    not defined takes it in its file's own numbers."""
     from hertzforge.rotate import translate_frame
 
     name = params['geometry']
@@ -847,9 +1080,11 @@ def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     geometry.place_coordinate_system(cs, origin=moved[3])
     project.record_call(name, 'place_coordinate_system', cs,
                         origin=[float(x) for x in moved[3]])
+    unit, scale = display_units.words_in('length') if geometry.units_defined else ('', 1.0)
+    moved_by = f'{params["distance"] * scale:+.6g}{" " + unit if unit else ""}'
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
-                              f'moved {cs} {params["distance"]:+g} along its '
-                              f'{params["axis"].upper()}'), name, geometry, cs)
+                              f'moved {cs} {moved_by} along its {params["axis"].upper()}',
+                              adds=False), name, geometry, cs)
 
 
 def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -864,7 +1099,8 @@ def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
     angles = [float(a) for a in angles_of(identity_frame(matrix))]
     geometry.place_coordinate_system(cs, angles=angles)
     project.record_call(name, 'place_coordinate_system', cs, angles=angles)
-    return _shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset')
+    return _with_gizmo(_shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset',
+                              adds=False), name, geometry, cs)
 
 
 # ---- DOF arrows and sensors ---------------------------------------------------------
@@ -939,10 +1175,8 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.dof_arrows`: an arrow at each DOF on the geometry the
     source is linked with, along that axis of the node's displacement
     coordinate system (`drawing.viz.geometry.dof_arrow_vectors`), all
-    one length (`dof_arrow_length`); a force points in and ends on its node. The arrows are extra
-    nodes and lines of the mesh, a shaft and a head of two barbs, since
-    a `shape3d` has no markers, and their table lists each DOF and where
-    it points."""
+    one length (`dof_arrow_length`); a force points in and ends on its node. The arrows are
+    the view's `arrows`, and their table lists each DOF and where it points."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
 
     name = params['source']
@@ -954,29 +1188,24 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
     drawn = [(dof, into, hit) for dof, into, hit in zip(dofs, incoming, found, strict=True)
              if hit is not None]
-    nodes: list = []
-    lines: list = []
+    view = _drawn(f'{home}, DOFs of {name}', geometry)
     if drawn:
         length = dof_arrow_length(xyz[[hit[0] for _d, _i, hit in drawn]], _extent(xyz))
-        for _dof, into, (row, vector, _axis) in drawn:
-            at = xyz[row]
-            if into:
-                _arrow(at - length * vector, at, nodes, lines)
-            else:
-                _arrow(at, at + length * vector, nodes, lines)
+        view['arrows'] = dof_arrow_solids(xyz, [(into, hit) for _d, into, hit in drawn], length,
+                                [dof for dof, _i, _h in drawn])
     rows = []
     for dof, into, hit in zip(dofs, incoming, found, strict=True):
         if hit is None:
             rows.append([dof, '', 'not drawn: no such node or direction on ' + home])
             continue
-        row, vector, _axis = hit
+        _row, vector, _axis = hit
         rows.append([dof, ' '.join(f'{c:+.3f}' for c in vector),
                      'in, ending on the node' if into else 'out from the node'])
     missing = len(dofs) - len(drawn)
     title = (f'DOFs of {name} on {home}: {what}, {len(drawn)} arrow'
              f'{"s" * (len(drawn) != 1)}'
              + (f'; {missing} of {len(dofs)} have none' if missing else ''))
-    return [_drawn(f'{home}, DOFs of {name}', geometry, nodes, lines),
+    return [view,
             v.table(title, ['DOF', 'Direction (global)', 'Arrow'], rows)]
 
 
@@ -1023,7 +1252,7 @@ def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
             v.reading(f'Sensors of {name}', readings)]
 
 
-# ---- Work Up ------------------------------------------------------------------------
+# ---- Auto Compute (the ids keep `work_up`) ------------------------------------------------------------------------
 
 def _still_missing(project: Any) -> list[dict]:
     """What the reports are still without: the slots required, those left
@@ -1111,7 +1340,7 @@ def _place_basis(project: Any, test: str) -> list[str]:
 
 
 def _srs_bands(project: Any, added: list[str]) -> list[dict]:
-    """Where a low-pass stopped an SRS Work Up made, since nothing else in
+    """Where a low-pass stopped an SRS Auto Compute made, since nothing else in
     its reading would say the top of the band was left off."""
     rows = []
     for name in added:
@@ -1127,25 +1356,27 @@ def _srs_bands(project: Any, added: list[str]) -> list[dict]:
 
 def _work_up(test: str) -> Any:
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
-        """Work Up in one module, which says the kind of test: the objects
-        that fill its Basis placed there, then every missing object it
-        expects computed from what is loaded, the report last
+        """Auto Compute in one module, which says the kind of test: the objects
+        that fill its Basis placed there, anything out of date recomputed,
+        then every missing object it expects computed from what is loaded, the report last
         (`Project.work_up`), and what is still missing after it."""
         if not project.names:
-            raise refused('Nothing is loaded to work up')
+            raise refused('Nothing is loaded to compute from')
         moved = _place_basis(project, test)
         try:
             added = project.work_up(test)
         except ValueError as error:
             raise refused(str(error)) from None
-        rows = ([v.row('Added', name, None, 'pass') for name in added]
-                or [v.row('Added', 'nothing to compute', None, 'info')])
+        rows = [v.row('Recomputed', name, None, 'pass')
+                for name in project.last_work_up_refreshed]
+        rows += ([v.row('Added', name, None, 'pass') for name in added]
+                 or [v.row('Added', 'nothing to compute', None, 'info')])
         if moved:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
         rows += _srs_bands(project, added)
         rows += [v.row('Not computed', f'{slot}: {why}', None, 'warn')
                  for slot, why in dict.fromkeys(project.last_work_up_skipped)]
-        return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
+        return [v.reading(f'Auto Compute, {test}', rows + _still_missing(project))]
     return run
 
 
@@ -1417,11 +1648,13 @@ def name_object_group(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- descriptors --------------------------------------------------------------------
 
 def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
-           edits: bool = True, workspace: Workspace = 'geometry') -> Operation:
+           edits: bool = True, workspace: Workspace = 'geometry',
+           previews: bool = False) -> Operation:
     """An act on a geometry: in the Geometry module unless it is the finite
     element model's (element groups, solving)."""
     return Operation(id=id_, title=title, workspace=workspace,
-                     summary=summary, params=params, outputs=outputs, run=run, edits=edits)
+                     summary=summary, params=params, outputs=outputs, run=run, edits=edits,
+                     previews=previews)
 
 
 def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
@@ -1442,23 +1675,35 @@ OPERATIONS = (
            'as a table to edit, beside the geometry drawn.',
            (GEOMETRY, KIND, Param('family', 'Family whose elements the table shows', 'string',
                                   default=''),
-            Param('groups', 'Element groups the table shows', 'string', default='')),
+            Param('groups', 'Element groups the table shows', 'string', default=''),
+            Param('cs', 'Coordinate system with the arrows and rings (0: none)', 'integer',
+                  default=0, min=0, step=1)),
            DRAWN, view_entities, edits=False),
     _model('project.add_node', 'Add Node',
-           'A node at typed coordinates, in meters once the geometry\'s units are '
-           'declared.',
-           (GEOMETRY, X, Y, Z, NODE_ID, PLACEMENT_CS, DISPLACEMENT_CS), DRAWN, add_node),
+           'A node at typed coordinates, or where the view is clicked.',
+           (GEOMETRY, X, Y, Z, NODE_ID, PLACEMENT_CS, DISPLACEMENT_CS), DRAWN, add_node,
+           previews=True),
     _model('project.add_coordinate_system', 'Add Coordinate System',
            'A coordinate system at a typed origin, turned about the fixed X, then Y, then '
            'Z axes.',
            (GEOMETRY, X, Y, Z, RX, RY, RZ, CS_NAME, CS_TYPE, NODE_ID), DRAWN,
-           add_coordinate_system),
+           add_coordinate_system, previews=True),
     _model('project.add_element', 'Add Element',
            'An element of a family on the nodes named, in order; for beams, the chain of '
            'elements through every node named.',
-           (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP), DRAWN, add_element),
+           (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP,
+            Param('groups', 'Element groups whose Edit shows after', 'string', default='')),
+           DRAWN, add_element),
+    _model('project.move_elements', 'Move Elements',
+           'Elements put in another element group of the same element family, as dragging '
+           'them onto it in the tree does.',
+           (GEOMETRY, Param('elements', 'Elements, as 1-3, 7', 'string', default=''),
+            Param('group', 'Element group', 'integer', default=1, min=1, step=1)),
+           DRAWN, move_elements),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='geometry'),
+           (GEOMETRY, GROUP_NAME, NODE_ID,
+            Param('family', 'Element family (blank: none yet)', 'string', default='')),
+           DRAWN, add_element_group, workspace='geometry'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',
@@ -1466,7 +1711,10 @@ OPERATIONS = (
     _model('project.delete_entities', 'Delete Entities',
            'Nodes, coordinate systems, elements or element groups deleted by id; nodes '
            'data is measured at, and the last coordinate system, are kept.',
-           (GEOMETRY, KIND, IDS), (*DRAWN, 'reading'), delete_entities),
+           (GEOMETRY, KIND, IDS,
+            Param('family', 'Family whose elements the table shows', 'string', default=''),
+            Param('groups', 'Element groups the table shows', 'string', default='')),
+           (*DRAWN, 'reading'), delete_entities),
     _model('project.rotate_coordinate_system', 'Rotate Coordinate System',
            'A coordinate system turned by a typed angle about one of its own axes.',
            (GEOMETRY, CS, AXIS, ANGLE), DRAWN, rotate_coordinate_system),
@@ -1488,7 +1736,8 @@ OPERATIONS = (
     _shared('project.set_channel_role', 'Set Channel Role',
              'One channel made a reference, a response or a monitor, on a time history or '
              'channel table and on what is linked with it.',
-             (ROLE_SOURCE, RECORD, CHANNEL_ROLE), ('table',), set_channel_role),
+             (ROLE_SOURCE, RECORD, CHANNEL_ROLE, TREE_PICKS), ('table',),
+             each_picked(set_channel_role)),
     _shared('project.rename_dof', 'Rename DOF',
              'A channel\'s DOF corrected on an object and on everything derived from it; '
              'with a quantity, only that channel at the DOF.',
@@ -1500,8 +1749,8 @@ OPERATIONS = (
              workspace='geometry'),
     _shared('project.set_control', 'Set Control',
              'Control checked or cleared on one channel of one control loop.',
-             (TABLE, ENVIRONMENT, RECORD, CONTROL), ('table',), set_control,
-             workspace='geometry'),
+             (TABLE, ENVIRONMENT, RECORD, CONTROL, TREE_PICKS), ('table',),
+             each_picked(set_control, source='table'), workspace='geometry'),
     _shared('project.link', 'Link', 'Objects linked into one group, merging the groups '
              'they are in.', (FIRST, SECOND, MORE, LINK_NAME), GROUPS, link),
     _shared('project.unlink', 'Unlink', 'An object taken out of its group.',
@@ -1529,7 +1778,7 @@ OPERATIONS = (
                 Param('groups', 'Element groups the table shows', 'string', default='')),
         outputs=('shape3d', 'table'), run=set_entity_cell, edits=True),
     *(Operation(
-        id=f'project.work_up_{module}', title=f'Work Up {test}', workspace=module,
+        id=f'project.work_up_{module}', title=f'Auto Compute {test}', workspace=module,
         summary=f'Every object a {test} test expects computed from what is loaded, the report '
                 'last.',
         params=(), outputs=('reading',), run=_work_up(test))

@@ -129,6 +129,14 @@ export interface SpectrumView {
 	handles?: SpectrumHandle[];
 	/** Sets of series shown one at a time, chosen from a list: a channel each, say. */
 	groups?: SeriesGroup[];
+	/** Zones shaded behind the curves, each between two edges at `x` (null: the plot's edge on that side): past a warning limit, over or under an abort. */
+	bands?: { kind: 'warning' | 'over' | 'under'; x: (number | null)[]; lower: (number | null)[] | null; upper: (number | null)[] | null }[];
+	/** The legend's lines for the zones and marks: a code (`warning`, `above`, `below`, `exceed_over`, `exceed_under`) and its words. */
+	key?: [string, string][];
+	/** Numbers boxed under the plot, as a group's: the share of lines out, the RMS error. */
+	readouts?: { label: string; text: string; status: Status }[];
+	/** The range of x the plot opens on, where that is not all of its data. */
+	x_home?: [number, number];
 }
 
 /** One set of a spectrum's series, by index, with readings that go with it. */
@@ -142,9 +150,16 @@ export interface SeriesGroup {
 export interface Region {
 	x0: number;
 	x1: number;
-	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone. */
-	kind: 'frame' | 'cut' | 'span';
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone; `over`, `under`: lines outside an abort limit. */
+	kind: 'frame' | 'cut' | 'span' | 'over' | 'under';
 	label?: string;
+	/** A frame's window: its weights from 0 to 1, evenly spaced from x0 to x1, drawn on a rail above the curves and followed by the frame's shading. */
+	window?: number[];
+	/** The frame's row on the rail, of `rows`: frames that overlap cannot share one. */
+	level?: number;
+	rows?: number;
+	/** A dragged span of frames: a frame's length and the step between frames, in x, and the record's ends, to draw the whole frames a drag would leave while it is dragged. */
+	snap?: { frame: number; hop: number; low: number; high: number };
 	/** Present when the span is dragged: `op` runs with `params`, the new x0 as `low`, x1 as `high`. */
 	drag?: { op: string; params: Record<string, unknown>; low: string; high?: string };
 }
@@ -216,22 +231,56 @@ export interface Shape3DView {
 	home?: { eye: number[]; up: number[] };
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
-	/** Static line work over the model in its own coordinates: DOF arrows. */
-	marks?: { nodes: Float32Array; lines: Uint32Array };
+	/**
+	 * DOF arrows over the model in its own coordinates, solids that stay put: `tails` [A, 3] where
+	 * each starts, `directions` [A, 3] the unit vector it points along, `axes` [A] the DOF's own
+	 * axis (0 X, 1 Y, 2 Z), which picks its color, and the one `length`. `labels` names each
+	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node. With
+	 * `follow` [A] the arrows move: each takes the motion of that row of `nodes` (2^32 − 1 stays put).
+	 */
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
 	/**
 	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
 	 */
 	bodies?: { nodes: Float32Array; triangles: Uint32Array; colors: Uint8Array; follow: Uint32Array };
+	/**
+	 * Free points over the model in its own coordinates, in layers: the nodes of a geometry that no
+	 * line or face is drawn through (measured points, a cloud from a laser scan, nodes alone).
+	 * `xyz` f32 [P, 3], `colors` u8 [P, 3] each point's sRGB, `size` the point's width on screen
+	 * in pixels. They stay put and are framed with the model.
+	 */
+	points?: { xyz: Float32Array; colors: Uint8Array; size: number }[];
+	/**
+	 * Free line segments over the model in its own coordinates, in layers: `xyz` f32 [2K, 3], segment k
+	 * from row 2k to row 2k + 1, and one sRGB `color` per layer. They stay put, are drawn over the
+	 * surface and are framed with the model (a projection's matched node pairs).
+	 */
+	segments?: { xyz: Float32Array; color: number[] }[];
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/**
+	 * The mesh the overlays move when they are a second geometry's shapes, whose nodes follow the
+	 * first's in `nodes`; `triangles` and `lines` are then the first geometry's alone.
+	 */
+	overlay_triangles?: Uint32Array;
+	overlay_lines?: Uint32Array;
 	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
 	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
+	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
+	marks?: { link: string };
+	/**
+	 * Things the tree's rows or a table's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the
+	 * origin of the k-th frame, and fills the triangles `faces[k]` and draws the edges `edges[k]` (rows of `nodes`, flat).
+	 */
+	mark_sets?: MarkSet[];
+	/** The elements in their own colors: triangles and lines (rows of `nodes`) and each one's color, u8 RGB. */
+	element_colors?: { triangles: Uint32Array; triangle_colors: Uint8Array; lines: Uint32Array; line_colors: Uint8Array };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -239,6 +288,20 @@ export interface Shape3DView {
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
+}
+
+/** Things marked together under a `link` (schema/PROTOCOL.md, `mark_sets`). */
+export interface MarkSet {
+	link: string;
+	ids: number[];
+	rows?: number[][];
+	frames?: boolean;
+	faces?: number[][];
+	edges?: number[][];
+	/** A click in the view marks the element under it (Select mode, beside a `pick`'s Add mode). */
+	clicks?: boolean;
+	/** Delete in the view runs `op` with `params` and the ids marked as `ids`. */
+	remove?: { op: string; params: Record<string, unknown> };
 }
 
 /** What a drag on a gizmo's arrow or ring runs. */
@@ -293,8 +356,16 @@ export interface Pick3D {
 	kept?: number[];
 	out?: string;
 	back?: string;
-	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI. */
+	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI; absent where the service takes it in the view's unit. */
 	to_si?: [number, number];
+	/** What is asked beside the clicks, each a param and its options; an option may change how many clicks make one, and the hint. */
+	settings?: PickSetting[];
+}
+
+export interface PickSetting {
+	param: string;
+	label: string;
+	options: { value: string | number; label: string; count?: number; hint?: string }[];
 }
 
 /**
@@ -437,6 +508,18 @@ export interface TableView {
 	total?: number;
 	/** How to ask for the rest: `method` with `params`, `start` and `count`. */
 	more?: { method: string; params: Record<string, unknown> };
+	/** A table of its own under a row, shown when the row is opened: one per row, null for a row with none. */
+	nested?: (TableView | null)[];
+	/** The rows that start opened, from 1; the rest start closed. */
+	open?: number[];
+	/**
+	 * What picking one row does: `op` runs with `params` and the row's cell in `column` as `param`,
+	 * and the views it answers with that are not tables take the others' places (a coordinate
+	 * system's row puts the arrows and rings on it).
+	 */
+	select?: { op: string; params: Record<string, unknown>; param: string; column: number };
+	/** The rows selected are marked, each by its cell in `column`, with every view of the same `link` (a 3-D view's nodes). */
+	marks?: { link: string; column: number };
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
@@ -452,6 +535,8 @@ export interface TableEdit {
 	rows?: number[];
 	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
 	to_si?: Record<string, [number, number]>;
+	/** A swatch drawn in each cell of a column, by key: the cell's text to its color, '#rrggbb'. */
+	swatches?: Record<string, Record<string, string>>;
 	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' ids, the cells in `column`, as runs. */
 	remove?: { op: string; params: Record<string, unknown>; column: number };
 }
@@ -550,6 +635,8 @@ export interface ProjectObject {
 	between?: [string, string];
 	/** A few words on what the object holds: its size, not its name. */
 	holds?: string;
+	/** It holds a structure of items, so its row opens onto them (`project.children`). */
+	opens?: boolean;
 	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
 	issue?: { message: string; sub_items: number[] };
 	/** Why a derived object no longer matches its source; absent while it does. */
@@ -616,11 +703,16 @@ export interface ExportFormat {
 }
 
 export interface ActionRow {
-	/** `show.*` for a default, an operation's id, or `self.*`. */
+	/** `show.*` for a default, an operation's id, `self.*`, or `group.*` for a row that only holds others. */
 	id: string;
 	verb: string;
-	kind: 'default' | 'run' | 'self';
+	/** `group`: not an action, a row that holds the ones `under` it. */
+	kind: 'default' | 'run' | 'self' | 'group';
 	ready: boolean;
+	/** The id of the row it is listed under: the setting it computes with, or the object's group. */
+	under?: string;
+	/** A row with rows under it opens showing them. */
+	open?: true;
 	/** Why it cannot run now. */
 	reason?: string;
 	/** The modules that offer it; absent, every module. */
@@ -638,6 +730,8 @@ export interface ActionRow {
 	live?: true;
 	/** Export: the formats this object can be written in. */
 	formats?: ExportFormat[];
+	/** The words a param's options read in this row, by param and option value (Project's directions, named after the two sets). */
+	labels?: Record<string, Record<string, string>>;
 }
 
 /** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */
@@ -662,6 +756,8 @@ export interface Shown {
 	/** Which of the bar's choices this selection takes. */
 	offers?: {
 		flat: boolean;
+		/** An object with warning and abort limits, which the 2-D plot draws or leaves off (`prefs.limits`). */
+		limits: boolean;
 		complex: boolean;
 		projection: boolean;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
@@ -669,6 +765,10 @@ export interface Shown {
 		values_dofs: string[];
 		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
 		arrows: boolean;
+		/** The channel choices whose arrows can be drawn alone (`all` first); empty with no table's arrows to draw. */
+		arrow_roles: string[];
+		/** The force references modal FRFs shown on a geometry can be driven at (`prefs.drive`). */
+		drives: string[];
 		sensors: boolean;
 		/** A lone channel table: its control loops, and the views the picked one holds. */
 		environments: string[];
@@ -687,11 +787,17 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
+	/** The warning and abort limits of a specification, drawn on its 2-D plot. */
+	limits: boolean;
 	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';
 	/** DOF arrows and the channel table's sensors over every stage. */
 	arrows: boolean;
+	/** The channels of the table whose arrows are drawn: `all`, `control` or a role. */
+	arrow_role: string;
+	/** The force reference modal FRFs are driven at; null for the table's first. */
+	drive: string | null;
 	sensors: boolean;
 	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
 	environment: string | null;
@@ -701,18 +807,16 @@ export interface ShowPrefs {
 	sine_reading: 'curves' | 'bars';
 	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
-	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
-	overlay: boolean;
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */
 export type ProjectChildren =
 	| {
 			kind: 'geometry';
-			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number }[];
-			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[]; rows?: string[] }[];
+			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number; elements?: number[] }[] }[];
 			solids: SolidRow[];
-			mates: { id: number; label: string }[];
+			mates: { id: number; label: string; name: string }[];
 	  }
 	| {
 			kind: 'grid';
@@ -729,6 +833,8 @@ export type ProjectChildren =
 	| { kind: 'channels'; channels: { dof: string; quantity: string }[] }
 	| { kind: 'photos'; photos: string[] }
 	| { kind: 'matches'; matches: { first: number; second: number; mac: number }[] }
+	/** What any other object with a structure holds, one row an item: a prediction, a report's block. */
+	| { kind: 'items'; items: { label: string; detail: string }[] }
 	| { kind: 'none' };
 
 export interface SolidRow {
@@ -811,6 +917,8 @@ export interface OperationDescriptor {
 	previews?: boolean;
 	/** The boolean param that says go ahead: the form does not ask it, Preview sends it false and Apply true. */
 	commits?: string;
+	/** With `commits`: the form runs its preview as soon as it opens, and has only Apply. */
+	opens_previewed?: boolean;
 }
 
 export interface Catalog {
@@ -1568,7 +1676,6 @@ export interface ReportField {
 	options: [string, string][];
 }
 
-/** `report.editor`: the edit page and the pane for the selection. */
 /** One block of a report as the shell's own page draws it (`report.views`). */
 export interface ReportPageBlock {
 	kind: 'text' | 'figure' | 'unbound';
@@ -1582,6 +1689,8 @@ export interface ReportPageBlock {
 	html?: string;
 	/** A figure: the views it is drawn as. */
 	views?: View[];
+	/** A figure laid out as a table of plots: a column a direction, a row a node, each cell its figures by their place in `views`. */
+	grid?: { columns: string[]; rows: { label: string; cells: { view: number; caption: string; note?: string; facts?: [string, string][] }[][] }[] };
 	/** An unbound slot: what the block was. */
 	was?: string;
 	empty?: boolean;

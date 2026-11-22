@@ -13,15 +13,20 @@
 	 * cell, a drag or Shift a block, and the arrows move. Typing, Enter or a double-click opens the
 	 * cell; Enter commits and moves down, Tab across, Escape cancels. Typed with a block selected,
 	 * the value goes to every cell of it (Batch Edit). Delete clears the block, or, in a table whose rows
- * are the entities themselves (a geometry's nodes or elements), removes its rows. Cmd or Ctrl+C copies
+	 * are the entities themselves (a geometry's nodes or elements), removes its rows. In a table with
+	 * `marks`, Cmd (Ctrl)-click adds a row to the rows marked or takes it from them, and Delete then
+	 * removes the rows marked. Cmd or Ctrl+C copies
 	 * it, and tab-separated text pasted sets the cells it covers. The square at the selection's
 	 * corner is the fill handle: dragged, it repeats the block down, up or across; double-clicked,
 	 * down to the last row. Each value goes through the table's own operation, so one it refuses
 	 * leaves its cell as it was, with the reason under the table.
 	 */
-	import { tick } from 'svelte';
-	import type { TableView } from '$lib/protocol/types';
-	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
+	import { tick, untrack } from 'svelte';
+	import type { TableEdit, TableView } from '$lib/protocol/types';
+	import Self from './TablePane.svelte';
+	import { mark, marked, markedRow } from './marks.svelte';
+	import { markedBy } from './pick';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, removedIds, spanned, tableHtml, tableText, toggled, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -32,9 +37,17 @@
 		onremove?: (ids: string[]) => Promise<string | null>;
 		/** A table that sent its first rows (`view.more`): rows `start` to `start + count`, asked for as they scroll into view. */
 		onrows?: (start: number, count: number) => Promise<string[][]>;
+		/** A cell typed into the table under an opened row (`view.nested`), with that table's own `edit`; resolves as `onedit`. */
+		onnested?: (edit: TableEdit, row: number, column: string, value: string) => Promise<string | null>;
+		/** A table with `select`: one row picked, by its cell in the column `select` names. */
+		onrowpick?: (id: string) => void;
+		/** Drawn whole, as a report page shows it: every row, no scrolling, each row one line of text. */
+		whole?: boolean;
 	}
 
-	let { view, showTitle = true, onedit, onremove, onrows }: Props = $props();
+	let { view, showTitle = true, onedit, onremove, onrows, onnested, onrowpick, whole = false }: Props = $props();
+	/** The rows opened onto their own tables (`view.nested`), from 0: those the view opens to start with, then as they are clicked. */
+	let opened = $state(openedAtFirst(untrack(() => view.open)));
 	let copied = $state(false);
 	let anchor = $state<{ row: number; col: number } | null>(null);
 	let focus = $state<{ row: number; col: number } | null>(null);
@@ -66,7 +79,7 @@
 		return all;
 	});
 	const blank = $derived(view.columns.map(() => ''));
-	const long = $derived(count > DRAWN_FROM);
+	const long = $derived(!whole && count > DRAWN_FROM);
 	const span = $derived(drawnRows(count, scrollTop, viewHeight, rowHeight));
 	const drawn = $derived(long ? Array.from(known.slice(span.first, span.last), (row) => row ?? blank) : known);
 	function scrolled() {
@@ -106,7 +119,22 @@
 		}
 	});
 	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
-	function reveal(row: number) {
+	function reveal(row: number, always = false) {
+		if (always && !long) {
+			// a short table is drawn whole: the row is brought into view within the table's own
+			// scroll, not the page's, so a row marked by a click in the 3-D view beside it does not
+			// scroll that view away
+			void tick().then(() => {
+				const cell = grid?.querySelector(`td[data-r="${row}"]`);
+				if (!grid || !cell) return;
+				const box = grid.getBoundingClientRect();
+				const at = cell.getBoundingClientRect();
+				const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+				if (at.top < box.top + head) grid.scrollTop -= box.top + head - at.top;
+				else if (at.bottom > box.bottom) grid.scrollTop += at.bottom - box.bottom;
+			});
+			return;
+		}
 		if (!long || !grid) return;
 		const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? rowHeight;
 		const rows = Math.max(1, Math.floor((grid.clientHeight - head) / rowHeight));
@@ -128,6 +156,51 @@
 	}
 	const editable = (col: number) => !!keys[col];
 	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
+	// one row picked in a table that says what a row picked does (`view.select`): said once a row
+	let rowPicked: string | null = null;
+	$effect(() => {
+		const pick = view.select;
+		if (!pick || !onrowpick || !block || block.r0 !== block.r1 || dragging) return;
+		const id = known[block.r0]?.[pick.column];
+		if (id === undefined || id === rowPicked) return;
+		rowPicked = id;
+		onrowpick(id);
+	});
+	// a table whose rows are marked with other views (`view.marks`): the rows selected mark their
+	// nodes in the 3-D view, and nodes marked there or in the tree are these rows, highlighted
+	const markedIds = $derived(view.marks ? new Set(marked(view.marks.link).map(String)) : null);
+	/** What this table last marked, so its own marks coming back do not move its selection. */
+	let sent: number[] | null = null;
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks || !block) return;
+		const ids: number[] = [];
+		for (let r = block.r0; r <= block.r1; r++) {
+			const id = Number(known[r]?.[marks.column]);
+			if (Number.isFinite(id)) ids.push(id);
+		}
+		untrack(() => {
+			sent = ids;
+			mark(marks.link, ids, block.r0);
+		});
+	});
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks) return;
+		const ids = marked(marks.link);
+		const hint = markedRow(marks.link);
+		untrack(() => {
+			if (ids === sent) return;
+			// marked from the view or the tree: the selection here would say other rows
+			sent = null;
+			anchor = null;
+			focus = null;
+			if (!ids.length) return;
+			const first = String(ids[0]);
+			const row = hint !== undefined && (known[hint] === undefined || known[hint]?.[marks.column] === first) ? hint : known.findIndex((cells) => cells?.[marks.column] === first);
+			if (row >= 0) reveal(row, true);
+		});
+	});
 	const fillBlock = $derived(block && fillTo && dragging === 'fill' ? spanned({ row: Math.min(block.r0, fillTo.row), col: Math.min(block.c0, fillTo.col) }, { row: Math.max(block.r1, fillTo.row), col: Math.max(block.c1, fillTo.col) }) : null);
 
 	function select(row: number, col: number, extend = false) {
@@ -151,14 +224,9 @@
 		grid?.focus();
 	}
 
-	/** Delete in a table of entities: the block's rows go, and the selection with them. */
-	async function removeRows(b: Block) {
-		const column = view.edit?.remove?.column ?? 0;
-		const ids: string[] = [];
-		for (let r = b.r0; r <= b.r1; r++) {
-			const id = known[r]?.[column];
-			if (id) ids.push(id);
-		}
+	/** Delete in a table of entities: the block's rows go, or the rows marked here with Cmd (Ctrl), and the selection with them. */
+	async function removeRows(b: Block | null) {
+		const ids = removedIds(known, view.edit?.remove?.column ?? 0, b, sent, view.marks?.column);
 		if (!onremove || !ids.length || saving) return;
 		saving = true;
 		refusal = await onremove(ids);
@@ -166,6 +234,7 @@
 		if (!refusal) {
 			anchor = null;
 			focus = null;
+			sent = null;
 		}
 	}
 
@@ -229,7 +298,7 @@
 			const row = Math.max(0, Math.min(count - 1, focus.row + step[0]));
 			const col = Math.max(0, Math.min(view.columns.length - 1, focus.col + step[1]));
 			select(row, col, e.shiftKey);
-		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block && view.edit?.remove && onremove) {
+		} else if ((e.key === 'Delete' || e.key === 'Backspace') && (block || sent?.length) && view.edit?.remove && onremove) {
 			e.preventDefault();
 			void removeRows(block);
 		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block) {
@@ -266,8 +335,26 @@
 
 	function down(e: PointerEvent, row: number, col: number) {
 		if (e.button !== 0 || editing) return;
+		if ((e.metaKey || e.ctrlKey) && view.marks) {
+			toggleMark(row, col);
+			return;
+		}
 		select(row, col, e.shiftKey);
 		dragging = 'select';
+	}
+
+	/** Cmd (Ctrl)-click in a table with `marks`: the row's id added to the ones marked, or taken from them, as in the 3-D view. */
+	function toggleMark(row: number, col: number) {
+		const marks = view.marks!;
+		const id = Number(known[row]?.[marks.column]);
+		if (!Number.isFinite(id)) return;
+		const ids = markedBy(sent ?? marked(marks.link), id, true);
+		sent = ids;
+		mark(marks.link, ids, row);
+		// the rows marked are the selection now, Delete's among them, and the arrows move from this cell
+		anchor = null;
+		focus = { row, col };
+		grid?.focus();
 	}
 
 	function grabHandle(e: PointerEvent) {
@@ -338,7 +425,7 @@
 		</button>
 	</header>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div class="scroll" class:long bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
+	<div class="scroll" class:long class:whole class:typed={!!view.edit} bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
 		aria-label={onedit && view.edit ? `${view.title}, editable` : undefined} onkeydown={gridKey} onpaste={paste} data-testid="table-grid">
 		<table>
 			<thead>
@@ -350,8 +437,9 @@
 				{#if long && span.before > 0}<tr class="spacer" aria-hidden="true" style:height="{span.before}px"><td colspan={view.columns.length}></td></tr>{/if}
 				{#each drawn as row, k (span.first + k)}
 					{@const r = long ? span.first + k : k}
-					<tr>
+					<tr class:marked={!!markedIds?.has(row[view.marks?.column ?? 0])}>
 						{#each row as cell, i (i)}
+							{@const opens = i === 0 && !!view.nested?.[r]}
 							{#if editing && editing.row === r && editing.col === i}
 								<td class="editing">
 									{#if kindOf(i) === 'choice' && choicesOf(i)}
@@ -375,10 +463,15 @@
 								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
 									class:picked={onedit && view.edit && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
 									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
+									{#if opens}
+										<button type="button" class="opener" class:on={opened.has(r)} aria-expanded={opened.has(r)} aria-label="{opened.has(r) ? 'Close' : 'Open'} {cell}" title={opened.has(r) ? 'Close' : 'Open what this row holds'}
+											onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()} onclick={(e) => { e.stopPropagation(); opened = toggled(opened, r); }} data-testid="table-row-opener">▸</button>
+									{/if}
 									{#if editable(i) && kindOf(i) === 'flag'}
 										<input type="checkbox" class="flag" checked={flagOn(cell)} aria-label="{view.columns[i]}, row {r + 1}" disabled={saving} onclick={(e) => { e.preventDefault(); void toggleFlag(r, i); }} data-testid="table-cell-flag" />
 									{:else}
-										{cell}
+										{@const swatch = view.edit?.swatches?.[keys[i] ?? '']?.[cell]}
+										{#if swatch}<span class="swatch" style:background={swatch} aria-hidden="true" data-testid="table-cell-swatch"></span>{/if}{cell}
 									{/if}
 									{#if onedit && view.edit && block && r === block.r1 && i === block.c1 && !saving}
 										<span class="handle" role="presentation" title="Drag to fill; double-click to fill down" onpointerdown={grabHandle} ondblclick={fillDown} data-testid="table-fill-handle"></span>
@@ -387,6 +480,14 @@
 							{/if}
 						{/each}
 					</tr>
+					{#if view.nested?.[r] && opened.has(r)}
+						{@const under = view.nested[r]!}
+						<tr class="under">
+							<td colspan={view.columns.length}>
+								<Self view={under} showTitle={false} onedit={onnested && under.edit ? (row, column, value) => onnested(under.edit!, row, column, value) : undefined} />
+							</td>
+						</tr>
+					{/if}
 				{/each}
 				{#if long && span.after > 0}<tr class="spacer" aria-hidden="true" style:height="{span.after}px"><td colspan={view.columns.length}></td></tr>{/if}
 			</tbody>
@@ -427,6 +528,8 @@
 	th {
 		position: sticky;
 		top: 0;
+		/* over the cells, which are positioned for the fill handle and would otherwise paint over it */
+		z-index: 1;
 		background: var(--bg-2);
 		color: var(--text-2);
 		font-weight: var(--weight-strong);
@@ -444,8 +547,23 @@
 		color: var(--text-1);
 	}
 
-	/* a long table's rows are one line each, so where a row is follows from its number */
-	.long td {
+	/* a long table's rows are one line each, so where a row is follows from its number; so are the
+	   rows of a table typed into (a channel table), which scrolls sideways instead of wrapping a
+	   description into a tall row */
+	.long td,
+	.typed td {
+		white-space: nowrap;
+	}
+
+	/* a page's table: as tall as its rows, each row one line of text, wider than the page scrolling sideways */
+	.whole {
+		max-height: none;
+	}
+
+	.whole th,
+	.whole td {
+		padding: 1px var(--sp-2);
+		line-height: 1.3;
 		white-space: nowrap;
 	}
 
@@ -482,6 +600,19 @@
 		user-select: none;
 	}
 
+	.swatch {
+		display: inline-block;
+		width: 0.8em;
+		height: 0.8em;
+		margin-right: 0.4em;
+		vertical-align: -0.05em;
+		border-radius: 2px;
+		border: 1px solid var(--line-2);
+	}
+	tr.marked td {
+		background: color-mix(in srgb, var(--blue-weak) 55%, transparent);
+	}
+
 	td.picked {
 		background: var(--blue-weak);
 	}
@@ -489,6 +620,42 @@
 	td.filling {
 		background: color-mix(in srgb, var(--blue-weak) 50%, transparent);
 		outline: 1px dashed var(--blue-line, var(--line-2));
+	}
+
+	/* a row that opens onto a table of its own: the mark turns when it is open, and the table sits in from the edge */
+	.opener {
+		all: unset;
+		display: inline-block;
+		width: 1.1em;
+		margin-right: 0.3em;
+		color: var(--text-2);
+		cursor: pointer;
+		text-align: center;
+		transition: transform 80ms;
+	}
+
+	.opener.on {
+		transform: rotate(90deg);
+	}
+
+	.opener:hover,
+	.opener:focus-visible {
+		color: var(--text-1);
+	}
+
+	/* the table under a row has no heading of its own: the row above it is its title */
+	tr.under > td > :global(section > header) {
+		display: none;
+	}
+
+	/* and is as wide as its own columns, at the left under its row, however wide the row's table is */
+	tr.under > td :global(table) {
+		width: auto;
+	}
+
+	tr.under > td {
+		padding: var(--sp-2) var(--sp-2) var(--sp-3) calc(var(--sp-4) + 1.4em);
+		background: var(--bg-1);
 	}
 
 	.handle {

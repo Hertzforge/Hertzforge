@@ -31,6 +31,8 @@
 //!   subscriptions.
 //! - [`recorder`]: the Recorder, the inputs recorded with no drive: its
 //!   configuration.
+//! - [`playback`]: Playback, a drive file played open loop on every drive it maps
+//!   to, every input and drive recorded: its configuration, the file's check and the run.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -44,7 +46,10 @@ pub mod explorer;
 pub mod laws;
 pub mod mimo;
 pub mod mimo_shock;
+pub mod mimo_sine;
 pub mod mixed;
+pub mod modal_test;
+pub mod playback;
 pub mod profiles;
 pub mod protocol;
 pub mod pulse;

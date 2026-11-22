@@ -1,0 +1,39 @@
+{
+  "name": "identification_coherence",
+  "kind": "coherence",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "identification: every control's and limit channel's response to every drive, the response taken 266 frames later (the lag the identification measured); a delay lags: each response's multiple coherence",
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        10
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        10
+      ],
+      "unit": "",
+      "offset": 80
+    }
+  ]
+}

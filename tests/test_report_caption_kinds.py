@@ -327,7 +327,9 @@ def test_the_page_carries_each_srs_channels_caption(shock_project):
     assert len(channels) == 2
     for k, channel in enumerate(channels):
         expected = project.caption_of(srs, [k], specification='Spec').rows()
-        assert channel['facts'] == [list(row) for row in expected]
+        # against a requirement, no Channel, Location or Requirement lines
+        assert channel['facts'] == [list(row) for row in expected
+                                    if row[0] not in ('Channel', 'Location and axis', 'Requirement')]
         assert '_record' not in channel, 'bookkeeping never reaches the page'
     assert figure['facts'] == channels[0]['facts']
     assert block_caption(block, project) == \

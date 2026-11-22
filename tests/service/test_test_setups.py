@@ -23,7 +23,9 @@ from hertzforge.service.protocol import ProtocolError
 GOLDEN = Path(__file__).resolve().parents[2] / 'schema' / 'golden'
 RUNS = GOLDEN / 'runs'
 
-#: each module's configure request golden and its params' schema definition
+#: each module's configure request golden and its params' schema definition;
+#: a module whose params have no definition of their own (MIMO Sine) is
+#: checked as its whole configure request against the protocol
 REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'sine': ('request_sine_configure', 'sineConfigureParams'),
             'mixed': ('request_mixed_configure', 'mixedConfigureParams'),
@@ -33,10 +35,19 @@ REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'explorer': ('request_explorer_configure', 'explorerConfigureParams'),
             'recorder': ('request_recorder_configure', 'recorderConfigureParams'),
             'mimo_random': ('request_mimo_random_setup', 'mimoSetupParams'),
-            'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams')}
+            'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams'),
+            'mimo_sine': ('request_mimo_sine_configure', None),
+            'playback': ('request_playback_configure', 'playbackConfigureParams'),
+            'modal_test': ('request_modal_test_configure', 'modalTestConfigureParams')}
 
-#: the golden run folders, by the module each ran
-GOLDEN_RUNS = sorted(p.name for p in RUNS.iterdir() if (p / 'setup.json').exists())
+#: the golden run folders, by the module each ran; a module that keeps several runs
+#: (Modal Test) keeps each in a folder of its own under the module's
+GOLDEN_RUNS = sorted(p.parent.relative_to(RUNS).as_posix() for p in RUNS.glob('**/setup.json'))
+
+
+def _module(name):
+    """The module a golden run folder's name says ran it."""
+    return name.split('/')[0]
 
 
 def _request(module):
@@ -48,11 +59,21 @@ def _params(module, config):
     return {CONFIGURE[module][1]: config}
 
 
+def _takes(validate, module, config):
+    """Check that the module's configure request takes `config`."""
+    method, member = CONFIGURE[module]
+    schema = REQUESTS[module][1]
+    if schema is None:
+        validate({'type': 'request', 'id': 1, 'method': method, 'params': {member: config}})
+    else:
+        validate(_params(module, config), schema)
+
+
 def test_every_module_is_covered_and_its_golden_is_its_configure_request():
     assert set(REQUESTS) == set(MODULES)
     for module in MODULES:
         assert _request(module)['method'] == CONFIGURE[module][0]
-    assert set(GOLDEN_RUNS) <= set(MODULES) and 'random' in GOLDEN_RUNS
+    assert {_module(n) for n in GOLDEN_RUNS} <= set(MODULES) and 'random' in GOLDEN_RUNS
 
 
 @pytest.mark.parametrize('module', MODULES)
@@ -73,7 +94,7 @@ def test_a_saved_setup_opens_back_as_its_configuration(module, tmp_path, validat
     opened = projects.open_setup(reopened, {'name': 'Saved'})
     validate({'setup': opened}, 'projectOpenSetupResult')
     assert opened == sent
-    validate(_params(module, opened['config']), REQUESTS[module][1])
+    _takes(validate, module, opened['config'])
 
 
 @pytest.fixture(scope='module')
@@ -90,6 +111,7 @@ def converted(tmp_path_factory):
 def test_a_setup_opened_from_a_golden_run_is_what_its_configure_takes(name, converted,
                                                                        validate):
     folder, state = converted[name]
+    module = _module(name)
     with open(os.path.join(folder, 'setup.json'), encoding='utf-8') as f:
         accepted = json.load(f)['config']
     with open(os.path.join(folder, 'run.json'), encoding='utf-8') as f:
@@ -97,10 +119,11 @@ def test_a_setup_opened_from_a_golden_run_is_what_its_configure_takes(name, conv
     listed = projects.setups(state, {})
     validate(listed, 'projectSetupsResult')
     (run,) = listed['runs']
-    assert (run['module'], run['run_uid'], run['has_config']) == (name, manifest['run_uid'], True)
+    assert (run['module'], run['run_uid'], run['has_config']) == (module, manifest['run_uid'],
+                                                                   True)
     opened = projects.open_setup(state, {'name': run['name']})
     validate({'setup': opened}, 'projectOpenSetupResult')
-    assert opened['module'] == name
+    assert opened['module'] == module
     assert opened['config'] == accepted
     assert opened['origin'] == {'kind': 'run', 'run_uid': manifest['run_uid'],
                                 'run_id': manifest['run_id'], 'name': run['name']}
@@ -108,7 +131,7 @@ def test_a_setup_opened_from_a_golden_run_is_what_its_configure_takes(name, conv
         table = json.load(f)
     assert opened['table'] == {'rows': table['rows'], 'revision': table['revision'],
                                'sha256': table['sha256']}
-    validate(_params(name, opened['config']), REQUESTS[name][1])
+    _takes(validate, module, opened['config'])
 
 
 def test_what_is_not_a_setup_is_refused_and_a_name_is_not_overwritten(converted):

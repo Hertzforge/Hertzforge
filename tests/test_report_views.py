@@ -64,11 +64,40 @@ def test_a_random_run_draws_its_grids_and_bars_as_views():
                          object_groups=project.object_groups)
     views = [view for b in blocks for view in b.get('views', [])]
     _valid(views)
-    grouped = [view for view in views if view['view'] == 'spectrum' and view.get('groups')]
-    assert grouped, 'the control grid is a spectrum shown a channel at a time'
-    first = grouped[0]
-    roles = {first['series'][i]['role'] for i in first['groups'][0]['series']}
-    assert {'reference', 'measured'} <= roles
+    # the control grid is a table of plots: a row a node, a column a direction, a plot a
+    # channel, each with its zones shaded, its lines outside abort marked and its numbers
+    laid = next(b for b in blocks if b.get('grid'))
+    grid, plots = laid['grid'], laid['views']
+    assert grid['columns'] and all(column.startswith('Global ') for column in grid['columns'])
+    placed = [figure for row in grid['rows'] for cell in row['cells'] for figure in cell]
+    assert [figure['view'] for figure in placed] == list(range(len(plots)))
+    assert all(len(row['cells']) == len(grid['columns']) for row in grid['rows'])
+    assert all(row['label'].startswith('Node ') for row in grid['rows'])
+    first = plots[0]
+    assert 'groups' not in first, 'a plot a channel, none picked from a list'
+    assert [line['role'] for line in first['series']] == ['reference', 'measured']
+    assert {band['kind'] for band in first['bands']} == {'warning', 'over', 'under'}
+    for band in first['bands']:
+        edges = [edge for edge in (band['lower'], band['upper']) if edge is not None]
+        assert edges and all(len(edge) == len(band['x']) for edge in edges)
+        assert (band['upper'] is None) == (band['kind'] == 'over')
+        assert (band['lower'] is None) == (band['kind'] == 'under')
+    assert [r['label'] for r in first['readouts']] == ['% Lines Out', 'RMS Error']
+    low, high = first['x_home']
+    assert first['series'][0]['x'][0] < low < high
+    # a line outside abort is shaded across its own bin, inside the band read
+    marks = [region for plot in plots for region in plot.get('regions', ())
+             if region['kind'] in ('over', 'under')]
+    assert marks and all(region['x1'] > region['x0'] for region in marks)
+    out = float(first['readouts'][0]['text'])
+    assert (out > 0) == any(r['kind'] in ('over', 'under') for r in first.get('regions', ()))
+    # built from the project itself, as the service builds it, a plot against its
+    # requirement has no Channel, Location and axis or Requirement lines under it
+    # (Brandon, 2026-11-18): its channel is its title
+    whole = page_blocks(project[name], project, object_groups=project.object_groups)
+    cell = next(b for b in whole if b.get('grid'))['grid']['rows'][0]['cells'][0][0]
+    assert not cell.get('facts')
+    assert cell['caption']
     assert any(view['view'] == 'bars' for view in views)
 
 
@@ -234,3 +263,29 @@ def test_an_exported_report_is_the_viewer_with_the_report_inside(tmp_path):
     assert held['title'] == project[name].title
     assert any(b['kind'] == 'figure' for b in held['blocks'])
     assert written == str(tmp_path / 'r.html')
+
+
+def test_the_random_reports_time_data_is_the_apps_averaging_stage():
+    """One waterfall a quantity, the frames on it as the averaging stage
+    draws them and no span to drag them by (Brandon, 2026-11-18)."""
+    from conftest import fixture_path
+
+    import hertzforge
+    from hertzforge.report.views import page_blocks
+    from hertzforge.service.ops_geometry import _work_up
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    _work_up('Random Vibration')(project, {})
+    report = next(n for n, o in project.items() if type(o).__name__ == 'Report')
+    stages = [view for block in page_blocks(project[report], project,
+                                            object_groups=project.object_groups)
+              if 'time histories' in block['caption']
+              for view in block.get('views', ())]
+    assert [view['view'] for view in stages] == ['waterfall', 'waterfall']
+    frames = project['Time History'].averaging.frames
+    for view in stages:
+        assert len(view['regions']) == frames
+        assert {region['kind'] for region in view['regions']} == {'frame'}
+        assert not any(region.get('drag') for region in view['regions'])
+    assert sorted(len(view['records']) for view in stages) == [4, 8]

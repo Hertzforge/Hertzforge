@@ -1,10 +1,13 @@
 <script lang="ts" module>
+	/** Perspective or parallel projection, one choice for every waterfall, kept until the app closes. */
+	let lastPerspective = true;
 	/** How each result's stage was left: a drag or a choice in it replaces the view, and the view belongs to the person, so the new one opens as they left it. */
-	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front'; logX: boolean; logZ: boolean }>();
+	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front' }>();
 </script>
 
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
+	import { chooseScale, scaleChoice, scaleKey } from './plotScales.svelte';
 	/**
 	 * Waterfall view, drawn with three.js: every record a polyline at its own depth, colored by
 	 * level on the sequential colormap (viridis), the way the 3-D data view draws time
@@ -26,13 +29,15 @@
 	 * their role's color where they are not the measurement, with translucent limit bands, the
 	 * lines past an abort limit as rectangles, and a scalogram as a surface inside the walls of
 	 * its cone of influence. `regions` stand across the whole stage on the floor and the back wall,
-	 * as a spectrum's do behind its curves, and one that drags is moved the way it is on the plot:
-	 * its middle slides it and an edge moves that edge.
+	 * as a spectrum's do behind its curves, and one that drags is moved by handles on the floor's
+	 * front edge: one at each end moves that edge and one in the middle slides it, so the rest of
+	 * the stage still turns the view.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
 		BufferAttribute,
 		BufferGeometry,
+		CanvasTexture,
 		Color,
 		DoubleSide,
 		DataTexture,
@@ -43,7 +48,8 @@
 		Mesh,
 		MeshBasicMaterial,
 		NoBlending,
-		PerspectiveCamera,
+		Points,
+		PointsMaterial,
 		RawShaderMaterial,
 		RGBAFormat,
 		Scene,
@@ -53,9 +59,12 @@
 		type Material
 	} from 'three';
 	import { TrackballControls } from './trackball';
+	import { StageCamera } from './projection';
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { draggedSpan, framesText, previewFrames, wallGlyph, windowBands, type DragPart } from './frames';
+	import type { Region } from '$lib/protocol/types';
 	import { colormap, colormapGradient } from './colormap';
 	import { formatCount, formatNumber, formatTick, withUnit } from './format';
 	import { ROLE_STYLES } from './roles';
@@ -64,14 +73,20 @@
 		axisTicks,
 		exceedTriangles,
 		fraction,
+		levelAt,
 		levelRange,
 		namedRecords,
 		pickedPoint,
 		recordOf,
 		segmentIndex,
+		shownLabels,
+		type ScreenLabel,
 		stageMap,
 		onStage,
+		regionHandles,
 		regionMarks,
+		handleStrokes,
+		type HandlePart,
 		stationOf,
 		surfaceIndex,
 		unfraction,
@@ -85,11 +100,17 @@
 		onparams?: (patch: ParamValues) => void;
 		/** A draggable region released at new edges: its index in `view.regions`, and the edges. */
 		onspan?: (region: number, x0: number, x1: number) => void;
+		/** Regions drawn in place of the view's own: they change without the stage being built again. */
+		regions?: Region[] | null;
 		/** The result the view belongs to: its stage reopens as it was left within it. */
 		scope?: string;
+		/** What is plotted, as the choice of scales is kept: the kinds of the objects selected. */
+		scaleOf?: string;
 	}
 
-	let { view, onparams, onspan, scope }: Props = $props();
+	let { view, onparams, onspan, scope, scaleOf, regions = null }: Props = $props();
+	/** The regions drawn: the caller's when it gives some, else the view's own. */
+	const shownRegions = $derived(regions ?? view.regions ?? []);
 	// read once: the pane is made again for each view it shows
 	const saved = untrack(() => (scope ? poses.get(scope) : undefined));
 
@@ -117,6 +138,13 @@
 
 	let logX = $state(false);
 	let logZ = $state(false);
+	/** The scales are kept for what is plotted, the kinds of the objects selected, and not for the window. */
+	const scalesAt = $derived(scaleKey(scaleOf ?? scope, view.x.unit ?? ''));
+	function setLog(axis: 'x' | 'y', log: boolean) {
+		if (axis === 'x') logX = log;
+		else logZ = log;
+		chooseScale(scalesAt, axis, log);
+	}
 	let facing = $state<Facing>('perspective');
 	let failure = $state<string | null>(null);
 	/** The point under the cursor and where it stands on screen, or null. */
@@ -124,8 +152,10 @@
 
 	// The service says how each axis reads; the viewer may change it afterward.
 	$effect.pre(() => {
-		logX = saved?.logX ?? view.x.scale === 'log';
-		logZ = saved?.logZ ?? view.z.scale === 'log';
+		// what was chosen for this kind of object, in 3-D or on its 2-D plot; else the view's own
+		const kept = scaleChoice(scalesAt);
+		logX = kept.x ?? view.x.scale === 'log';
+		logZ = kept.y ?? view.z.scale === 'log';
 	});
 
 	const recordCount = $derived(view.records.length);
@@ -174,7 +204,7 @@
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let curves: LineSegments | Mesh;
@@ -182,8 +212,12 @@
 	/** The regions' shading and edges, rebuilt on a scale change or as one is dragged. */
 	let regionFaces: Mesh | null = null;
 	let regionEdges: LineSegments | null = null;
+	/** The handles a draggable region is moved by, one set of points for each part. */
+	let regionGrips: Points[] = [];
 	/** A region being dragged, with its edges as they stand. */
-	let draggingRegion: { k: number; x0: number; x1: number } | null = null;
+	let draggingRegion: { k: number; x0: number; x1: number; part: DragPart } | null = null;
+	/** How many frames the span being dragged would leave, said over the stage; null when none is dragged. */
+	let dragCount = $state<string | null>(null);
 	let frame: LineSegments | null = null;
 	let colorTexture: DataTexture;
 	const materials: Material[] = [];
@@ -326,7 +360,7 @@
 		for (const t of zTicks) {
 			const f = fraction(t, zRange, logZ) * Z;
 			seg([0, Y, f], [X, Y, f]);
-			seg([X, Y, f], [X + 0.012, Y, f]);
+			seg([0, Y, f], [-0.012, Y, f]);
 		}
 		const g = new BufferGeometry();
 		g.setAttribute('position', new BufferAttribute(new Float32Array(p), 3));
@@ -339,32 +373,85 @@
 
 	/** Each region on the floor and the back wall, the one being dragged at its edges as they stand. */
 	function buildRegions() {
-		for (const old of [regionFaces, regionEdges]) {
+		for (const old of [regionFaces, regionEdges, ...regionGrips]) {
 			if (!old) continue;
 			scene.remove(old);
 			old.geometry.dispose();
+			(old.material as PointsMaterial).map?.dispose();
 			(old.material as Material).dispose();
 		}
 		regionFaces = regionEdges = null;
-		const regions = view.regions ?? [];
+		regionGrips = [];
+		// while a span of frames is dragged, the whole frames it would leave are drawn in place of the ones before
+		let regions = shownRegions;
+		const dragged = draggingRegion && shownRegions[draggingRegion.k];
+		if (draggingRegion && dragged?.snap) {
+			const kept = draggedSpan(dragged.snap, draggingRegion.part, dragged, draggingRegion.x0, draggingRegion.x1);
+			dragCount = framesText(kept.count);
+			regions = [...previewFrames(shownRegions, dragged.snap, kept), { ...dragged, x0: draggingRegion.x0, x1: draggingRegion.x1 }];
+		} else dragCount = null;
 		if (!regions.length) return;
 		const faces: number[] = [];
+		const alphas: number[] = [];
 		const edges: number[] = [];
+		const flat = (triangles: number[], alpha: number) => {
+			faces.push(...triangles);
+			for (let v = 0; v < triangles.length / 3; v++) alphas.push(alpha);
+		};
 		regions.forEach((r, k) => {
-			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
-			const m = regionMarks(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x);
-			faces.push(...m.faces);
+			const [x0, x1] = regions === shownRegions && draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
+			const a = fraction(x0, xRange, logX) * STAGE.x;
+			const b = fraction(x1, xRange, logX) * STAGE.x;
+			const m = regionMarks(a, b);
+			if (r.window?.length) {
+				// a frame is shaded by its window, as the flat plot shades it, so overlapping frames
+				// add, with a line where it starts and where it ends, across the floor and up the wall
+				const bands = windowBands(r.window, a, b, STAGE.y, STAGE.z, STAGE.x);
+				faces.push(...bands.faces);
+				alphas.push(...bands.alphas);
+				for (const x of [a, b]) {
+					// a frame that ends a sample past the record still ends on the stage
+					if (x < -FRAME_SLACK || x > STAGE.x + FRAME_SLACK) continue;
+					const at = Math.max(0, Math.min(STAGE.x, x));
+					edges.push(at, 0, 0, at, STAGE.y, 0, at, STAGE.y, 0, at, STAGE.y, STAGE.z);
+				}
+				// its window stands on the back wall, when the whole of it is on the stage
+				if (a >= -FRAME_SLACK && b <= STAGE.x + FRAME_SLACK) {
+					const g = wallGlyph(r.window, r.level ?? 0, r.rows ?? 1, Math.max(0, a), Math.min(STAGE.x, b), STAGE.y, STAGE.z);
+					flat(g.faces, GLYPH_OPACITY);
+					edges.push(...g.edges);
+				}
+				return;
+			}
+			// a span is its edges alone, as on the flat plot: shading it would wash out its frames
+			if (r.kind !== 'span') flat(m.faces, REGION_OPACITY);
 			edges.push(...m.edges);
 		});
 		const f = new BufferGeometry();
 		f.setAttribute('position', new BufferAttribute(new Float32Array(faces), 3));
-		regionFaces = new Mesh(f, new MeshBasicMaterial({ color: new Color(cssVar('--blue-2')), transparent: true, opacity: 0.16, side: DoubleSide, depthWrite: false }));
+		// white with each corner's own opacity: the material's color tints it
+		const colors = new Float32Array(alphas.length * 4).fill(1);
+		alphas.forEach((alpha, v) => (colors[4 * v + 3] = alpha));
+		f.setAttribute('color', new BufferAttribute(colors, 4));
+		regionFaces = new Mesh(f, new MeshBasicMaterial({ color: new Color(cssVar('--blue-2')), vertexColors: true, transparent: true, side: DoubleSide, depthWrite: false }));
 		regionFaces.renderOrder = 1;
 		const e = new BufferGeometry();
 		e.setAttribute('position', new BufferAttribute(new Float32Array(edges), 3));
 		regionEdges = new LineSegments(e, new LineBasicMaterial({ color: new Color(cssVar('--blue-2')), transparent: true, opacity: 0.9, depthTest: false }));
 		regionEdges.renderOrder = 2;
 		scene.add(regionFaces, regionEdges);
+		const handles = onspan ? handlesNow() : [];
+		for (const part of ['low', 'move', 'high'] as const) {
+			const at = handles.filter((h) => h.part === part).flatMap((h) => h.at);
+			if (!at.length) continue;
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(new Float32Array(at), 3));
+			const grips = new Points(g, new PointsMaterial({ map: handleTexture(part), size: HANDLE_SIZE * renderer!.getPixelRatio(), sizeAttenuation: false, transparent: true, depthTest: false }));
+			grips.renderOrder = 3;
+			grips.frustumCulled = false;
+			regionGrips.push(grips);
+			scene.add(grips);
+		}
 		dirty = true;
 	}
 
@@ -378,42 +465,31 @@
 		return { x: unfraction(hit[0] / STAGE.x, xRange, logX), depth: hit[1] };
 	}
 
-	/** How far stage x `a` lies from the pointer on screen, at the depth the pointer met the stage. */
-	function pixelsFrom(x: number, depth: number, e: PointerEvent): number {
-		const box = canvasHost.getBoundingClientRect();
-		probe.set(fraction(x, xRange, logX) * STAGE.x, depth, 0).project(camera);
-		return Math.hypot(((probe.x + 1) / 2) * box.width - (e.clientX - box.left), ((1 - probe.y) / 2) * box.height - (e.clientY - box.top));
-	}
-
 	/**
 	 * A press on a draggable region takes it from the camera: the middle slides it, an edge (when
 	 * the span has two) moves that edge, and on release its new edges go to `onspan`.
 	 */
 	function onRegionPress(e: PointerEvent) {
-		if (!renderer || !onspan || e.button !== 0 || !view.regions?.length) return;
-		const at = pointerOnStage(e);
-		if (!at) return;
-		const k = view.regions.findIndex(
-			(r) => r.drag && ((at.x >= Math.min(r.x0, r.x1) && at.x <= Math.max(r.x0, r.x1)) || pixelsFrom(r.x0, at.depth, e) <= EDGE_PX || pixelsFrom(r.x1, at.depth, e) <= EDGE_PX)
-		);
-		if (k < 0) return;
-		const r = view.regions[k];
-		const two = !!r.drag!.high;
-		const part = two && pixelsFrom(r.x0, at.depth, e) <= EDGE_PX ? 'low' : two && pixelsFrom(r.x1, at.depth, e) <= EDGE_PX ? 'high' : 'move';
+		if (!renderer || !onspan || e.button !== 0 || !shownRegions.length) return;
+		const held = handleUnder(e);
+		const at = held && pointerOnStage(e);
+		if (!held || !at) return;
+		const { k, part } = held;
+		const r = shownRegions[k];
 		e.preventDefault();
 		e.stopPropagation();
 		controls.enabled = false;
 		hover = null;
 		const start = at.x;
-		draggingRegion = { k, x0: r.x0, x1: r.x1 };
+		draggingRegion = { k, x0: r.x0, x1: r.x1, part };
 		const move = (m: PointerEvent) => {
 			const now = pointerOnStage(m);
 			if (!now || !draggingRegion) return;
 			if (part === 'move') {
 				const d = now.x - start;
-				draggingRegion = { k, x0: r.x0 + d, x1: r.x1 + d };
-			} else if (part === 'low') draggingRegion = { k, x0: Math.min(now.x, r.x1), x1: r.x1 };
-			else draggingRegion = { k, x0: r.x0, x1: Math.max(now.x, r.x0) };
+				draggingRegion = { k, x0: r.x0 + d, x1: r.x1 + d, part };
+			} else if (part === 'low') draggingRegion = { k, x0: Math.min(now.x, r.x1), x1: r.x1, part };
+			else draggingRegion = { k, x0: r.x0, x1: Math.max(now.x, r.x0), part };
 			buildRegions();
 		};
 		const up = () => {
@@ -422,15 +498,82 @@
 			controls.enabled = true;
 			const done = draggingRegion;
 			draggingRegion = null;
+			dragCount = null;
 			if (!done || (done.x0 === r.x0 && done.x1 === r.x1)) return buildRegions();
+			// what was dragged to stays drawn until the answer's regions take its place
 			onspan?.(k, done.x0, done.x1);
 		};
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', up);
 	}
 
-	/** How near a region's edge, in pixels, a press takes that edge rather than the whole span. */
-	const EDGE_PX = 8;
+	/** How dark a region without a window is shaded, and a window's shape on the back wall. */
+	const REGION_OPACITY = 0.16;
+	const GLYPH_OPACITY = 0.3;
+
+	/** How near a handle, in pixels, a press takes it, and how wide one is drawn. */
+	const HANDLE_PX = 14;
+	const HANDLE_SIZE = 22;
+	/** How far past the stage, in stage units, a frame's end still counts as on it. */
+	const FRAME_SLACK = 1e-3 * STAGE.x;
+
+	/** The handles of every draggable region, where they stand on the stage now. */
+	function handlesNow(): { k: number; part: HandlePart; at: [number, number, number] }[] {
+		const out: { k: number; part: HandlePart; at: [number, number, number] }[] = [];
+		shownRegions.forEach((r, k) => {
+			if (!r.drag) return;
+			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
+			for (const h of regionHandles(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x, !!r.drag.high)) {
+				out.push({ k, ...h });
+			}
+		});
+		return out;
+	}
+
+	/** The handle the pointer is on, the nearest within reach, or null: only a handle takes a press from the camera. */
+	function handleUnder(e: PointerEvent): { k: number; part: HandlePart } | null {
+		if (!onspan) return null;
+		const box = canvasHost.getBoundingClientRect();
+		let best: { k: number; part: HandlePart } | null = null;
+		let least = HANDLE_PX;
+		for (const h of handlesNow()) {
+			probe.set(...h.at).project(camera);
+			const d = Math.hypot(((probe.x + 1) / 2) * box.width - (e.clientX - box.left), ((1 - probe.y) / 2) * box.height - (e.clientY - box.top));
+			if (d <= least) {
+				least = d;
+				best = { k: h.k, part: h.part };
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * A handle's face, which says what dragging it does: an arrow pointing left on the low end, one
+	 * pointing right on the high end, and three bars on the middle, which slides the whole span.
+	 */
+	function handleTexture(part: HandlePart): CanvasTexture {
+		const size = 96;
+		const canvas = document.createElement('canvas');
+		canvas.width = canvas.height = size;
+		const ctx = canvas.getContext('2d')!;
+		ctx.beginPath();
+		ctx.arc(size / 2, size / 2, size / 2 - 5, 0, 2 * Math.PI);
+		ctx.fillStyle = cssVar('--blue-2');
+		ctx.fill();
+		ctx.lineWidth = 5;
+		ctx.strokeStyle = '#ffffff';
+		ctx.stroke();
+		ctx.lineWidth = 9;
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.beginPath();
+		for (const [x0, y0, x1, y1] of handleStrokes(part)) {
+			ctx.moveTo(x0 * size, y0 * size);
+			ctx.lineTo(x1 * size, y1 * size);
+		}
+		ctx.stroke();
+		return new CanvasTexture(canvas);
+	}
 
 	/** The bands, the exceedances and the walls, one translucent mesh for each kind, rebuilt on a scale change. */
 	function buildMarks() {
@@ -469,7 +612,24 @@
 		frameMaterial.color = new Color(cssVar('--line-2'));
 		TONES.forEach((role, k) => uniforms.uTones.value[k].set(cssVar(ROLE_STYLES[role].colorVar)));
 		for (const [kind, mesh] of marks) (mesh.material as MeshBasicMaterial).color.set(cssVar(MARKS[kind].colorVar));
-		for (const r of [regionFaces, regionEdges]) if (r) (r.material as MeshBasicMaterial | LineBasicMaterial).color.set(cssVar('--blue-2'));
+		// the handles' faces are painted in the theme's color: the regions are built again
+		if (regionFaces) buildRegions();
+		// the colormap starts further in on the dark theme: the shader's copy is made again
+		if (uniforms.uMap.value) {
+			uniforms.uMap.value.dispose();
+			colorTexture = mapTexture();
+			uniforms.uMap.value = colorTexture;
+		}
+		dirty = true;
+	}
+
+	/** Drawn in perspective; off, in parallel projection, the stage the size it was at its centre. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
 		dirty = true;
 	}
 
@@ -517,7 +677,8 @@
 		});
 
 		scene = new Scene();
-		camera = new PerspectiveCamera(30, 1, 0.01, 100);
+		camera = new StageCamera(30, 1, 0.01, 100);
+		camera.setParallel(!perspective);
 
 		geometry = new BufferGeometry();
 		geometry.setAttribute('ax', new BufferAttribute(view.x_values, 1));
@@ -591,34 +752,28 @@
 	}
 
 	const probe = new Vector3();
-	/** Closest two record labels may stand on screen, in pixels; nearer ones are skipped. */
-	const LABEL_GAP_PX = 12;
-
-	/**
-	 * Pin each HTML label over its point on the stage. Record and level labels are thinned by where
-	 * they land on screen, not only by count: forty names along a depth axis seen end-on, or a
-	 * decade every few pixels on a short level axis, would overprint.
-	 */
+	/** Pin each HTML label over its point on the stage, showing those `shownLabels` keeps. */
 	function placeLabels() {
 		if (!overlay) return;
 		const w = canvasHost.clientWidth;
 		const h = canvasHost.clientHeight;
-		const last: Record<string, [number, number]> = {};
-		for (const el of overlay.querySelectorAll<HTMLElement>('[data-at]')) {
+		const els = [...overlay.querySelectorAll<HTMLElement>('[data-at]')];
+		// each label is moved to its point first, so the box its text takes there can be read
+		const points = els.map((el) => {
 			const [x, y, z] = el.dataset.at!.split(',').map(Number);
 			probe.set(x, y, z).project(camera);
 			const sx = ((probe.x + 1) / 2) * w;
 			const sy = ((1 - probe.y) / 2) * h;
-			let visible = probe.z < 1;
-			const thinned = el.classList.contains('rec') ? 'rec' : el.classList.contains('z') ? 'z' : null;
-			if (visible && thinned) {
-				const [lx, ly] = last[thinned] ?? [-Infinity, -Infinity];
-				if (Math.hypot(sx - lx, sy - ly) < LABEL_GAP_PX) visible = false;
-				else last[thinned] = [sx, sy];
-			}
-			el.style.visibility = visible ? 'visible' : 'hidden';
 			el.style.transform = `translate(${sx}px, ${sy}px)`;
-		}
+			return { sx, sy, front: probe.z < 1 };
+		});
+		const labels = els.map((el, i): ScreenLabel => {
+			const r = el.getBoundingClientRect();
+			const thinned = el.classList.contains('rec') ? 'rec' : el.classList.contains('z') ? 'z' : null;
+			return { ...points[i], box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, thinned };
+		});
+		const shown = shownLabels(labels);
+		els.forEach((el, i) => (el.style.visibility = shown[i] ? 'visible' : 'hidden'));
 	}
 
 	/** Draw the curves alone around (px, py) with the picking material and read back what is there. */
@@ -657,6 +812,8 @@
 	}
 
 	function onPointerMove(e: PointerEvent) {
+		// a handle under the pointer says it can be dragged
+		canvasHost.style.cursor = draggingRegion ? 'grabbing' : handleUnder(e) ? 'grab' : '';
 		// not while orbiting, when the point under the cursor changes every frame anyway
 		if (e.buttons) {
 			hover = null;
@@ -680,10 +837,18 @@
 		renderer.render(scene, camera);
 		placeLabels();
 		// kept as it is drawn, not as the pane goes: the view that replaces it is made first
-		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing, logX, logZ });
+		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing });
 	}
 
 	onMount(init);
+
+	// the regions change without the stage being built again
+	$effect(() => {
+		void shownRegions;
+		untrack(() => {
+			if (renderer && !draggingRegion) buildRegions();
+		});
+	});
 
 	$effect(() => {
 		void logX;
@@ -715,7 +880,8 @@
 		controls.dispose();
 		geometry.dispose();
 		frame?.geometry.dispose();
-		for (const mesh of [...marks.values(), regionFaces, regionEdges]) {
+		for (const grips of regionGrips) (grips.material as PointsMaterial).map?.dispose();
+		for (const mesh of [...marks.values(), regionFaces, regionEdges, ...regionGrips]) {
 			if (!mesh) continue;
 			mesh.geometry.dispose();
 			(mesh.material as Material).dispose();
@@ -735,8 +901,8 @@
 		if (k === 'r') face('perspective');
 		else if (k === 't') face('top');
 		else if (k === 'f') face('front');
-		else if (k === 'x') logX = !logX;
-		else if (k === 'l') logZ = !logZ;
+		else if (k === 'x') setLog('x', !logX);
+		else if (k === 'l') setLog('y', !logZ);
 		else return;
 		e.preventDefault();
 	}
@@ -752,9 +918,7 @@
 	});
 
 	const xAt = (t: number) => `${fraction(t, xRange, logX) * STAGE.x},${-0.035},0`;
-	// the level axis stands at the back right, where a spectrum's levels are usually lowest, so
-	// the curves rarely pass in front of its labels
-	const zAt = (t: number) => `${STAGE.x + 0.02},${STAGE.y},${fraction(t, zRange, logZ) * STAGE.z}`;
+	const zAt = (t: number) => levelAt(fraction(t, zRange, logZ)).join(',');
 	// the records are named at the low end of the abscissa, as the earlier toolset named them
 	// (Brandon, 2026-11-14)
 	const recordAt = (r: number) => `${-0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
@@ -830,11 +994,16 @@
 				<span class="tick rec low" data-at={recordAt(r)}>{depthLabels[r]}</span>
 			{/each}
 		{/if}
-		{#each view.regions ?? [] as r, i (i)}
-			{#if r.label}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
+		{#each shownRegions as r, i (i)}
+			<!-- a frame with its window, and a span with handles, say what they are by how they are drawn -->
+			{#if r.label && !r.window && !r.drag}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
 		{/each}
 		<span class="title" data-at="{STAGE.x / 2},-0.11,0">{withUnit(view.x.label, view.x.unit)}</span>
 	</div>
+
+	{#if dragCount}
+		<div class="dragcount num" data-testid="waterfall-drag-count">{dragCount}</div>
+	{/if}
 
 	{#if failure}
 		<div class="failure" role="alert">{failure}</div>
@@ -843,6 +1012,7 @@
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Waterfall display">
 			<button class="btn ghost sm copyimg" data-testid="waterfall-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
+			<button class="btn sm toggle" data-testid="waterfall-projection" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<div class="seg" role="radiogroup" aria-label="Viewpoint">
 				<button role="radio" data-testid="waterfall-perspective" aria-checked={facing === 'perspective'} class:on={facing === 'perspective'} onclick={() => face('perspective')} title="Perspective (R)">3-D</button>
 				<button role="radio" data-testid="waterfall-top" aria-checked={facing === 'top'} class:on={facing === 'top'} onclick={() => face('top')} title="From the top: a map of level over abscissa and record (T)">Top</button>
@@ -850,13 +1020,13 @@
 			</div>
 			<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
 				<span class="lbl">{view.x.label}</span>
-				<button role="radio" data-testid="waterfall-x-linear" aria-checked={!logX} class:on={!logX} onclick={() => (logX = false)} title="Linear (X)">Lin</button>
-				<button role="radio" data-testid="waterfall-x-log" aria-checked={logX} class:on={logX} onclick={() => (logX = true)} title="Log (X)">Log</button>
+				<button role="radio" data-testid="waterfall-x-linear" aria-checked={!logX} class:on={!logX} onclick={() => setLog('x', false)} title="Linear (X)">Lin</button>
+				<button role="radio" data-testid="waterfall-x-log" aria-checked={logX} class:on={logX} onclick={() => setLog('x', true)} title="Log (X)">Log</button>
 			</div>
 			<div class="seg" role="radiogroup" aria-label="{view.z.label} scale">
 				<span class="lbl">{view.z.label}</span>
-				<button role="radio" data-testid="waterfall-z-linear" aria-checked={!logZ} class:on={!logZ} onclick={() => (logZ = false)} title="Linear (L)">Lin</button>
-				<button role="radio" data-testid="waterfall-z-log" aria-checked={logZ} class:on={logZ} onclick={() => (logZ = true)} title="Log (L)">Log</button>
+				<button role="radio" data-testid="waterfall-z-linear" aria-checked={!logZ} class:on={!logZ} onclick={() => setLog('y', false)} title="Linear (L)">Lin</button>
+				<button role="radio" data-testid="waterfall-z-log" aria-checked={logZ} class:on={logZ} onclick={() => setLog('y', true)} title="Log (L)">Log</button>
 			</div>
 			{#if view.quantities && onparams}
 				<div class="seg" role="radiogroup" aria-label="Quantity">
@@ -905,6 +1075,12 @@
 </div>
 
 <style>
+	.toggle.on {
+		color: var(--text-1);
+		background: var(--blue-weak);
+		border-color: var(--blue-line);
+	}
+
 	.copyimg {
 		flex: none;
 		font-size: var(--text-2xs, 11px);
@@ -960,8 +1136,9 @@
 		translate: -50% 2px;
 	}
 
+	/* at the low end of the abscissa, as the record names are: a level ends at its point */
 	.tick.z {
-		translate: 4px -50%;
+		translate: calc(-100% - 4px) -50%;
 	}
 
 	.tick.region {
@@ -1158,5 +1335,21 @@
 		padding: var(--sp-6);
 		color: var(--text-2);
 		text-align: center;
+	}
+
+	/* how many frames a drag would leave, said over the stage while it is dragged */
+	.dragcount {
+		position: absolute;
+		top: 52px;
+		left: 50%;
+		translate: -50% 0;
+		padding: 2px 8px;
+		font-size: var(--text-xs);
+		white-space: nowrap;
+		color: var(--text-1);
+		background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm, 4px);
+		pointer-events: none;
 	}
 </style>

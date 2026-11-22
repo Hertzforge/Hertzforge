@@ -175,6 +175,10 @@ def _number(text: str) -> bool:
 
 
 def _table(view: dict, system: Any) -> None:
+    for under in view.get('nested') or ():
+        # the table under an opened row is a table like any other
+        if under is not None:
+            _table(under, system)
     edit = view.get('edit') or {}
     edited = edit.get('columns') or []
     for k, heading in enumerate(view['columns']):
@@ -216,8 +220,9 @@ def quantities_of(name: str, quantities: set[str]) -> dict[str, dict[str, Any]]:
 
 def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
     """`values` with each `length` param taken from the system `name` to meters, and each
-    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are."""
-    if not geometry.units_defined or name == DEFAULT:
+    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are;
+    with no geometry (None) they are taken as the system's."""
+    if (geometry is not None and not geometry.units_defined) or name == DEFAULT:
         return values
     system = _system(name)
     scale = float(system.transform('length')[0])
@@ -273,13 +278,20 @@ def _shape(view: dict, system: Any) -> None:
     if change is not None:
         view['nodes'] = _values(view['nodes'], change)
         view['unit'] = change[2]
-        marks = view.get('marks')
-        if marks is not None:
+        arrows = view.get('arrows')
+        if arrows is not None:
             # the arrows over the model, in its coordinates
-            marks['nodes'] = np.asarray(_values(marks['nodes'], change), dtype=np.float32)
+            arrows['tails'] = np.asarray(_values(arrows['tails'], change), dtype=np.float32)
+            arrows['length'] = float(arrows['length'] / change[0])
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)
+        for layer in view.get('points', ()):
+            # free points over the model, in its coordinates
+            layer['xyz'] = np.asarray(_values(layer['xyz'], change), dtype=np.float32)
+        for layer in view.get('segments', ()):
+            # free line segments over the model, in its coordinates
+            layer['xyz'] = np.asarray(_values(layer['xyz'], change), dtype=np.float32)
         for frame in view.get('frames', ()):
             frame['origin'] = [float((v - change[1]) / change[0]) for v in frame['origin']]
             frame['length'] = float(frame['length'] / change[0])
@@ -289,7 +301,7 @@ def _shape(view: dict, system: Any) -> None:
             if not gizmo['slide'].get('in_display'):
                 gizmo['to_si'] = change[0]
         pick = view.get('pick')
-        if pick is not None and pick.get('target') == 'point':
+        if pick is not None and pick.get('target') == 'point' and not pick.get('in_display'):
             pick['to_si'] = [change[0], change[1]]
     motion = view.get('motion')
     if motion is not None:

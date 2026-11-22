@@ -10,6 +10,11 @@ thread so the event loop stays responsive.
 Each connection has at most one project of its own (`project.*`), which
 every operation runs on and which ends with it. Table files (`tables.*`) are
 read and written by path beside it, without touching it.
+
+A plain HTTP request, one that does not ask to upgrade to WebSocket, is
+answered with the shell's built pages when the package carries them
+(`shell_folder`), so `hertzforge` with no command can open the interface in
+a browser from a pip install.
 """
 
 from __future__ import annotations
@@ -25,12 +30,17 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from websockets.asyncio.server import Server, ServerConnection, serve
+from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Request, Response
 
 from . import (
+    dialogs,
     display_units,
+    drive_files,
     fitting,
     frames,
     op_progress,
@@ -66,11 +76,12 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.drag_out',
+                   'project.retitle',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
                    'project.mesh_size', 'project.journal',
-                   'project.show', 'project.actions',
+                   'project.show', 'project.averaging', 'project.actions',
                    'project.setups', 'project.save_setup', 'project.open_setup',
                    'project.channel_table', 'project.put_channel_table',
                    'project.seeds', 'project.seed')
@@ -98,6 +109,8 @@ PRELOAD = (
     'hertzforge.deform',
     # what showing a selection reaches, imported inside the core at first use
     'hertzforge.service.show',
+    # a geometry's bare and measured nodes drawn as points
+    'hertzforge.service.scans',
     # the table a selection answers with
     'hertzforge.service.action_table',
     'hertzforge.core.merge',
@@ -114,8 +127,10 @@ PRELOAD = (
     # forming its octave and coherence products
     'hertzforge.core.detect',
     'hertzforge.core.octave',
-    # fitting a modal survey's FRFs
+    # fitting a modal survey's FRFs, and noting an exponential window's
+    # damping on each published mode
     'hertzforge.core.modal_fit',
+    'hertzforge.core.modal_test',
     'hertzforge.core.partial_coherence',
     # solving a model's modes
     'hertzforge.core.sparse_solve',
@@ -155,13 +170,51 @@ SWITCH_INTERVAL = 0.001
 
 
 
-def _preview_copy(project: Any, name: str) -> Any:
-    """A project holding only a copy of geometry `name`, for an operation to act on while
-    its form is typed: nothing it does reaches the project or its journal."""
+def _typed_on(project: Any, op: Any, values: dict[str, Any]) -> Any:
+    """The geometry whose units an operation's lengths are typed in: its `geometry`, or
+    else the one the first object it names is drawn on; None when it names none."""
+    from hertzforge.core.geometry import Geometry
+
+    names = ([values['geometry']] if 'geometry' in values else
+             [values[p.name] for p in op.params if (p.kinds or p.verb) and p.name in values])
+    for name in names:
+        held = project.get(name) if isinstance(name, str) else None
+        if isinstance(held, Geometry):
+            return held
+        found = project.geometry_for(name) if held is not None else None
+        if found is not None:
+            return found[1]
+    return None
+
+
+def _preview_copy(project: Any, *names: str) -> Any:
+    """A project holding only copies of the objects `names`, for an operation to act on while
+    its form is typed: nothing it does reaches the project or its journal. Each is linked to
+    copies of the geometries linked to it, and the active geometry is copied for an object
+    with none, so a preview draws on, and matches against, the geometry Apply would."""
     from hertzforge import Project
+    from hertzforge.core.geometry import Geometry
 
     scratch = Project('preview')
-    scratch.add(name, copy.deepcopy(project[name]))
+    named = list(dict.fromkeys(names))
+    for name in named:
+        scratch.add(name, copy.deepcopy(project[name]))
+    lonely = False
+    for name in named:
+        if isinstance(project[name], Geometry):
+            continue
+        homes = [m for m in project.object_group_of(name) or ()
+                 if m != name and isinstance(project.get(m), Geometry)]
+        lonely = lonely or not homes
+        for home in homes:
+            if home not in scratch:
+                scratch.add(home, copy.deepcopy(project[home]))
+            scratch.link(home, name)
+    active = project.active_geometry
+    if lonely and active is not None and active in project:
+        if active not in scratch:
+            scratch.add(active, copy.deepcopy(project[active]))
+        scratch.active_geometry = active
     return scratch
 
 
@@ -175,6 +228,10 @@ def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, 
         for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
             if row.get('label') in AS_PREVIEW:
                 row['label'] = AS_PREVIEW[row['label']]
+        if view.get('view') == 'table':
+            # a copy's table: its rows are not the project's, so nothing is typed into it
+            view.pop('edit', None)
+            view.pop('select', None)
     display_units.convert(views, units)
     return views
 
@@ -184,8 +241,17 @@ class Service:
     threads. One per process."""
 
     def __init__(self, operations: Sequence[Operation] = OPERATIONS,
-                 workers: int = 2) -> None:
+                 workers: int = 2, dialogs: bool = False) -> None:
         self.operations: dict[str, Operation] = {op.id: op for op in operations}
+        #: the clients connected now, and the event loop's time when the last one left (None
+        #: until one has come and gone): `hertzforge` with no command stops once its browser
+        #: tab has been closed for a while (`__main__._closed_for`)
+        self.connections: int = 0
+        self.last_closed: float | None = None
+        #: whether `files.choose` shows the system's file dialogs: only for `hertzforge`
+        #: with no command, whose browser is on this machine. `hertzforge serve` may run
+        #: where its client is not, and a dialog there would wait on a screen nobody sees.
+        self.dialogs: bool = dialogs
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(
             workers, thread_name_prefix='hertzforge-service')
 
@@ -347,7 +413,8 @@ class Connection:
             self.project, added = await call(projects.import_file, self.project,
                                              params, report)
             return {'added': added, 'project': projects.summary(self.project)}
-        edits = {'project.rename': (projects.rename, ('name', 'to', 'index')),
+        edits = {'project.rename': (projects.rename, ('name', 'to', 'index', *projects.SUB_ITEMS)),
+                 'project.retitle': (projects.retitle, ('title',)),
                  'project.remove': (projects.remove, ('names',)),
                  'project.delete_parts': (projects.delete_parts, ('parts',)),
                  'project.activate': (projects.activate, ('geometry',)),
@@ -385,6 +452,9 @@ class Connection:
         if method == 'project.children':
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
+        if method == 'project.averaging':
+            _only(params, ('name', 'averaging'), method)
+            return await call(projects.averaging, self.project, params)
         if method == 'project.mesh_size':
             # the whole form comes along; only these are read
             found = await call(projects.mesh_size, self.project, params)
@@ -448,11 +518,13 @@ class Connection:
                 values['units'] = self.units
             if any(param.length or param.quantity for param in op.params):
                 values = display_units.typed_lengths(op.params, values, self.units,
-                                                     project[values['geometry']])
+                                                     _typed_on(project, op, values))
             if params.get('preview') and not op.previews:
                 raise bad_request(f'{op.id} does not preview')
             if params.get('preview'):
-                scratch = _preview_copy(project, values['geometry'])
+                scratch = _preview_copy(project, *(
+                    values[p.name] for p in op.params
+                    if (p.kinds or p.verb) and values.get(p.name) in project))
                 return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
             before, journaled = list(project), len(project.journal)
             self.running_op, self.cancel_asked = op.id, False
@@ -495,7 +567,8 @@ class Connection:
                 'report.editor': ('name', 'selected', 'theme', 'page'),
                 'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
                                    'kind', 'field', 'value'),
-                'report.print': ('name', 'anyway'), 'report.issue': ('name', 'step', 'path', 'anyway')}
+                'report.print': ('name', 'anyway', 'browser'),
+                'report.issue': ('name', 'step', 'path', 'anyway', 'browser')}
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
@@ -629,6 +702,28 @@ class Connection:
             # writer can take it
             self.run_log.close()
 
+    async def choose_files(self, params: Any) -> dict[str, Any]:
+        """`files.choose`: the system's open or save dialog on this machine, and the
+        paths chosen in it (none when cancelled). Refused where the service shows no
+        dialogs or none can be shown here, so the shell asks for a typed path."""
+        _only(params, ('purpose', 'name'), 'files.choose')
+        purpose = params.get('purpose')
+        if purpose not in dialogs.PURPOSES:
+            raise bad_request(f'files.choose takes a purpose of {", ".join(dialogs.PURPOSES)}')
+        if not self.service.dialogs:
+            raise refused('This service shows no file dialogs; type the path instead.')
+        name = params.get('name') or ''
+        if not isinstance(name, str):
+            raise bad_request('files.choose takes a name as text')
+        try:
+            # a dialog waits on the person for as long as it takes: on a thread of its own,
+            # not one of the workers an operation needs
+            paths = await asyncio.to_thread(dialogs.choose, purpose, name)
+        except dialogs.DialogUnavailable as error:
+            raise refused(f'No file dialog could be shown: {error}. Type the path '
+                          'instead.') from None
+        return {'paths': paths}
+
     async def answer(self, request: dict[str, Any]) -> None:
         """Run one request and send its response. A ProtocolError becomes an
         error response with its code; any other exception is logged and sent
@@ -668,6 +763,9 @@ class Connection:
                 else:
                     frame = frames.encode_text({'type': 'response', 'id': ident,
                                                 'result': result})
+            elif method == 'files.choose':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': await self.choose_files(params)})
             elif method == 'units.system':
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': self.units_request(params)})
@@ -690,6 +788,18 @@ class Connection:
                 result = await self.service.in_worker(table_files.request, method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in drive_files.DRIVE_METHODS:
+                # a file by its path needs nothing of the connection; the open
+                # project's objects are read under its lock
+                if drive_files.needs_project(params):
+                    async with self.project_lock:
+                        project = self.project.project if self.project is not None else None
+                        result = await self.service.in_worker(drive_files.request, method,
+                                                              params, project)
+                else:
+                    result = await self.service.in_worker(drive_files.request, method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
@@ -704,6 +814,7 @@ class Connection:
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
                     f'{", ".join(table_files.TABLE_METHODS)}, '
+                    f'{", ".join(drive_files.DRIVE_METHODS)}, '
                     f'{", ".join(run_files.RUN_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
@@ -733,18 +844,85 @@ def _reason(text: str) -> str:
     return text if len(data) <= 123 else data[:120].decode('utf-8', 'ignore') + '...'
 
 
+#: what the shell's build holds, by suffix; anything else is sent as bytes
+_SHELL_TYPES = {
+    '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json',
+    '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+    '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
+    '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8',
+}
+
+
+def shell_folder() -> Path | None:
+    """The shell's built pages: `hertzforge/shell` in an installed package
+    (the release workflow builds it into the wheel), else `ui/build` in a
+    source checkout after `npm --prefix ui run build`. None when neither
+    holds an `index.html`."""
+    package = Path(__file__).resolve().parents[1]
+    for folder in (package / 'shell', package.parents[1] / 'ui' / 'build'):
+        if (folder / 'index.html').is_file():
+            return folder
+    return None
+
+
+def shell_response(folder: Path, request: Request) -> Response | None:
+    """The file a plain GET asks for from the shell's `folder`, or None for
+    a WebSocket upgrade, which the protocol handles. The shell is a
+    single-page app, so a path with no suffix gets `index.html`; a missing
+    file with a suffix is a 404, and nothing outside `folder` is served."""
+    if 'websocket' in request.headers.get('Upgrade', '').lower():
+        return None
+    root = folder.resolve()
+    wanted = unquote(urlsplit(request.path).path).lstrip('/')
+    target = (root / wanted).resolve()
+    if not target.is_relative_to(root):
+        return _plain(404, 'Not Found', b'not found')
+    if not target.is_file():
+        if Path(wanted).suffix:
+            return _plain(404, 'Not Found', b'not found')
+        target = root / 'index.html'
+    body = target.read_bytes()
+    headers = Headers()
+    headers['Content-Type'] = _SHELL_TYPES.get(target.suffix, 'application/octet-stream')
+    headers['Content-Length'] = str(len(body))
+    # the hashed bundles under _app/immutable never change; the page that
+    # names them must be fetched afresh so an upgrade is seen
+    headers['Cache-Control'] = ('max-age=31536000, immutable' if '/immutable/' in target.as_posix()
+                                else 'no-cache')
+    return Response(200, 'OK', headers, body)
+
+
+def _plain(status: int, reason: str, body: bytes) -> Response:
+    headers = Headers()
+    headers['Content-Type'] = 'text/plain; charset=utf-8'
+    headers['Content-Length'] = str(len(body))
+    return Response(status, reason, headers, body)
+
+
 async def start(service: Service, host: str = '127.0.0.1',
-                port: int = 8791) -> Server:
+                port: int = 8791, shell: Path | None = None) -> Server:
     """A listening server (port 0 picks a free one; `server.sockets` says
-    which). It changes nothing beyond the server: the process that serves
-    calls `preload` and sets `SWITCH_INTERVAL` first (`__main__._serve`)."""
+    which). With `shell`, a plain HTTP request is answered from that folder
+    of built pages (`shell_response`). It changes nothing beyond the server:
+    the process that serves calls `preload` and sets `SWITCH_INTERVAL` first
+    (`__main__._serve`)."""
 
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
-        await Connection(service, socket).serve()
+        service.connections += 1
+        try:
+            await Connection(service, socket).serve()
+        finally:
+            service.connections -= 1
+            if not service.connections:
+                service.last_closed = asyncio.get_running_loop().time()
         log.info('connection from %s closed', socket.remote_address)
 
     # no per-message compression: loopback, and deflating a dense model's
     # shapes would run on the event loop
+    def pages(_connection: ServerConnection, request: Request) -> Response | None:
+        return shell_response(shell, request) if shell is not None else None
+
     return await serve(handler, host, port, compression=None,
-                       max_size=MAX_INCOMING)
+                       max_size=MAX_INCOMING, process_request=pages)

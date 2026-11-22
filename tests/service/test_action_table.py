@@ -76,7 +76,12 @@ def test_every_row_has_a_glyph():
 
 
 def test_verbs_are_short():
-    assert not [v for v in verbs.VERBS.values() if len(v.split()) > 2]
+    # two words, but for Auto Compute, which names its kind of test now that the one
+    # analysis module offers all six together; under its row they read by the test alone
+    long = [v for v in verbs.VERBS.values() if len(v.split()) > 2]
+    assert all(v.startswith('Auto Compute ') for v in long)
+    work_ups = [v for k, v in verbs.VERBS.items() if 'work_up_' in k]
+    assert len(set(work_ups)) == len(work_ups) == 6
 
 
 def test_every_core_verb_an_operation_takes_has_its_types():
@@ -182,7 +187,10 @@ def test_a_part_of_a_geometry_brings_its_own_verbs(plate):
     assert row(with_part, 'Add Node')['part'] is True
     assert 'Rotate' not in verbs_in(with_part)
     systems = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'coordinate_systems'})[0]
-    assert 'Rotate' in verbs_in(systems)
+    # a system is slid and turned in its Edit, by its row or its arrows and rings
+    assert verbs_in(systems) == ['Plot', 'Edit', 'Add System']
+    edit = row(systems, 'Edit')
+    assert edit['fill']['cs'] == 0 and 'cs' in edit['omit']
 
 
 SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 'Add Plate',
@@ -214,11 +222,13 @@ def test_a_part_offers_its_own_verbs_alone(plate):
     assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
 
 
-def test_a_family_fills_the_element_it_adds(plate):
+def test_a_family_opens_its_edit_which_adds_its_elements(plate):
     geometry = named(plate, 'geometry')
     family = table(plate, geometry, part={'name': geometry, 'kind': 'family', 'id': 'hexes'})[0]
-    assert row(family, 'Add Element')['fill']['family'] == 'hexes'
-    assert row(family, 'Add Element')['part'] is True and 'Add Group' in verbs_in(family)
+    # an element is added in Edit's Add mode, which the family fills
+    assert row(family, 'Edit')['fill']['family'] == 'hexes'
+    assert row(family, 'Edit')['part'] is True and 'Add Group' in verbs_in(family)
+    assert 'Add Element' not in verbs_in(family)
 
 
 def test_element_groups_picked_together_fill_what_ties_them(plate):
@@ -530,8 +540,8 @@ def test_sensors_says_a_table_names_no_sensor_model(rich):
 def test_apply_truncation_names_the_row_that_sets_a_span(rich):
     history = named(rich, 'time_history')
     found = _offered(rich, history, 'Apply Truncation', 'project.truncate_data')
-    assert not found['ready'] and 'Set Truncation' in found['reason']
-    assert 'Set Truncation' in _refusal(rich.project, found['id'], {'source': history})
+    assert not found['ready'] and 'Truncation sets one' in found['reason']
+    assert 'Truncation sets one' in _refusal(rich.project, found['id'], {'source': history})
     rich.project[history].truncation = (0.0, 0.01)
     assert _offered(rich, history, 'Apply Truncation', 'project.truncate_data')['ready']
 
@@ -644,3 +654,132 @@ def test_cmif_plots_the_whole_frf_with_no_form(plate):
     frf = named(plate, 'frf')
     cmif = next(r for r in table(plate, frf)[0]['rows'] if r['id'] == 'project.cmif')
     assert cmif['ready'] and cmif['fill']['records'] == '' and cmif['fill']['frf'] == frf
+
+
+def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
+    from hertzforge.service.action_table import NESTS, OBJECT_GROUP, OBJECT_ROWS, nested
+
+    history = named(plate, 'time_history')
+    rows = {r['id']: r for r in table(plate, history)[0]['rows']}
+    # what is computed from the averaging is under it, and it opens showing them
+    for child in ('project.compute_psds', 'project.compute_cpsds', 'project.compute_frfs'):
+        assert rows[child]['under'] == 'project.set_averaging'
+    assert rows['project.set_averaging'].get('open') is True
+    assert 'under' not in rows['project.set_averaging']
+    # a filter is one action, set and applied in its form; Integrate and Differentiate
+    # are under a row that is not an action
+    assert 'project.filter_data' not in rows and rows['project.set_filter']['verb'] == 'Filter'
+    assert 'under' not in rows['project.set_filter']
+    assert rows['group.calculus']['kind'] == 'group'
+    assert rows['project.integrate']['under'] == rows['project.differentiate']['under'] \
+        == 'group.calculus'
+    assert rows['project.truncate_data']['under'] == 'project.set_truncation'
+    # the object's own acts are under a row that is not an action
+    assert rows[OBJECT_GROUP]['kind'] == 'group'
+    assert rows['self.rename']['under'] == OBJECT_GROUP
+    assert all(rows[r]['under'] == OBJECT_GROUP for r in OBJECT_ROWS if r in rows)
+    # nothing is under two rows, and nothing holds and is held
+    children = [child for held in NESTS.values() for child in held]
+    assert len(children) == len(set(children)) and not set(children) & set(NESTS)
+    assert not set(children) & set(OBJECT_ROWS)
+    # a row whose setting cannot run stays where it was
+    loose = nested([{'id': 'project.set_truncation', 'verb': 'Truncation', 'kind': 'run',
+                     'ready': False, 'reason': 'no'},
+                    {'id': 'project.truncate_data', 'verb': 'Apply Truncation', 'kind': 'run',
+                     'ready': True}])
+    assert all('under' not in row for row in loose)
+
+
+def test_the_projects_own_actions_are_grouped(validate):
+    from hertzforge.service.action_table import HEADS
+
+    held = projects.new({'title': 'Empty'})
+    rows = table(held, validate=validate)[0]['rows']
+    by_id = {r['id']: r for r in rows}
+    order = [r['id'] for r in rows]
+    # the six computations by kind of test are under one row, which stands where they did
+    six = HEADS['group.auto_compute'][1]
+    assert len(six) == 6 and all(by_id[op]['under'] == 'group.auto_compute' for op in six)
+    assert by_id['group.auto_compute'] == {'id': 'group.auto_compute', 'verb': 'Auto Compute',
+                                           'kind': 'group', 'ready': True}
+    assert order.index('group.auto_compute') == order.index(six[0]) - 1
+    assert all(by_id[op]['verb'].startswith('Auto Compute ') for op in six)
+    # the ways a file comes in are under Import, and the rest under rows of their own
+    assert by_id['project.import_text']['under'] == 'self.import'
+    for head, (_words, ops) in HEADS.items():
+        for op in ops:
+            if op in by_id:
+                assert by_id[op]['under'] == head
+    assert {'group.index', 'group.reports', 'group.new'} <= set(by_id)
+    assert 'group.object' not in by_id, 'nothing is selected'
+
+
+def test_an_action_runs_on_what_is_picked_in_the_tree_and_asks_for_no_channel(plate):
+    history = named(plate, 'time_history')
+    whole = {r['id']: r for r in table(plate, history)[0]['rows']}
+    picked = {r['id']: r for r in table(plate, history, records={history: [1, 2]})[0]['rows']}
+    # an action on one channel takes every channel picked, or every channel of the object
+    role = picked['project.set_channel_role']
+    assert role['fill']['picked'] == '2-3' and {'record', 'picked'} <= set(role['omit'])
+    assert whole['project.set_channel_role']['fill']['picked'] == 'all'
+    # a reading of one record reads the first one picked, and a list takes them all
+    assert picked['project.amplitude_spectrum']['fill']['record'] == '2'
+    assert 'record' in whole['project.amplitude_spectrum']['omit']
+    assert 'record' not in whole['project.amplitude_spectrum']['fill']
+    assert picked['project.rescale']['fill']['records'] == '2-3'
+    assert whole['project.rescale']['fill']['records'] == ''
+    assert 'records' in whole['project.rescale']['omit']
+    # no row of an object asks for its channels, records or rows by number
+    by_id = {op.id: op for op in OPERATIONS}
+    for row in whole.values():
+        op = by_id.get(row['id'])
+        if op is None or not row['ready']:
+            continue
+        asked = {p.name for p in op.params} - set(row.get('omit', ()))
+        assert not asked & {'records', 'channels', 'rows', 'record', 'drawn', 'picked'}, row['id']
+
+
+def test_a_channels_role_is_set_on_every_channel_picked(plate):
+    history = named(plate, 'time_history')
+    op = next(o for o in OPERATIONS if o.id == 'project.set_channel_role')
+    kinds = {name: projects.kind_of(obj) for name, obj in plate.project.items()}
+
+    def run(**given):
+        return op.run(plate.project, op.resolve({'source': history, **given}, objects=kinds))
+
+    run(role='monitor', picked='2-3')
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == roles[2] == 'monitor' and roles[0] != 'monitor'
+    # called with a channel and no picks, as a script calls it, it is the one channel
+    run(role='response', record=2)
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == 'response' and roles[2] == 'monitor'
+    with pytest.raises(ProtocolError, match='outside'):
+        run(role='monitor', picked='999')
+
+
+def test_modal_test_estimate_again_is_ready_only_on_a_modal_test_runs_frames(rich, tmp_path):
+    """Estimate Again is offered on every time history by its type; it is ready only on a
+    Modal Test run's measurement frames with a reference and a response, and says why not
+    on anything else, as the operation itself would refuse it."""
+    import run_folders as rf
+
+    from hertzforge.io import run_convert
+
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Estimate Again', 'project.reprocess_modal_test')
+    assert not found['ready']
+    assert found['reason'] == "It is not a Modal Test run's measurement frames"
+    assert _refusal(rich.project, found['id'], {'source': history})
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer', hits=3)
+    state = projects.open_file({'path': run_convert.convert(folder).path})
+    frames = 'Measurement 1 frames (point 1)'
+    found = _offered(state, frames, 'Estimate Again', 'project.reprocess_modal_test')
+    assert found['ready'] and not found.get('reason')
+    assert _refusal(state.project, found['id'], {'source': frames}) is None
+    held = state.project[frames]
+    held.roles = {key: 'response' for key in held.channel_roles()}
+    found = _offered(state, frames, 'Estimate Again', 'project.reprocess_modal_test')
+    assert not found['ready']
+    assert found['reason'] == 'It needs a reference and a response channel'
+    assert _refusal(state.project, found['id'], {'source': frames})

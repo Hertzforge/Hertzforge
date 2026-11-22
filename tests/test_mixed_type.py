@@ -261,14 +261,16 @@ def test_the_sine_report_draws_no_averaging_frames_on_its_time_figures():
         html = render_html(template(objects, object_groups=[]), objects)
         data = json.loads(html.split('type="application/json">')[1]
                           .split('</script>')[0])
-        return [b for b in data['blocks'] if b.get('kind') == 'plot'
+        return [b for b in data['blocks'] if b.get('kind') in ('plot', 'stage')
                 and 'time histories' in b.get('caption', '')]
 
 
     sine = time_figures(sine_template)
     assert sine and all('averaging' not in b for b in sine)
+    # the random report's are on the stage (Brandon, 2026-11-18), the frames among its marks
     random = time_figures(random_template)
-    assert random and all('averaging' in b for b in random)
+    assert random and all('averaging' in b or 'averaging' in b.get('marks', {})
+                          for b in random)
 
 
 def test_virtual_channels_lie_across_one_row_of_the_grid():

@@ -99,7 +99,6 @@ fn law_file(name: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     exe.ancestors()
         .skip(1)
-        .take(4)
         .map(|d| d.join("wasm32-wasip2").join("release").join(&file))
         .find(|p| p.is_file())
         .unwrap_or_else(|| panic!("{file} is not built; run scripts/build_laws.sh"))

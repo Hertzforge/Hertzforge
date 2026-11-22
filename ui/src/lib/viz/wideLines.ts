@@ -20,6 +20,12 @@ export interface WideLineOptions {
 	transparent?: boolean;
 	/** Pixels; `LINE_WIDTH` unless the caller asks for another. */
 	width?: number;
+	/**
+	 * Color the lines by deflection, as the faces are: each end's offset at this instant over
+	 * `uPeak`, looked up in the colormap `uMap`, while `uScalar` is on; the line's own color while
+	 * it is off.
+	 */
+	scalar?: { uPeak: { value: number }; uMap: { value: unknown }; uScalar: { value: number } };
 }
 
 /** The node pairs `index` names, gathered per segment: [start xyz, end xyz] for each. */
@@ -41,7 +47,9 @@ export function gathered(index: Uint32Array, values: ArrayLike<number>, out: Flo
 /**
  * The segments `index` names over `position`, drawn `width` pixels wide and moved, as the
  * other displaced materials are, by `shape * uRe + shapeImag * uIm`. The shape attributes are
- * gathered per segment before a frame only when they changed.
+ * gathered per segment before a frame only when they changed. With `options.scalar` they take
+ * the colormap by deflection as the faces do, so a geometry of tracelines alone shows a mode's
+ * colors too (Brandon, 2026-11-16).
  */
 export function wideLines(
 	index: Uint32Array,
@@ -83,8 +91,26 @@ export function wideLines(
 				'vec4 end = modelViewMatrix * vec4( instanceEnd, 1.0 );',
 				'vec4 end = modelViewMatrix * vec4( instanceEnd + shapeEnd * uRe + shapeImagEnd * uIm, 1.0 );'
 			);
+		const scalar = options.scalar;
+		if (!scalar) return;
+		shader.uniforms.uPeak = scalar.uPeak;
+		shader.uniforms.uMap = scalar.uMap;
+		shader.uniforms.uScalar = scalar.uScalar;
+		// each end's own travel, carried along the segment
+		shader.vertexShader = shader.vertexShader
+			.replace('#include <common>', '#include <common>\nuniform float uPeak;\nvarying float vTravel;')
+			.replace(
+				'vec4 start = modelViewMatrix',
+				'vTravel = length( position.y < 0.5 ? shapeStart * uRe + shapeImagStart * uIm : shapeEnd * uRe + shapeImagEnd * uIm ) / uPeak;\n\t\t\tvec4 start = modelViewMatrix'
+			);
+		shader.fragmentShader = shader.fragmentShader
+			.replace('#include <common>', '#include <common>\nuniform sampler2D uMap;\nuniform float uScalar;\nvarying float vTravel;')
+			.replace(
+				'#include <color_fragment>',
+				'#include <color_fragment>\nif (uScalar > 0.5) diffuseColor.rgb = texture2D(uMap, vec2(clamp(vTravel, 0.0, 1.0), 0.5)).rgb;'
+			);
 	};
-	material.customProgramCacheKey = () => 'sds-wide-displaced';
+	material.customProgramCacheKey = () => (options.scalar ? 'sds-wide-displaced-scalar' : 'sds-wide-displaced');
 
 	const lines = new LineSegments2(geometry, material);
 	lines.frustumCulled = false;
@@ -101,6 +127,25 @@ export function wideLines(
 			imag.needsUpdate = true;
 		}
 		seen = [shape.version, shapeImag.version];
+	};
+	return lines;
+}
+
+/**
+ * Segments that stay put, `xyz` [2K, 3] with segment k from row 2k to row 2k + 1, `width` pixels
+ * wide and drawn over the surface: a projection's matched node pairs, which are short beside the
+ * model and would be lost at 1 px or under a face.
+ */
+export function fixedWideLines(xyz: Float32Array, color: ColorRepresentation, width: number = LINE_WIDTH): LineSegments2 {
+	const geometry = new LineSegmentsGeometry();
+	geometry.setPositions(xyz);
+	const material = new LineMaterial({ color, linewidth: width, depthTest: false });
+	const lines = new LineSegments2(geometry, material);
+	lines.frustumCulled = false;
+	lines.renderOrder = 4;
+	const size = new Vector2();
+	lines.onBeforeRender = (renderer: WebGLRenderer) => {
+		material.resolution.copy(renderer.getSize(size));
 	};
 	return lines;
 }

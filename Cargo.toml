@@ -8,7 +8,7 @@ resolver = "2"
 members = ["crates/*", "modules/*", "laws/*", "crates/hertzforge-law-host/guests/*"]
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.20"
 edition = "2021"
 license = "MIT"
 
@@ -22,6 +22,8 @@ hertzforge-capture = { path = "crates/hertzforge-capture" }
 hertzforge-channel-table = { path = "crates/hertzforge-channel-table" }
 hertzforge-dsp = { path = "crates/hertzforge-dsp" }
 hertzforge-explorer-host = { path = "crates/hertzforge-explorer-host" }
+hertzforge-modal-test = { path = "crates/hertzforge-modal-test" }
+hertzforge-playback = { path = "crates/hertzforge-playback" }
 hertzforge-hal = { path = "crates/hertzforge-hal" }
 hertzforge-hal-sim = { path = "crates/hertzforge-hal-sim" }
 hertzforge-mixed = { path = "crates/hertzforge-mixed" }
@@ -30,7 +32,6 @@ hertzforge-module-abi = { path = "crates/hertzforge-module-abi" }
 hertzforge-random = { path = "crates/hertzforge-random" }
 hertzforge-random-laws = { path = "crates/hertzforge-random-laws" }
 hertzforge-recorder = { path = "crates/hertzforge-recorder" }
-hertzforge-reference = { path = "crates/hertzforge-reference" }
 hertzforge-sdm = { path = "crates/hertzforge-sdm" }
 hertzforge-law-host = { path = "crates/hertzforge-law-host" }
 hertzforge-shaker-db = { path = "crates/hertzforge-shaker-db" }
@@ -99,7 +100,17 @@ opt-level = 3
 [profile.dev.package.hertzforge-mimo-shock-law-math]
 opt-level = 3
 
+# The MIMO Sine law math: its modal fit fits up to eight candidate modes jointly by finite
+# differences; the parity tests took over 60 s unoptimized on the ten-core Mac and 2.5 s optimized.
+[profile.dev.package.hertzforge-mimo-sine-law-math]
+opt-level = 3
+
 # The Sine core: its law check's seven cases took 24.2 s unoptimized on the ten-core Mac and
 # 14.6 s with this.
 [profile.dev.package.hertzforge-sine]
+opt-level = 3
+
+# The MIMO Sine engine: its identification and tracking filters run every case of the MIMO Sine
+# law check.
+[profile.dev.package.hertzforge-mimo-sine]
 opt-level = 3

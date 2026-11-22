@@ -30,14 +30,23 @@ def _history(channels, seconds=2.0, rate=16384.0, seed=1):
                        ordinate_unit=['m/s**2'] * channels)
 
 
-def test_the_random_report_draws_its_time_histories_flat():
+def test_the_random_report_draws_its_time_histories_on_the_stage():
+    """One 3-D figure a quantity, every channel in depth with the frames on
+    the floor, as the app's averaging stage draws it (Brandon, 2026-11-18),
+    and no larger than the flat figures it replaced."""
     from hertzforge.core.report import random_template
+    from hertzforge.report import render_html
 
     project = hertzforge.random_vibration_run(_fixture('plate', 'random.nc4'))
-    blocks = random_template(project, object_groups=project.object_groups).blocks
-    time = [b for b in blocks if b.get('source') == '@basis:TimeHistory'
+    report = random_template(project, object_groups=project.object_groups)
+    time = [b for b in report.blocks if b.get('source') == '@basis:TimeHistory'
             and b.get('kind') == 'plot' and 'time histor' in b.get('caption', '')]
-    assert time and all(b['mode'] == 'curves' for b in time)
+    assert time and all(b['mode'] == 'stage' for b in time)
+    staged = len(render_html(report, project, object_groups=project.object_groups))
+    for block in time:
+        block['mode'] = 'curves'
+    flat = len(render_html(report, project, object_groups=project.object_groups))
+    assert staged <= flat * 1.1, (staged, flat)
 
 
 def test_many_channels_page_and_share_one_axis():
@@ -119,12 +128,14 @@ def _fixture(*parts):
     return fixture_path(*parts)
 
 
-def test_no_template_puts_a_time_history_on_the_stage():
+def test_no_template_but_the_random_puts_a_time_history_on_the_stage():
     """A stage figure carries two million points, and a report's time
     histories are the largest thing in it: the plate's modal report
     was 36 MB, 88% of it two of them (Brandon, 2026-09-20). Every
-    built-in template draws its time histories flat. The stage stays
-    for what it is good at — the spectra, the coherence, the FRFs."""
+    built-in template draws its time histories flat but the random
+    report, whose stage carries the flat figure's points (Brandon,
+    2026-11-18). The stage stays for what it is good at — the spectra,
+    the coherence, the FRFs."""
     from hertzforge.core.report import (
         modal_template,
         random_template,
@@ -138,6 +149,8 @@ def test_no_template_puts_a_time_history_on_the_stage():
                 'shock': shock_template, 'sine': sine_template,
                 'sysid': sysid_template, 'transient': transient_template}
     for name, build in builders.items():
+        if name == 'random':
+            continue
         histories = [b for b in build({}).blocks
                      if b.get('kind') == 'plot'
                      and str(b.get('source', '')).endswith('TimeHistory')]

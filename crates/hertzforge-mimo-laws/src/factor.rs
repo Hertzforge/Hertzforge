@@ -715,3 +715,381 @@ impl Step {
         }
     }
 }
+
+/// A line of the drive given to [`FactorLoop::seed_with`] counts as held when
+/// it differs from what the loop holds by at most this much, relative to the
+/// larger of the two (Frobenius norms): rounding, not a projection.
+pub const SEED_HELD_TOLERANCE: f64 = 1e-10;
+
+impl FactorLoop {
+    /// The first drive given by the law. The loop takes `Z` as the factor of
+    /// `A^+ drive A^+^H` in its coordinates (as an FRF update carries a drive
+    /// over), and the drive it returns, records as played and corrects from
+    /// is the one those coordinates hold, `A Z Z^H A^H`, so the next loop,
+    /// with an exact estimate and a response on the reference, changes
+    /// nothing beyond rounding.
+    ///
+    /// The loop can hold only the part of `drive` that lies in the range of
+    /// its map `A`: on a line where `A^+ A = I` (`A` of full column rank, true
+    /// in both coordinate systems) and `drive = A C A^H` for some `C`, the
+    /// factor gives `drive` back, to rounding, and that line of `drive` is
+    /// returned itself, so an exact zero stays an exact zero. A line outside
+    /// that range, as a diagonal drive on a wide system (more drives than
+    /// controls) or on directions the inverse's truncation drops, is replaced
+    /// by its projection `A A^+ drive A^+^H A^H`; sources the target has no
+    /// pivot for are dead in the loop and are dropped likewise. Lines outside
+    /// the band are zero.
+    ///
+    /// Also returns, per line, the relative difference (Frobenius norms,
+    /// relative to the larger) of `drive` from what was returned: 0 on every
+    /// line held to [`SEED_HELD_TOLERANCE`], the difference elsewhere.
+    pub fn seed_with(
+        &mut self,
+        frf: &MatrixStack,
+        drive: &HermitianStack,
+    ) -> Result<(Step, Vec<f64>), LawError> {
+        if drive.lines() != self.lines || drive.n() != self.nd {
+            return Err(LawError(format!(
+                "the first drive has {} lines of {} drives; the loop has {} of {}",
+                drive.lines(),
+                drive.n(),
+                self.lines,
+                self.nd
+            )));
+        }
+        self.generation = 0;
+        self.last = Some(drive.clone());
+        self.refresh(frf, true)?;
+        let (held, condition, kept) = self.drive(frf)?;
+        let nd = self.nd;
+        let mut out = held;
+        let mut differs = vec![0.0; self.lines];
+        for (l, slot) in differs.iter_mut().enumerate() {
+            let (mut diff, mut ng, mut nh) = (0.0f64, 0.0f64, 0.0f64);
+            for r in 0..nd {
+                for c in 0..nd {
+                    let (g, h) = (drive.get(l, r, c), out.get(l, r, c));
+                    diff += (g - h).norm_sqr();
+                    ng += g.norm_sqr();
+                    nh += h.norm_sqr();
+                }
+            }
+            let scale = ng.max(nh).sqrt();
+            let rel = if scale > 0.0 {
+                diff.sqrt() / scale
+            } else {
+                0.0
+            };
+            if rel <= SEED_HELD_TOLERANCE {
+                for r in 0..nd {
+                    for c in r..nd {
+                        out.set(l, r, c, drive.get(l, r, c));
+                    }
+                }
+            } else {
+                *slot = rel;
+            }
+        }
+        self.last = Some(out.clone());
+        Ok((
+            Step {
+                drive: out,
+                condition,
+                kept,
+                correction_db: 0.0,
+                clamped: 0,
+                held: 0,
+            },
+            differs,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod seed_with_tests {
+    //! [`FactorLoop::seed_with`] against [`FactorLoop::seed`].
+
+    use super::*;
+    use hertzforge_sdm::law::Tolerances;
+
+    const LINES: usize = 24;
+    const BAND: (usize, usize) = (2, 22);
+
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
+        }
+        fn c(&mut self) -> C64 {
+            C64::new(self.next(), self.next())
+        }
+    }
+
+    /// `H G H^H` on every line.
+    fn through(h: &MatrixStack, g: &HermitianStack) -> HermitianStack {
+        let (lines, nc, nd) = h.dims();
+        let mut y = HermitianStack::zeros(lines, nc);
+        for l in 0..lines {
+            for r in 0..nc {
+                for c in r..nc {
+                    let mut s = ZERO;
+                    for a in 0..nd {
+                        for b in 0..nd {
+                            s += h.get(l, r, a) * g.get(l, a, b) * h.get(l, c, b).conj();
+                        }
+                    }
+                    y.set(l, r, c, s);
+                }
+            }
+        }
+        y
+    }
+
+    /// A structure, an estimate 5 percent off it, and a reachable reference.
+    fn case(seed: u64, nc: usize, nd: usize) -> (MimoSetup, MatrixStack, MatrixStack) {
+        let mut rng = Lcg(seed);
+        let mut h = MatrixStack::zeros(LINES, nc, nd);
+        let mut est = MatrixStack::zeros(LINES, nc, nd);
+        for l in 0..LINES {
+            for r in 0..nc {
+                for c in 0..nd {
+                    let v = rng.c() * 0.6 + if r == c { C64::new(1.5, 0.0) } else { ZERO };
+                    h.set(l, r, c, v);
+                    est.set(l, r, c, v * (C64::new(1.0, 0.0) + rng.c() * 0.1));
+                }
+            }
+        }
+        let mut g = HermitianStack::zeros(LINES, nd);
+        for l in BAND.0..BAND.1 {
+            for d in 0..nd {
+                g.set(l, d, d, C64::new(1.0 + rng.next(), 0.0));
+            }
+            for d in 1..nd {
+                let v = g.get(l, 0, 0).re.min(g.get(l, d, d).re).sqrt() * 0.3;
+                g.set(l, 0, d, C64::new(v, 0.0));
+            }
+        }
+        let reference = through(&h, &g);
+        let setup = MimoSetup {
+            controls: nc,
+            drives: nd,
+            lines: LINES,
+            df_hz: 1.0,
+            band: BAND,
+            reference,
+            tolerances: Tolerances::none(LINES, nc),
+        };
+        (setup, h, est)
+    }
+
+    fn settings() -> LoopSettings {
+        LoopSettings {
+            convergence: 0.5,
+            cap_up_db: 3.5,
+            cap_down_db: 6.0,
+            rank_tol: 1e-6,
+        }
+    }
+
+    /// The worst relative line difference of two drives.
+    fn rel(a: &HermitianStack, b: &HermitianStack) -> f64 {
+        let mut worst: f64 = 0.0;
+        for l in 0..a.lines() {
+            let n = a.n();
+            let (mut d, mut s) = (0.0, 0.0f64);
+            for r in 0..n {
+                for c in 0..n {
+                    d += (a.get(l, r, c) - b.get(l, r, c)).norm_sqr();
+                    s = s.max(a.get(l, r, c).norm_sqr());
+                }
+            }
+            if s > 0.0 {
+                worst = worst.max((d / s).sqrt());
+            }
+        }
+        worst
+    }
+
+    fn run(
+        lp: &mut FactorLoop,
+        first: Step,
+        h: &MatrixStack,
+        est: &MatrixStack,
+        loops: usize,
+    ) -> Vec<HermitianStack> {
+        let mut drives = vec![first.drive];
+        for _ in 0..loops {
+            let response = through(h, drives.last().expect("one"));
+            drives.push(lp.iterate(est, &response).expect("loop").drive);
+        }
+        drives
+    }
+
+    #[test]
+    fn given_the_seeds_own_drive_the_loop_runs_as_from_the_seed() {
+        for (nc, nd, seed) in [(3usize, 3usize, 1u64), (6, 4, 2), (3, 5, 3)] {
+            let (setup, h, est) = case(seed, nc, nd);
+            let mut a = FactorLoop::new(
+                &setup,
+                &setup.reference,
+                crate::pareto::loop_rule(),
+                settings(),
+            )
+            .expect("loop");
+            let first = a.seed(&est).expect("seed");
+            let x0 = first.drive.clone();
+            let (cond, kept) = (first.condition.clone(), first.kept.clone());
+            let da = run(&mut a, first, &h, &est, 5);
+            let mut b = FactorLoop::new(
+                &setup,
+                &setup.reference,
+                crate::pareto::loop_rule(),
+                settings(),
+            )
+            .expect("loop");
+            let (given, differs) = b.seed_with(&est, &x0).expect("seed_with");
+            assert!(
+                differs.iter().all(|d| *d == 0.0),
+                "{nc} x {nd}: {differs:?}"
+            );
+            assert_eq!(given.drive.line(BAND.0), x0.line(BAND.0));
+            assert_eq!(
+                rel(&given.drive, &x0),
+                0.0,
+                "{nc} x {nd}: the drive given is returned"
+            );
+            assert_eq!(given.condition, cond);
+            assert_eq!(given.kept, kept);
+            let db = run(&mut b, given, &h, &est, 5);
+            let worst = da
+                .iter()
+                .zip(&db)
+                .map(|(x, y)| rel(x, y))
+                .fold(0.0f64, f64::max);
+            println!("{nc} x {nd}: seed_with against seed over 5 loops, worst {worst:.2e}");
+            assert!(worst <= 1e-10, "{nc} x {nd}: {worst:e}");
+            // The loops did correct: the drive moved.
+            assert!(rel(&da[5], &da[0]) > 1e-3, "{nc} x {nd}");
+        }
+    }
+
+    #[test]
+    fn given_a_scaled_drive_the_loop_plays_it_then_converges_where_the_seed_does() {
+        // Square and feasible: the estimate is the structure.
+        let (setup, h, _) = case(4, 3, 3);
+        let mut a = FactorLoop::new(
+            &setup,
+            &setup.reference,
+            crate::pareto::loop_rule(),
+            settings(),
+        )
+        .expect("loop");
+        let first = a.seed(&h).expect("seed");
+        let mut x = first.drive.clone();
+        let da = run(&mut a, first, &h, &h, 40);
+        for l in 0..LINES {
+            for r in 0..3 {
+                for c in r..3 {
+                    x.set(l, r, c, x.get(l, r, c) * 1.5);
+                }
+            }
+        }
+        let mut b = FactorLoop::new(
+            &setup,
+            &setup.reference,
+            crate::pareto::loop_rule(),
+            settings(),
+        )
+        .expect("loop");
+        let (given, differs) = b.seed_with(&h, &x).expect("seed_with");
+        assert!(differs.iter().all(|d| *d == 0.0), "{differs:?}");
+        assert_eq!(rel(&given.drive, &x), 0.0);
+        let db = run(&mut b, given, &h, &h, 40);
+        let gap = rel(&da[40], &db[40]);
+        let start = rel(&da[0], &db[0]);
+        println!("scaled 1.5: start {start:.3}, after 40 loops {gap:.2e}");
+
+        assert!(start > 0.3);
+        assert!(gap <= 1e-8, "{gap:e}");
+        assert!(rel(&through(&h, &db[40]), &setup.reference) <= 1e-8);
+        assert!(rel(&through(&h, &da[40]), &setup.reference) <= 1e-8);
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn given_a_drive_outside_its_range_the_loop_plays_and_records_what_it_holds() {
+        // Wide (3 controls, 5 drives), the estimate exact, the reference the
+        // response of a diagonal drive: the loop's map spans only the
+        // structure's row space, so it holds the projection `P D P` with
+        // `P = H^+ H`, which gives the same response.
+        let (mut setup, h, _) = case(5, 3, 5);
+        let mut rng = Lcg(55);
+        let mut d = HermitianStack::zeros(LINES, 5);
+        for l in BAND.0..BAND.1 {
+            for k in 0..5 {
+                d.set(l, k, k, C64::new(1.0 + rng.next(), 0.0));
+            }
+        }
+        setup.reference = through(&h, &d);
+        let mut lp = FactorLoop::new(
+            &setup,
+            &setup.reference,
+            crate::pareto::loop_rule(),
+            settings(),
+        )
+        .expect("loop");
+        let (given, differs) = lp.seed_with(&h, &d).expect("seed_with");
+        // The projection, formed here from the whole pseudo-inverse.
+        let (hp, _) =
+            hertzforge_sdm::linalg::pinv(&h, hertzforge_sdm::linalg::Regularization::None)
+                .expect("pinv");
+        let mut want = HermitianStack::zeros(LINES, 5);
+        for l in BAND.0..BAND.1 {
+            let mut p = [[ZERO; 5]; 5];
+            for r in 0..5 {
+                for c in 0..5 {
+                    p[r][c] = (0..3).map(|k| hp.get(l, r, k) * h.get(l, k, c)).sum();
+                }
+            }
+            for r in 0..5 {
+                for c in r..5 {
+                    let mut v = ZERO;
+                    for a in 0..5 {
+                        v += p[r][a] * d.get(l, a, a) * p[c][a].conj();
+                    }
+                    want.set(l, r, c, v);
+                }
+            }
+        }
+        let off = rel(&given.drive, &want);
+        let moved = rel(&given.drive, &d);
+        println!("outside the range: returned against P D P {off:.2e}, against D {moved:.3}");
+        assert!(off <= 1e-10, "{off:e}");
+        assert!(moved > 0.1, "{moved}");
+        // Every in-band line differed, by the amount reported.
+        for l in 0..LINES {
+            if (BAND.0..BAND.1).contains(&l) {
+                assert!(differs[l] > SEED_HELD_TOLERANCE, "line {l}");
+            } else {
+                assert_eq!(differs[l], 0.0, "line {l}");
+            }
+        }
+        // The same response as the drive given.
+        assert!(rel(&through(&h, &given.drive), &setup.reference) <= 1e-10);
+        // What was returned is what was recorded: the next loop, with the
+        // response on the reference, changes nothing beyond rounding, and
+        // its change is measured from the drive returned.
+        let next = lp.iterate(&h, &through(&h, &given.drive)).expect("loop");
+        let step = rel(&next.drive, &given.drive);
+        println!(
+            "next loop: {step:.2e} relative, {:.2e} dB",
+            next.correction_db
+        );
+        assert!(step <= 1e-10, "{step:e}");
+        assert!(next.correction_db <= 1e-9, "{}", next.correction_db);
+    }
+}

@@ -1,8 +1,10 @@
 """A time history's analysis settings, set from the shell: its averaging,
 its filter and its truncation span, which Compute Spectra and Compute
-PSDs, Apply Filter and Apply Truncation then read. Each is an
+PSDs, the filtered history and Apply Truncation then read. Each is an
 operation whose params open on the history's own settings (`setting`)
-and whose result draws the setting on one record, and reads back what was stored.
+and whose result draws the setting on one record, and reads back what was
+stored. Filter is set and applied in one: with `keep` it adds the filtered
+history and draws that.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ HISTORY = Param('source', 'Time history', 'enum', options_from='objects:time_his
 #: the channel the setting is drawn on; not a setting itself
 SHOWN = Param('record', 'Drawn on record', 'integer', default=1, min=1, step=1)
 #: more frames than this are shaded as one span: a frame a few pixels wide says nothing
-MOST_FRAMES_SHADED = 200
+MOST_FRAMES_SHADED = 1000
 
 FRAME = Param('frame_length', 'Frame', 'integer', default=4096, unit='samples',
               min=2, step=1024, setting='averaging.frame_length')
@@ -39,6 +41,13 @@ DETREND = Param('detrend', 'Detrend', 'enum', default='none', setting='averaging
                 options=(Option('none', 'None'), Option('mean', 'Mean'),
                          Option('linear', 'Linear')))
 
+#: the dragged span of every frame, seconds on the record's clock
+SPAN_START = Param('start', 'Span from', 'number', default=0.0, unit='s', step=0.1)
+SPAN_STOP = Param('stop', 'Span to', 'number', default=1.0, unit='s', step=0.1)
+#: where the span ended before the drag, which tells a left edge dragged from a slide;
+#: negative when not known
+SPAN_WAS = Param('was_stop', 'Span ended at', 'number', default=-1.0, unit='s', step=0.1)
+
 PASS = Param('kind', 'Filter', 'enum', default='low-pass', setting='filtering.kind',
              options=(Option('low-pass', 'Low-pass'), Option('high-pass', 'High-pass'),
                       Option('band-pass', 'Band-pass')))
@@ -48,6 +57,8 @@ HIGH = Param('high', 'High edge', 'number', default=1000.0, unit='Hz', min=0.0,
              step=10.0, setting='filtering.high')
 ORDER = Param('order', 'Order', 'integer', default=4, min=1, max=12, step=1,
               setting='filtering.order')
+FILTER_KEEP = Param('keep', 'Add the filtered record (else the preview)', 'boolean',
+                    default=False)
 
 CUT_START = Param('start', 'Start', 'number', default=0.0, unit='s', step=0.1,
                   setting='truncation.start')
@@ -146,32 +157,63 @@ def _trace(history: Any, name: str, record: int, regions: list[dict],
                       regions=regions)
 
 
-def _frames_span(history: Any, name: str, record: int) -> list[dict]:
-    """The span of every frame, dragged on the plot to slide the frames
-    along the record; the
-    averaging run again with its settings as they are and the new start."""
-    averaging = history.averaging
-    rate = _rate(history)
-    origin = float(history.abscissa[0])
+#: how many points a frame's window is drawn with: it is smooth, so this only has to be
+#: finer than the eye at the width of a frame
+WINDOW_POINTS = 33
+
+
+def span_region(name: str, averaging: Any, rate: float, origin: float,
+                samples: int | None = None) -> dict:
+    """The span of every frame, dragged on the plot: its middle slides the
+    frames along the record and an edge adds or removes frames
+    (`project.drag_averaging`, which keeps whole frames). The drag carries the
+    frame, overlap, window and detrend drawn, so frames typed into the form and
+    not yet stored are the ones dragged."""
     bounds = averaging.frame_bounds(rate, origin)
-    held = {'source': name, 'record': record + 1, 'frame_length': averaging.frame_length,
-            'overlap': averaging.overlap, 'window': averaging.window,
-            'frames': averaging.frames, 'detrend': averaging.detrend}
-    return [v.region(bounds[0][0], bounds[-1][1], 'span', 'Drag to slide the frames',
-                     v.dragging('project.set_averaging', held, 'start'))]
+    held = {'source': name, 'frame_length': int(averaging.frame_length),
+            'overlap': float(averaging.overlap), 'window': averaging.window,
+            'detrend': averaging.detrend, 'was_stop': float(bounds[-1][1])}
+    snap = None if samples is None else {
+        'frame': averaging.frame_length / rate, 'hop': averaging.hop / rate,
+        'low': origin, 'high': origin + samples / rate}
+    return v.region(bounds[0][0], bounds[-1][1], 'span',
+                    'Drag to slide the frames; drag an edge for more or fewer',
+                    v.dragging('project.drag_averaging', held, 'start', 'stop'), snap=snap)
 
 
-def _frames(history: Any) -> list[dict]:
-    """The frames a history's spectra are averaged from, each a region;
-    one span over all of them when there are too many to see."""
-    rate = _rate(history)
-    origin = float(history.abscissa[0])
-    bounds = history.averaging.frame_bounds(rate, origin)
+def frame_regions(averaging: Any, rate: float, origin: float) -> list[dict]:
+    """The frames spectra are averaged from, each a region carrying its
+    window's weights and its row among the frames it overlaps
+    (`Averaging.levels`); one span over all of them when there are too
+    many to see."""
+    from hertzforge.core.averaging import window_shape
+
+    bounds = averaging.frame_bounds(rate, origin)
     if len(bounds) > MOST_FRAMES_SHADED:
         return [v.region(bounds[0][0], bounds[-1][1], 'frame',
                          f'{len(bounds)} frames, {bounds[0][0]:g} to {bounds[-1][1]:g} s')]
-    return [v.region(a, b, 'frame', f'Frame {k + 1}, {a:g} to {b:g} s')
+    levels, rows = averaging.levels(rate)
+    n = int(averaging.frame_length)
+    shape = np.asarray(window_shape(averaging.window, n, averaging.window_parameter),
+                       dtype=float)
+    at = np.linspace(0, n - 1, min(WINDOW_POINTS, n)).astype(int)
+    peak = float(shape.max())
+    # as the shading weighs the record: a flat top's small negative lobes draw as none
+    weights = [round(float(w), 4)
+               for w in np.clip(shape[at] / peak if peak > 0 else shape[at], 0.0, 1.0)]
+    return [v.region(a, b, 'frame', f'Frame {k + 1}, {a:g} to {b:g} s',
+                     window=weights, level=levels[k], rows=rows)
             for k, (a, b) in enumerate(bounds)]
+
+
+def averaging_regions(name: str, history: Any, averaging: Any = None) -> list[dict]:
+    """What draws an averaging on a history's plot: its frames, then the
+    span that drags them. `averaging` is the history's own when None."""
+    averaging = history.averaging if averaging is None else averaging
+    rate = _rate(history)
+    origin = float(history.abscissa[0])
+    return frame_regions(averaging, rate, origin) + [
+        span_region(name, averaging, rate, origin, len(history.abscissa))]
 
 
 def _averaging_reading(name: str, history: Any) -> dict:
@@ -192,12 +234,35 @@ def _averaging_reading(name: str, history: Any) -> dict:
     return v.reading(f'Averaging of {name}', rows)
 
 
+def _own_averaging(project: Any, name: str) -> None:
+    """Refuse an averaging for a history of transformed responses: it is
+    framed as the recording it was made from, and takes that recording's
+    averaging (`Project.follow_averaging`)."""
+    source = project.transformed_from(name)
+    if source is not None:
+        raise refused(f'{name} takes its averaging from {source}, which its rows are '
+                      f'computed from; set it on {source}')
+
+
+def _store_averaging(project: Any, name: str, averaging: Any) -> None:
+    """An averaging stored on a history and journaled, and given to the
+    histories of transformed responses made from it."""
+    project[name].averaging = averaging
+    project.record_setting(name, 'averaging', averaging)
+    # journaled as the call a script makes after assigning one, and only
+    # where there is something to follow
+    if any(project.transformed_from(other) == name for other in project.names):
+        project.follow_averaging(name)
+
+
 def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_averaging`: the frames a history's spectra are averaged
-    from. Refused when the record cannot hold them."""
+    from. Refused when the record cannot hold them, and for a history of
+    transformed responses, which takes its recording's."""
     from hertzforge.core.averaging import Averaging
 
     name = params['source']
+    _own_averaging(project, name)
     history = project[name]
     try:
         averaging = Averaging(params['frame_length'], params['overlap'],
@@ -210,10 +275,64 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'{name} holds {most} such frames from {averaging.start:g} s, '
                       f'not {averaging.frames}')
     record = _shown(history, name, params)
-    history.averaging = averaging
-    project.record_setting(name, 'averaging', averaging)
-    return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
+    _store_averaging(project, name, averaging)
+    return [_trace(history, name, record, averaging_regions(name, history)),
             _averaging_reading(name, history)]
+
+
+def spanned(averaging: Any, rate: float, origin: float, samples: int,
+            start: float, stop: float, was_stop: float | None = None) -> Any:
+    """`averaging` moved to the span `start` to `stop`, seconds on the record's
+    clock, with as many whole frames as the span holds, at least one. It starts
+    where the span does, unless the span still ends at `was_stop`, where it
+    ended before the drag: then its left edge was the one dragged, so the end
+    stays and whole frames are added or removed at the start. A span slid past
+    the end of the record is slid back until its frames fit, and one dragged
+    longer than the record keeps the frames that fit."""
+    from dataclasses import replace
+
+    n, hop = int(averaging.frame_length), int(averaging.hop)
+    first = max(round((float(start) - origin) * rate), 0)
+    last = round((float(stop) - origin) * rate)
+    length = last - first
+    # a slid span comes back a sample short or long of its frames; that is not a frame lost
+    frames = 1 + max(length - n + min(2, hop - 1), 0) // hop
+    if was_stop is not None and abs(float(stop) - float(was_stop)) * rate < 1.5:
+        # the left edge dragged: the frames end where they did
+        frames = max(min(frames, 1 + max(last - n, 0) // hop), 1)
+        first = max(last - n - (frames - 1) * hop, 0)
+    moved = replace(averaging, start=first / rate, frames=frames, start_set=True)
+    if not moved.fits(samples, rate):
+        first = min(first, max(samples - moved.span, 0))
+        moved = replace(moved, start=first / rate)
+    if not moved.fits(samples, rate):
+        moved = replace(moved, frames=max(moved.most_frames(samples, rate), 1))
+    return moved
+
+
+def drag_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.drag_averaging`: a history's frames after their span was
+    dragged on its plot to `start` and `stop`, seconds on the record's clock
+    (`spanned`), with the frame length, overlap, window and detrend the plot drew.
+    A span that still ends at `was_stop` had its left edge dragged."""
+    from hertzforge.core.averaging import Averaging
+
+    name = params['source']
+    _own_averaging(project, name)
+    history = project[name]
+    try:
+        drawn = Averaging(params['frame_length'], params['overlap'], params['window'], 1,
+                          0.0, params['detrend'], start_set=True)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    rate = _rate(history)
+    moved = spanned(drawn, rate, float(history.abscissa[0]),
+                    len(history.abscissa), params['start'], params['stop'],
+                    params['was_stop'] if params['was_stop'] >= 0 else None)
+    if not moved.fits(len(history.abscissa), rate):
+        raise refused(f'{name} is shorter than one frame of {moved.frame_length} samples')
+    _store_averaging(project, name, moved)
+    return [_averaging_reading(name, history)]
 
 
 def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -221,21 +340,26 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     and as many frames as fit in it (`TimeHistory.suggest_averaging`),
     keeping the frame, window and overlap it already has."""
     name = params['source']
+    _own_averaging(project, name)
     history = project[name]
     record = _shown(history, name, params)
     try:
-        history.averaging = history.suggest_averaging()
+        found = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_setting(name, 'averaging', history.averaging)
-    return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
+    _store_averaging(project, name, found)
+    return [_trace(history, name, record, averaging_regions(name, history)),
             _averaging_reading(name, history)]
 
 
 def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.set_filter`: the pass band Apply Filter filters a history
-    to. A low-pass takes the high edge, a high-pass the low edge and a
-    band-pass both."""
+    """`project.set_filter`: a time history's filter, set and applied in
+    one place (Brandon, 2026-11-17: Set Filter and Apply Filter were two
+    actions for one thing). A low-pass takes the high edge, a high-pass the
+    low edge and a band-pass both. The settings are stored on the history
+    either way. Without `keep` the picked record is drawn as recorded and
+    as the filter would leave it; with it the filtered history is added
+    (`Project.filter_data`), every channel at zero phase."""
     from hertzforge.core.filters import Filtering
 
     name, kind = params['source'], params['kind']
@@ -255,8 +379,11 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     history.filtering = filtering
     project.record_setting(name, 'filtering', filtering)
-    # the preview is what Apply Filter will make of this record: the same
-    # design, zero phase
+    if params.get('keep'):
+        from .ops_project import _derived
+
+        return _derived(project, lambda: project.filter_data(name))
+    # the preview is what Apply will make of this record: the same design, zero phase
     from scipy.signal import sosfiltfilt
 
     from hertzforge.core.filters import design
@@ -308,16 +435,24 @@ OPERATIONS = (
         params=(HISTORY, FRAME, OVERLAP, WINDOW, FRAMES, START, DETREND, SHOWN),
         outputs=('spectrum', 'reading'), run=set_averaging, edits=True),
     Operation(
+        id='project.drag_averaging', title='Drag Averaging', workspace='signals', everywhere=True,
+        summary='A time history\'s frames after their span was dragged on its plot: '
+                'slid along the record, or made more or fewer.',
+        params=(HISTORY, FRAME, OVERLAP, WINDOW, DETREND, SPAN_START, SPAN_STOP, SPAN_WAS),
+        outputs=('reading',), run=drag_averaging,
+        edits=True),
+    Operation(
         id='project.detect_averaging', title='Detect Averaging', workspace='signals', everywhere=True,
         summary='The steady stretch of a time history found, and as many frames '
                 'as fit in it, keeping its frame length, window and overlap.',
         params=(HISTORY, SHOWN), outputs=('spectrum', 'reading'), run=detect_averaging, edits=True),
     Operation(
         id='project.set_filter', title='Filter', workspace='signals', everywhere=True,
-        summary='The pass band Apply Filter filters a time history to, at zero '
-                'phase.',
-        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN), outputs=('spectrum', 'reading'),
-        run=set_filter, edits=True),
+        summary='A time history filtered to a pass band at zero phase: Preview draws a '
+                'record as the filter would leave it, and Apply adds the filtered history.',
+        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN, FILTER_KEEP),
+        outputs=('spectrum', 'reading', 'waterfall'), run=set_filter, edits=True,
+        commits='keep'),
     Operation(
         id='project.set_truncation', title='Truncation', workspace='signals', everywhere=True,
         summary='The span of a time history Apply Truncation keeps.',

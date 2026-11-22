@@ -1,0 +1,55 @@
+{
+  "format": "hertzforge-drive",
+  "version": 1,
+  "rate_hz": 1000.0,
+  "samples": 301,
+  "channels": [
+    {
+      "name": "Offset",
+      "unit": "V",
+      "source": "Offset"
+    },
+    {
+      "name": "Cosine",
+      "unit": "V",
+      "source": "Cosine"
+    }
+  ],
+  "sha256": "af216b57c38f9f1ba977cef63cb451838e837ada03c8cff05b76a4139818d5c1",
+  "source": {
+    "path": null,
+    "sha256": null,
+    "format": "npy",
+    "selections": []
+  },
+  "fixes": [
+    {
+      "kind": "fix_ends",
+      "from": {
+        "folder": "/Users/someone/Hertzforge_Data/drives/ends",
+        "sha256": "933e0d60153cc1886f29f920fdfc7225ada23784934095055c63f4219987692b"
+      },
+      "taper_s": 0.01,
+      "taper_samples": 10,
+      "correction": "c(t) = a sin(pi t / T) + b sin(2 pi t / T), T = (samples - 1) / rate_hz",
+      "channels": [
+        {
+          "name": "Offset",
+          "a": 0.1518450310390239,
+          "b": -1.8987432544318898e-05,
+          "rms_before": 0.29955670422828,
+          "rms_after": 0.27968427586676964
+        },
+        {
+          "name": "Cosine",
+          "a": -1.6120746432969814e-05,
+          "b": -1.569040279581488e-16,
+          "rms_before": 0.3541402022285053,
+          "rms_after": 0.3455168280630637
+        }
+      ]
+    }
+  ],
+  "tool": "hertzforge 0.0.0",
+  "created_utc": "2026-11-15T00:00:00Z"
+}

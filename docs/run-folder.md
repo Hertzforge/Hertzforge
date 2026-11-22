@@ -7,7 +7,7 @@ service to be read. The analysis side converts it into an ordinary project file
 finished run reaches every analysis tool with its channel table, its setup, its
 log and its measurements. Every control module writes one for every run: the
 Random, MIMO Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock
-and TWR modules, Explorer and the Recorder.
+and TWR modules, Explorer, Playback and the Recorder.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -29,11 +29,11 @@ Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_srs_<run id>`, a MIMO Shock run's
 `<YYYYMMDD-HHMMSS>_mimo_shock_<run id>` and a TWR run's
 `<YYYYMMDD-HHMMSS>_twr_<run id>`, the time it armed in UTC. A Recorder run's
-folder, and an Explorer run's, is the plain name its setup gives
-(`capture.run_name`). The run's state names the folder from arm on
+folder, an Explorer run's and a Playback run's, is the plain name its setup
+gives (`capture.run_name`). The run's state names the folder from arm on
 (`random.state`, `mimo_random.status`, `sine.state`, `mixed.state`, `shock.state`,
-`srs.state`, `mimo_shock.state`, `twr.state`, `explorer.state` and
-`recorder.state`, `record.folder`).
+`srs.state`, `mimo_shock.state`, `twr.state`, `explorer.state`,
+`playback.state` and `recorder.state`, `record.folder`).
 
 ## Layout
 
@@ -425,6 +425,71 @@ and each law call's measured duration normalized, and each shot of its streams
 cut to its first 80 frames (`cut_from_frames`, on the stream and on each shot);
 `scripts/make_golden_runs.sh` rewrites it.
 
+## What a MIMO Sine Run Saves
+
+From arm: `run.json` (with the simulator's structure by name in
+`sim.structure`; after the identification, its facts in `identification`: the
+level it was taken at by response, the drive-to-response lag, the frames the
+station held ahead of the first drive frame at the start that lag was measured
+on (`frames_ahead`; every start of the run must hold the same), the record
+length, the records averaged, the line spacing, how long it played, each
+drive's rms, each control's band-mean coherence, whether the gate passed, the
+resonances it found and the sweep-rate warning for each, and, once the law is
+built, the tracker delay factor and the transport delay the law was told),
+`table.json`, `setup.json` (the configuration as accepted; resolved, the test,
+the level schedule, whether the phases are specified, the controls with their
+units, profiles and phase rows, the drives with their ceilings and aborts, the
+limit channels with their bounds, the guards and the notch, the shaker ratings
+the kinematic monitor judges, the identification's settings, the tracking
+rule, the law and its parameters, the request switch and its bounds, the rates
+and the simulator's structure; the derived values; the feasibility inputs and
+verdict), `law/law.json` (the law's identity, its parameters as given and in
+force, the shapes, test types and references it accepts, its declared values
+and its guards) and `log.jsonl` (every state, the station, each start of the
+station with the frames it held ahead of its first drive frame, the
+identification's gate and each flagged resonance, the engage, every level change, hold and
+resume, manual frequency (where the tone was sent, `to_hz` in `data`), notch in and out, refused notched reference, alarm in
+and out, unusable law call, drive over its ceiling, each change of the law's
+request and its outcome, the stop or trip and the end, each with its tick, its
+station time, its frequency and its level in `data`), and these files, each
+checked against the golden run folder (`schema/golden/runs/mimo_sine/`) by
+`tests/test_run_folder_golden_mimo_sine.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order, from arm, the identification included (`kind` `inputs`) |
+| `streams/drives` | Every enabled drive as the device accepted it, in volts (`kind` `drives`) |
+| `results/reference` | Each control's reference amplitude and phase at full level, peak, and its alarm and abort bands, on the run's band: every control's breakpoints and the points between them; the phase NaN where the run's phases are not specified (`kind` `mimo_sine_reference`) |
+| `results/limit_ch<n>` | Each limit channel's bound and abort bound at full level on the run's band (`kind` `limit`), one result per limit channel |
+| `results/identification_frf` | The identification: every control's and limit channel's response to every drive on its grid, a delay lagging (`kind` `frf`) |
+| `results/identification_coherence` | Each control's and limit channel's multiple coherence with the drives (`kind` `coherence`) |
+| `results/identification_trust` | Whether each line of the identification is trusted (`kind` `mimo_sine_trust`, kept as arrays) |
+| `results/channel_levels` | Every control's, limit channel's and drive's tracked amplitude, peak, and phase against the tone, tick by tick, with the tone's frequency, the scheduled level, the sweep's direction and pass, whether a settle window was open, each control's reference (as judged, and its phase) and error, each limit channel's bound, the notch's scale (how far the whole drive vector was cut that tick) and depth (the share of the reference the controls were held to), whether a law's notched reference was taken, and the two readings (`kind` `sine_levels`, one record per 16 ticks) |
+| `results/control_trace` | Every tick of the control law: whether it was called and whether as its engage, the hold it was told, the drive in force it was told, the drive it asked for and the drive played after every guard (each drive's real and imaginary parts), the miss and its reason, the call's time, its own fault judgement, its request and what came of it, the ceiling and first-drive scales, the caps that bound, the largest rotation asked for and the law's declared values (`kind` `mimo_sine_control`, kept as arrays, one record per 16 ticks) |
+| `end.json` | The end, as the run's state reports it, with the records written and dropped and the run's report (per control its worst error and phase error and where, its time in alarm and its deepest notch; per limit channel its largest margin to its bound and where and the time the notch was in (the reference held down or the drive vector cut); per drive its largest amplitude and where and its ticks over its ceiling; the largest readings; the law's requests) |
+
+Every tick is kept; a record is handed to the record's writer when its 16 ticks
+are full, the last one, part full, at the end, and nothing is held to the end
+of the run. A run that ends before it engages has its identification (when it
+got that far) and no `channel_levels` or `control_trace`; one held by the
+coherence gate has its identification and no levels. A run killed part way
+leaves the records written so far and `run.json` with `complete` false, and
+converts with what it has. With `record.streams` false there is no `streams/`
+folder.
+
+On the analysis side the streams become time histories; the references a
+`SineSweepSpecification` of one tone with each control's own amplitude, phase
+and bands (a sweep's tone one pass across the band in the direction the run
+started, a dwell's its frequency held for its dwell; a stepped sine plays no
+one tone, so its references stay in the run record); the levels of the last
+one-way pass at the highest level a `SineLevelSet` of every control, limit
+channel and drive (a sweep or a stepped sine; a dwell's levels are against
+time and stay in the run record); the identification an `Frf` and its
+coherence a `MultipleCoherence`; all in SI, opened in the Sine Sweep
+workspace. The trust mask, every other point of the levels, the references as
+judged, the errors, the notch, the readings and the law's calls have no
+analysis class and stay in the run record as named arrays.
+
 ## What a TWR Run Saves
 
 From arm: `run.json`, `table.json`, `setup.json` (the configuration as accepted;
@@ -751,6 +816,121 @@ it measured, and the values of the survey's levels and of the spectra (their
 shapes, channels and units are kept). Its streams are cut to their first 256
 frames, before the first steer (`cut_from_frames`);
 `scripts/make_golden_runs.sh` rewrites it.
+
+## What a Playback Run Saves
+
+From start, before the station is opened: `run.json` (with the run's
+`metadata`; its `grid` is the drive file's own rate, which the station must
+program or the start is refused), `table.json`, `setup.json` and `log.jsonl`.
+`setup.json` holds `config` as accepted; `resolved`: `control`, the words "open
+loop, no control law" (the file is played as it is, scaled by the level, and
+nothing is corrected from the response), the drive file (its folder, its
+SHA-256, its rate, samples and channels, each with the drive row it plays on,
+and its sidecar `drive.json` whole, with the source it was converted from and
+the fixes made to it), the map, the level and its gain, the ceiling, the
+pre-roll and post-roll, the stop (40 dB over 3 s, then zero), the inputs and
+the drives, every abort in force (the ceiling, each row's abort limits from the
+channel table, the input overload, the underrun and the reader's failure) and
+the folder's name; `check`, the check report the run was configured with (each
+channel's peak, start and end values, its velocity and displacement taken as an
+acceleration with their end values and peaks, pass or fail with the reason);
+and `derived`. Then these, each checked against the golden run folder
+(`schema/golden/runs/playback/`) by `tests/test_run_folder_golden_playback.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order (`kind` `inputs`), from the station's first frame until past the drive's last recorded frame by the station's input delay |
+| `streams/drives` | Every drive as the device accepted it, in volts, in table order (`kind` `drives`), frame for frame with the inputs: the pre-roll's zeros (the station's lead-in first), the file at the level from the pre-roll's last frame, then the post-roll, or the stop ramp and one station block of zeros after it. A completed run's drives are the pre-roll, the file and the post-roll exactly; the zeros played after them, while the inputs come back, are not recorded |
+| `results/playback_check` | The check report (`kind` `drive_check`, the report whole in its description) and, per file channel, its peak, start, end, velocity and displacement end values and peaks, and the envelopes of the drive, the velocity and the displacement (each bucket's minimum and maximum), in V, V s and V s² |
+| `results/playback_outcome` | How the run ended (`kind` `playback_outcome`): `ended` (`completed`, `stopped` or `aborted`), the `outcome` and its reason in words, whether the emergency stop was issued and a response abort's trip; arrays `played` (file samples), `played_s` and `generated` (frames from the station's first, the rolls included) |
+| `end.json` | The end, as the run's state reports it, the samples played of the file's, and the state itself, with the loop's `health` (`engine_ticks`, `worst_tick_ms` against `budget_ms`, `health_faults`, `ring_overruns`) |
+
+The log has an entry for the check (`check`, `data.event` `check_passed`),
+the arm (`state`, `armed`), each phase as it begins with the generated frame
+it began at (`pre_roll`, `playing`, `post_roll`, `post_roll_done`, `stop`,
+`stopped`, `zeroed`), an operator's stop or abort and who asked
+(`operator`), a trip (`trip`), an underrun (`underrun`), an abort (`abort`),
+an overload (`overload`) and the outcome (`outcome`). A start refused (the
+file changed since its check, a rate the station does not run, the station or
+the record refusing) is a `state` entry, beside a `check` entry when the file or
+its rate refused it, and ends the run `arm_refused`. With `record.streams` false there is no `streams/` folder.
+Playback has no law.
+
+The golden folder is written by `cargo test -p sds-control --test
+playback_golden_run` from a short run on the simulator (one input, one drive,
+2048 Hz): a half-second burst at -6 dB with an eighth of a second of pre-roll
+and of post-roll, played to its end. What follows the wall clock is
+normalized: the wall times, the build fields, the folders' paths, the station
+frames and the read-ahead's fill. Its drive stream is whole, 1536 frames; its
+input stream is cut to the same 1536 frames (`cut_from_frames`);
+`scripts/make_golden_runs.sh` rewrites it.
+
+## What a Modal Test Run Saves
+
+From start, before the station is opened: `run.json` (`test` `modal_test`, with
+the run's `metadata` and, when the configuration names one, its
+`specification`; its `grid` adds `analysis_block`, the setup's block, and
+`df_hz`, the line spacing), `table.json`, `setup.json` and `log.jsonl`.
+`setup.json` holds `config` as accepted; `resolved`: `control` (impact mode:
+the words "no drive: impact mode writes no drive sample"; shaker mode: "open
+loop, no control law", each shaker playing its source at its level), the input
+rows and the drive rows (none in impact mode), `windows` (the analysis window,
+the force window's `pre_frames`, `width_frames` and `fall_frames`, and the
+exponential window's `tau_s`, `inv_tau_per_s`, `end` and `added_damping`, each
+null when off), `capture`, in shaker mode the `stop` (40 dB over 3 s, then
+zero) and the `aborts` in force (with `latency`: `bound_s`, the station's
+characterized time from an abort to the drive at zero, and `from`, where it comes
+from; null on a station with none, the words then saying what bounds it in the
+loop), and on the simulator the simulated `structure`
+(its modes, scale, shapes, the hammer's force and the impulse responses'
+length); `check`, the check report the run was configured with (the rate, the
+block, the band and its lines, the estimator, the averages, the references, the
+responses, every point's DOFs, and the mode's settings; in impact mode the
+trigger's signed `level`, its `polarity` and the words of what it `watches`). Then these, each checked
+against the golden run folders (`schema/golden/runs/modal_test/impact_roving/` and
+`schema/golden/runs/modal_test/shaker_burst_random/`) by
+`tests/test_run_folder_golden_modal_test.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every measured row as read from the station, in table order (`kind` `inputs`), from the station's first frame |
+| `streams/drives` | Shaker mode only: every drive as the device accepted it, in volts (`kind` `drives`), frame for frame with the inputs. Impact mode opens no drive row and has no `drives` stream |
+| `results/modal_frames` | Repeating, a line per hit or frame taken (`event` `taken`) and per change of its status (`event` `status`): the tile (`n`, `seq`, `status`, `reason`, `overload`, `double_hit`, `start_frame`, `decay` (on a hit or a burst frame `{"row","ratio","warning"}`, the decay check of `schema/PROTOCOL.md`, after the windows; otherwise null); in impact mode `peak`, `tip_warning`, `force_window_cut` and the hit's whole `report`, whose `double_hit` is null or `{"frame","peak","ratio"}` and whose frames count from the block's start; with a target `target_verdict` and `target_diff_pct`) and its `point`; array `span` (`f8` `[2]`, unit `frame`), the first station input frame and the length |
+| `results/modal_frf` | Repeating, a record per measured point (`kind` `frf`, `layout` `["response","reference","line"]`, the abscissa in Hz from the band's first line, `windows` as in `setup.json`); array `frf`, `c16` `[responses, references, lines]`, unit response over reference (`g/lbf`). The line: `measurement` (from 1), `point` (from 0), `replaces` (the measurement it replaces, or null), `averages`, `estimator` (`H1`, `H2` or `Hv`; `matrix H1` with several references), the point's `rows` (each reference and response with its `index`, `node`, `direction` and `unit`) and `decay`, the largest decay check over the hits or frames averaged (null when none was checked) |
+| `results/modal_coherence` | Repeating, the same lines (`layout` `["response","line"]`): array `coherence` with one reference, `multiple_coherence` with several, `f8` `[responses, lines]` |
+| `results/modal_reference_spectra` | Repeating, the same lines (`layout` `["reference","line"]`): array `autospectra`, `f8` `[references, lines]`, unit the reference's squared per Hz (`lbf^2/Hz`); with several references also `condition_number`, `f8` `[lines]` |
+| `results/modal_outcome` | Once at the end (`kind` `modal_outcome`): the `mode`, the `outcome` and its `reason` in words, whether the emergency stop was issued, the `totals` (`accepted`, `taken`, `points_measured`, `points_planned`) and the per-point `counts`; arrays `accepted`, `taken`, `points_measured` and `points_planned`, each `f8` `[1]` |
+| `end.json` | The end, as the run's state reports it, the `totals`, each stream's frames, drops, gaps and fault, and the state itself |
+
+Every record is written as it is made, off the run's thread: a test cut off
+part way leaves every finished point's FRF, coherence and spectra, and every
+hit taken, on the disk, with `run.json` `complete` false and no `end.json`. A
+point measured again is a new record whose `replaces` names the earlier one; a
+reader takes each point's last record.
+
+The log has an entry for the configure and the start (`state`, `data.event`
+`started`), each state the run enters (`state`, `data.event` `state`; impact mode enters
+`arming` on every arm and re-arm, then `armed` once the pre-trigger is full), each
+point selected (`selected`), each hit or frame and its status (`hit`), each
+point measured (`result`, with its `measurement` and `replaces`), the first hit or
+frame of a measurement over the decay check's threshold (`warning`, `data.event`
+`response_not_decayed`, with the `point`, `seq`, `row` and `ratio`), a drive
+start (`drive_start`), an operator's verb and who asked (`operator`), a point cleared
+(`operator`, `clear_point`), a force
+target set from a hit (`operator`, `target_from_hit`), an abort (`abort`) and
+the outcome (`outcome`). With `record.streams` false there is no `streams/`
+folder. The Modal Test has no law.
+
+The golden folders are written by `cargo test -p sds-control --test
+modal_test_golden_run` on the simulator, at 1024 Hz with a band to 200 Hz:
+`impact_roving`, a roving hammer over three points, two hits a point, a
+512-frame block, the force and exponential windows on; and
+`shaker_burst_random`, two shakers playing burst random (seed 7, 40 percent of
+the frame) at one point, a 1024-frame block, matrix H1 over four frames.
+What follows the wall clock is normalized: the wall times, the run's unique
+identity, the build fields, the folders' paths and the station frames when
+the run ended. Each stream is cut to its first 1024 frames, 512 in the shaker
+folder (`cut_from_frames`); `scripts/make_golden_runs.sh` rewrites them.
 
 ## Reports and the Run Log
 

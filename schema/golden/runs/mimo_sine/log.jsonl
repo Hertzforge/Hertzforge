@@ -1,0 +1,16 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden MIMO Sine\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"station","text":"armed on sim at 16384 Hz, a 819 frame tick, shared clock, structure sine-linear-4x4"}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"note","text":"started; identification at -20 dB under full level","data":{"action":"start","level_db":-20.0}}
+{"seq":5,"at_unix":1794240005.25,"frame":45056,"kind":"station","text":"the station started for the identification with 8 frames ahead of the first drive frame (4 from the engine's first update, 4 in the engine's queue)","data":{"event":"station_start","phase":"identification","frames_ahead":8,"lead_in_frames":0,"prefill_frames":4,"queue_frames":4}}
+{"seq":6,"at_unix":1794240006.25,"frame":45056,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
+{"seq":7,"at_unix":1794240007.25,"frame":45056,"kind":"gate","text":"identification: band coherence 1 at worst against a gate of 0.5; passed","data":{"coherence_mean":[1.0,1.0,1.0,1.0],"gate_coherence":0.5,"passed":true,"lag_frames":266}}
+{"seq":8,"at_unix":1794240008.25,"frame":45056,"kind":"state","text":"coherence gate to engaged","data":{"from":"coherence_gate","to":"engaged","state":"running"}}
+{"seq":9,"at_unix":1794240009.25,"frame":49152,"kind":"station","text":"the station started for the engaged run with 8 frames ahead of the first drive frame (4 from the engine's first update, 4 in the engine's queue)","data":{"event":"station_start","phase":"engaged","frames_ahead":8,"lead_in_frames":0,"prefill_frames":4,"queue_frames":4}}
+{"seq":10,"at_unix":1794240010.25,"frame":49152,"kind":"level","text":"engaged at 0 dB and 80 Hz","data":{"t_s":0,"tick":0,"frequency_hz":80,"level_db":0,"event":"engaged"}}
+{"seq":11,"at_unix":1794240011.25,"frame":57344,"kind":"note","text":"the schedule is complete at 81 Hz; every drive ramps down","data":{"t_s":0.5499,"tick":11,"frequency_hz":81,"level_db":0,"event":"stopping","outcome":"completed"}}
+{"seq":12,"at_unix":1794240012.25,"frame":57344,"kind":"state","text":"engaged to ramping down","data":{"from":"engaged","to":"ramping_down","state":"stopping"}}
+{"seq":13,"at_unix":1794240013.25,"frame":73728,"kind":"state","text":"every drive at zero (completed)","data":{"t_s":0.5999,"tick":12,"frequency_hz":81,"level_db":0,"event":"ended","outcome":"completed"}}
+{"seq":14,"at_unix":1794240014.25,"frame":75264,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
+{"seq":15,"at_unix":1794240015.25,"frame":75264,"kind":"note","text":"Test complete: the schedule ran its 0.5 s of test time and every drive ramped down with the controlled stop.","data":{"outcome":"completed","by":"the operator"}}

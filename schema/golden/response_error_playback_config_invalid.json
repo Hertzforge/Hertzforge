@@ -1,0 +1,19 @@
+{
+ "type": "response",
+ "id": 134,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 1 error: Drive file channel 0 (drive) peaks at 2.000000 V, 1.002374 V at -6 dB, over the drive ceiling of 1 V.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "peak_over_ceiling",
+     "field": "level_db",
+     "message": "Drive file channel 0 (drive) peaks at 2.000000 V, 1.002374 V at -6 dB, over the drive ceiling of 1 V."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

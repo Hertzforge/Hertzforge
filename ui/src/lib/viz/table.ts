@@ -155,3 +155,30 @@ export function fillTargets(
 	}
 	return out;
 }
+
+/** The rows a table opens onto their own tables to start with: `open` counts from 1, the set from 0. */
+export function openedAtFirst(open: number[] | undefined): Set<number> {
+	return new Set((open ?? []).map((row) => row - 1));
+}
+
+/** A set of opened rows with `row` opened if it was closed and closed if it was open. */
+export function toggled(opened: Set<number>, row: number): Set<number> {
+	const next = new Set(opened);
+	if (!next.delete(row)) next.add(row);
+	return next;
+}
+
+/**
+ * The ids Delete removes in a table of entities: the rows this table marked (Cmd or Ctrl-clicked, or the block), when they
+ * are marked by the column the ids are in, else the block's rows, each by its cell in `column`.
+ */
+export function removedIds(known: readonly (readonly string[] | undefined)[], column: number, block: Block | null, markedHere: readonly number[] | null, markColumn: number | undefined): string[] {
+	if (markedHere?.length && markColumn === column) return markedHere.map(String);
+	const ids: string[] = [];
+	if (block)
+		for (let r = block.r0; r <= block.r1; r++) {
+			const id = known[r]?.[column];
+			if (id) ids.push(id);
+		}
+	return ids;
+}

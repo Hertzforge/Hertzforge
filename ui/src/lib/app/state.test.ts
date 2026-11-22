@@ -239,6 +239,19 @@ describe('a form with a Preview button', () => {
 		expect(runs.at(-1)?.preview).toBeUndefined();
 	});
 
+	it('opens on its preview when it is opens_previewed, and not otherwise', async () => {
+		const fitSensors = { ...meshSolids, id: 'project.create_sensors', title: 'Fit Sensors', opens_previewed: true, params: [geometry, { name: 'keep', label: 'Create', type: 'boolean', default: false }] } as unknown as OperationDescriptor;
+		const { a, runs, app } = withMesh();
+		app.catalog = { operations: [addBlock, meshSolids, fitSensors] } as never;
+		await a.perform(row(fitSensors), column);
+		expect(a.formOpen).toBe(true);
+		expect(runs.map((r) => [r.op, r.params?.keep])).toEqual([['project.create_sensors', false]]);
+		expect(a.reading?.title).toBe('Fit Sensors, preview');
+		a.closeForm();
+		await a.perform(row(meshSolids), column);
+		expect(runs.length).toBe(1);
+	});
+
 	it('Preview does nothing on a form without one', async () => {
 		const { a, runs } = withMesh();
 		await a.perform(row(addBlock), column);
@@ -394,11 +407,11 @@ describe('a finished run opened in Analysis', () => {
 		return { app, sent, answers };
 	}
 
-	it('opens the folder as the project when the project holds nothing, and shows the Random workspace', async () => {
+	it('opens the folder as the project when the project holds nothing, and shows the analysis', async () => {
 		const { app, sent } = runApp({ ...summary, objects: [], active_geometry: null } as unknown as ProjectSummary);
 		expect(await app.runOpen.open('/data/20261113-180000_random_r-0001')).toBe(true);
 		expect(sent).toEqual([['project.open', { path: '/data/20261113-180000_random_r-0001' }]]);
-		expect(app.workspace).toBe('random');
+		expect(app.workspace).toBe('signals');
 		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
 		expect(app.project.busy).toBeNull();
 	});
@@ -409,7 +422,7 @@ describe('a finished run opened in Analysis', () => {
 		expect(sent.map(([m]) => m)).toEqual(['project.import']);
 		expect(app.project.summary?.objects.map((o) => o.name)).toEqual(['G', 'H', ...runObjects.map((o) => o.name)]);
 		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
-		expect(app.workspace).toBe('random');
+		expect(app.workspace).toBe('signals');
 	});
 
 	it('stays on the run screen and says why when the analysis service refuses', async () => {
@@ -458,5 +471,347 @@ describe('the fit cursor dragged', () => {
 		await pressed;
 		expect(seen).toEqual([null, 'Fitting the mode']);
 		expect(app.fit.busy).toBeNull();
+	});
+});
+
+describe('the force of a modal FRF response moved', () => {
+	// each force's stage comes back at its own strongest line unless a line is asked for
+	const strongest: Record<string, number> = { '101Z+': 120, '505Z+': 310 };
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	function driven() {
+		const made = make();
+		const asked: { drive: string | null; line: number | null }[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: { prefs?: { drive: string | null; line: number | null } }) => {
+			if (method !== 'project.show') return { table: { columns: [] } };
+			const prefs = params.prefs!;
+			asked.push({ drive: prefs.drive, line: prefs.line });
+			const frequency_hz = prefs.line ?? strongest[prefs.drive ?? '101Z+'];
+			return { title: 'shown', note: '', views: [{ view: 'shape3d', cursor: 'frequency', modes: [{ frequency_hz }] }] };
+		});
+		made.app.project.selection = { objects: ['Modal FRFs', 'Two', 'Plate'], records: {} } as never;
+		return { ...made, asked };
+	}
+
+	it('keeps the line shown when the cursor was never moved', async () => {
+		const { a, asked } = driven();
+		a.setPref('drive', null);
+		await a.showSelection();
+		a.setPref('drive', '505Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: 120 });
+		a.setPref('drive', '101Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '101Z+', line: 120 });
+	});
+
+	it('keeps the line the cursor was put on', async () => {
+		const { a, asked } = driven();
+		await a.showSelection();
+		a.moveLine(0);
+		await rest();
+		a.setPref('drive', '505Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: 0 });
+	});
+
+	it('starts a fresh selection at its strongest line again', async () => {
+		const { app, a, asked } = driven();
+		a.setPref('drive', null);
+		await a.showSelection();
+		a.setPref('drive', '505Z+');
+		await rest();
+		app.project.selection = { objects: ['Plate'], records: {} } as never;
+		await a.showSelection();
+		app.project.selection = { objects: ['Modal FRFs', 'Two', 'Plate'], records: {} } as never;
+		await a.showSelection();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: null });
+	});
+});
+
+describe('a shell with no control service (`?control=none`)', () => {
+	// `hertzforge` with no command opens the shell from the Python package, where no control
+	// service runs: the workspaces that need one are not offered and nothing connects to it.
+	it('offers the analysis and the report alone, and opens the analysis for a control address', () => {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		expect(app.config.control).toBe(false);
+		expect(app.workspaces.map((w) => w.id)).toEqual(['signals', 'report']);
+		app.go('acquire');
+		expect(app.workspace).toBe('signals');
+		app.go('simulate');
+		expect(app.workspace).toBe('signals');
+		app.go('report');
+		expect(app.workspace).toBe('report');
+	});
+
+	it('offers every workspace when a control service is named or assumed', () => {
+		for (const search of ['?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1', '']) {
+			const app = new AppState(readConfig(search));
+			expect(app.config.control).toBe(true);
+			expect(app.workspaces.map((w) => w.id)).toEqual(['acquire', 'simulate', 'signals', 'report']);
+			app.go('simulate');
+			expect(app.workspace).toBe('simulate');
+		}
+	});
+});
+
+describe("a report's Print", () => {
+	const g = globalThis as { __TAURI__?: unknown };
+	afterEach(() => {
+		delete g.__TAURI__;
+	});
+
+	// The desktop app's web view does not print; there the saved HTML file is opened in a browser
+	// instead, so the app offers no Print and asks the service for no printable page.
+	it('is not offered in the desktop app, and asks for nothing there', async () => {
+		g.__TAURI__ = { core: { invoke: vi.fn() }, dialog: { open: vi.fn(), save: vi.fn() } };
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const request = vi.spyOn(app.analysis, 'request').mockResolvedValue({ html: '<p>page</p>', owed: [], index: [] } as never);
+		app.report.name = 'Random';
+		expect(app.report.canPrint).toBe(false);
+		await app.report.print();
+		expect(request.mock.calls.filter(([method]) => method === 'report.print')).toEqual([]);
+	});
+
+	it('is offered in a browser, and prints the page in place', async () => {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const request = vi.spyOn(app.analysis, 'request').mockResolvedValue({ html: '<p>page</p>', owed: [], index: [] } as never);
+		app.report.name = 'Random';
+		expect(app.report.canPrint).toBe(true);
+		await app.report.print();
+		const sent = request.mock.calls.filter(([method]) => method === 'report.print');
+		expect(sent.map(([, params]) => params)).toEqual([{ name: 'Random' }]);
+		expect(app.report.printing).toBe('<p>page</p>');
+	});
+});
+
+describe('open, import and save in a browser', () => {
+	function browser(answer: (method: string, params: Record<string, unknown>) => unknown) {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const sent: [string, Record<string, unknown>][] = [];
+		(app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+			sent.push([method, params]);
+			return answer(method, params);
+		});
+		app.project.summary = { ...summary, title: 'Plate', file: null, modified: false } as never;
+		return { app, sent };
+	}
+
+	it('opens, imports and saves the paths picked in the dialog the service shows', async () => {
+		const { app, sent } = browser((method, params) => {
+			if (method === 'files.choose') return { paths: params.purpose === 'import' ? ['/d/a.uff', '/d/b.csv'] : params.purpose === 'save' ? ['/d/Plate.hforge'] : ['/d/run.hforge'] };
+			return { project: summary, added: [] };
+		});
+		// Save As first: the open that follows replaces the project, and its title with it
+		await app.project.fileAct('save-as');
+		await app.project.fileAct('import');
+		await app.project.fileAct('open');
+		expect(sent.filter(([m]) => m === 'files.choose').map(([, p]) => p)).toEqual([{ purpose: 'save', name: 'Plate.hforge' }, { purpose: 'import' }, { purpose: 'open' }]);
+		expect(sent.filter(([m]) => m !== 'files.choose' && m.startsWith('project.') && m !== 'project.actions').map(([m, p]) => [m, p.path])).toEqual([
+			['project.save', '/d/Plate.hforge'],
+			['project.import', '/d/a.uff'],
+			['project.import', '/d/b.csv'],
+			['project.open', '/d/run.hforge']
+		]);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('does nothing when the dialog is cancelled', async () => {
+		const { app, sent } = browser(() => ({ paths: [] }));
+		await app.project.fileAct('open');
+		expect(sent.map(([m]) => m)).toEqual(['files.choose']);
+		expect(app.project.asking).toBeNull();
+	});
+
+	it('asks for a typed path where the service shows no dialog, and does not ask it again', async () => {
+		const { app, sent } = browser((method) => {
+			if (method === 'files.choose') throw new RequestError('refused', 'This service shows no file dialogs; type the path instead.', method);
+			return {};
+		});
+		await app.project.fileAct('import');
+		expect(app.project.asking).toBe('import');
+		await app.project.fileAct('open');
+		expect(app.project.asking).toBe('open');
+		expect(sent.filter(([m]) => m === 'files.choose')).toHaveLength(1);
+	});
+});
+
+describe('a projection, whose distance its row fills in', () => {
+	const project = {
+		id: 'project.project_onto_basis',
+		title: 'Project onto Basis DOFs',
+		workspace: 'modal',
+		modules: ['modal'],
+		outputs: ['shape3d'],
+		params: [
+			{ name: 'source', label: 'Shape set', type: 'enum', options_from: 'verb:project_onto_basis' },
+			{ name: 'onto', label: 'Onto', type: 'enum', options_from: 'objects:shape_set|channel_table|geometry' },
+			{ name: 'distance', label: 'Node match tolerance', type: 'number', default: 0, unit: 'm', length: true }
+		]
+	} as unknown as OperationDescriptor;
+	const groups = (defined: boolean) =>
+		({
+			...summary,
+			active_geometry: null,
+			objects: [
+				{ name: 'Model', kind: 'geometry', records: 0, groups: ['A'], verbs: [], units_defined: defined },
+				{ name: 'Modes', kind: 'shape_set', records: 0, groups: ['A'], verbs: ['project_onto_basis'] },
+				{ name: 'Test', kind: 'geometry', records: 0, groups: ['B'], verbs: [], units_defined: defined }
+			]
+		}) as unknown as ProjectSummary;
+	const filled = { id: project.id, verb: 'Project', kind: 'run', ready: true, fill: { source: 'Modes', onto: 'Test', distance: '2.5' } } as unknown as ActionRow;
+
+	function projecting(defined = true) {
+		const made = make();
+		made.app.catalog = { operations: [project] } as never;
+		made.app.project.summary = groups(defined);
+		made.app.units.length = { unit: 'mm', to_si: 0.001 } as never;
+		return made;
+	}
+
+	it('opens its form on the distance rather than running at once', async () => {
+		const { a, runs } = projecting();
+		await a.perform(filled, column);
+		expect(a.formOpen).toBe(true);
+		expect(runs).toHaveLength(0);
+		expect(a.currentValues.distance).toBe(2.5);
+		expect(a.formParams.map((p) => p.name)).toEqual(['distance']);
+	});
+
+	it('shows the display unit when its geometries have units, and none when they have not', async () => {
+		const shown = projecting();
+		await shown.a.perform(filled, column);
+		expect(shown.a.formParams[0].unit).toBe('mm');
+		const own = projecting(false);
+		await own.a.perform(filled, column);
+		expect(own.a.formParams[0].unit).toBeUndefined();
+	});
+});
+
+describe('the display system changed', () => {
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	// the service draws in the system it was last set to, as the real one does
+	function unitsMade() {
+		const made = make();
+		let system = 'mm-kg-N-s';
+		const shows: { line: number | null; projection: boolean }[] = [];
+		const runs: Sent[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Sent & { name?: string; prefs?: { line: number | null; projection: boolean } }) => {
+			if (method === 'units.system') {
+				if (params.name) system = params.name;
+				return { name: system, systems: ['mm-kg-N-s', 'in-slinch-lbf-s'] };
+			}
+			if (method === 'project.show') {
+				shows.push({ line: params.prefs!.line, projection: params.prefs!.projection });
+				return { title: `shown in ${system}`, note: '', views: [] };
+			}
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: `${params.preview ? 'PREVIEW' : 'REAL'} in ${system}`, rows: [] }] };
+			}
+			return { table: { columns: [] } };
+		});
+		made.app.project.selection = { objects: ['Test Modes', 'FEM Modes'], records: {} } as never;
+		return { ...made, shows, runs };
+	}
+
+	it('draws the selection again in the new units, keeping its line, picks and Projection', async () => {
+		const { app, a, shows } = unitsMade();
+		await app.units.sync();
+		await a.showSelection();
+		a.setPref('projection', true);
+		a.moveLine(12);
+		a.pickCell({ row: 1, column: 2 });
+		await rest();
+		expect(a.shown?.title).toBe('shown in mm-kg-N-s');
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(a.shown?.title).toBe('shown in in-slinch-lbf-s');
+		expect(shows.at(-1)).toEqual({ line: 12, projection: true });
+		expect(a.picks).toEqual([{ row: 1, column: 2 }]);
+	});
+
+	it('keeps a reading that was applied, and draws a preview again', async () => {
+		const { app, a, runs } = unitsMade();
+		await app.units.sync();
+		await a.perform(row(addBlock), column);
+		await a.run();
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(said(a)).toBe('REAL in mm-kg-N-s');
+		expect(runs.filter((r) => !r.preview).length).toBe(1);
+		a.followPreview();
+		await rest();
+		expect(said(a)).toBe('PREVIEW in in-slinch-lbf-s');
+		await app.units.choose('mm-kg-N-s');
+		await rest();
+		expect(said(a)).toBe('PREVIEW in mm-kg-N-s');
+		expect(a.reading?.title).toBe('Add Block, preview');
+	});
+});
+
+describe("Project's direction, worded by its row", () => {
+	const project = {
+		id: 'project.project_onto_basis',
+		title: 'Project onto Basis DOFs',
+		workspace: 'modal',
+		modules: ['modal'],
+		outputs: ['shape3d'],
+		previews: true,
+		params: [
+			{ name: 'source', label: 'Shape set', type: 'enum', options_from: 'objects:shape_set' },
+			{ name: 'onto', label: 'Onto', type: 'enum', options_from: 'objects:shape_set|channel_table|geometry' },
+			{ name: 'direction', label: 'Direction', type: 'enum', default: 'named', options: [{ value: 'named', label: 'Shape set onto Onto' }, { value: 'reversed', label: 'Onto onto Shape set' }] }
+		]
+	} as unknown as OperationDescriptor;
+	const sets = {
+		...summary,
+		objects: [
+			{ name: 'Test', kind: 'shape_set', records: 0, groups: [], verbs: [] },
+			{ name: 'Model', kind: 'shape_set', records: 0, groups: [], verbs: [] }
+		]
+	} as unknown as ProjectSummary;
+	const labels = { direction: { named: 'Test onto Model (not possible: Test has 2 nodes measured in fewer than three directions)', reversed: 'Model onto Test' } };
+	const row = (direction: string) => ({ id: project.id, verb: 'Project', kind: 'run', ready: true, fill: { source: 'Test', onto: 'Model', direction }, labels }) as unknown as ActionRow;
+
+	function directed() {
+		const made = make();
+		made.app.catalog = { operations: [project] } as never;
+		made.app.project.summary = sets;
+		return made;
+	}
+
+	it('names each way after the two sets, the one that cannot be made with why', async () => {
+		const { a } = directed();
+		await a.perform(row('reversed'), column);
+		const direction = a.formParams.find((p) => p.name === 'direction');
+		expect(direction?.options?.map((o) => o.label)).toEqual([labels.direction.named, 'Model onto Test']);
+		expect(a.currentValues.direction).toBe('reversed');
+		expect(a.errors.direction).toBeUndefined();
+	});
+
+	it('says why when the way chosen is the one that cannot be made', async () => {
+		vi.useFakeTimers();
+		try {
+			const { a, answers } = directed();
+			await a.perform(row('reversed'), column);
+			answers.refuse = 'Test cannot be projected onto Model: Test has 2 nodes measured in fewer than three directions';
+			a.values = { ...a.values, [project.id]: { ...a.currentValues, direction: 'named' } };
+			a.followPreview();
+			await vi.advanceTimersByTimeAsync(400);
+			expect(a.runError).toBe(answers.refuse);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('asks which way when its row chose neither, and runs nothing until one is chosen', async () => {
+		const { a, runs } = directed();
+		await a.perform(row(''), column);
+		expect(a.formOpen).toBe(true);
+		expect(a.errors.direction).toBe('Choose one of the options.');
+		await a.run();
+		expect(runs).toHaveLength(0);
 	});
 });

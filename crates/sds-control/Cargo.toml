@@ -79,15 +79,29 @@ hertzforge-twr-laws.workspace = true
 # finished station backend and names none, and holds the Sim only as a
 # dev-dependency (tests/forbidden_deps.rs).
 hertzforge-explorer-host.workspace = true
+# Playback (src/playback/): the drive file, its checks and the run host that plays it.
+hertzforge-playback.workspace = true
 # The Recorder (src/recorder/): the controller's acquisition and recording core, its
 # trigger, recording writer and reader, and analysis pass. It is handed a finished
 # station backend and names none, and holds the Sim only as a dev-dependency
 # (tests/forbidden_deps.rs).
 hertzforge-recorder.workspace = true
+# Modal Test (src/modal_test/): the setup, plan, windows, hit checks, averages and
+# run host of impact and shaker FRF measurement. Reviewed 2026-11-20: it is handed a
+# finished station backend and names none, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-modal-test.workspace = true
 # MIMO Shock: the engine the run thread drives, and the law choice (built-ins,
 # law files, the catalog's entries) and the law check's cases.
 hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
 hertzforge-mimo-shock-laws = { path = "../hertzforge-mimo-shock-laws" }
+# MIMO Sine: the engine the run thread drives (its run service, handed the
+# station at arm), and the law choice (built-ins, law files, the catalog's
+# entries) and the law check's cases. Reviewed 2026-11-17 with their contracts
+# (tests/forbidden_deps.rs): each reaches hardware only through the station
+# backend it is handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
+hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
 serde_json.workspace = true
 # A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
 # or Apache-2.0, as the reference reader already has it).

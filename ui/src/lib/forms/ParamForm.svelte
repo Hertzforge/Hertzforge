@@ -119,7 +119,7 @@
 
 <!-- Enter in a field of a form that applies as it goes leaves the field, which applies it -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="form {layout}" onfocusout={commit} onchange={(e) => (e.target as HTMLElement).tagName === 'SELECT' || (e.target as HTMLInputElement).type === 'checkbox' ? commit() : undefined} onkeydown={(e) => oncommit && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && (e.target as HTMLElement).blur()} role="group">
+<div class="form {layout}" onfocusout={commit} onclick={(e) => (e.target as HTMLElement).closest('button') && commit()} onchange={(e) => (e.target as HTMLElement).tagName === 'SELECT' || (e.target as HTMLInputElement).type === 'checkbox' ? commit() : undefined} onkeydown={(e) => oncommit && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && (e.target as HTMLElement).blur()} role="group">
 	{#each params as p (p.name)}
 		{@const id = `${idPrefix}-${p.name}`}
 		{@const err = errorFor(p)}
@@ -209,6 +209,8 @@
 							}}
 						>
 							{#if opts.length === 0}<option value="">No options</option>{/if}
+							<!-- a choice the form leaves to the user (Project's direction when both ways can be made) -->
+							{#if opts.length && !opts.some((o) => o.value === values[p.name])}<option value="" disabled>Choose…</option>{/if}
 							{#each opts as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
 						</select>
 					{/if}

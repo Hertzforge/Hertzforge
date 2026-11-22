@@ -962,16 +962,18 @@ def test_a_report_does_not_reduce_the_data_it_reports():
     import numpy as np
 
     from hertzforge.core.data import TimeHistory
-    from hertzforge.report import MAX_FIGURE_POINTS, _build_block
+    from hertzforge.report import TIME_FIGURE_POINTS, _build_block
 
-    rate, seconds, channels = 4096.0, 6.0, 6
+    # a time history's stage carries what its flat figure would, half the
+    # flat figure's points since each is stored with its depth (2026-11-18)
+    rate, seconds, channels = 4096.0, 6.0, 3
     n = int(rate * seconds)
     rng = np.random.default_rng(21)
     data = TimeHistory(
         np.arange(n) / rate, rng.standard_normal((channels, n)),
         response_dof=[f'{101 + i}Z+' for i in range(channels)],
         ordinate_dim='acceleration', ordinate_unit='m/s**2')
-    assert channels * n < MAX_FIGURE_POINTS, 'the fixture fits the budget'
+    assert channels * n < TIME_FIGURE_POINTS // 2, 'the fixture fits the budget'
 
     figures = _build_block({'kind': 'plot', 'mode': 'stage',
                             'source': 'T', 'caption': 'Traces'},

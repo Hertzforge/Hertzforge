@@ -1,0 +1,8 @@
+{
+ "type": "response",
+ "id": 64,
+ "error": {
+  "code": "refused",
+  "message": "the drives differ in length (a has 401, Shaker 2 has 397 samples); every drive plays the same number of samples"
+ }
+}

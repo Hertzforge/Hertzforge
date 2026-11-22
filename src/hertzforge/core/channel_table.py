@@ -63,7 +63,7 @@ class Spec(NamedTuple):
 #: type and a record's dimension are the same word and the unit
 #: shortlist follows from it — not a second vocabulary to keep in step.
 CHANNEL_TYPES = ('acceleration', 'velocity', 'length', 'force', 'pressure',
-                 'strain', 'voltage', 'temperature')
+                 'strain', 'voltage', 'current', 'temperature')
 
 def record_quantity(quantity: str) -> str:
     """A channel's quantity in the word a record's dimension uses. A record
@@ -267,6 +267,11 @@ class Environment:
     reference_transformation : numpy.ndarray or None
         `(rows, len(drives))`: what it applied to its drive signals.
         None when it drove the channels themselves.
+    kind : str
+        What kind of test the loop ran ('random', 'sine', 'transient',
+        'modal' or 'time'), so a report on one kind shows that loop's
+        transformations and not another's from the same run. '' when
+        unknown, as in a table saved before the kind was kept.
     """
     # A combined run has one channel table and a loop per environment:
     # a sine and a random over the same hardware may control different
@@ -278,12 +283,14 @@ class Environment:
     drives: list[int] = field(default_factory=list)
     response_transformation: np.ndarray | None = None
     reference_transformation: np.ndarray | None = None
+    kind: str = ''
 
     def __post_init__(self) -> None:
         # a matrix typed as nested lists is a matrix from here on, so
         # the shape checks and the equality have one thing to look at
         self.controls = [int(n) for n in self.controls]
         self.drives = [int(n) for n in self.drives]
+        self.kind = str(self.kind or '').strip().lower()
         for form in TRANSFORMATION_FORMS:
             matrix = getattr(self, f'{form}_transformation')
             if matrix is not None:
@@ -295,6 +302,7 @@ class Environment:
             return NotImplemented
         return (list(self.controls) == list(other.controls)
                 and list(self.drives) == list(other.drives)
+                and self.kind == other.kind
                 and _same_matrix(self.response_transformation,
                                  other.response_transformation)
                 and _same_matrix(self.reference_transformation,
@@ -1353,7 +1361,8 @@ class ChannelTable:
             raise ValueError('an environment needs a name')
         checked = Environment(
             controls=[int(n) for n in environment.controls],
-            drives=[int(n) for n in environment.drives])
+            drives=[int(n) for n in environment.drives],
+            kind=environment.kind)
         for listed in ('controls', 'drives'):
             numbers = getattr(checked, listed)
             if len(set(numbers)) != len(numbers):
@@ -1490,6 +1499,102 @@ class ChannelTable:
                         rows=[str(k + 1) for k in range(matrix.shape[0])],
                         columns=[dofs[r] for r in self.rows_of(numbers)],
                         values=matrix.copy())
+
+    def transformed_responses(self, history: Any, environment: str) -> Any:
+        """What a control loop's response transformation made of a
+        recording: its rows, as the controller computed them, as a time
+        history of their own.
+
+        The controller applies the matrix to every frame of its control
+        channels in their engineering units and controls the rows in
+        their place, so its specification and spectra are over the rows.
+        The rows are computed the same way here, from each control
+        channel's values in its own stated unit, frame by frame when the
+        recording holds one record per frame. A row is in the control
+        channels' unit when they all share one; over a mix of units its
+        values are numbers in no unit, left undeclared rather than
+        labelled with a guess.
+
+        Parameters
+        ----------
+        history : TimeHistory
+            The recording, with a record of every control channel.
+        environment : str
+            Which loop.
+
+        Returns
+        -------
+        TimeHistory
+            A record per row and frame, rows numbered from 1 as the
+            controller's own records of them are, each a response, on
+            the recording's clock and with its averaging.
+
+        Raises
+        ------
+        ValueError
+            If the loop holds no response transformation, or the
+            recording lacks a control channel or holds a different
+            number of records of two of them.
+        """
+        from ..units import UNKNOWN, si_transform
+        from .data import TimeHistory
+
+        held = self._environment(environment)
+        matrix = held.response_transformation
+        if matrix is None:
+            raise ValueError(f'{environment} holds no response transformation')
+        rows = self.rows_of(held.controls)
+        named = self.identities(history)
+        dofs = self.dof_strings()
+        absent = [dofs[row] for row in rows if named[row] is None]
+        if absent:
+            raise ValueError(f'the recording has no record of control channel'
+                             f'{"s" if len(absent) > 1 else ""} {", ".join(absent)} '
+                             f'of {environment}')
+        keys = list(zip(history.response_dof, history.ordinate_dim))
+        records = [[i for i, key in enumerate(keys) if key == named[row]]
+                   for row in rows]
+        counts = {len(found) for found in records}
+        if len(counts) != 1:
+            raise ValueError(f'the control channels of {environment} hold different '
+                             'numbers of records')
+        units = [history.ordinate_unit[found[0]] for found in records]
+        dims = [history.ordinate_dim[found[0]] for found in records]
+
+        def in_unit(i: int, unit: str | None) -> np.ndarray:
+            # the controller's numbers: SI back to the channel's own unit
+            if not unit:
+                return history.ordinate[i]
+            scale, offset = si_transform(unit)
+            return (history.ordinate[i] - offset) / scale
+
+        shared = len(set(zip(units, dims))) == 1 and bool(units[0])
+        scale = si_transform(units[0])[0] if shared else 1.0
+        frames = counts.pop()
+        labels = [str(k + 1) for k in range(matrix.shape[0])]
+        values = np.empty((len(labels) * frames, len(history.abscissa)))
+        for f in range(frames):
+            stacked = np.vstack([in_unit(found[f], unit)
+                                 for found, unit in zip(records, units)])
+            values[f::frames] = matrix @ stacked * scale
+        dim = dims[0] if shared else UNKNOWN
+        blocks = history.block
+        # what every control channel says of the recording, such as the
+        # window it was read over, is said of its rows too
+        said = {history.comment[found[0]] for found in records}
+        note = f'{said.pop()}; ' if len(said) == 1 and '' not in said else ''
+        out = TimeHistory(
+            abscissa=history.abscissa, ordinate=values,
+            response_dof=[label for label in labels for _ in range(frames)],
+            ordinate_dim=dim, ordinate_unit=units[0] if shared else None,
+            comment=[f'{note}row {label} of the {environment} response transformation '
+                     f'over {len(rows)} control channels' for label in labels
+                     for _ in range(frames)],
+            block=(None if blocks is None else
+                   [blocks[found] for _ in labels for found in records[0]]))
+        out.roles = {(label, dim): 'response' for label in labels}
+        out.averaging = history.averaging
+        return out
 
     def types(self) -> list[str]:
         """Each channel's type (what it measures), '' where undeclared."""

@@ -244,13 +244,16 @@ class Operation:
     #: offered in every analysis module, not only its own: an act any
     #: study needs (Plot Records, Save As, a table's cell edit)
     everywhere: bool = False
-    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
-    #: copy of its geometry, so nothing in the project changes
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on
+    #: copies of the objects it takes, so nothing in the project changes
     previews: bool = False
     #: the boolean param that says go ahead, for an operation that shows what it would do
     #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
     #: it false for its Preview button and true for Apply (Brandon, 2026-11-11)
     commits: str | None = None
+    #: for an operation that `commits`: the form runs its preview as soon as it opens and has
+    #: no Preview button, only Apply, when the preview is quick and asks nothing (Fit Sensors)
+    opens_previewed: bool = False
     #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
     says_lengths: bool = False
 
@@ -266,6 +269,8 @@ class Operation:
             out['previews'] = True
         if self.commits:
             out['commits'] = self.commits
+        if self.opens_previewed:
+            out['opens_previewed'] = True
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,
@@ -309,3 +314,8 @@ class Operation:
                 raise bad_request(f'{self.id} needs param "{param.name}" '
                                   f'({param.label})')
         return out
+
+
+#: the channels picked in the tree, sent to an operation that acts on one channel so that
+#: it acts on each of them; a form does not ask for it (`parsing.each_picked`)
+TREE_PICKS = Param('picked', 'Channels picked in the tree', 'string', default='')

@@ -112,11 +112,6 @@ export function toggledSurface(params: Record<string, unknown>, kept: number[], 
 /** Meters in a length unit the view can be drawn in. */
 const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, ft: 0.3048 };
 
-/**
- * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
- * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
- * whose numbers have no unit to round in.
- */
 /** The gimbal's colors, X red, Y green and Z blue (three's TransformControls): the corner
  * axes and a coordinate system's arrows wear them too, so all three read alike. */
 export const AXIS_COLORS = [0xff0000, 0x00ff00, 0x0000ff] as const;
@@ -136,8 +131,125 @@ export function stillFramed(then: number, now: number): boolean {
 	return then > 0 && now > 0 && now / then < 1.25 && then / now < 1.25;
 }
 
+/**
+ * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
+ * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
+ * whose numbers have no unit to round in.
+ */
 export function gridStep(unit: string): number | null {
 	const meters = METERS[unit];
 	if (meters === undefined) return null;
 	return (unit === 'in' || unit === 'ft' ? 0.00254 : 0.01) / meters;
+}
+
+/**
+ * The nodes marked after a click on node `id` (null for a click on nothing): the one clicked, or,
+ * with `add` (Cmd, Ctrl or Shift held), the ones marked with it put in or taken out. A click on
+ * nothing clears them, and with `add` leaves them.
+ */
+export function markedBy(ids: readonly number[], id: number | null, add: boolean): number[] {
+	if (id === null) return add ? [...ids] : [];
+	if (!add) return [id];
+	return ids.includes(id) ? ids.filter((n) => n !== id) : [...ids, id];
+}
+
+/** The ids in `order` from `from` through `to`, whichever comes first; `to` alone when either is not there. */
+export function markedRun(order: readonly number[], from: number, to: number): number[] {
+	const a = order.indexOf(from);
+	const b = order.indexOf(to);
+	if (a < 0 || b < 0) return [to];
+	return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+/** Past this many nodes in the picture their numbers are not written: they would cover the model and each other. */
+export const NUMBER_LIMIT = 800;
+
+/**
+ * Where each node's number is written: the nodes of the first `count` that are in the picture
+ * (`screen` x and y a node, `visible` in front of the camera) of `width` by `height`, as their
+ * rows; null when more than `limit` are, which is too many to read.
+ */
+export function numbered(screen: ArrayLike<number>, visible: ArrayLike<boolean>, count: number, width: number, height: number, limit = NUMBER_LIMIT): number[] | null {
+	const rows: number[] = [];
+	for (let n = 0; n < count; n++) {
+		if (!visible[n]) continue;
+		const x = screen[2 * n];
+		const y = screen[2 * n + 1];
+		if (x < 0 || x > width || y < 0 || y > height) continue;
+		if (rows.length === limit) return null;
+		rows.push(n);
+	}
+	return rows;
+}
+
+/** A `mark_sets` entry, as far as its faces and edges go. */
+interface ShapedSet {
+	link: string;
+	ids: number[];
+	faces?: number[][];
+	edges?: number[][];
+}
+
+/** The triangles and edges, as flat rows of the view's nodes, of every id marked under its set's link (`marked`): the elements whose rows are selected in a table or the tree. */
+export function markedShapes(sets: readonly ShapedSet[], marked: (link: string) => readonly number[]): { faces: number[]; edges: number[] } {
+	const faces: number[] = [];
+	const edges: number[] = [];
+	for (const set of sets) {
+		if (!set.faces && !set.edges) continue;
+		const wanted = new Set(marked(set.link));
+		if (!wanted.size) continue;
+		set.ids.forEach((id, k) => {
+			if (!wanted.has(id)) return;
+			for (const row of set.faces?.[k] ?? []) faces.push(row);
+			for (const row of set.edges?.[k] ?? []) edges.push(row);
+		});
+	}
+	return { faces, edges };
+}
+
+/** Every face of a set's elements as one index of node rows, with the element (its place in `ids`) each triangle is of: what a click on the model is matched against. */
+export function setTriangles(set: { faces?: number[][] }): { index: number[]; owner: number[] } {
+	const index: number[] = [];
+	const owner: number[] = [];
+	(set.faces ?? []).forEach((rows, k) => {
+		for (let t = 0; t + 2 < rows.length; t += 3) {
+			index.push(rows[t], rows[t + 1], rows[t + 2]);
+			owner.push(k);
+		}
+	});
+	return { index, owner };
+}
+
+/**
+ * The element of a set whose side passes nearest (x, y) on screen, within `reach`: its place in the set's `ids`, or null.
+ * `screen` holds each node row's x and y, `visible` whether it is in front of the camera. A line element is picked so, having no face.
+ */
+export function nearestEdge(set: { edges?: number[][] }, screen: ArrayLike<number>, visible: ArrayLike<boolean>, x: number, y: number, reach = PICK_REACH): number | null {
+	let best: number | null = null;
+	let bestDistance = reach * reach;
+	(set.edges ?? []).forEach((rows, k) => {
+		for (let e = 0; e + 1 < rows.length; e += 2) {
+			const [a, b] = [rows[e], rows[e + 1]];
+			if (!visible[a] || !visible[b]) continue;
+			const [ax, ay, bx, by] = [screen[2 * a], screen[2 * a + 1], screen[2 * b], screen[2 * b + 1]];
+			const length = (bx - ax) ** 2 + (by - ay) ** 2;
+			const t = length > 0 ? Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length)) : 0;
+			const d = (ax + t * (bx - ax) - x) ** 2 + (ay + t * (by - ay) - y) ** 2;
+			if (d < bestDistance) {
+				bestDistance = d;
+				best = k;
+			}
+		}
+	});
+	return best;
+}
+
+/** How many clicks make one and what the hint says, from the option chosen in a setting that says so (an element type), else the pick's own. */
+export function pickClicks(pick: { count?: number; hint: string; params: Record<string, unknown>; settings?: { param: string; options: { value: string | number; count?: number; hint?: string }[] }[] }, chosen: Record<string, unknown>): { count: number; hint: string } {
+	for (const setting of pick.settings ?? []) {
+		const value = setting.param in chosen ? chosen[setting.param] : pick.params[setting.param];
+		const option = setting.options.find((o) => String(o.value) === String(value));
+		if (option?.count !== undefined) return { count: option.count, hint: option.hint ?? pick.hint };
+	}
+	return { count: pick.count ?? 0, hint: pick.hint };
 }

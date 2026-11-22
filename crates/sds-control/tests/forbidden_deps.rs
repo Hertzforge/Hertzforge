@@ -118,6 +118,23 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // service is handed a finished `Box<dyn Backend>` by the station factory, and the
     // Sim is a dev-dependency only. It runs no control law.
     "hertzforge-explorer-host",
+    // Playback behind the wire's `playback.*` methods, reviewed 2026-11-15: the drive
+    // file, its checks before arming and the run host that plays it
+    // (`hertzforge-playback`, MIT, written here). Its `[dependencies]` are
+    // `hertzforge-channel-table`, `hertzforge-engine`, `hertzforge-hal`,
+    // `hertzforge-module-abi`, `serde_json` and `sha2`, and it names no backend: the
+    // run host is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-playback",
+    // The Modal Test behind the wire's `modal_test.*` methods, reviewed 2026-11-20: the
+    // setup, plan, windows, hit checks, averages and run host of impact and shaker FRF
+    // measurement (`hertzforge-modal-test`, MIT, written here). Its `[dependencies]`
+    // are `hertzforge-channel-table`, `hertzforge-dsp`, `hertzforge-engine`,
+    // `hertzforge-hal`, `hertzforge-module-abi`, `hertzforge-sdm` and `serde_json`, the
+    // controller crates all already on this list, and it names no backend: the run host
+    // is handed a finished `Box<dyn Backend>` by the station factory, and the Sim is a
+    // dev-dependency only. It runs no control law.
+    "hertzforge-modal-test",
     // The Recorder behind the wire's `recorder.*` methods: the acquisition and recording
     // core (`hertzforge-recorder`, MIT, imported): its trigger, recording writer and
     // reader, analysis pass and run service. Its `[dependencies]` are
@@ -153,6 +170,17 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // and `hertzforge-sdm` alone, built for WebAssembly as the classical shock math is),
     // reviewed 2026-11-11 with the laws it serves. Written here, so on LAW_CRATES.
     "hertzforge-mimo-shock-law-math",
+    // MIMO Sine, reviewed 2026-11-17 with its contracts, before the wire reaches it:
+    // the run contracts (`hertzforge-mimo-sine`, MIT, written here), whose
+    // `[dependencies]` are `hertzforge-dsp`, `hertzforge-sdm`, `hertzforge-sine` (its
+    // pure core, without the service), `serde` and `serde_json`; it names no backend.
+    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it, the law
+    // catalog, the law host and the law SDK (the built-in laws' declarations), as
+    // MIMO Shock's choice does, and its laws' math (`hertzforge-mimo-sine-law-math`,
+    // on `hertzforge-sdm` alone, built for WebAssembly). Both are on LAW_CRATES.
+    "hertzforge-mimo-sine",
+    "hertzforge-mimo-sine-laws",
+    "hertzforge-mimo-sine-law-math",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -179,9 +207,21 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// their validation) and the run engine's surface. It names no backend; the run
 /// service hands it a finished station, and the Sim is at most a dev-dependency.
 ///
+/// `hertzforge-mimo-sine` was written here as well (2026-11-17): the MIMO Sine
+/// contracts (the run's setup, the per-update law inputs and outputs, the law traits
+/// and their validation) and the run engine's surface. It names no backend.
+///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
 /// names no backend and reaches no hardware; it builds for WebAssembly.
+///
+/// `hertzforge-playback` was written here as well (2026-11-15): the drive file, its
+/// checks before arming and the run host that plays it. It names no backend; the run
+/// service hands it a finished station, and the Sim is a dev-dependency only.
+///
+/// `hertzforge-modal-test` was written here as well (2026-11-20): the Modal Test's
+/// setup, plan, windows, hit checks, averages and run host. It names no backend; the
+/// run service hands it a finished station, and the Sim is a dev-dependency only.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-automation",
     "hertzforge-backendd",
@@ -203,8 +243,11 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-ipc",
     "hertzforge-mimo-random",
     "hertzforge-mimo-shock",
+    "hertzforge-mimo-sine",
     "hertzforge-mixed",
+    "hertzforge-modal-test",
     "hertzforge-module-abi",
+    "hertzforge-playback",
     "hertzforge-protocol",
     "hertzforge-random",
     "hertzforge-recorder",
@@ -259,20 +302,34 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// world, written against the world's own bindings. Its law files followed
 /// (2026-11-11): `mimo-shock-inverse`, `mimo-shock-shape` and `mimo-shock-paired`
 /// (the SDK over the same law mathematics) and the `shock-mimo-misbehave` host
-/// fixture.
+/// fixture. So was the MIMO Sine set (2026-11-17), named with its contracts before
+/// most of it exists: the choice of a law (`hertzforge-mimo-sine-laws`), its laws'
+/// math (`hertzforge-mimo-sine-law-math`), the law files `mimo-sine-matrix`,
+/// `mimo-sine-paired`, `mimo-sine-steepest-descent`, `mimo-sine-secant` and
+/// `mimo-sine-ratio` (the SDK over the same math), and the `sine-mimo-misbehave` host
+/// fixture; the `sine-mimo-template` host fixture (the SDK template's law, compiled as
+/// a law file) joined them with the law plumbing.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
     "hertzforge-law-host",
     "hertzforge-law-mimo-band-average",
+    "hertzforge-law-mimo-broyden-congruence",
     "hertzforge-law-mimo-buzz",
+    "hertzforge-law-mimo-independent",
     "hertzforge-law-mimo-min-drive",
+    "hertzforge-law-mimo-nearly-independent",
     "hertzforge-law-mimo-open-loop",
     "hertzforge-law-mimo-pinv",
     "hertzforge-law-mimo-shock-inverse",
     "hertzforge-law-mimo-shock-paired",
     "hertzforge-law-mimo-shock-shape",
     "hertzforge-law-mimo-shape",
+    "hertzforge-law-mimo-sine-matrix",
+    "hertzforge-law-mimo-sine-paired",
+    "hertzforge-law-mimo-sine-ratio",
+    "hertzforge-law-mimo-sine-secant",
+    "hertzforge-law-mimo-sine-steepest-descent",
     "hertzforge-law-mimo-zero",
     "hertzforge-law-ratio",
     "hertzforge-law-ratio-math",
@@ -284,6 +341,8 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-mimo-laws",
     "hertzforge-mimo-shock-law-math",
     "hertzforge-mimo-shock-laws",
+    "hertzforge-mimo-sine-law-math",
+    "hertzforge-mimo-sine-laws",
     "hertzforge-mixed-laws",
     "hertzforge-random-laws",
     "hertzforge-shock-law-math",
@@ -297,6 +356,8 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-shock-mimo-misbehave",
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
+    "law-fixture-sine-mimo-misbehave",
+    "law-fixture-sine-mimo-template",
     "law-fixture-sine-misbehave",
     "law-fixture-sine-template",
     "law-fixture-srs-misbehave",

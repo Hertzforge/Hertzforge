@@ -78,8 +78,10 @@ export const MODULE_STATES: readonly (readonly [string, readonly string[], strin
 	['srs.state', ['armed', 'running', 'review', 'stopping'], 'an SRS test'],
 	['twr.state', ['armed', 'running', 'review', 'held', 'stopping'], 'a TWR test'],
 	['mimo_shock.state', ['armed', 'running', 'review', 'stopping'], 'a MIMO Shock test'],
+	['mimo_sine.state', ['armed', 'running', 'review', 'stopping'], 'a MIMO Sine test'],
 	['explorer.state', ['starting', 'running', 'stopping'], 'an Explorer run'],
-	['recorder.state', ['starting', 'running', 'stopping'], 'a Recorder run']
+	['recorder.state', ['starting', 'running', 'stopping'], 'a Recorder run'],
+	['modal_test.state', ['starting', 'idle', 'armed', 'captured', 'measuring', 'stopping', 'point_done'], 'a Modal Test']
 ];
 
 /** A run the control service reports as live, and the folder it records into (null when it has not said). */

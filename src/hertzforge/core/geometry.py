@@ -128,7 +128,15 @@ ELEMENT_TYPES = {
     # The UNV writer refuses these two by name instead.
     201: ('pyramid5', 5, 'volume'),
     202: ('pyramid13', 13, 'volume'),
+    # A point measured on the part with a coordinate measuring arm, one
+    # node, with no stiffness or mass: the points probed on one surface
+    # are one element group, named as the person measuring named it
+    # (`io.point_files`).
+    203: ('measured_point', 1, 'point'),
 }
+
+#: the element type of a point measured on the part (`io.point_files`)
+MEASURED_POINT = 203
 
 #: the element families the tree lists under a geometry (Brandon,
 #: 2026-09-30: one sub-item per element type, element groups under each), in
@@ -800,11 +808,20 @@ class Geometry:
         #: definitions the model builder makes links of, kept in step as
         #: nodes and element groups are renumbered, merged or deleted
         self.mates: list = []
+        #: what was chosen for each accelerometer its measured points locate
+        #: (`core.scan_sensors`), by the sensor's name: its 'node', its 'model',
+        #: and its 'size' and 'length' in the coordinates' unit. A sensor or a
+        #: key absent is left to what the fit and the catalog give
+        self.sensor_choices: dict[str, dict[str, Any]] = {}
         #: {element group id: the solids Mesh Solids meshed into it}: a part meshed again
         #: replaces this mesh, whatever the group or the solid has been renamed. An empty
         #: tuple is a mesh whose solids have gone; a group absent is one from no solid, or
         #: from a file written before this was kept, and is found by its name
         self.group_solids: dict[int, tuple[int, ...]] = {}
+        #: {element group id: the family it was made for ('quads', 'beams')}: what an
+        #: element group holds before it holds anything, as an Exodus element block has an
+        #: element type when it is empty. A group with elements is what they are
+        self.group_family: dict[int, str] = {}
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -1073,6 +1090,7 @@ class Geometry:
         raw_scale = (1.0 if self.length_unit is None
                      else 1.0 / si_transform(self.length_unit, 'length')[0])
         self.solids = [s.scaled(raw_scale * scale) for s in self.solids]
+        self._scale_sensor_choices(raw_scale * scale)
         self.length_unit = length_unit
         if self.from_deck:
             notes = implausible_materials(self.group_properties)
@@ -1092,6 +1110,7 @@ class Geometry:
                                           self.length_unit, 'length')
         self.solids = [s.scaled(1.0 / si_transform(self.length_unit, 'length')[0])
                        for s in self.solids]
+        self._scale_sensor_choices(1.0 / si_transform(self.length_unit, 'length')[0])
         if self.from_deck:
             self.group_properties = deck_to_si(
                 self.group_properties, self.length_unit, self.mass_unit,
@@ -1099,6 +1118,14 @@ class Geometry:
             self.mass_unit = None
         self.length_unit = None
         return self
+
+    def _scale_sensor_choices(self, scale: float) -> None:
+        """The sizes chosen for measured accelerometers follow the
+        coordinates when their unit is declared, corrected or removed."""
+        for choice in self.sensor_choices.values():
+            for key in ('size', 'length'):
+                if choice.get(key) is not None:
+                    choice[key] = float(choice[key]) * scale
 
     # ---- adding -------------------------------------------------------------
 
@@ -1702,7 +1729,8 @@ class Geometry:
         return sorted({int(n) for k in np.flatnonzero(
             np.isin(self.elem_group, groups)) for n in self.elem_conn[k]})
 
-    def add_group(self, name: str = '', group_id: int | None = None) -> int:
+    def add_group(self, name: str = '', group_id: int | None = None,
+                  family: str = '') -> int:
         """Declare an element group and return its id.
 
         An empty element group is allowed: exodus files contain empty
@@ -1715,18 +1743,26 @@ class Geometry:
             What to call the element group.
         group_id : int, optional
             Its identifier. One more than the highest id when omitted.
+        family : str, optional
+            The element family it is for, such as 'quads' (`FAMILIES`), kept in
+            `group_family`: where an empty element group is listed.
 
         Returns
         -------
         int
             The element group's identifier.
         """
+        if family and family not in (*FAMILIES, *RARE_FAMILIES):
+            raise ValueError(f'{family!r} is not an element family; the families are '
+                             + ', '.join((*FAMILIES, *RARE_FAMILIES)))
         group_id = (self._next_id(self.group_id) if group_id is None
                     else int(group_id))
         if group_id in self.group_id:
             raise ValueError(f'element group {group_id} already exists')
         self.group_id = np.append(self.group_id, group_id)
         self.group_name.append(str(name))
+        if family:
+            self.group_family[group_id] = family
         return group_id
 
     def add_element(self, node_ids: Ids, elem_type: int | None = None,
@@ -1896,6 +1932,80 @@ class Geometry:
             conn[conn == old] = node_id
         self._mates_follow(nodes={old: node_id})
 
+    def rename_group(self, group_id: int, name: str) -> None:
+        """Give an element group a name.
+
+        Parameters
+        ----------
+        group_id : int
+            The element group's id.
+        name : str
+            Its new name; empty for none.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the geometry has no element group with that id.
+        """
+        rows = np.flatnonzero(np.asarray(self.group_id) == group_id)
+        if not len(rows):
+            raise ValueError(f'no element group {group_id}')
+        self.group_name[int(rows[0])] = str(name).strip()
+
+    def move_elements(self, elem_ids: Ids, group_id: int) -> int:
+        """Put elements in another element group, as dragging them onto it in the tree does.
+
+        An element group holds one element family, so elements of another family than
+        the group holds, or than an empty group was made for (`group_family`), are
+        refused, as are elements of two families at once. The groups they leave stay,
+        empty if they held nothing else.
+
+        Parameters
+        ----------
+        elem_ids : sequence of int
+            The elements, by id.
+        group_id : int
+            The element group they go in.
+
+        Returns
+        -------
+        int
+            How many elements moved: those not in the group already.
+
+        Raises
+        ------
+        ValueError
+            When the group or an element is not in the geometry, or the families differ.
+        """
+        group_id = int(group_id)
+        if group_id not in {int(g) for g in self.group_id}:
+            raise ValueError(f'no element group {group_id}')
+        wanted = {int(e) for e in elem_ids}
+        missing = sorted(wanted - {int(e) for e in self.elem_id})
+        if missing:
+            raise ValueError('no element ' + ', '.join(str(e) for e in missing[:4])
+                             + (f' (and {len(missing) - 4} more)' if len(missing) > 4 else ''))
+        rows = np.flatnonzero(np.isin(self.elem_id, list(wanted)))
+        moving = {element_family(int(self.elem_type[r])) for r in rows}
+        if len(moving) > 1:
+            raise ValueError('an element group holds one element family; these elements are '
+                             + ' and '.join(sorted(moving)))
+        held = {element_family(int(code)) for code, group
+                in zip(self.elem_type, self.elem_group, strict=True)
+                if int(group) == group_id}
+        made_for = getattr(self, 'group_family', {}).get(group_id)
+        holds = held or ({made_for} if made_for else set())
+        if moving and holds and holds != moving:
+            raise ValueError(f'element group {group_id} holds {holds.pop()}; these elements '
+                             f'are {moving.pop()}')
+        moved = int(np.sum(self.elem_group[rows] != group_id))
+        self.elem_group[rows] = group_id
+        return moved
+
     def renumber_group(self, row: int, group_id: int) -> None:
         """Give an element group a new id, and update its elements.
 
@@ -1923,7 +2033,7 @@ class Geometry:
         self.group_id[row] = group_id
         self.elem_group[self.elem_group == old] = group_id
         if old != group_id:
-            for held in (self.group_properties, self.group_solids):
+            for held in (self.group_properties, self.group_solids, self.group_family):
                 if old in held:
                     held[group_id] = held.pop(old)
         self._mates_follow(groups={old: group_id})
@@ -2766,6 +2876,7 @@ class Geometry:
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
             self.group_solids.pop(group, None)
+            self.group_family.pop(group, None)
         self.group_id = self.group_id[staying]
         self._mates_follow(groups={group: None for group in wanted})
         return {'groups': removed, 'elements': len(doomed),
@@ -2843,6 +2954,7 @@ class Geometry:
         for group in others:
             self.group_properties.pop(group, None)
             self.group_solids.pop(group, None)
+            self.group_family.pop(group, None)
         if tied:
             self.group_solids[into] = tuple(sorted(solids))
         self.group_id = self.group_id[keep]

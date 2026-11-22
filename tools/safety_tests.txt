@@ -66,6 +66,10 @@ sds-control             tests/twr_sim_run.rs                   sim_4_a_ceiling_u
 sds-control             tests/shock_protocol.rs                wrong_mode_and_the_drive_ceiling_on_a_level_move          drive-ceiling  the shock drive ceiling holds on a level move through the protocol
 sds-control             tests/srs_protocol.rs                  wrong_mode_and_the_drive_ceiling_on_a_level_move          drive-ceiling  the SRS drive ceiling holds on a level move through the protocol
 sds-control             tests/mimo_setup_fields.rs             a_prediction_over_a_ceiling_engages_only_on_its_own_acknowledgement  drive-ceiling  a multiple-output run predicted over a ceiling waits for its acknowledgement
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_drive_over_its_ceiling_scales_the_whole_vector  drive-ceiling  a multiple-drive sine drive over its ceiling scales the whole vector
+hertzforge-mimo-sine    src/core.rs                            mimo_sine_core_every_drive_stays_under_its_ceiling_whatever_the_law_asks  drive-ceiling  every multiple-drive sine drive sample stays under its ceiling
+hertzforge-mimo-sine    tests/limit_channel.rs                 mimo_sine_the_backstop_notch_holds_the_article_at_its_bound_and_releases  drive-ceiling  the multiple-drive sine backstop notch holds a limit channel at its bound
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_first_drive_over_its_bound_is_scaled_to_it    drive-ceiling  the first multiple-drive sine drive is bounded
 
 # ------------------------------------------------------------------ drive abort
 hertzforge-random       tests/service_acceptance.rs            acceptance_i_drive_vrms_abort                             drive-abort    a Random drive past its RMS abort ends the run
@@ -85,6 +89,8 @@ hertzforge-mimo-shock   tests/engine_audit.rs                  mimo_shock_engine
 hertzforge-explorer-host tests/explorer_guards.rs              explorer_a_sample_over_the_ceiling_aborts_drive_vpk       drive-abort    an Explorer drive sample over the ceiling aborts
 sds-control             tests/shock_sim_run.rs                 the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse  drive-abort  the shock drive abort through the control service
 sds-control             tests/srs_sim_run.rs                   the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse  drive-abort  the SRS drive abort through the control service
+hertzforge-mimo-sine    src/core.rs                            mimo_sine_core_a_drive_at_its_abort_ends_the_run_even_past_the_ceiling  drive-abort  a multiple-drive sine drive at its abort ends the run
+hertzforge-mimo-sine    src/guards.rs                          mimo_sine_guard_drive_abort_names_the_drive               drive-abort    the multiple-drive sine drive abort names its drive
 
 # -------------------------------------------------------------------- stop ramp
 hertzforge-engine       src/output.rs                          ramp_never_steps_or_cliffs                                stop-ramp      the engine's ramp down never steps
@@ -107,6 +113,7 @@ sds-control             tests/sine_sim_run.rs                  sim_1_a_sweep_com
 sds-control             src/sine/run.rs                        a_stop_ramps_down_and_ends_operator_stop_at_the_level_it_was_asked  stop-ramp  a Sine stop ramps from the level it was asked at
 sds-control             tests/mixed_sim_run.rs                 a_stop_ramps_every_part_down_and_ends_operator_stop       stop-ramp      a Mixed stop ramps every part down
 sds-control             tests/mimo_service.rs                  a_real_run_goes_from_setup_to_full_level_and_a_ramped_stop  stop-ramp    a multiple-output run's ramped stop through the control service
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_an_operator_stop_walks_every_drive_down_and_stops_the_station  stop-ramp  a multiple-drive sine stop walks every drive down
 
 # ---------------------------------------------------------------- abort to zero
 hertzforge-hal-sim      src/lib.rs                             emergency_stop_drives_output_toward_zero                  abort-to-zero  the simulator's emergency stop takes the output to zero
@@ -130,6 +137,8 @@ sds-control             tests/mixed_sim_run.rs                 an_abort_ends_ope
 sds-control             tests/mimo_service.rs                  an_abort_on_the_ladder_takes_the_drive_down_at_once       abort-to-zero  a multiple-output abort takes the drive down at once
 sds-control             tests/sim_run.rs                       an_abort_ends_the_run_as_stopped_and_says_why             abort-to-zero  a simulated Random abort ends the run
 sds-control             tests/mimo_shock_sim_run.rs            mimo_shock_stop_and_abort_mid_ladder_fire_nothing_after   abort-to-zero  nothing fires after a multiple-drive shock stop or abort
+hertzforge-mimo-sine    src/core.rs                            mimo_sine_core_an_abort_walks_the_drive_to_zero_on_the_ramp  abort-to-zero  a multiple-drive sine abort takes every drive to zero
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_control_outside_its_abort_band_ends_the_run_and_ramps_out  abort-to-zero  a multiple-drive sine control abort ends at zero drive
 
 # ------------------------------------------------------- run-thread failure
 hertzforge-engine       tests/delivery.rs                      an_output_that_never_accepts_is_a_faulted_stop            run-thread-failure  an output that never accepts ends the run as a fault
@@ -142,6 +151,7 @@ hertzforge-random       tests/service_acceptance.rs            t_loop_fault_publ
 hertzforge-sine         tests/oscillator_range.rs              an_out_of_domain_sweep_faults_instead_of_panicking        run-thread-failure  an out-of-range sweep faults instead of panicking
 hertzforge-shock-host   src/service/mod.rs                     a_missing_ladder_is_a_typed_error_not_a_panic             run-thread-failure  a missing shock ladder is an error, not a panic
 sds-control             src/pulse/rails.rs                     a_panic_is_caught_with_its_words                          run-thread-failure  a panic on a pulse run's thread is caught
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_run_thread_failure_stops_the_station_at_once  run-thread-failure  a failed multiple-drive sine run thread stops the station
 
 # -------------------------------------------------------------------- law guards
 hertzforge-random       tests/law_guards.rs                    a_law_returning_nan_is_held_and_the_run_stops_under_control  law-guard  a NaN drive from a Random law is held and the run stops
@@ -234,6 +244,12 @@ sds-control             tests/twr_sim_run.rs                   sim_6_a_law_past_
 sds-control             tests/shock_sim_run.rs                 a_slow_law_ends_the_run_after_three_misses                law-guard      a slow shock law ends the run
 sds-control             tests/srs_sim_run.rs                   a_slow_law_ends_the_run_after_three_misses                law-guard      a slow SRS law ends the run
 sds-control             tests/mimo_shock_sim_run.rs            mimo_shock_a_law_that_panics_ends_the_run_by_name         law-guard      a panicking multiple-drive shock law ends the run
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_wrong_drive_count_is_refused_three_times_then_the_run_stops  law-guard  a wrong multiple-drive sine drive count is refused; three stop the run
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_non_finite_drive_is_refused_three_times_then_the_run_stops  law-guard  a non-finite multiple-drive sine drive is refused
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_panicking_law_is_caught_per_call_and_the_run_stops  law-guard  a panicking multiple-drive sine law is caught
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_law_over_its_budget_three_times_ends_the_run  law-guard     a slow multiple-drive sine law ends the run
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_law_is_refused_for_a_test_type_its_manifest_does_not_accept  law-guard  a multiple-drive sine law is refused a test type it does not accept
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_the_rotation_cap_is_off_by_default_records_the_turn_and_binds_when_set  law-guard  the multiple-drive sine rotation cap
 
 # --------------------------------------------------------------------- envelope
 hertzforge-breakpoints  src/tests.rs                           envelope_low_breach_detected                              envelope       a response under its envelope is caught
@@ -284,6 +300,7 @@ sds-control             tests/shock_sim_run.rs                 a_displacement_li
 sds-control             tests/srs_sim_run.rs                   a_displacement_ceiling_under_the_prediction_aborts_predicted  kinematic  the SRS displacement limit through the control service
 sds-control             tests/random_protocol.rs               a_kinematic_abort_trips_during_system_identification      kinematic      the kinematic abort through the protocol
 sds-control             tests/mimo_setup_fields.rs             the_article_and_moving_mass_decide_whether_the_shaker_can_carry_the_test  kinematic  the multiple-output shaker rating check
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_control_past_its_shakers_rating_ends_the_run  kinematic  a multiple-drive sine control past its shaker's rating ends the run
 
 # ------------------------------------------------------------------ divergence
 hertzforge-dsp          tests/control.rs                       servo_never_diverges_on_noisy_plant                       divergence     the level servo does not diverge on noise
@@ -303,6 +320,7 @@ hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine
 hertzforge-mimo-shock   tests/engine_audit.rs                  mimo_shock_engine_a6_a_slow_divergence_is_stopped_by_the_tenth_pulse_at_its_level  divergence  a slow multiple-drive divergence is stopped
 hertzforge-mimo-shock   tests/engine_runs.rs                   mimo_shock_engine_r4_a_diverging_law_is_stopped_before_its_drive_doubles  divergence  a diverging law is stopped before its drive doubles
 hertzforge-mimo-shock-law-math tests/requirements.rs          mimo_shock_r2b_watchdog_bounds_the_divergence             divergence     the shock watchdog bounds a frozen-inverse divergence
+hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_drive_growing_past_the_caps_is_capped_and_trips_divergence  divergence  a multiple-drive sine drive growing past its caps trips divergence
 
 # -------------------------------------------------------------------- overload
 hertzforge-hal          src/lib.rs                             an_input_overloads_at_98_percent_of_its_own_range         overload       an input overloads at 98 percent of its range
@@ -471,3 +489,59 @@ sds-control             tests/shock_protocol.rs                shutdown_refuses_
 sds-control             tests/srs_protocol.rs                  shutdown_refuses_the_drive_verbs_and_safe_stops_the_run   shutdown       a shutting-down SRS run safe stops
 sds-control             tests/twr_protocol.rs                  shutdown_refuses_the_twr_verbs_and_safe_stops_the_run     shutdown       a shutting-down waveform run safe stops
 sds-control             tests/mimo_shock_protocol.rs           mimo_shock_auto_refuses_the_manual_fire_and_shutdown_refuses_the_drive  shutdown  a shutting-down multiple-drive shock run refuses drive commands
+
+# ---------------------------------------------------------------- Playback
+hertzforge-playback     tests/check.rs                         refuses_an_unchecked_or_changed_file                      checked-input  Playback refuses a file not checked as it is, a pin that is not its hash, and samples changed under the sidecar
+hertzforge-playback     tests/check.rs                         refuses_a_malformed_file                                  checked-input  Playback refuses a drive file of the wrong size, unit or with a value that is not a number
+hertzforge-playback     tests/check.rs                         refuses_ends_not_at_zero                                  checked-input  Playback refuses a drive whose acceleration, velocity or displacement does not end at zero
+hertzforge-playback     tests/check.rs                         the_zero_ends_check_agrees_with_the_shock_gates_integrator  checked-input  the zero-ends check integrates exactly as the shock compensation gate
+hertzforge-playback     tests/check.rs                         refuses_a_map_to_a_missing_or_repeated_drive_row          checked-input  Playback refuses a file channel mapped to a missing or repeated drive row
+hertzforge-playback     tests/check.rs                         refuses_a_rate_mismatch_naming_both_rates                 checked-input  Playback refuses a file at another rate than the station's, naming both
+hertzforge-playback     tests/check.rs                         refuses_a_peak_over_the_ceiling                           drive-ceiling  Playback refuses a file whose peak at the level is over the ceiling
+hertzforge-playback     tests/run.rs                           the_drive_ceiling_holds_on_every_sample                   drive-ceiling  a Playback sample over the ceiling zeroes the drive and ends in the emergency stop
+hertzforge-playback     tests/run.rs                           refuses_a_rate_the_station_does_not_run_the_file_at       arm-gate       a station that programs another rate is refused before anything is driven
+hertzforge-playback     tests/run.rs                           a_response_abort_zeroes_the_drive_at_once                 watchdog       a Playback response past its table abort limit takes the drive to zero at once
+hertzforge-playback     tests/run.rs                           an_underrun_aborts_to_zero                                underrun       the Playback read-ahead running dry takes the drive to zero and ends in the emergency stop
+hertzforge-playback     tests/run.rs                           a_reader_stalled_inside_a_read_does_not_hold_up_the_end   underrun       a Playback reader held inside one read does not hold up the end of the run; the drive is already zero
+hertzforge-playback     tests/run.rs                           a_stop_ramps_the_streamed_drive_down                      stop-ramp      a Playback stop ramps the streamed drive down, never a step
+hertzforge-playback     tests/run.rs                           a_reader_thread_failure_ends_in_the_emergency_stop        run-thread-failure  a failure of the Playback reader thread ends in the emergency stop
+hertzforge-playback     tests/run.rs                           a_panic_on_the_loop_thread_ends_in_the_emergency_stop     run-thread-failure  a panic on the Playback loop thread ends in the emergency stop
+sds-control             tests/playback_sim_run.rs              the_service_refuses_what_its_checks_refuse                checked-input  the control service refuses an unchecked, failing or changed drive file before anything is driven
+sds-control             tests/playback_sim_run.rs              a_stop_ramps_and_an_abort_zeroes                          abort-to-zero  a Playback abort through the service zeroes the drive with the emergency stop; a stop ramps
+sds-control             tests/mimo_sine_sim_run.rs             mimo_sine_a_stop_ramps_every_drive_down_and_an_abort_ends_at_once  stop-ramp  a multiple-drive sine stop ramps every drive down through the control service
+sds-control             tests/mimo_sine_protocol.rs            mimo_sine_the_shutdown_ends_a_driving_run_with_its_ramp   stop-ramp      the shutdown ends a multiple-drive sine run with its ramp
+sds-control             tests/mimo_sine_protocol.rs            mimo_sine_a_run_nobody_holds_control_of_ends_in_the_safe_stop  dropped-controller  a multiple-drive sine run nobody holds ends in the safe stop
+sds-control             tests/mimo_sine_law_check.rs           mimo_sine_an_unchecked_law_file_is_refused_on_hardware_and_taken_on_the_simulator  arm-gate  an unchecked multiple-drive sine law file never arms on hardware
+sds-control             tests/mimo_sine_protocol.rs            mimo_sine_a_run_never_arms_on_the_default_one_drive_simulator  arm-gate  a multiple-drive sine run never arms on a station of another size
+sds-control             tests/mimo_sine_record.rs              mimo_sine_a_record_that_cannot_be_written_refuses_the_arm  arm-gate      a multiple-drive sine run whose record cannot be written does not arm
+sds-control             tests/mimo_sine_protocol.rs            mimo_sine_every_refusal_of_a_configuration_is_named       checked-input  every multiple-drive sine configuration error is refused by name
+
+# ---------------------------------------------------------------- Modal Test
+hertzforge-modal-test   src/setup.rs                           modal_test_level_over_ceiling_is_refused_by_the_bounded_crest  drive-ceiling  a Modal Test drive level whose bounded crest is over the ceiling is refused
+hertzforge-modal-test   src/plan.rs                            modal_test_a_ceiling_over_a_drive_rows_range_is_refused_by_row  drive-ceiling  a Modal Test ceiling over a drive row's range is refused, naming the row
+hertzforge-modal-test   src/setup.rs                           modal_test_sources_refused_for_several_shakers  checked-input  a Modal Test source that cannot play on several shakers is refused for several
+hertzforge-modal-test   src/setup.rs                           modal_test_too_few_averages_for_the_references_is_refused  checked-input  a Modal Test with fewer averages than references is refused
+hertzforge-modal-test   src/setup.rs                           modal_test_force_window_past_the_block_or_without_width_is_refused  checked-input  a Modal Test force window past the block or without width is refused, never clamped
+sds-control             tests/modal_test_safety.rs             modal_test_start_refuses_a_restored_table_until_it_is_applied  arm-gate  the Modal Test refuses a restored table until it is applied
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_ceiling_trips_the_emergency_stop  drive-ceiling  a Modal Test drive sample over the ceiling zeroes the drive and ends in the emergency stop
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_response_abort_zeroes_at_once  watchdog  a Modal Test response past its table abort limit takes the drive to zero at once
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_ramps_on_a_frame_start_and_stops_by_the_shared_ramp  stop-ramp  a Modal Test stop ramps every drive down by the shared ramp, never a step
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_abort_zeroes_at_once  abort-to-zero  a Modal Test abort zeroes the drive at once with the emergency stop
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_source_underrun_zeroes_at_once  underrun  a Modal Test source that runs dry takes the drive to zero and ends in the emergency stop
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_source_thread_failure_ends_in_the_emergency_stop  run-thread-failure  a failure of the Modal Test source thread ends in the emergency stop
+hertzforge-modal-test   src/source.rs                          modal_test_a_source_that_fails_is_caught_before_and_after_the_feeder_starts  run-thread-failure  a Modal Test source that fails is caught before the start and on its thread
+hertzforge-modal-test   tests/host.rs                          modal_test_impact_host_writes_no_drive_sample  arm-gate  a Modal Test in impact mode opens no drive row and writes no drive sample
+sds-control             tests/modal_test_sim_run.rs            modal_test_impact_mode_writes_no_drive_sample  arm-gate  an impact Modal Test through the control service writes no drive sample
+sds-control             tests/modal_test_sim_run.rs            modal_test_shaker_stop_ramps_down_and_abort_zeroes_at_once  abort-to-zero  a shaker Modal Test through the control service ramps on a stop and zeroes on an abort
+sds-control             tests/modal_test_sim_run.rs            modal_test_refusals_are_named  checked-input  every Modal Test configuration and verb refusal through the control service is named
+hertzforge-modal-test   tests/step.rs                          modal_test_step_ramps_up_and_stops_by_the_shared_ramp  stop-ramp  a Modal Test stop falls by the shared ramp's ratio every sample over its length, never a step
+hertzforge-modal-test   tests/step.rs                          modal_test_step_zeroes_the_very_next_block_after_an_abort  abort-to-zero  a Modal Test abort zeroes the very next block the step writes
+hertzforge-modal-test   tests/step.rs                          modal_test_step_zeroes_the_very_next_block_after_a_source_failure  run-thread-failure  a failed Modal Test source zeroes the very next block, not a batch later
+hertzforge-modal-test   tests/step.rs                          modal_test_step_takes_no_drive_start_once_ended_or_aborted  arm-gate  a Modal Test step takes no drive start once an end or an abort is asked
+hertzforge-modal-test   tests/step.rs                          modal_test_step_never_hands_over_an_f32_past_the_ceiling  drive-ceiling  a Modal Test drive sample is judged as the f32 the station is handed
+hertzforge-modal-test   tests/step.rs                          modal_test_no_source_at_an_accepted_level_trips_or_passes_the_ceiling_in_f32  drive-ceiling  no Modal Test source at a level the setup accepts trips or passes the ceiling by rounding
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_takes_no_drive_start_after_the_end  arm-gate  a Modal Test host drives nothing after an end, even if a start reaches the step
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_loop_panic_outside_the_ticks_ends_in_the_emergency_stop  run-thread-failure  a panic anywhere in the Modal Test loop ends in the emergency stop
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_run_thread_panic_ends_in_the_emergency_stop  run-thread-failure  a panic on the Modal Test run's own thread takes the drive to zero with the emergency stop
+hertzforge-modal-test   tests/host.rs                          modal_test_shaker_host_that_cannot_start_its_loop_closes_the_station  run-thread-failure  a Modal Test whose loop thread cannot start stops and closes the station
+sds-control             tests/modal_test_safety.rs             modal_test_no_drive_starts_after_an_end_or_an_abort  arm-gate  no Modal Test drive start is taken through the control service after an end or an abort

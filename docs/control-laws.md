@@ -4,7 +4,8 @@ A control law is the math the controller runs once per loop to decide the next d
 loads control laws from files, so a law can be written, built and shared without rebuilding
 Hertzforge. This page is a guide for someone writing one, for the test types with a law
 interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock,
-Sine and time waveform replication, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
+Sine, time waveform replication, MIMO Shock and MIMO Sine, which each have their own chapter
+below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -255,7 +256,14 @@ with a drive the checks accept, and that no protection trips. Then:
 
 Each case reports the loops it took to converge, the trip if one ended the run, the calls not used
 and the drives refused, the drive-lines the controller repaired or held back, and the slowest call
-against its budget. The five built-in laws from the literature pass. The band-average law passes
+against its budget. The seven built-in laws from the literature pass, and so does N. Hunter's
+Broyden congruence law, on all six cases within 1 dB one loop after full level and 0.32 to 0.50 dB
+off on its worst control at the end. Uncorrelated drives cannot
+produce every control's autospectrum on the four 12 x 6 cases. At its defaults independent
+drives settles 1.5 to 2.1 dB off on its worst control on all four, as it does with the
+published method; with N. Hunter's weighting by the target set (`solve_weighting` `target`) it
+ends them about 0.9 to 1.2 dB off. On the ill-conditioned case the core
+ends the nearly-independent run by its change cap, a pass by the check's rules. The band-average law passes
 four cases and settles on the two that ask a 4 x 4 plant to converge: it controls band averages,
 so each control's line-by-line rms error holds steady at 1.5 dB there, with every call answered in
 time and no trip. The zero-drive law fails every case (the envelope
@@ -273,11 +281,14 @@ whether the file is cleared for hardware.
 
 ### The built-in MIMO laws
 
-Six multiple-output laws are built in, each running natively and also built as a law file from
+Nine multiple-output laws are built in, each running natively and also built as a law file from
 the same source (`laws/mimo-pinv`, `laws/mimo-open-loop`, `laws/mimo-shape`, `laws/mimo-buzz`,
-`laws/mimo-min-drive`, `laws/mimo-band-average`, all on the crate
-`crates/hertzforge-mimo-laws`). The first five are from the published literature; the sixth is
-Brandon Zwink's. There are tests
+`laws/mimo-min-drive`, `laws/mimo-band-average`, `laws/mimo-independent`,
+`laws/mimo-nearly-independent`, `laws/mimo-broyden-congruence`, all on the crate
+`crates/hertzforge-mimo-laws`). All but the sixth and the ninth are from the published
+literature; the sixth is Brandon Zwink's, the seventh and eighth carry N. Hunter's unpublished
+refinements by default, each of which a parameter turns off, and the eighth has an open form that
+is his law as his note runs it; the ninth is N. Hunter's own law, from his unpublished note. There are tests
 that hold every law file to its native law within `1e-12`, relative:
 
 | Id | Law | What it does |
@@ -288,6 +299,9 @@ that hold every law file to its native law within `1e-12`, relative:
 | `buzz_match` | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent; then the default law's closed loop |
 | `min_drive` | Minimum drive | Takes the reference's cross terms from the drive that needs the least power to produce its autospectra: on each line the drive minimizing the autospectrum residuals plus a trade-off times the drive power, over the positive semi-definite cone, and the plant's predicted response to it as the target (K. Coletti, R. B. Davis and R. Schultz, "Pareto-optimal target definition for multi-axis random vibration testing", 2026; Smallwood's minimum input trace at the exact-control end). The trade-off is picked at the knee of drive against residual, among the trade-offs whose target stays inside the alarm lines and leaves no control more than the largest shortfall under its specification on average over the band (3 dB by default), or set; closed loop by the default law's correction on that target. Parameters: the trade-off (auto or fixed) and its value, the largest shortfall, the residual weighting, convergence factor |
 | `band_average` | Band average | Solves the inverse in fractional-octave bands: for each band, one drive cross-spectral matrix, flat across the band, whose band-averaged response matches the band-averaged reference; how correlated the drives are comes out of the solve, so they can be fully correlated, uncorrelated or partly correlated, with a threshold per band chosen by a sweep at the first solve; then a gain correction band by band from the measured response, and optionally a new solve from the updated FRF. It controls band averages, not lines |
+| `independent` | Independent drives | Uncorrelated drives: on each line the drive autospectra solved from the reference autospectra through the squared magnitudes of the FRF (R. L. Mayes and D. P. Rohe, IMAC XXXIV, 2016; R. Schultz, IMAC XXXVII, 2019), a negative level set to zero (N. Hunter, K. Cross and G. Nelson, IMAC XXXVI, 2018); then each loop the levels played plus the solve of the autospectrum error, times a convergence factor (1 by default, the published whole step), each level's autospectrum held to +100 and -67 percent per loop (the paper says "voltage"; read as amplitude the limit would be +300 / -89 percent of the autospectrum, looser than the core's own cap, and either reading can be set). It counts per line the levels solved below zero before the negative rule and the limit: at the seed, lines where independent drives cannot meet the autospectra; on later loops also a step that overshoots, and a counted level may still be played above zero where the fall limit holds it. It matches autospectra only, with the coherence and phase the structure gives uncorrelated drives. By default it carries N. Hunter's non-negative least squares, used with his permission; his solve weighted by the target can be set and is off by default, because the solved levels are the drive played and, where the targets cannot all be met, the weighted solve settles low (on the benchmark's tuning structures it ran 3 to 7 dB low; Hertzforge's choice, to be confirmed with the author). The two refinements: the solve weighted by the target (each control's row and target divided by its target, so every control's error counts in proportion to its own level, with the regularization constant then multiplying each drive's own diagonal element of the weighted normal matrix, D. W. Marquardt's scaling, J. SIAM 11, 1963), and non-negative least squares (where the plain solve gives a negative level, the levels minimize the same objective over levels of zero or more, instead of the negative ones being set to zero). The published method is `solve` `set_to_zero` (with `solve_weighting` `none`, the default). Parameters: the regularization constant, the floor a negative level is set to (with the set-to-zero solve only), the largest rise and fall per loop, convergence factor, level solve (`nonnegative` by default, or `set_to_zero`), solve weighting (`none` by default, or `target`) |
+| `nearly_independent` | Nearly independent drives | Keeps the reference's autospectra and takes each pair's coherence and phase from the response the independent drives would produce through the FRF, rescaled to the specified autospectra (J. S. Cap, S. Norman and D. O. Smallwood, 86th Shock and Vibration Symposium, 2015, Appendix A); then the default law's closed loop. With more controls than drives that reference is in general out of reach, and the loop settles at the part of it the drives can produce. By default the levels are solved with both of N. Hunter's refinements above, the weighting included, and his exactness test is applied: on a line where the unregularized levels are all zero or more and meet the autospectra to a relative residual of 1e-10, independent drives are kept there and the loop starts from that diagonal drive where it can hold it; with more drives than controls, or where its inverse is truncated, it cannot, and starts there from its own drive, the least drive with the same response (counted in `exact_not_held`; the open form plays the diagonal drive). On every other line his level set scales the first drive by the specified total power over the predicted total, so the two are equal (the factor is 1 with as many controls as drives or fewer). The published method is `solve` `set_to_zero`, `solve_weighting` `none`, `exact_tolerance` 0 and `level_set` off. `loop` `open` is his law as his note runs it: the same drive on every call while the estimate is held, formed again when it changes, with no correction from the response, so its error is whatever the model's error is; the core's level, limits, ceilings and aborts act on it as on any law. Parameters: the regularization constant, convergence factor (closed loop only), level solve, solve weighting, level set (on by default), loop (`closed` by default, or `open`), exactness tolerance (1e-10 by default, 0 turns the test off) |
+| `broyden_congruence` | Broyden congruence | N. Hunter's law (his unpublished note "The Broyden Congruence Law, Step by Step", private communication, 2026, used with his permission). It specifies autospectra only. The first drive is the inverse of the reference; after that the law never forms a drive again: each loop it multiplies each drive by a gain and, with phase steering, turns its phase, a congruence `D X D^H` that keeps the coherence between every pair of drives and keeps the drive realizable. The gains come from the sensitivity of the log response to the log gains, first the model's from the FRF and the current drive, then corrected each loop from what the last step did by a damped Broyden secant update (C. G. Broyden, Mathematics of Computation 19, 1965) and pulled 5 percent a loop back toward the model's. The error is split into a common level and a shape, the shape solved by a ridge weighted by each control's multiple coherence; the step is cut at resonances, limited so that no prediction of its effect exceeds the largest step, and a ceiling scales the drive down at once when a control would be driven far above its target. The resonance cut is Hertzforge's (the note names a peak detector it does not define). Parameters: the first drive's regularization and amount, the drive-coherence cap, the start cap (off) and its level, convergence factor, largest step, ridge, resonance sensitivity, half-width and smallest gain, ceiling, Broyden gain (0 turns learning off), coherence power, model anchor, smallest change learned from, level split, base on the command and its tolerance, phase steering and its largest step, effective averages |
 
 The band-average law's arithmetic is `crates/hertzforge-law-band-average-math`, a port of
 Brandon Zwink's Python law that the crate's `parity` example holds to it call for call. It leaves
@@ -302,6 +316,22 @@ is over the law budget of a 2 s loop, and milliseconds on the law check's plants
 The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnostic of each layout.
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove
 the path a law file takes.
+
+### Running a built-in MIMO law on a benchmark problem
+
+Two examples of `sds-control` are the programs the Hertzforge Journal's benchmark study of these
+six laws used on the Open Benchmark Set, on the simulator only. `x4_runner` runs one built-in law,
+closed loop, through the MIMO Random run service on a structure given as data, and writes a run
+folder (the manifest, the loop log, the drive and response as played, the structure's frequency
+response) for the set's scorer:
+
+```
+cargo run --release -p sds-control --example x4_runner -- case.json --out run_folder
+```
+
+`obs_play` plays a drive record open loop through a jointed structure given as data and writes
+every output sample; the set's tests use it to hold its reference model to the simulator. Each
+file's header comment gives the case file's keys and how to build one from a problem of the set.
 
 ## Classical shock laws
 
@@ -920,6 +950,264 @@ cannot answer in time is named (`law_too_slow`) before the run, not in the middl
 4. Import the law file in the law panel, run its check on the simulator, and read the record: each
    case passed, or the requirement it broke with its number. A new law is worth keeping when it
    passes a case the built-ins fail, or passes the same cases with less drive.
+
+## MIMO Sine laws
+
+A MIMO Sine law drives several shakers with one tone to put a sine at several control points: a
+sweep, a dwell or a stepped sine. The controller plays the tone on every drive, each with its own
+amplitude and phase, tracks it at every control and limit channel, and calls the law once per
+control update (10 ms by default) for one complex amplitude per drive. The tone's frequency, the
+sweep, the level schedule and every protection are the controller's. The specification's section
+16 states the world in full.
+
+Every result stated here was measured on simulated structures: the research testbed's, and the
+simulator's standard sine structures the law check runs on. No MIMO Sine law has yet run on a
+shaker.
+
+What differs from the single-output Sine laws:
+
+- **The drive is a complex vector.** Each drive's amplitude and phase are the law's; a control's
+  tracked amplitude is its response's phase minus the tone's, so a linear structure in steady
+  state gives `C = H D` with `H` the identification.
+- **The law is told the drive in force.** The controller caps each drive's change and rise and
+  scales the whole drive vector down for the limit channels and the drive ceilings, so what was
+  played is not always what was asked for. A law that integrates starts each update from the drive
+  in force.
+- **The manifest states what the law accepts:** the shapes (as many controls as drives, more, or
+  fewer), the test types (sweep, dwell, stepped) and whether it takes an amplitude-only
+  reference. The controller refuses a run the law does not accept before the law is built.
+
+### Writing a MIMO Sine law in Rust
+
+Implement `SineMimoLaw` (`describe`, `new`, `engage`, `tick`) from
+`hertzforge_law_sdk::sine_mimo` and export it with `export_sine_mimo_law!`. Build the manifest
+with `ManifestBuilder`: name, version, summary, the shapes, the test types, whether it takes an
+amplitude-only reference, the parameters and the values. The SDK hands the law plain Rust: `Setup`
+(the identification as a `MatrixStack` of controls by drives on every line, the reference, the
+bands, the ceilings, the tracking rule) and `Inputs` (every channel's tracked amplitude, the drive
+in force, the hold), and takes `Outputs` back (the drive, the fault flag, the values, a request, a
+notched reference). `sine_mimo::math` is the mathematics the built-in laws run on: the
+regularized inverse by shape, the loop-speed rule, the model the carry runs through and each
+built-in law's steps.
+
+Start from the template, `crates/hertzforge-law-sdk/template/sine-mimo`: a complete law that pairs
+each control with one drive and follows the ratio of wanted to measured amplitude, written plainly
+with its README. Copy the folder, rename the package, change `src/law.rs`, and build it with
+`cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with a MIMO Sine law's drive
+
+Every one of these holds whatever the law returns:
+
+- one finite complex amplitude per drive, at most eight declared values, a slow request's factor
+  above 0 and at most 1, a notched reference of one value per control; anything else is refused
+  by name and is a miss with the drive in force held;
+- each drive's change per update and rise per second are capped, and a rotation cap per update is
+  available;
+- the whole drive vector is scaled down, its direction kept, when a limit channel nears its bound
+  or a drive is over its ceiling;
+- while the backstop notch is in, the law is told `hold` `notch` and the notch scale: the share of
+  the reference the controller now judges the controls against. A law aims for the reference times
+  that scale, or it fights the notch: on the base-and-article structure `matrix` aiming for the
+  whole reference held the article 0.66 dB over its bound with the notch going in eight times. Every
+  built-in law does. The scale goes down at once when a limit channel demands it and comes back up
+  only past a hysteresis (`limits.notch.release_hysteresis_db`, 1 dB by default) at a capped rate
+  (`limits.notch.release_ramp_db_per_s`, 10 dB a second by default), and while
+  it is under 1 the whole drive vector rises no faster than that rate;
+- the first drive is bounded near what the identification predicts;
+- when the level moves (the ladder, or the operator's level step), the controller carries the drive
+  with it: the drive in force is scaled by the level's ratio, at no more per update than the change
+  and rise caps allow, and the law is told the scaled drive as the drive in force and the level it
+  is at, which follows the scheduled level at the same pace. On a linear structure that is exactly
+  the drive the new level needs, so a law keeps what it has learned; a law that keeps readings or
+  drives of its own scales them with the level (`secant` does). The controls are not judged until
+  the settle window after the last move closes;
+- a cap that binds without a break for a second ends the run in the controlled stop;
+- a late, failed, crashed or refused call is a miss; three in a row end the run; a law file that
+  traps, runs past its budget or asks for too much memory stays stopped for the rest of the run.
+
+**Time.** A law is built after identification, before the first drive. A law file's constructor
+has 120 s by default, because a law may fit a model there: `matrix` fits its modal model when it
+is built, which took 4.6 s natively and 42 s as a law file on a four-by-four structure with 1441
+identification lines. Each update's call has a quarter of the update by default.
+
+### Checking a MIMO Sine law before hardware
+
+A MIMO Sine law file must pass the check before it may drive hardware. Each case is a whole run on
+the simulator at 16384 Hz with a 10 ms update: every control at full level (1 g peak) on a flat
+profile, an alarm band of 1.5 dB and an abort band of 6 dB, every drive's ceiling 2 V, identification
+20 dB under the reference, the guards at their defaults, and noise of 0.01 g rms on every input
+unless the case says otherwise. A law that accepts an amplitude-only reference runs one; any other
+law gets every control in phase. A law runs only the cases of the test types it accepts: `matrix`
+all seventeen, `paired` and `ratio` seven, `steepest_descent` and `secant` six. The bands and dwells
+are short so the check of one law takes seconds of simulated test.
+
+| Case | Type | Structure and run | Asks |
+|---|---|---|---|
+| dwell at resonance | dwell | Linear 4 x 4, 6 s at its 96 Hz mode | Within 1.0 dB from 2 s after the start |
+| dwell away from resonance | dwell | Linear 4 x 4, 6 s at 130 Hz | Within 1.0 dB from 2 s after the start |
+| measurement noise | dwell | Linear 4 x 4 at 96 Hz, noise 30 dB under full level | Within 1.5 dB |
+| transport delay | dwell | The plate without its modes, 50 ms on every drive, at -6 dB, 6 s at 100 Hz | Within 0.5 dB from 2 s after the start |
+| level ladder | dwell | Mildly softening 4 x 4 at 96 Hz, rungs of 2 s at -20, -12, -6 and 0 dB | Every rung within 1.0 dB |
+| stepped | stepped | Linear 4 x 4, 60 to 120 Hz, six steps an octave of 2 s | Within 1.5 dB |
+| slow sweep | sweep | Linear 4 x 4, 80 to 120 Hz at one octave a minute | Within 1.5 dB, median within 0.5 dB |
+| fast sweep | sweep | Linear 4 x 4, 80 to 160 Hz at four octaves a minute | Within 5.0 dB within 12 Hz of the mode, 2.0 dB further away |
+| close modes | sweep | The linear plate with a second mode 2 percent above the 96 Hz mode, two octaves a minute | Within 2.0 dB |
+| near-singular | sweep | Near-singular 4 x 4, 350 to 420 Hz through 381.2 Hz | Completes, or ends on the controller's own abort or divergence stop, no drive over its ceiling |
+| limit channel | sweep | Base and article, the article limited at 2 g, 150 to 350 Hz at two octaves a minute | The notch engages; the limit at most 0.5 dB over its bound; no control over 1.0 dB in the second after a release |
+| more controls than drives | sweep | 6 controls by 3 drives, 80 to 120 Hz | Within 3.0 dB of the response the drives can reach, median within 0.5 dB |
+| more drives than controls | sweep | 3 controls by 6 drives, 80 to 120 Hz | Within 1.5 dB, median within 0.5 dB, opposition ratio at most 6 dB |
+| steep reference | sweep | Linear 4 x 4, 100 to 120 Hz at one octave a minute, the reference rising 12 dB (a quarter of full level to full level) between 109 and 110 Hz | No control more than 1.0 dB over its reference |
+| law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
+| moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
+
+A law that declares itself for weakly coupled pairs (`paired`) runs the two dwells, the
+measurement noise, the level ladder and the stepped sine on `sine-weak-4x4` instead: the plate's
+modes with each control dominated by its own drive, every cross path at least 20 dB under the
+direct one across the band. Its transport delay and law-misbehaves cases are every law's.
+
+The control service's `laws.check` (with `"world":"sine_mimo"` for a built-in law) runs the same
+cases, each as the laws crate plans it for the law, so `paired`'s pair cases run on
+`sine-weak-4x4` there too and the report's `structure` says so. A law file's scored verdicts are
+recorded against its exact file, and arming on a hardware station is refused (`law_not_checked`)
+until that record has passed; a missing or failing record is refused alike.
+
+Every case first asks the same of the run, in this order: no answer of the law was refused for what
+it was (a wrong count, a value that is not finite, an undeclared value, a bad request, an error or a
+crash) and the run did not end on a law fault for one; the law was on time; no drive sample went over its ceiling and the controller never had to scale an answer
+down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
+divergence stop; and it completed. "Within" is judged on every control at every update outside a
+settle window at the case's last level. A failed case is recorded with the requirement it broke and
+the number that broke it; the moved-resonance cases are printed so the linear law's stated limit
+can be seen, and never fail a law.
+
+A late answer is not a wrong one. The check holds every call to the run's budget (a quarter of the
+update) as a run on hardware does: a call past it is refused and the drive in force held. "On time"
+fails only when the run ends on the controller's own rule of three late answers in a row, or when
+the law's median call is over the budget, so one call that a busy computer delays cannot fail a
+case. Every case's line in the report gives the law's call times: its calls, the slowest and the
+median call, how many were over the budget (`over_budget` of `budget_ms`), and its refused answers
+with the late ones among them (`misses`, `late`).
+
+The requirements are what a good law should do, written before any law was run against them, and
+several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
+as a law file with the same verdicts, through the laws crate and through the service's
+`laws.check`. Every built-in law passes every scored case it runs. On the
+limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
+control is over its reference in the second after the release (the worst is 1.1 dB under). On the
+level ladder the worst rung is 0.3 to 0.4 dB for every law. Through the steep reference `matrix`
+reads at most 0.19 dB over its reference (it is the only built-in law that accepts a sweep). `matrix`'s hardening sweep, reported
+and not scored, is 2.3 dB: the resonance has moved past where its stated limit begins.
+
+`matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
+case) takes about 20 s; the check times the build apart from the run.
+
+### The built-in MIMO Sine laws
+
+Each runs natively and as a law file (`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`,
+`laws/mimo-sine-steepest-descent`, `laws/mimo-sine-secant`, `laws/mimo-sine-ratio`), from the same
+mathematics and the same declaration; on the same inputs over whole recorded runs the law file
+gives the native law's drives within rounding (`matrix` with its modal model within about 1e-7,
+because the modal fit is an iterative search that the platforms' rounding moves). Every built-in
+accepts all three shapes. A law that accepts a test type is not promised to hold it on every
+structure: the limits below are what the testbed measured.
+
+**`matrix`** (the default; sweep, dwell and stepped; amplitude-only references accepted). Each
+update it corrects the drive through the regularized inverse of the identification (least squares
+with more controls than drives, least norm with more drives), at a gain set every update from the
+tracking filter's delay and the identification's group delay near the tone. In a sweep it also
+carries the drive along a model of the structure: the change of drive the model predicts for the
+next frequency is added with the carry weight. Where the reference itself changes with frequency
+(a profile's breakpoint, a slope), the drive follows the change through the inverse the update it
+is told, at full weight. Its correction compares each control with the reference as the tracking
+filter would read it (the reference passed through the filter's delay and the transport delay),
+so while the reference moves the filter's trail is not taken for a control error. A reference
+that moves faster than the change cap allows is followed at the cap's pace: what the cap cut from
+the change is carried again the next update. It rebases on the drive in force every update, and
+with spare drives it removes the part of the drive the controls cannot see. With an amplitude-only
+reference it controls every control in phase, or takes each control's phase from its measurement.
+
+A 12 dB rise or fall over 0.1 Hz at one octave a minute leaves the response within about 1 dB of
+the reference on the simulator's loopback and linear structures. A fall faster than the change
+cap allows (1 dB an update by default, so 12 dB takes 120 ms) over-tests by up to the part of the
+fall the cap holds back, about 8 dB for a 12 dB fall over 0.1 Hz at four octaves a minute, for
+about 0.1 s. While the reference falls, the tracked controls read high by up to the size of the
+fall for about the filter's delay, and the controller judges them as read.
+
+| Key | What it does |
+|---|---|
+| `carry` | The weight on the carry, 0 to 1; 0 is the correction alone (default 0.67, the value that leaves at most a third of the sweep error whether damping at test level is as identified or up to three times it) |
+| `gain_rule` | `loop_speed` (default): the gain from the loop's delays; `fixed`: `fixed_gain` every update |
+| `fixed_gain` | The gain when the rule is fixed (default 0.5, the published value; on a lightly damped structure it can lose the loop) |
+| `delay_estimate` | How the loop-speed rule reads the identification's group delay near the tone. `largest` (default): the largest phase slope over the response's elements at or above a tenth of the largest; with noise in the identification, an element with little response can set it, and the loop then runs slower than it needs to between resonances. `principal`: the phase slope along the response's largest singular direction, which at a resonance is the mode's own delay and which a noisy small element cannot set. It lets the loop run faster between resonances; on a structure whose resonances move with level that speed can lose a resonance that `largest` holds, so it is for structures that respond at test level as identified |
+| `regularization` | Regularization of the inverse, relative to its largest singular value (default 0.001) |
+| `model` | `modal` (default): the identification's resonances fitted exactly and the rest smoothed; `smoothed`: the whole identification smoothed; `identification`: as measured |
+| `smoothing_lines` | Half-width of the model's smoothing in identification lines (default 8) |
+| `free_phase` | With an amplitude-only reference: `in_phase` (default) or `measured` |
+| `carry_outside_model` | Carry also where the modal fit left a group of resonances out (default off) |
+
+Values: `gain`, `group_delay_s`, `condition`, `carried_share`, `rotation_deg`, `unseen_share`,
+`modes_kept`, `candidates_left_out`.
+
+Its limit. This law assumes the test article responds at test level as it did during the
+low-level identification. Where a resonance has moved by less than a quarter of its half-power
+bandwidth, expect the same control as on a linear article. Between a quarter and one bandwidth,
+expect errors over 3 dB at that resonance. Past about one bandwidth the loop can be lost and the
+test will abort. A Q of 50 puts one bandwidth at 2 percent of frequency. On the testbed's linear
+four-by-four structure it completed 5 of 5 dwells at the lightest resonance, 5 of 5 stepped sines
+(12 steps an octave, 30 to 120 Hz) and 16 of 20 sweeps at one octave a minute.
+
+**`paired`** (dwell and stepped; amplitude-only references accepted). Control `i` is paired with
+drive `i`; every update that drive's amplitude is multiplied by its control's ratio of wanted to
+measured amplitude, raised to the gain, and its phase is left to the pair. Its first drive is the
+drive that rule settles to on the identification at the tone (the rule run on the identification's
+response until every control is within 0.01 dB, at most 200 rounds), so it starts where its loop
+would end rather than where each pair's own path alone puts it. It has no model of the coupling: it
+is for structures whose pairs are weakly coupled, each control dominated by its own drive, and the
+law check runs its dwells, measurement noise, stepped sine and level ladder on such a structure
+(`sine-weak-4x4`), where it passes every case. On the testbed's coupled four-by-four structure it
+completed none of 5 dwells and none of 5 stepped sines; on the simulator's coupled plate its first
+drive was 5.4 dB low at 96 Hz before it was settled on the identification. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
+`error_db`.
+
+**`steepest_descent`** (dwell only; references with phases only). It starts from the
+identification's inverse drive and then moves the drive every update down the gradient of the
+squared control error through the identification, scaled by its largest singular value. On the
+testbed's four-by-four structure it completed 5 of 5 dwells, 2 of 5 stepped sines and none of 20
+sweeps at one octave a minute. Parameters `gain_rule`, `fixed_gain`, `delay_estimate` and
+`regularization` as for `matrix`. Values: `gain`, `error_db`.
+
+**`secant`** (dwell only; references with phases only). Two-step cycles: a probe along the inverse
+correction, then a step with the complex gain found from the probe's measured response, and a
+rank-one update of its inverse model. Each step waits for the response to settle, so its pace is
+the settle wait. On the testbed's four-by-four structure it completed 4 of 5 dwells with either
+carry, none of 5 stepped sines and none of 20 sweeps: each cycle holds the drive for several settle
+waits while the tone moves on.
+
+| Key | What it does |
+|---|---|
+| `carry` | How the inverse model moves to a new frequency: `factor` (default) keeps the learned correction as a factor on the identification's inverse there; `plain` keeps the inverse learned at the start |
+| `first_probe` | The probe's weight at the start (default 0.1) |
+| `largest_probe` | The largest the probe's weight may grow (default 1) |
+| `settle_factor` | How long each step waits, in multiples of the filter's and the structure's delays (default 5) |
+| `regularization` | As for `matrix` (default 0.001) |
+
+Values: `a_re`, `a_im` (the last measured gain against the probe), `c` (the probe weight), `phase`
+(the step of the cycle), `error_db`, `secant_skipped`.
+
+**`ratio`** (dwell and stepped; amplitude-only references accepted). It plays the identification's
+inverse of a reference scaled by one factor per control, and updates each factor from a
+compressed ratio of wanted to measured amplitude once the reading has settled. On the testbed's
+four-by-four structure, with reference pairing it completed 5 of 5 dwells, 5 of 5 stepped sines and
+3 of 20 sweeps; with drive pairing, 1 of 5 dwells and none of 5 stepped sines.
+
+| Key | What it does |
+|---|---|
+| `pairing` | `reference` (default): control `i`'s ratio scales its own reference, any shape; `drive`: it scales drive `i`, square setups only |
+| `compression` | The constant of the ratio update; larger is gentler (default 1) |
+| `regularization` | As for `matrix` (default 0.001) |
+
+Values: `sigma_min`, `sigma_max` (the smallest and largest factor), `error_db`.
 
 ## Importing a law
 

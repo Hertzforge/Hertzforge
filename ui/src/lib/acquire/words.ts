@@ -95,9 +95,11 @@ export const OUTCOME_WORDS: Record<RandomOutcome, string> = {
 };
 
 /** Every outcome but a completed schedule and the operator's own stop is shown as an abort. */
-export function outcomeTone(outcome: RandomOutcome): Status {
+export function outcomeTone(outcome: RandomOutcome | (string & {})): Status {
 	if (outcome === 'completed') return 'pass';
-	if (outcome === 'operator_stop') return 'info';
+	// Playback's controlled stop is the operator's, as `operator_stop` is everywhere else
+	// a Modal Test's End Test is the operator's too
+	if (outcome === 'operator_stop' || outcome === 'stopped' || outcome === 'ended') return 'info';
 	return 'fail';
 }
 

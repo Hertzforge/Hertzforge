@@ -146,11 +146,7 @@ impl ArrayData {
 
     fn read_le(dtype: DType, bytes: &[u8]) -> ArrayData {
         fn chunks<const N: usize>(bytes: &[u8]) -> impl Iterator<Item = [u8; N]> + '_ {
-            bytes.chunks_exact(N).map(|c| {
-                let mut a = [0u8; N];
-                a.copy_from_slice(c);
-                a
-            })
+            bytes.as_chunks::<N>().0.iter().copied()
         }
         match dtype {
             DType::F32 => ArrayData::F32(chunks::<4>(bytes).map(f32::from_le_bytes).collect()),

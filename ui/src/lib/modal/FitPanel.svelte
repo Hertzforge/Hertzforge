@@ -17,7 +17,12 @@
 	}
 	let { fit }: Props = $props();
 
-	const s = $derived(fit.state);
+	/**
+	 * The fit as last drawn: when the fit ends, the frame takes the panel away, and its plot reads
+	 * the state it drew until then rather than none (a null here stopped the page updating).
+	 */
+	let lastState: typeof fit.state = null;
+	const s = $derived.by(() => (lastState = fit.state ?? lastState));
 	/**
 	 * The modes picked in the table: a click picks a row, Shift picks to it, Cmd (Ctrl elsewhere)
 	 * adds or takes one away, and Delete takes the picked back (Brandon, 2026-11-14).
@@ -185,8 +190,11 @@
 				</span>
 			{/if}
 		</div>
-		{#if fit.busy}<p class="muted" role="status">{fit.busy}.</p>{/if}
-		{#if fit.error}<p class="error" role="alert" data-testid="fit-error">{fit.error}</p>{/if}
+		<!-- one line that is always there, so what it says never moves the plot -->
+		<div class="status">
+			{#if fit.error}<p class="error" role="alert" data-testid="fit-error">{fit.error}</p>
+			{:else if fit.busy}<p class="muted" role="status">{fit.busy}.</p>{/if}
+		</div>
 
 		<div class="plot">
 			<SpectrumPane
@@ -201,10 +209,13 @@
 			/>
 		</div>
 
-		{#if s.mac}
-			<div class="mac" data-testid="fit-mac"><ViewRenderer view={s.mac} /></div>
-		{/if}
+		<!-- the MAC and the modes each have their place under the plot from the start, so the plot keeps its size as modes are confirmed -->
+		<div class="under">
+		<div class="mac" data-testid="fit-mac">
+			{#if s.mac}<ViewRenderer view={s.mac} />{:else}<p class="muted empty">The MAC of the confirmed modes shows here once there are two.</p>{/if}
+		</div>
 
+		<div class="list">
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (the table takes Delete for its picked rows) -->
 		<table class="modes" data-testid="fit-modes" aria-label="Confirmed modes" tabindex="0" onkeydown={tableKey}>
 			<thead><tr><th>Mode</th><th>Frequency (Hz)</th><th>Damping (%)</th><th>Description</th><th></th></tr></thead>
@@ -232,6 +243,8 @@
 				{/each}
 			</tbody>
 		</table>
+		</div>
+		</div>
 		<p class="hint">Click the plot to move the cursor. Drag to pan; right-drag or the wheel zooms, over an axis that axis alone; double-click or A views all. Find Mode searches what is on screen.</p>
 	</section>
 {/if}
@@ -285,9 +298,63 @@
 	}
 
 	/* the pane fills its box: the rotated mode labels need room under the cells */
+	.status {
+		flex: none;
+		height: 1.5em;
+		overflow: hidden;
+	}
+
+	.status p {
+		margin: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* the plot has the top three fifths of what the bar and the readout leave, and what is under it the rest: neither changes size as modes are confirmed. Two thirds left the MAC a strip too low to read */
+	.plot {
+		display: flex;
+		flex: 3 1 0;
+		flex-direction: column;
+		min-height: 300px;
+	}
+
+	.plot > :global(*) {
+		flex: 1 1 0;
+		min-height: 0;
+	}
+
+	.under {
+		display: grid;
+		flex: 2 1 0;
+		grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+		gap: var(--sp-4);
+		min-height: 260px;
+	}
+
+	.mac,
+	.list {
+		min-width: 0;
+		min-height: 0;
+	}
+
 	.mac {
-		max-width: 460px;
-		height: 360px;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.mac > :global(*) {
+		flex: 1 1 0;
+		min-height: 0;
+	}
+
+	.empty {
+		padding: var(--sp-2);
+	}
+
+	/* the modes scroll in their place */
+	.list {
+		overflow-y: auto;
 	}
 
 	.modes {

@@ -69,11 +69,15 @@ _BARE_MIL = re.compile(r'(?<![A-Za-z0-9_])mils?(?![A-Za-z0-9_])')
 # 'lbm' is the engineering spelling of pound-mass; pint has only 'lb', and
 # refuses 'lbm' outright — which made it a dead entry in the mass shortlist
 _BARE_LBM = re.compile(r'\blbm\b')
+# 'amps' is how a shaker's current monitor is often labeled, and pint reads
+# it as attometers per second: a velocity, which would declare the channel
+# as one. 'amp' and 'ampere' are pint's own.
+_BARE_AMPS = re.compile(r'(?<![A-Za-z0-9_])amps(?![A-Za-z0-9_])')
 
 
 def _spell(unit: str) -> str:
-    """The three substitutions above, applied to a string as written."""
-    unit = _BARE_LBM.sub('lb', unit)
+    """The four substitutions above, applied to a string as written."""
+    unit = _BARE_AMPS.sub('ampere', _BARE_LBM.sub('lb', unit))
     return _BARE_MIL.sub('thou', _BARE_G.sub('standard_gravity', unit))
 
 
@@ -96,6 +100,7 @@ _UNIT_SPELLINGS = (
     'lbf', 'N', 'kN', 'newton', 'newtons',
     'psi', 'Pa', 'kPa', 'MPa',
     'V', 'mV', 'volt', 'volts',
+    'A', 'mA', 'ampere', 'amperes', 'amp', 'amps',
     'strain', 'microstrain', 'dimensionless',
     'degC', 'degF', 'K', 'degR',
     'rad', 'radian', 'radians', 'deg', 'degree', 'degrees',
@@ -107,6 +112,9 @@ _UNIT_TOKEN = re.compile(r'[A-Za-z_]+')
 # gauss in a compound parses, so `G/lbf` and `G^2/Hz` never traded up to
 # their gravity readings. A prefixed `G` (`GHz`, `GPa`) is a different token.
 _BARE_CAPITAL_G = re.compile(r'(?<![A-Za-z0-9_])G(?![A-Za-z0-9_])')
+# The same for 'PA': pint reads it as petaamperes, a current, which would
+# win over the pascals anyone typing it means.
+_BARE_CAPITAL_PA = re.compile(r'(?<![A-Za-z0-9_])PA(?![A-Za-z0-9_])')
 
 
 @lru_cache(maxsize=4096)
@@ -135,7 +143,7 @@ def fold_unit_case(unit: str) -> str:
     if not isinstance(unit, str):
         return unit
     # among units this toolset speaks: 'G per fortnight' is still nothing
-    gravity = (_BARE_CAPITAL_G.sub('g', unit)
+    gravity = (_BARE_CAPITAL_PA.sub('Pa', _BARE_CAPITAL_G.sub('g', unit))
                if all(token.lower() in _FOLD for token in _UNIT_TOKEN.findall(unit))
                else unit)
     if _reading(gravity) == 2:
@@ -197,6 +205,7 @@ _DIMENSIONALITY = {
     'density': '[mass] / [length] ** 3',
     'temperature': '[temperature]',
     'voltage': '[length] ** 2 * [mass] / [current] / [time] ** 3',
+    'current': '[current]',
     # pint spells "no dimension" as the empty expression; asking it for the
     # dimensionality of the word 'dimensionless' raises KeyError('')
     'strain': '',
@@ -704,9 +713,8 @@ class UnitSystem:
 
     `base` is the coherent system a derived system was made from, such as
     in-slinch-lbf-s for in-slinch-lbf-s (g), which shows accelerations in
-    g. It is None for a coherent system. Most exporters write in the
-    coherent system (see `coherent`), because most file formats cannot
-    label a value as g.
+    g. It is None for a coherent system. UNV export writes the coherent
+    system (see `coherent`), because its units block cannot declare g.
 
     The angular, moment, density and modal units are filled in from
     the base units when the system does not name them.
@@ -1022,6 +1030,7 @@ SI = UnitSystem('m-kg-N-s', {
     'length': 'm', 'mass': 'kg', 'time': 's', 'frequency': 'Hz',
     'force': 'N', 'acceleration': 'm/s**2', 'velocity': 'm/s',
     'pressure': 'Pa', 'temperature': 'K', 'voltage': 'V',
+    'current': 'A',
     'strain': '', 'dimensionless': '',
 })
 
@@ -1029,6 +1038,7 @@ MMKS = UnitSystem('mm-kg-N-s', {
     'length': 'mm', 'mass': 'kg', 'time': 's', 'frequency': 'Hz',
     'force': 'N', 'acceleration': 'mm/s**2', 'velocity': 'mm/s',
     'pressure': 'MPa', 'temperature': 'degC', 'voltage': 'V',
+    'current': 'A',
     'strain': '', 'dimensionless': '',
 })
 
@@ -1036,6 +1046,7 @@ IN_LBF_S = UnitSystem('in-slinch-lbf-s', {
     'length': 'in', 'mass': 'slinch', 'time': 's', 'frequency': 'Hz',
     'force': 'lbf', 'acceleration': 'in/s**2', 'velocity': 'in/s',
     'pressure': 'psi', 'temperature': 'degF', 'voltage': 'V',
+    'current': 'A',
     'strain': '', 'dimensionless': '',
 })
 
@@ -1043,6 +1054,7 @@ FT_LBF_S = UnitSystem('ft-slug-lbf-s', {
     'length': 'ft', 'mass': 'slug', 'time': 's', 'frequency': 'Hz',
     'force': 'lbf', 'acceleration': 'ft/s**2', 'velocity': 'ft/s',
     'pressure': 'lbf/ft**2', 'temperature': 'degF', 'voltage': 'V',
+    'current': 'A',
     'strain': '', 'dimensionless': '',
 })
 

@@ -833,7 +833,13 @@ def _build_block(block, objects, us, object_groups=None):
     resolved = {key: (resolve_binding(block.get(key), objects, object_groups)
                       or '')
                 for key in ('source', 'geometry', 'shapes', 'dofs_source',
-                            'measured', 'specification') if block.get(key)}
+                            'measured', 'specification', 'channels')
+                if block.get(key)}
+    if block.get('kind') == 'scene' and 'channels' not in block:
+        # a scene draws the sensors of the basis channel table, a
+        # report saved before scenes named one included
+        resolved['channels'] = resolve_binding(
+            '@basis:ChannelTable', objects, object_groups) or ''
     block = {**block, **resolved}
     if block.get('caption'):
         # captions carry live references too — a filtered-transients
@@ -1044,7 +1050,8 @@ def _caption_figures(built, block, source, objects, us):
     spectrum the run, the estimate, the resolution, the window and the
     DOF), and each cell says only its own channel's rows (the caption's
     `CHANNEL_ROWS`), so eight cells do not repeat the same five lines
-    eight times.
+    eight times. A plot drawn against a requirement leaves those rows
+    out: its channel is its title, and the requirement is drawn on it.
 
     A measured spectrum, a shock response spectrum, a sine level and a
     time history have one (`report_caption.caption_kind`), and only
@@ -1076,9 +1083,13 @@ def _caption_figures(built, block, source, objects, us):
         return caption_of(name, records, specification=specification,
                           per_octave=octave, unit_system=us, **extra)
 
+    # Brandon, 2026-11-18: no Channel, Location and axis or Requirement
+    # lines under a plot against a requirement
+    quiet = () if against is None else ('Channel', 'Location and axis', 'Requirement')
+
     def rows(caption, only=None):
         return [list(row) for row in caption.rows()
-                if only is None or row[0] in only]
+                if (only is None or row[0] in only) and row[0] not in quiet]
 
     def channels_of(figure):
         return [channel for channel in figure.get('channels') or []
@@ -1253,6 +1264,7 @@ def _stage_page(block, source, objects, us, caption, page):
     # With a `floor` it is the paired stage instead: the two
     # objects met station by station, overlaid or divided, which
     # is the same choice the app's bar offers over two PSDs.
+    from ..core.data import TimeHistory
     from ..drawing.viz.waterfall import (
         STAGE,
         stage_basis,
@@ -1342,6 +1354,15 @@ def _stage_page(block, source, objects, us, caption, page):
         drawing = chosen[page * MAX_STAGE_RECORDS:
                          (page + 1) * MAX_STAGE_RECORDS]
         per_record = _stage_budget(len(drawing))
+        if isinstance(source, TimeHistory):
+            # a record's stage is read as its flat figure is, for where the
+            # run was at level and how the frames sat on it, and costs what
+            # the flat figure costs: half its points, since a point on the
+            # stage is stored with its depth. At the stage's two million the
+            # plate's random report was 33 MB, 5.5 MB flat (Brandon,
+            # 2026-11-18, time data in 3-D; 2026-09-20, the size)
+            per_record = min(per_record,
+                             max(TIME_FIGURE_POINTS // 2 // max(len(drawing), 1), 512))
         arrays = waterfall_arrays(
             source, drawing, us, block.get('component', 'magnitude'),
             budget=per_record,
@@ -2467,7 +2488,7 @@ def _scene_block(block, geometry, shapes, us, objects):
                 continue
             arrows.append({'node': node_row[node],
                            'vector': [_compact(v) for v in vector],
-                           'color': AXIS_COLORS[axis],
+                           'color': AXIS_COLORS[axis], 'axis': int(axis),
                            'label': dof})
         if not arrows:
             return None     # nothing measured as that quantity here
@@ -2478,6 +2499,15 @@ def _scene_block(block, geometry, shapes, us, objects):
         built['arrow_length'] = float(dof_arrow_length(
             points[[arrow['node'] for arrow in arrows]], extent))
         built['arrows_incoming'] = quantity in EXCITATION_QUANTITIES
+    from ..core.channel_table import ChannelTable
+
+    # the sensors on the figures of what was instrumented, not over a
+    # mode's animation
+    table = objects.get(block.get('channels') or '')
+    if shapes is None and isinstance(table, ChannelTable):
+        bodies = _scene_bodies(table, geometry, quantity, node_row, us)
+        if bodies is not None:
+            built['bodies'] = bodies
     if shapes is not None:
         from ..deform import ShapeDeflection
 
@@ -2500,6 +2530,32 @@ def _scene_block(block, geometry, shapes, us, objects):
                 'peak': float(deflection.peak_magnitude) or 1.0,
                 **_motion(real, imag)})
     return built
+
+
+def _scene_bodies(table, geometry, quantity, node_row, us):
+    """The sensor bodies a scene draws, as the 3-D view draws them
+    (`core.sensors.place`, `drawing.viz.sensors.sensor_bodies`), in the
+    scene's display coordinates: on a DOF scene the sensors that measure
+    its quantity, on the geometry alone every sensor. None with none."""
+    from ..core.sensors import place
+    from ..drawing.viz.sensors import sensor_bodies
+
+    placed, _notes = place(table, geometry)
+    if quantity:
+        types = table.types()
+        placed = [sensor for sensor in placed
+                  if any(types[row] == quantity for row in sensor.rows)]
+    bodies, _notes = sensor_bodies(placed, geometry, node_row.get)
+    if bodies is None:
+        return None
+    nodes = bodies['nodes'].astype(float)
+    if geometry.units_defined:
+        nodes = us.from_si(nodes, 'length')
+    # lists, since the edit page carries the built block as JSON
+    return {'nodes': [[_compact(v) for v in p] for p in nodes],
+            'triangles': bodies['triangles'].tolist(),
+            'colors': bodies['colors'].tolist(),
+            'follow': bodies['follow'].tolist()}
 
 
 def _motion(real: np.ndarray, imag: np.ndarray) -> dict[str, Any]:
@@ -3672,9 +3728,24 @@ def _table_block(block, source, geometry=None):
     asking what is in a channel table cannot answer differently. The
     caption is this end's business.
     """
+    from ..core.channel_table import TRANSFORMATION_FORMS, ChannelTable
     from ..core.shapes import ShapeSet
-    from ..core.tables import table_of
+    from ..core.tables import table_of, transformation_table
 
+    form = block.get('form')
+    if form is not None:
+        # a control loop's transformation, drawn only while the loop
+        # still holds it: a table re-imported without one leaves the
+        # block unrendered rather than an empty grid
+        held = (source.environments.get(block.get('environment', ''))
+                if isinstance(source, ChannelTable) else None)
+        if (form not in TRANSFORMATION_FORMS or held is None
+                or held.matrix(form) is None):
+            return None
+        headers, rows = transformation_table(source, block['environment'],
+                                             form)
+        return {'kind': 'table', 'caption': block.get('caption', ''),
+                'headers': headers, 'rows': rows}
     built = table_of(source, geometry)
     if built is None:
         return None

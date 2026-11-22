@@ -1,5 +1,7 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
+	/** Perspective or parallel projection, one choice for every 3-D view of a model, kept until the app closes. */
+	let lastPerspective = true;
 	/**
 	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
 	 * another object or a part, clicking away or an edit drawing the model again opens where
@@ -41,6 +43,7 @@
 		ConeGeometry,
 		DataTexture,
 		Group,
+		InstancedMesh,
 		DirectionalLight,
 		LinearFilter,
 		RGBAFormat,
@@ -56,7 +59,6 @@
 		MeshLambertMaterial,
 		Matrix4,
 		Object3D,
-		PerspectiveCamera,
 		Points,
 		PointsMaterial,
 		Quaternion,
@@ -71,9 +73,10 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
+	import { arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-	import { wideLines } from './wideLines';
+	import { fixedWideLines, wideLines } from './wideLines';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapBytes, colormapGradient } from './colormap';
@@ -81,10 +84,14 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedShapes, modelPlane, nearestEdge, nearestNode, numbered, pickClicks, placedPoint, setTriangles, toggledSurface } from './pick';
+	import { isAdding, setAdding } from './editMode.svelte';
+	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
+	import { linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
 	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
+	import { StageCamera, lookAtFace } from './projection';
 
 	interface Props {
 		view: Shape3DView;
@@ -192,8 +199,16 @@
 		dirty = true;
 	}
 
+	/** The elements a click in the view selects in Select mode (`mark_sets` with `clicks`). */
+	const elementSet = $derived(view.mark_sets?.find((set) => set.clicks) ?? null);
+	/** A view that both selects elements and adds them has Select and Add modes, Select first. */
+	const twoModes = $derived(!!(onpick && view.pick && elementSet));
 	/** The click the view takes, when it takes one and there is somewhere to send it. */
-	const pick = $derived(onpick ? view.pick : undefined);
+	const pick = $derived(onpick && (!twoModes || isAdding()) ? view.pick : undefined);
+	/** What Add mode's settings (`pick.settings`) are set to here, sent with the next element made. */
+	let chosen = $state<Record<string, unknown>>({});
+	/** How many clicks make one, and what the bar says: the type chosen decides both. */
+	const clicks = $derived(pick ? pickClicks(pick, chosen) : { count: 0, hint: '' });
 	/** Nodes picked so far toward one element, as rows of `view.nodes`. */
 	let picked = $state<number[]>([]);
 	/** The pickable node under the cursor. */
@@ -204,6 +219,34 @@
 	const paneId = `s3-${Math.random().toString(36).slice(2, 9)}`;
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
+
+	/** Drawn in perspective; off, in parallel projection, the scene the size it was at what the camera looks at. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
+		dirty = true;
+	}
+
+	/**
+	 * A press on a face of the cube at the orientation axes turns the view to look straight at
+	 * that face, and goes no further: the camera does not start a drag on it and nothing is picked.
+	 */
+	function pressCube(e: PointerEvent) {
+		if (e.button !== 0 || !triad || !orientation || !renderer) return;
+		const box = triad.getBoundingClientRect();
+		if (!box.width || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) return;
+		orientation.look(camera.quaternion);
+		const face = orientation.faceAt(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2);
+		if (!face) return;
+		e.stopPropagation();
+		e.preventDefault();
+		lookAtFace(camera, controls.target, face.axis, face.sign);
+		controls.update();
+		dirty = true;
+	}
 
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
@@ -293,6 +336,87 @@
 	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
 	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
+	/** Each DOF arrow's label written at its free end; kept across views and launches. */
+	const LABELS_KEY = 'hertzforge.shape3d.dofLabels';
+	let dofLabels = $state(readDofLabels());
+	function readDofLabels(): boolean {
+		try {
+			return localStorage.getItem(LABELS_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	function toggleDofLabels() {
+		dofLabels = !dofLabels;
+		dirty = true;
+		try {
+			localStorage.setItem(LABELS_KEY, dofLabels ? '1' : '0');
+		} catch {
+			// no storage: the choice lasts as long as the pane
+		}
+	}
+	/** Each node's number written beside it; kept across views and launches. */
+	const NUMBERS_KEY = 'hertzforge.shape3d.nodeNumbers';
+	let nodeNumbers = $state(readNodeNumbers());
+	function readNodeNumbers(): boolean {
+		try {
+			return localStorage.getItem(NUMBERS_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	/** The numbers turned off on a view of the nodes themselves, where they are written unasked. */
+	let numbersHidden = $state(false);
+	/** Written on the nodes' own views (the Nodes row picked, their table open) without being asked for; elsewhere when turned on. */
+	const numbersShown = $derived(view.marks ? !numbersHidden : nodeNumbers);
+	function toggleNodeNumbers() {
+		dirty = true;
+		if (view.marks) {
+			numbersHidden = !numbersHidden;
+			return;
+		}
+		nodeNumbers = !nodeNumbers;
+		try {
+			localStorage.setItem(NUMBERS_KEY, nodeNumbers ? '1' : '0');
+		} catch {
+			// no storage: the choice lasts as long as the pane
+		}
+	}
+	/** The node numbers over the canvas, redrawn each frame the view moves. */
+	let numbersSvg: SVGSVGElement;
+	/** More nodes are in the picture than numbers can be read on: said in place of them. */
+	let tooManyNumbers = $state(false);
+	/** The nodes a click marks, with the table and the tree of the same link: the link, or null. */
+	const marking = $derived(view.marks && view.node_ids ? view.marks.link : null);
+	/** Each marked node's row in `view.nodes`. */
+	const markedRows = $derived.by(() => {
+		const ids = marking ? marked(marking) : [];
+		if (!ids.length || !view.node_ids) return [];
+		const wanted = new Set(ids);
+		const rows: number[] = [];
+		for (let r = 0; r < view.node_ids.length; r++) if (wanted.has(view.node_ids[r])) rows.push(r);
+		return rows;
+	});
+	/** Where the things marked from the tree are ringed (`view.mark_sets`): an element's nodes, a coordinate system's origin. */
+	const setPlaces = $derived.by(() => {
+		const places: number[] = [];
+		for (const set of view.mark_sets ?? []) {
+			const wanted = new Set(marked(set.link));
+			if (!wanted.size) continue;
+			set.ids.forEach((id, k) => {
+				if (!wanted.has(id)) return;
+				if (set.frames) places.push(...(view.frames?.[k]?.origin ?? []));
+				for (const row of set.rows?.[k] ?? []) places.push(view.nodes[3 * row], view.nodes[3 * row + 1], view.nodes[3 * row + 2]);
+			});
+		}
+		return places;
+	});
+	/** The triangles and edges, as rows of `view.nodes`, of the elements marked with a table's rows or the tree. */
+	const setShapes = $derived(markedShapes(view.mark_sets ?? [], marked));
+	/** The DOF labels over the canvas, redrawn each frame the view moves. */
+	let labelsSvg: SVGSVGElement;
+	/** Where each label sits in the model: its arrow's free end, a little past it. */
+	let labelAt: Float32Array | null = null;
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
 	let hoverPending = false;
@@ -341,17 +465,14 @@
 	/** The sample shown, for the scrubber and the time readout. */
 	let sample = $state(0);
 
-	/** Model diagonal, from the undeformed nodes. */
+	/** The lowest and highest coordinate along each axis of the undeformed nodes and of any point layers. */
+	function span(): { lo: number[]; hi: number[] } {
+		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz), ...(view.segments ?? []).map((layer) => layer.xyz)]);
+	}
+
+	/** Model diagonal, from the undeformed nodes and any point layers. */
 	const diagonal = $derived.by(() => {
-		const n = view.nodes;
-		const lo = [Infinity, Infinity, Infinity];
-		const hi = [-Infinity, -Infinity, -Infinity];
-		for (let i = 0; i < n.length; i += 3) {
-			for (let k = 0; k < 3; k++) {
-				if (n[i + k] < lo[k]) lo[k] = n[i + k];
-				if (n[i + k] > hi[k]) hi[k] = n[i + k];
-			}
-		}
+		const { lo, hi } = span();
 		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
 		// that puts every point nowhere
 		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
@@ -361,18 +482,7 @@
 	const peak = $derived(amplitude * AMP_UNIT * diagonal);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
-	const extents = $derived.by(() => {
-		const n = view.nodes;
-		const lo = [Infinity, Infinity, Infinity];
-		const hi = [-Infinity, -Infinity, -Infinity];
-		for (let i = 0; i < n.length; i += 3) {
-			for (let k = 0; k < 3; k++) {
-				if (n[i + k] < lo[k]) lo[k] = n[i + k];
-				if (n[i + k] > hi[k]) hi[k] = n[i + k];
-			}
-		}
-		return { lo, hi };
-	});
+	const extents = $derived.by(() => span());
 
 	/** Display scaling of the model unit: meters shown as millimeters below one meter. */
 	const display = $derived.by(() => {
@@ -386,7 +496,7 @@
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
 	let boundsBox: Box3Helper | null = null;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
@@ -401,8 +511,14 @@
 	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
-	/** The view's `marks`: DOF arrows and sensors, drawn still. */
-	let markLines: LineSegments | null = null;
+	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still unless they `follow` nodes. */
+	let dofArrows: InstancedMesh | null = null;
+	/** Arrows that follow nodes: each one's place and its label's at rest, and how far each has gone. */
+	let arrowRest: Matrix4[] | null = null;
+	let labelRest: Float32Array | null = null;
+	let arrowGone: Float32Array | null = null;
+	/** The orientation axes, drawn in the corner of the canvas after the model. */
+	let orientation: ReturnType<typeof triadScene> | null = null;
 	/** The view's coordinate systems (`frames`), drawn as the gimbal is: X red, Y green, Z blue arrows. */
 	let frameGroup: Group | null = null;
 	function buildFrames() {
@@ -432,6 +548,10 @@
 
 	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
 	let bodies: Mesh | null = null;
+	/** The view's `points` layers: the nodes no line or face is drawn through, which stay put. */
+	let pointLayers: Points[] = [];
+	/** The view's `segments` layers: free line segments, each layer in its own color, which stay put. */
+	let segmentLayers: LineSegments2[] = [];
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
@@ -451,6 +571,15 @@
 	let otherOn: Points | null = null;
 	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
+	/** The elements in their own colors (`element_colors`), over the gray surface. */
+	let elementColors: Mesh | null = null;
+	let coloredLines: LineSegments | null = null;
+	/** The selectable elements' faces, not drawn, that a click in Select mode is matched against, and each triangle's element. */
+	let elementPick: Mesh | null = null;
+	let elementOwner: number[] = [];
+	/** The faces and edges of the elements marked (`mark_sets` with `faces` and `edges`), drawn over the model. */
+	let lit: Mesh | null = null;
+	let litEdges: LineSegments | null = null;
 	const materials: Material[] = [];
 	/**
 	 * The deflection's two parts, and for the surface's colors: the largest travel at the scale
@@ -479,7 +608,7 @@
 	let fitBox = new Box3();
 	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
 	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
+		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect, camera.parallel);
 	}
 	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
@@ -588,6 +717,15 @@
 		paintColors();
 	}
 
+	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
+	function rideArrows() {
+		const follow = view.arrows?.follow;
+		if (!follow || !dofArrows || !arrowRest || !labelRest || !labelAt || !arrowGone) return;
+		riddenOffsets(follow, shapeAttr.array, shapeImagAttr.array, uniforms.uRe.value, uniforms.uIm.value, arrowGone);
+		moveArrows(dofArrows, arrowRest, arrowGone);
+		for (let i = 0; i < labelAt.length; i++) labelAt[i] = labelRest[i] + arrowGone[i];
+	}
+
 	/** Give the bodies their nodes' offsets: the real part, and the imaginary too when `both`. */
 	function followBodies(both: boolean) {
 		if (!view.bodies || !bodyShapeAttr || !bodyShapeImagAttr) return;
@@ -666,10 +804,15 @@
 		if (outline) (outline.material as LineMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
+		// the theme's text color, which stands out on an element of any palette color
+		if (lit) (lit.material as MeshBasicMaterial).color = new Color(cssVar('--text-1'));
+		if (litEdges) (litEdges.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		// beside a second set of places, the ones a click picks wear the accent
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
-		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
+		// the colormap starts further in on the dark theme: the shader's copy is made again
+		uniforms.uMap.value.dispose();
+		uniforms.uMap.value = colormapTexture();
 		dirty = true;
 	}
 
@@ -704,7 +847,8 @@
 		});
 
 		scene = new Scene();
-		camera = new PerspectiveCamera(32, 1, 0.001, 1000);
+		camera = new StageCamera(32, 1, 0.001, 1000);
+		camera.setParallel(!perspective);
 		camera.up.copy(homePose().up);
 
 		// Geometry: one position buffer shared by the surface, outline and ghosts.
@@ -729,6 +873,13 @@
 			// bodies drawn in their own color (a solid being edited) are framed too, alone or not
 			others.push(new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3)));
 		}
+		for (const layer of view.points ?? []) {
+			// points are framed with the model, or alone when nothing else is drawn
+			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
+		}
+		for (const layer of view.segments ?? []) {
+			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
+		}
 		for (const frame of view.frames ?? []) {
 			// a coordinate system's arrows, framed with the model
 			const box = new Box3().setFromCenterAndSize(new Vector3().fromArray(frame.origin), new Vector3(0, 0, 0));
@@ -736,7 +887,8 @@
 			others.push(box);
 		}
 		fitBox = view.nodes.length ? new Box3().setFromBufferAttribute(position) : (others.shift() ?? new Box3(new Vector3(), new Vector3()));
-		if (others.length) {
+		if (others.length || !view.nodes.length) {
+			// with no nodes the box is the first of the others, and the sphere is that box's
 			for (const other of others) fitBox.union(other);
 			fitBox.getBoundingSphere(sphere);
 		}
@@ -747,7 +899,8 @@
 		camera.far = radius * 100;
 		camera.updateProjectionMatrix();
 
-		boundsBox = new Box3Helper(new Box3().setFromBufferAttribute(position), 0x8b949e);
+		const { lo: spanLo, hi: spanHi } = span();
+		boundsBox = new Box3Helper(new Box3(new Vector3().fromArray(spanLo), new Vector3().fromArray(spanHi)), 0x8b949e);
 		boundsBox.visible = bounds;
 		scene.add(boundsBox);
 
@@ -768,14 +921,19 @@
 		scene.add(ghostSurface);
 
 		if (view.overlays?.length) {
-			// the same nodes and faces, moved by the overlay's own shape attributes
+			// the same nodes and faces, moved by the overlay's own shape attributes; or, when the
+			// overlays are a second geometry's shapes, that geometry's own faces and lines
+			const own = view.overlay_triangles !== undefined || view.overlay_lines !== undefined;
+			const faces = own ? view.overlay_triangles : view.triangles;
+			const edges = own ? view.overlay_lines : view.lines;
 			overlayAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 			overlayImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 			overlayGeometry = new BufferGeometry();
 			overlayGeometry.setAttribute('position', position);
 			overlayGeometry.setAttribute('shape', overlayAttr);
 			overlayGeometry.setAttribute('shapeImag', overlayImagAttr);
-			if (view.triangles) overlayGeometry.setIndex(new BufferAttribute(view.triangles, 1));
+			// with no faces there is nothing for the surface to draw: an empty index, not every third node
+			overlayGeometry.setIndex(new BufferAttribute(faces ?? new Uint32Array(0), 1));
 			overlaySurface = new Mesh(
 				overlayGeometry,
 				displaced(new MeshBasicMaterial({ color: OVERLAY_COLOR, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }))
@@ -784,9 +942,9 @@
 			overlaySurface.renderOrder = 3;
 			overlaySurface.visible = false;
 			scene.add(overlaySurface);
-			if (view.lines && view.lines.length) {
+			if (edges && edges.length) {
 				// its tracelines and bars as wide as the mode's; the edges on its faces stay thin
-				const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+				const { onFaces, apart } = splitOnFaces(edges, faces);
 				if (apart.length) {
 					overlayOutline = wideLines(apart, view.nodes, overlayAttr, overlayImagAttr, uniforms, { color: OVERLAY_COLOR });
 					materials.push(overlayOutline.material);
@@ -807,22 +965,19 @@
 			}
 		}
 
-		if (view.marks && view.marks.lines.length) {
-			// DOF arrows and sensor bodies: line work that stays put while the model moves
-			const g = new BufferGeometry();
-			const { nodes: mn, lines: ml } = view.marks;
-			const segs = new Float32Array(ml.length * 3);
-			for (let i = 0; i < ml.length; i++) {
-				const n = ml[i] * 3;
-				segs[i * 3] = mn[n];
-				segs[i * 3 + 1] = mn[n + 1];
-				segs[i * 3 + 2] = mn[n + 2];
+		if (view.arrows && view.arrows.axes.length) {
+			// DOF arrows: solids that stay put while the model moves, each in its axis's color
+			dofArrows = arrowMesh(view.arrows);
+			scene.add(dofArrows);
+			labelAt = labelPoints(view.arrows);
+			if (view.arrows.follow) {
+				// arrows that ride their nodes (a force on the node it pushes): where each rests
+				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.length);
+				labelRest = labelAt.slice();
+				arrowGone = new Float32Array(labelAt.length);
 			}
-			g.setAttribute('position', new BufferAttribute(segs, 3));
-			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
-			markLines.frustumCulled = false;
-			scene.add(markLines);
 		}
+		orientation = triadScene();
 
 		if (view.bodies && view.bodies.triangles.length) {
 			// sensor bodies: solids in their own colors, each point moving with its node
@@ -842,6 +997,27 @@
 			scene.add(bodies);
 		}
 
+		for (const layer of view.points ?? []) {
+			// free points, each in its own color, at one size on screen however far away
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(layer.xyz, 3));
+			g.setAttribute('color', new BufferAttribute(linearColors(layer.colors), 3));
+			const cloud = new Points(g, plain(new PointsMaterial({ size: layer.size, sizeAttenuation: false, vertexColors: true })));
+			cloud.frustumCulled = false;
+			pointLayers.push(cloud);
+			scene.add(cloud);
+		}
+
+		for (const layer of view.segments ?? []) {
+			// free segments, a projection's node pairs: drawn over the surface, so a pair inside a
+			// shell or under a face still shows
+			const [r, gr, b] = layer.color.map((c) => srgbToLinear(c / 255));
+			const drawn = fixedWideLines(layer.xyz, new Color(r, gr, b));
+			plain(drawn.material as Material);
+			segmentLayers.push(drawn);
+			scene.add(drawn);
+		}
+
 		if (view.lines && view.lines.length) {
 			// a line along a face's side is an element's edge, drawn dark on the surface as the
 			// earlier toolset drew them; a beam or a marker keeps the line color, which reads
@@ -857,7 +1033,8 @@
 			};
 			lineGeometry = linked(view.lines);
 			if (apart.length) {
-				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9 });
+				// colored by deflection as the faces are, so a geometry of tracelines alone shows a mode's colors
+				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9, scalar: uniforms });
 				materials.push(outline.material);
 				scene.add(outline);
 			}
@@ -932,13 +1109,74 @@
 			otherOn = layer(start, held, 9, 0.9);
 			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
-		if (view.pick?.target === 'nodes') {
+		if (view.pick?.target === 'nodes' || (view.marks && view.node_ids) || view.mark_sets?.length) {
 			markGeometry = new BufferGeometry();
 			markGeometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
 			marks = new Points(markGeometry, plain(new PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false })));
 			marks.renderOrder = 5;
 			marks.frustumCulled = false;
 			scene.add(marks);
+		}
+		if (view.element_colors?.triangles.length) {
+			const { triangles, triangle_colors } = view.element_colors;
+			// a triangle a color: each corner its own vertex, so neighbors of another color keep theirs
+			const xyz = new Float32Array(3 * triangles.length);
+			const rgb = new Float32Array(3 * triangles.length);
+			for (let v = 0; v < triangles.length; v++) {
+				xyz.set(view.nodes.subarray(3 * triangles[v], 3 * triangles[v] + 3), 3 * v);
+				const t = Math.floor(v / 3);
+				for (let c = 0; c < 3; c++) rgb[3 * v + c] = srgbToLinear(triangle_colors[3 * t + c] / 255);
+			}
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			g.setAttribute('color', new BufferAttribute(rgb, 3));
+			elementColors = new Mesh(g, plain(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true })));
+			elementColors.frustumCulled = false;
+			scene.add(elementColors);
+		}
+		if (view.element_colors?.lines.length) {
+			const { lines, line_colors } = view.element_colors;
+			const xyz = new Float32Array(3 * lines.length);
+			const rgb = new Float32Array(3 * lines.length);
+			for (let v = 0; v < lines.length; v++) {
+				xyz.set(view.nodes.subarray(3 * lines[v], 3 * lines[v] + 3), 3 * v);
+				const l = Math.floor(v / 2);
+				for (let c = 0; c < 3; c++) rgb[3 * v + c] = srgbToLinear(line_colors[3 * l + c] / 255);
+			}
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			g.setAttribute('color', new BufferAttribute(rgb, 3));
+			coloredLines = new LineSegments(g, plain(new LineBasicMaterial({ vertexColors: true })));
+			coloredLines.frustumCulled = false;
+			scene.add(coloredLines);
+		}
+		const selectable = view.mark_sets?.find((set) => set.clicks);
+		if (selectable?.faces) {
+			const { index, owner } = setTriangles(selectable);
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(view.nodes, 3));
+			g.setIndex(index);
+			elementPick = new Mesh(g, plain(new MeshBasicMaterial({ side: DoubleSide })));
+			elementPick.visible = false;
+			elementOwner = owner;
+		}
+		if (view.mark_sets?.some((set) => set.faces || set.edges)) {
+			// over the model and through it, so an element inside a solid shows when its row is selected
+			const at = new BufferAttribute(view.nodes, 3);
+			const faces = new BufferGeometry();
+			faces.setAttribute('position', at);
+			faces.setIndex([]);
+			lit = new Mesh(faces, plain(new MeshBasicMaterial({ side: DoubleSide, transparent: true, opacity: 0.6, depthTest: false, depthWrite: false })));
+			lit.renderOrder = 4;
+			lit.frustumCulled = false;
+			scene.add(lit);
+			const lines = new BufferGeometry();
+			lines.setAttribute('position', at);
+			lines.setIndex([]);
+			litEdges = new LineSegments(lines, plain(new LineBasicMaterial({ depthTest: false })));
+			litEdges.renderOrder = 4;
+			litEdges.frustumCulled = false;
+			scene.add(litEdges);
 		}
 
 		// A headlight that follows the camera keeps shading even while orbiting.
@@ -949,6 +1187,8 @@
 		scene.add(camera);
 
 		controls = new TrackballControls(camera, renderer.domElement);
+		// ahead of the camera's own listener and of every click the view takes
+		canvasHost.addEventListener('pointerdown', pressCube, { capture: true });
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
@@ -996,8 +1236,35 @@
 		dirty = true;
 	}
 
+	/** The orientation axes as solid arrows, drawn into the canvas where their letters sit. */
+	function drawTriad() {
+		if (!triad || !orientation || !renderer) return;
+		const canvas = renderer.domElement.getBoundingClientRect();
+		const box = triad.getBoundingClientRect();
+		if (!canvas.width || !canvas.height || !box.width) return;
+		// the canvas may be drawn at another size than it shows at
+		const size = renderer.getSize(new Vector2());
+		const sx = size.x / canvas.width;
+		const sy = size.y / canvas.height;
+		const x = (box.left - canvas.left) * sx;
+		const y = (canvas.bottom - box.bottom) * sy;
+		orientation.look(camera.quaternion);
+		const auto = renderer.autoClear;
+		renderer.autoClear = false;
+		renderer.setViewport(x, y, box.width * sx, box.height * sy);
+		renderer.setScissor(x, y, box.width * sx, box.height * sy);
+		renderer.setScissorTest(true);
+		renderer.clearDepth();
+		renderer.render(orientation.scene, orientation.camera);
+		renderer.setScissorTest(false);
+		renderer.setViewport(0, 0, size.x, size.y);
+		renderer.autoClear = auto;
+	}
+
 	const tmp = new Vector3();
 	const inv = new Quaternion();
+	/** How far along an axis its letter sits, in the picture's 48 units. */
+	const LETTER = (24 / TRIAD_HALF) * 1.2;
 	function updateTriad() {
 		if (!triad) return;
 		inv.copy(camera.quaternion).invert();
@@ -1008,19 +1275,78 @@
 		];
 		for (const [name, v] of axes) {
 			tmp.copy(v).applyQuaternion(inv);
-			const line = triad.querySelector<SVGLineElement>(`line.${name}`);
 			const label = triad.querySelector<SVGTextElement>(`text.${name}`);
-			const x = 24 + tmp.x * 15;
-			const y = 24 - tmp.y * 15;
-			line?.setAttribute('x2', x.toFixed(1));
-			line?.setAttribute('y2', y.toFixed(1));
-			label?.setAttribute('x', (24 + tmp.x * 21).toFixed(1));
-			label?.setAttribute('y', (24 - tmp.y * 21 + 3.5).toFixed(1));
+			label?.setAttribute('x', (24 + tmp.x * LETTER).toFixed(1));
+			label?.setAttribute('y', (24 - tmp.y * LETTER + 3).toFixed(1));
 		}
 	}
 
 	const corner = new Vector3();
 	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
+	/** Past this many arrows the labels are not written: they would cover the model. */
+	const LABEL_LIMIT = 600;
+	/** Write each DOF arrow's label at its free end; nothing while the labels are off. */
+	function updateLabels() {
+		if (!labelsSvg) return;
+		const labels = view.arrows?.labels;
+		if (!dofLabels || !labelAt || !labels || labels.length > LABEL_LIMIT) {
+			if (labelsSvg.firstChild) labelsSvg.replaceChildren();
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		labelsSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		let drawn = '';
+		for (let k = 0; k < labels.length; k++) {
+			corner.set(labelAt[3 * k], labelAt[3 * k + 1], labelAt[3 * k + 2]).project(camera);
+			if (corner.z < -1 || corner.z > 1) continue;
+			const x = ((corner.x + 1) / 2) * w;
+			const y = ((1 - corner.y) / 2) * h;
+			if (x < 0 || x > w || y < 0 || y > h) continue;
+			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(labels[k])}</text>`;
+		}
+		labelsSvg.innerHTML = drawn;
+	}
+	/** Past this many nodes the numbers are not offered: every node is projected on each frame the view moves. */
+	const NUMBERED_MODEL = 300_000;
+	/** Write each node's number beside it, on the nodes in the picture; nothing while they are off or too many. */
+	function updateNumbers() {
+		if (!numbersSvg) return;
+		const ids = view.node_ids;
+		const all = numbersShown && !!ids && ids.length <= NUMBERED_MODEL;
+		const under = marking && hoverNode !== null && ids && hoverNode < ids.length ? hoverNode : null;
+		if (!ids || (!all && under === null)) {
+			if (numbersSvg.firstChild) numbersSvg.replaceChildren();
+			if (tooManyNumbers) tooManyNumbers = false;
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		const place = (n: number): [number, number, boolean] => {
+			corner.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			return [((corner.x + 1) / 2) * w, ((1 - corner.y) / 2) * h, corner.z > -1 && corner.z < 1];
+		};
+		let drawn = '';
+		let rows: number[] | null = [];
+		if (all) {
+			const count = ids.length;
+			const screen = new Float32Array(2 * count);
+			const visible = new Array<boolean>(count);
+			for (let n = 0; n < count; n++) [screen[2 * n], screen[2 * n + 1], visible[n]] = place(n);
+			rows = numbered(screen, visible, count, w, h);
+			for (const n of rows ?? []) if (n !== under) drawn += `<text x="${(screen[2 * n] + 5).toFixed(1)}" y="${(screen[2 * n + 1] - 5).toFixed(1)}">${ids[n]}</text>`;
+		}
+		if (tooManyNumbers !== (rows === null)) tooManyNumbers = rows === null;
+		if (under !== null) {
+			// the node under the pointer, whatever else is written
+			const [x, y] = place(under);
+			drawn += `<text class="under" x="${(x + 6).toFixed(1)}" y="${(y - 6).toFixed(1)}">${ids[under]}</text>`;
+		}
+		numbersSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		numbersSvg.innerHTML = drawn;
+	}
+	const escapeText = (text: string) => text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+
 	function updateAxes() {
 		if (!axesSvg) return;
 		if (!bounds || !boundsBox) {
@@ -1088,8 +1414,11 @@
 		}
 		dirty = false;
 		renderer.render(scene, camera);
+		drawTriad();
 		updateTriad();
 		updateAxes();
+		updateLabels();
+		updateNumbers();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -1126,6 +1455,7 @@
 			uniforms.uPeak.value = peak || 1;
 			dirty = true;
 		}
+		if (dirty) rideArrows();
 	}
 
 	/**
@@ -1214,6 +1544,15 @@
 		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
+		// the colors are the surface's: a wireframe or a see-through model shows the gray mesh
+		if (elementColors) elementColors.visible = !wireframe && opacity >= 1;
+		dirty = true;
+	});
+	// every node shows as a dot only while clicks make elements of them (Add mode)
+	$effect(() => {
+		const on = !!pick;
+		if (!renderer || !dots) return;
+		dots.visible = on;
 		dirty = true;
 	});
 
@@ -1223,11 +1562,14 @@
 	});
 
 	onDestroy(() => {
-		if (markLines) {
-			markLines.geometry.dispose();
-			(markLines.material as Material).dispose();
+		if (dofArrows) {
+			dofArrows.geometry.dispose();
+			(dofArrows.material as Material).dispose();
 		}
+		orientation?.dispose();
 		bodies?.geometry.dispose();
+		for (const cloud of pointLayers) cloud.geometry.dispose();
+		for (const drawn of segmentLayers) drawn.geometry.dispose();
 		frameGroup?.traverse((o) => {
 			if (o instanceof Mesh || o instanceof LineSegments) {
 				o.geometry.dispose();
@@ -1252,6 +1594,11 @@
 		otherOn?.geometry.dispose();
 		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
+		lit?.geometry.dispose();
+		litEdges?.geometry.dispose();
+		elementColors?.geometry.dispose();
+		coloredLines?.geometry.dispose();
+		elementPick?.geometry.dispose();
 		overlayGeometry?.dispose();
 		overlayOutline?.geometry.dispose();
 		overlayEdges?.geometry.dispose();
@@ -1262,13 +1609,21 @@
 		renderer = null;
 	});
 
-	// The picked nodes and the one under the cursor, as marks on the model.
+	// What is marked on the model: the nodes picked toward an element, the nodes and the places marked with the table and the tree, and the node under the cursor.
 	$effect(() => {
 		if (!renderer || !markGeometry) return;
-		const rows = hoverNode !== null && !picked.includes(hoverNode) ? [...picked, hoverNode] : picked;
-		const xyz = new Float32Array(3 * rows.length);
+		const rows = [...new Set([...markedRows, ...picked, ...(hoverNode !== null ? [hoverNode] : [])])];
+		const xyz = new Float32Array(3 * rows.length + setPlaces.length);
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
+		xyz.set(setPlaces, 3 * rows.length);
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
+		dirty = true;
+	});
+	$effect(() => {
+		const { faces, edges } = setShapes;
+		if (!renderer || !lit || !litEdges) return;
+		lit.geometry.setIndex(faces);
+		litEdges.geometry.setIndex(edges);
 		dirty = true;
 	});
 
@@ -1298,6 +1653,30 @@
 		return nearestNode(screen, visible, count, x, y);
 	}
 
+	/** The element under (x, y), as its place in the selectable set: the face hit nearest the camera, else the side nearest on screen. */
+	function elementAt(x: number, y: number): number | null {
+		const set = elementSet;
+		if (!set) return null;
+		if (elementPick) {
+			pointer.set((x / canvasHost.clientWidth) * 2 - 1, -(y / canvasHost.clientHeight) * 2 + 1);
+			raycaster.setFromCamera(pointer, camera);
+			const hit = raycaster.intersectObject(elementPick, false)[0];
+			if (hit?.faceIndex != null) return elementOwner[hit.faceIndex] ?? null;
+		}
+		const count = view.nodes.length / 3;
+		const w = canvasHost.clientWidth;
+		const h = canvasHost.clientHeight;
+		const screen = new Float32Array(2 * count);
+		const visible: boolean[] = [];
+		for (let n = 0; n < count; n++) {
+			tmp.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			screen[2 * n] = ((tmp.x + 1) / 2) * w;
+			screen[2 * n + 1] = ((1 - tmp.y) / 2) * h;
+			visible.push(tmp.z < 1);
+		}
+		return nearestEdge(set, screen, visible, x, y);
+	}
+
 	/** Aim the raycaster through (x, y) and return what it meets on the model's faces. */
 	function aim(x: number, y: number) {
 		pointer.set((x / canvasHost.clientWidth) * 2 - 1, -(y / canvasHost.clientHeight) * 2 + 1);
@@ -1307,19 +1686,33 @@
 
 	function commitNodes() {
 		const p = pick;
-		if (!p?.ids || !p.param || picked.length < (p.count === 1 ? 1 : 2)) return;
-		onpick?.({ [p.param]: idList(picked.map((r) => p.ids![r])) });
+		if (!p?.ids || !p.param || picked.length < (clicks.count === 1 ? 1 : 2)) return;
+		onpick?.({ ...chosen, [p.param]: idList(picked.map((r) => p.ids![r])) });
 		picked = [];
 	}
 
-	function click(x: number, y: number) {
+	function click(x: number, y: number, add = false) {
 		const p = pick;
-		if (!p || !renderer) return;
+		if (!renderer) return;
+		if (!p) {
+			if (elementSet) {
+				// Select mode: the element under the cursor is marked, with its row in the table
+				const k = elementAt(x, y);
+				mark(elementSet.link, markedBy(marked(elementSet.link), k === null ? null : elementSet.ids[k], add));
+				return;
+			}
+			// no click of the view's own: it marks the node, with the table and the tree
+			if (!marking || !view.node_ids) return;
+			const row = nodeAt(x, y, view.node_ids.length);
+			const ids = markedBy(marked(marking), row === null ? null : view.node_ids[row], add);
+			mark(marking, ids, row !== null && ids.length === 1 ? row : undefined);
+			return;
+		}
 		if (p.target === 'nodes') {
 			const row = nodeAt(x, y);
 			if (row === null) return;
 			picked = picked.includes(row) ? picked.filter((r) => r !== row) : [...picked, row];
-			if (p.count && picked.length === p.count) commitNodes();
+			if (clicks.count && picked.length === clicks.count) commitNodes();
 			return;
 		}
 		const hit = aim(x, y);
@@ -1362,7 +1755,7 @@
 		pressedAt = null;
 		if (!start || e.button !== 0) return;
 		const [x, y] = at(e);
-		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y);
+		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y, e.metaKey || e.ctrlKey || e.shiftKey);
 	}
 
 	function onPointerMove(e: PointerEvent) {
@@ -1378,7 +1771,9 @@
 		const [x, y] = at(e);
 		requestAnimationFrame(() => {
 			hoverPending = false;
-			hovered = nodeAt(x, y, nodeCount);
+			hovered = nodeAt(x, y, Math.min(nodeCount, view.node_ids?.length ?? nodeCount));
+			// on the nodes' own views the one a click would mark is ringed and numbered
+			if (marking) hoverNode = hovered;
 		});
 	}
 
@@ -1411,6 +1806,10 @@
 		else if (e.key === 'ArrowUp' && view.modes.length > 1) step(-1);
 		else if (e.key === 'Enter' && pick?.target === 'nodes') commitNodes();
 		else if (e.key === 'Escape' && picked.length) picked = [];
+		else if (e.key === 'Escape' && marking && marked(marking).length) mark(marking, []);
+		else if (e.key === 'Escape' && !pick && elementSet && marked(elementSet.link).length) mark(elementSet.link, []);
+		else if ((e.key === 'Delete' || e.key === 'Backspace') && !pick && elementSet?.remove && ongizmo && marked(elementSet.link).length)
+			ongizmo(elementSet.remove, { ids: idList([...marked(elementSet.link)]) });
 		else return;
 		e.preventDefault();
 	}
@@ -1442,6 +1841,9 @@
 		onpointerleave={() => (hoverNode = null)}
 	>
 		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
+		<svg class="axes doflabels" bind:this={labelsSvg} data-testid="shape3d-dof-labels" aria-hidden="true"></svg>
+		<svg class="axes doflabels numbers" bind:this={numbersSvg} data-testid="shape3d-node-numbers" aria-hidden="true"></svg>
+		{#if tooManyNumbers}<span class="toomany" data-testid="shape3d-numbers-zoom">Zoom in to read the node numbers</span>{/if}
 	</div>
 
 	{#if view.gizmo && ongizmo}
@@ -1452,12 +1854,29 @@
 		</div>
 	{/if}
 
-	{#if pick}
+	{#if twoModes || pick}
 		<div class="pickbar" data-testid="shape3d-pick" role="status">
-			<span>{pick.hint}</span>
-			{#if picked.length}
+			{#if twoModes}
+				<span class="seg" role="radiogroup" aria-label="What a click does">
+					<button role="radio" data-testid="shape3d-select-mode" aria-checked={!pick} class:on={!pick} onclick={() => { setAdding(false); picked = []; }} title="Click elements to select them">Select</button>
+					<button role="radio" data-testid="shape3d-add-mode" aria-checked={!!pick} class:on={!!pick} onclick={() => setAdding(true)} title="Click nodes to make elements">Add</button>
+				</span>
+			{/if}
+			{#if pick}
+				{#each pick.settings ?? [] as setting (setting.param)}
+					<label class="setting">{setting.label}
+						<select data-testid="shape3d-setting-{setting.param}" value={String(chosen[setting.param] ?? pick.params[setting.param] ?? '')} onchange={(e) => { chosen = { ...chosen, [setting.param]: typeof setting.options[0]?.value === 'number' ? Number(e.currentTarget.value) : e.currentTarget.value }; picked = []; }}>
+							{#each setting.options as option (option.value)}<option value={String(option.value)}>{option.label}</option>{/each}
+						</select>
+					</label>
+				{/each}
+				<span data-testid="shape3d-pick-hint">{clicks.hint}</span>
+			{:else}
+				<span data-testid="shape3d-pick-hint">Click an element to select it, Cmd-click to add more; Delete removes them</span>
+			{/if}
+			{#if pick && picked.length}
 				<span class="num" data-testid="shape3d-picked">Picked {idList(picked.map((r) => pick.ids?.[r] ?? r))}</span>
-				{#if !pick.count}<button class="btn sm" data-testid="shape3d-pick-done" onclick={commitNodes} title="Make the elements (Enter)">Done</button>{/if}
+				{#if !clicks.count}<button class="btn sm" data-testid="shape3d-pick-done" onclick={commitNodes} title="Make the elements (Enter)">Done</button>{/if}
 				<button class="btn ghost sm" onclick={() => (picked = [])} title="Clear the picks (Escape)">Clear</button>
 			{/if}
 		</div>
@@ -1514,7 +1933,14 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
+			<button class="btn sm toggle" data-testid="shape3d-perspective" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
+			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
+				<button class="btn sm toggle" data-testid="shape3d-node-numbers-toggle" class:on={numbersShown} aria-pressed={numbersShown} onclick={toggleNodeNumbers} title="Node numbers: each node's number beside it, once few enough are in the picture to read">Node Numbers</button>
+			{/if}
+			{#if view.arrows?.labels.length}
+				<button class="btn sm toggle" data-testid="shape3d-dof-labels-toggle" class:on={dofLabels} aria-pressed={dofLabels} onclick={toggleDofLabels} title="DOF labels: each arrow's DOF written at its free end">DOF Labels</button>
+			{/if}
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1595,18 +2021,8 @@
 		{/if}
 
 		<div class="corner">
-			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
-				<!-- the gimbal's colors and arrowheads: X red, Y green, Z blue -->
-				<defs>
-					{#each ['x', 'y', 'z'] as axis, k (axis)}
-						<marker id="triad-{axis}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
-							<path d="M0,0 L10,5 L0,10 z" fill={AXIS_HEX[k]} />
-						</marker>
-					{/each}
-				</defs>
-				<line class="x" x1="24" y1="24" x2="39" y2="24" stroke={AXIS_HEX[0]} marker-end="url(#triad-x)" />
-				<line class="y" x1="24" y1="24" x2="24" y2="9" stroke={AXIS_HEX[1]} marker-end="url(#triad-y)" />
-				<line class="z" x1="24" y1="24" x2="30" y2="30" stroke={AXIS_HEX[2]} marker-end="url(#triad-z)" />
+			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="72" height="72" aria-hidden="true" data-testid="shape3d-triad">
+				<!-- the letters only: the arrows are solids drawn into the canvas behind them (`drawTriad`), in the gimbal's colors: X red, Y green, Z blue -->
 				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
 				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
 				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
@@ -1680,6 +2096,43 @@
 		fill: var(--text-2);
 	}
 
+	/* a DOF's label, outlined in the plot's background so it reads over the model */
+	.doflabels :global(text) {
+		fill: var(--text-1);
+		font-size: 11px;
+		font-weight: 600;
+		text-anchor: middle;
+		dominant-baseline: middle;
+		paint-order: stroke;
+		stroke: var(--bg-1);
+		stroke-width: 3px;
+		stroke-linejoin: round;
+	}
+
+	.toomany {
+		position: absolute;
+		bottom: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 2px 8px;
+		border-radius: 4px;
+		background: var(--bg-1);
+		color: var(--text-2);
+		font-size: 11px;
+		pointer-events: none;
+	}
+
+	.numbers :global(text) {
+		font-weight: 500;
+		text-anchor: start;
+	}
+
+	.numbers :global(text.under) {
+		fill: var(--blue-2);
+		font-size: 13px;
+		font-weight: 700;
+	}
+
 	.axes :global(text.title) {
 		font-size: 12px;
 		fill: var(--text-1);
@@ -1701,6 +2154,25 @@
 		background: color-mix(in srgb, var(--bg-1) 88%, transparent);
 		border: 1px solid var(--line-1);
 		border-radius: var(--radius-md);
+	}
+	.pickbar:has(.setting) {
+		/* Add mode's settings and hint wrap rather than run past the view */
+		flex-wrap: wrap;
+		justify-content: center;
+		row-gap: 4px;
+	}
+	.pickbar .setting {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.pickbar select {
+		font: inherit;
+		color: var(--text-1);
+		background: var(--bg-2);
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-sm);
+		padding: 1px 4px;
 	}
 
 	.top,
@@ -1920,14 +2392,9 @@
 		margin-right: -6px;
 	}
 
-	.triad line {
-		stroke-width: 1.6;
-		stroke-linecap: round;
-	}
-
 	.triad text {
 		font-family: var(--font-mono);
-		font-size: 8.5px;
+		font-size: 6.5px;
 		font-weight: 600;
 		text-anchor: middle;
 	}

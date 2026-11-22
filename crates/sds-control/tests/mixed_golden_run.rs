@@ -4,7 +4,8 @@
 //! analysis side converts the same folder in `tests/test_run_folder_golden_mixed.py`.
 //!
 //! Normalized means: the wall times, the run's unique identity and the build fields
-//! fixed; each law call's measured duration (`call_us`, a wall-clock figure) set to
+//! fixed; the built-in floor law's version, which is the package version, fixed
+//! where it is the package version (so another version still differs); each law call's measured duration (`call_us`, a wall-clock figure) set to
 //! zero; and each stream cut to its first [`CUT_FRAMES`] frames, its `stream.json`
 //! and the end's counts saying so (`cut_from_frames`, the frames the run recorded).
 //! The cut is the golden folder's alone: the run's streams are some forty thousand
@@ -161,6 +162,18 @@ fn zero_call_times(bin: Vec<u8>, side: &Value) -> Vec<u8> {
     out
 }
 
+/// `bytes` (a JSON file) with the version at `path` fixed to 0.0.0 where it is the
+/// package version: the built-in floor law's version moves with every release, as
+/// the build fields do.
+fn package_version_fixed(bytes: &[u8], path: &[&str]) -> Vec<u8> {
+    let mut v: Value = serde_json::from_slice(bytes).unwrap();
+    let at = path.iter().try_fold(&v, |at, k| at.get(*k));
+    if at.and_then(Value::as_str) == Some(env!("CARGO_PKG_VERSION")) {
+        set(&mut v, path, json!("0.0.0"));
+    }
+    pretty(&v)
+}
+
 /// A folder's files normalized (the module's own docs say how).
 fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
@@ -211,6 +224,8 @@ fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {
                 pretty(&v)
             }
             "log.jsonl" => lines_at(bytes, START_UNIX),
+            "law/law.json" => package_version_fixed(&bytes, &["floor", "version"]),
+            "setup.json" => package_version_fixed(&bytes, &["derived", "law", "floor", "version"]),
             "results/control_trace.bin" if !golden => {
                 let side = read_json(&folder.join("results/control_trace.json"));
                 zero_call_times(bytes, &side)

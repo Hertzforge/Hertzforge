@@ -198,7 +198,8 @@ def _channel_rows(channels, dofs: list[str]) -> list[int]:
 
 def _read_stream(variable, rows=None, first: int = 0,
                  last: int | None = None, ticker: Any = None) -> np.ndarray:
-    """A (channels, samples) stream variable, read into one array.
+    """A (channels, samples) stream variable, netCDF or h5py, read into
+    one array.
 
     `rows` picks channels, in the order given; `first` and `last` a
     sample range [first, last) — the import window, read as a slice of
@@ -215,7 +216,9 @@ def _read_stream(variable, rows=None, first: int = 0,
     the old whole read handed back too, and a masked array of this size
     would be a second one.
     """
-    variable.set_auto_maskandscale(False)
+    if hasattr(variable, 'set_auto_maskandscale'):
+        # an h5py dataset (a SignalCalc export's TimeData) has no masking
+        variable.set_auto_maskandscale(False)
     last = variable.shape[1] if last is None else int(last)
     rows = list(range(variable.shape[0])) if rows is None else list(rows)
     # netCDF reads an integer sequence along an axis in sorted order;
@@ -1457,8 +1460,9 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
     channels : iterable of int or str, optional
         Which channels of the streams to import, by table row or by
         coordinate ('101Z+'). All of them when omitted. An
-        environment's virtual responses are included only when every
-        control channel they are computed from is selected.
+        environment's virtual responses are made from the selection
+        afterward (`Project.transform_responses`) only when every
+        control channel they are computed from is in it.
     progress : callable, optional
         Called with `(done, total)` samples as the streams are read.
 
@@ -1523,41 +1527,15 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                     f'{first / sample_rate:g} to {(last - 1) / sample_rate:g} s '
                     f'of {base}')
             rows_comment = [note] * len(rows)
-            # the virtual responses an environment controlled, as more
-            # records of the same history: the controller's own matrix
-            # over the raw channels, so they share the frames, the
-            # averaging and every act the raw channels get — processed
-            # once, beside them, not twice (Brandon, 2026-09-18: "all the
-            # time data can be processed identically"). Taken from the
-            # raw values, before the scaling below rewrites them
-            virtual = []
-            for env_name, group in ds.groups.items():
-                if 'control_channel_indices' not in group.variables:
-                    continue
-                indices = np.asarray(
-                    group.variables['control_channel_indices'][()], dtype=int)
-                found = _response_transformation(group, indices, scales_dims)
-                if found is None or any(int(i) not in rows for i in indices):
-                    # a subset missing a control channel cannot compute
-                    # the virtual row; it is left out, not made up
-                    continue
-                matrix, labels, (scale, dim, unit) = found
-                positions = [rows.index(int(i)) for i in indices]
-                virtual.append((matrix @ time_data[positions]) * scale)
-                rows_dof += labels
-                rows_dim += [dim] * len(labels)
-                rows_unit += [unit] * len(labels)
-                rows_comment += [
-                    (f'{note}; ' if note else '')
-                    + f'row {label} of the {env_name} response transformation '
-                    f'over {len(indices)} control channels' for label in labels]
             # scaled in place: the array is the file's read and nobody
             # else holds it, and a scaled copy beside it was the second
             # of the two whole copies an import cost (2026-09-18)
             time_data *= scales[:, np.newaxis]
             time_data += offsets[:, np.newaxis]
-            values = (np.vstack([time_data, *virtual]) if virtual
-                      else time_data)
+            # a response transformation's rows are a history of their own,
+            # made beside this one (`Project.transform_responses`): two
+            # environments both number their rows from 1
+            values = time_data
             frames = 0 if partial else _frame_count(ds, time_data.shape[1])
             if frames:
                 # (channels, frames * samples) -> one record per capture.
@@ -1597,13 +1575,10 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             # each channel's role, from the table read beside it — the
             # file's own statement (a feedback device makes a
             # reference), so FRFs start from the channels the
-            # controller drove; the virtual rows are the controlled
-            # responses they are
+            # controller drove
             table_roles = table.roles()
             roles = {(dof, dim): (table_roles[i] or 'response')
                      for i, dof, dim in zip(rows, rows_dof, rows_dim)}
-            for dof, dim in zip(rows_dof[len(rows):], rows_dim[len(rows):]):
-                roles[(dof, dim)] = 'response'
             history.roles = roles
             out[key] = history
 
@@ -1811,8 +1786,11 @@ def _record_environments(ds, table, drive_channels, scales_dims):
     names them (modal), else the table's drives, which is how the
     spectra find them too. A reference transformation whose columns do
     not fit those drives cannot be labeled and is left out with a
-    warning rather than imported over the wrong channels.
+    warning rather than imported over the wrong channels. Each loop
+    keeps the kind of test the file says it ran (`_environment_kinds`),
+    so a report on one kind shows that loop's transformations only.
     """
+    kinds = _environment_kinds(ds)
     for env_name, group in ds.groups.items():
         if 'control_channel_indices' not in group.variables:
             continue
@@ -1840,7 +1818,8 @@ def _record_environments(ds, table, drive_channels, scales_dims):
             controls=[int(i) + 1 for i in indices],
             drives=[d + 1 for d in drives],
             response_transformation=None if found is None else found[0],
-            reference_transformation=reference))
+            reference_transformation=reference,
+            kind=kinds.get(env_name) or ''))
 
 
 def _environment_rate(group, ds):
