@@ -877,3 +877,65 @@ def test_the_geometrys_own_plot_draws_each_element_in_its_color(validate):
     assert colors['triangles'].tolist() == [[0, 1, 2], [0, 2, 3]]
     assert colors['triangle_colors'].tolist() == [[214, 38, 41]] * 2
     assert colors['lines'].tolist() == [[1, 4]] and colors['line_colors'].tolist() == [[43, 161, 43]]
+def test_add_group_on_a_family_makes_an_empty_group_of_it_at_once(project, validate):
+    """Add Group on a family adds a group straight away, numbered next and unnamed, and
+    the tree lists it under that family while it holds nothing; it is renamed there."""
+    from hertzforge.service.action_table import action_table
+    from hertzforge.service.tree import children
+
+    geometry = project['Geometry']
+    rows = action_table(project, ['Geometry'], {}, {'kind': 'family', 'id': 'beams'})['columns'][0]['rows']
+    add = next(row for row in rows if row['id'] == 'project.add_element_group')
+    assert add['instant'] is True and add['fill']['family'] == 'beams'
+    assert {'name', 'id', 'family'} <= set(add['omit'])
+    views = run(project, add['id'], **add['fill'])
+    wire_views(views, validate)
+    group = int(geometry.group_id[-1])
+    assert geometry.group_family == {group: 'beams'} and geometry.group_name[-1] == ''
+    assert views[-1]['title'] == f'Element groups of Geometry: added element group {group} for the beams'
+
+    def listed():
+        return {f['id']: [(g['id'], g['count']) for g in f['groups']]
+                for f in children(project, 'Geometry')['families']}
+
+    assert listed()['beams'] == [(group, 0)]
+    assert (group, 0) not in listed()['quads']
+    run(project, 'project.add_element', family='beams', nodes='101 102', group=group)
+    assert listed()['beams'] == [(group, 1)], 'with an element, by what it holds'
+
+
+def test_a_groups_family_follows_it_and_is_saved(tmp_path):
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.io import native
+
+    geometry = Geometry(node_id=[1, 2], node_xyz=np.eye(2, 3), elem_id=[1], elem_type=[21],
+                        elem_conn=[np.array([1, 2])], elem_group=[1], group_id=[1],
+                        group_name=['b'])
+    with pytest.raises(ValueError, match='not an element family'):
+        geometry.add_group('x', family='squares')
+    two = geometry.add_group('strut', family='beams')
+    three = geometry.add_group('', family='quads')
+    geometry.renumber_group(int(np.flatnonzero(geometry.group_id == two)[0]), 20)
+    assert geometry.group_family == {20: 'beams', three: 'quads'}
+    path = tmp_path / 'g.hforge'
+    native.save(geometry, path)
+    assert native.load(path).group_family == {20: 'beams', three: 'quads'}
+    four = geometry.add_group('', family='beams')
+    geometry.merge_groups([20, four])
+    assert geometry.group_family == {20: 'beams', three: 'quads'}, 'the merged-away one goes'
+    geometry.delete_groups([three, 20])
+    assert geometry.group_family == {}
+    native.save(geometry, path)
+    assert native.load(path).group_family == {}, 'a file with none reads back with none'
+
+
+def test_add_mode_offers_an_empty_group_only_for_the_family_it_was_made_for(project, validate):
+    run(project, 'project.add_element_group', name='Struts', family='beams')
+    run(project, 'project.add_element_group', name='Skins', family='quads')
+    run(project, 'project.add_element_group', name='Open')
+    labels = {}
+    for family in ('quads', 'beams'):
+        drawn, _table = _edited(project, {'kind': 'family', 'id': family}, validate)
+        labels[family] = [o['label'] for o in drawn['pick']['settings'][1]['options']]
+    assert labels['quads'] == ['First or new', 'element group 1', 'Skins', 'Open']
+    assert labels['beams'] == ['First or new', 'Struts', 'Open']

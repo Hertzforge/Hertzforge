@@ -354,14 +354,18 @@ def _clicks(code: int) -> tuple[int, str]:
 
 def _add_settings(geometry: Any, family: str) -> list[dict[str, Any]]:
     """What Add mode asks beside the clicks: the type of the family to make, and the
-    element group it goes in, of the groups that hold that family or nothing yet."""
+    element group it goes in, of the groups that hold that family, or hold nothing yet and
+    were made for it or for no family (`Geometry.group_family`)."""
     from hertzforge.core.geometry import ELEMENT_TYPES, element_family
 
     held: dict[int, set[str]] = {int(g): set() for g in geometry.group_id}
     for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
         held.setdefault(int(group), set()).add(element_family(int(code)))
+    made_for = geometry.group_family
     groups = [{'value': int(g), 'label': _group_label(geometry, k)}
-              for k, g in enumerate(geometry.group_id) if held[int(g)] <= {family}]
+              for k, g in enumerate(geometry.group_id)
+              if held[int(g)] == {family}
+              or (not held[int(g)] and made_for.get(int(g), family) == family)]
     return [
         {'param': 'type', 'label': 'Type',
          # each type says how many clicks make one, so the view counts them as it is picked
@@ -690,15 +694,18 @@ GROUP_NAME = Param('name', 'Name', 'string', default='')
 def add_element_group(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_element_group`: an empty element group
     (`Geometry.add_group`), added outright since
-    an element group is not placed in space."""
+    an element group is not placed in space. With `family` it is that family's, listed
+    under it in the tree while it is empty and offered in its Edit's Add mode."""
     name = params['geometry']
     geometry = project[name]
+    family = params['family'].strip()
     try:
-        group = geometry.add_group(params['name'], _optional_id(params['id']))
+        group = geometry.add_group(params['name'], _optional_id(params['id']), family=family)
     except ValueError as error:
         raise refused(str(error)) from None
-    project.record_call(name, 'add_group', params['name'], int(group))
-    return _shown(name, geometry, 'groups', f'added element group {group}')
+    project.record_call(name, 'add_group', params['name'], int(group), family=family)
+    return _shown(name, geometry, 'groups', f'added element group {group}'
+                  + (f' for the {family}' if family else ''))
 
 
 ENTITY = Param('entity', 'Id', 'integer', default=0, min=0, step=1)
@@ -1668,7 +1675,9 @@ OPERATIONS = (
             Param('groups', 'Element groups whose Edit shows after', 'string', default='')),
            DRAWN, add_element),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='geometry'),
+           (GEOMETRY, GROUP_NAME, NODE_ID,
+            Param('family', 'Element family (blank: none yet)', 'string', default='')),
+           DRAWN, add_element_group, workspace='geometry'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',

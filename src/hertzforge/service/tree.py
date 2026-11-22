@@ -167,6 +167,11 @@ def _geometry(geometry: Any) -> dict[str, Any]:
     for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
         held = families.setdefault(element_family(int(code)), {})
         held[int(group)] = held.get(int(group), 0) + 1
+    # an empty element group is listed under the family it was made for
+    for group in (int(g) for g in geometry.group_id):
+        made_for = geometry.group_family.get(group)
+        if made_for and not any(group in held for held in families.values()):
+            families.setdefault(made_for, {})[group] = 0
     # each group's elements, the first of a large one, listed when its row is opened
     members = {group: [int(geometry.elem_id[row]) for row in rows]
                for group, rows in listed_elements(geometry).items()}

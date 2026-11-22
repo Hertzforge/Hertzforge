@@ -620,6 +620,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'solids' and op.id in _adds():
             # a shape is made at once and then edited (Brandon, 2026-11-10)
             more['instant'] = True
+        if where == 'family' and op.id == 'project.add_element_group':
+            # a family's group is made at once, numbered next and unnamed: it is renamed
+            # in the tree
+            more['instant'] = True
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'name', 'id', 'family']))
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
         if op.id == 'project.mate_surfaces':
