@@ -1,0 +1,77 @@
+{
+ "type": "response",
+ "id": 32,
+ "result": {
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Time History",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Force",
+     "unit": "lbf",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "1Z+",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        0.25,
+        0.5,
+        0.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        -1.5,
+        2.0,
+        -0.75,
+        1.25
+       ]
+      }
+     }
+    ],
+    "span": {
+     "method": "op.run",
+     "params": {
+      "op": "project.plot",
+      "params": {
+       "data": "Time History",
+       "records": "1"
+      }
+     },
+     "view": 0
+    }
+   }
+  ],
+  "project": {
+   "title": "Bracket Survey",
+   "file": null,
+   "modified": false,
+   "objects": [
+    {
+     "name": "Time History",
+     "kind": "time_history",
+     "records": 1,
+     "units_defined": true,
+     "groups": []
+    }
+   ]
+  }
+ }
+}

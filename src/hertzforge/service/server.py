@@ -51,6 +51,7 @@ from . import (
     table_files,
     uploads,
     verbs,
+    zoom,
 )
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
@@ -276,7 +277,7 @@ class Service:
 
     def operation(self, params: Any) -> Operation:
         """The operation an `op.run` names."""
-        _only(params, ('op', 'params', 'preview'), 'op.run')
+        _only(params, ('op', 'params', 'preview', 'span'), 'op.run')
         op = self.operations.get(params.get('op'))
         if op is None:
             raise not_found(f'No operation named {params.get("op")!r}; '
@@ -497,9 +498,12 @@ class Connection:
             return await call(display_units.running_in, self.units, projects.actions,
                               self.project, params)
         if method == 'project.show':
-            _only(params, ('objects', 'records', 'part', 'prefs'), method)
-            shown = await call(display_units.running_in, self.units, projects.show, self.project,
-                               params)
+            _only(params, ('objects', 'records', 'part', 'prefs', 'span'), method)
+            span = zoom.checked_span(params['span']) if params.get('span') is not None else None
+            shown, thinned = await call(zoom.drawn, span, display_units.running_in, self.units,
+                                        projects.show, self.project, params)
+            if thinned:
+                zoom.mark(shown['views'], method, params)
             display_units.convert(shown['views'], self.units)
             if verbs.part_key(params.get('part')) in ('solids', 'solid'):
                 # the solids table says its lengths in words, as Move Part's own answer does
@@ -526,6 +530,11 @@ class Connection:
         project's summary, which counts as modified when the operation
         added or removed an object."""
         op = self.service.operation(params)
+        span = zoom.checked_span(params['span']) if params.get('span') is not None else None
+        if span is not None and op.edits and not params.get('preview'):
+            # drawing a span again runs the operation again, which must change nothing; a preview
+            # runs on copies
+            raise bad_request(f'{op.id} changes the project, so it is not run again for a span')
         async with self.project_lock:
             state = self.project
             project = state.project
@@ -545,29 +554,39 @@ class Connection:
                 scratch = _preview_copy(project, *(
                     values[p.name] for p in op.params
                     if (p.kinds or p.verb) and values.get(p.name) in project))
-                return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
+                views, thinned = await self._ran(op, scratch, values, span=span)
+                if thinned:
+                    zoom.mark(views, 'op.run', params)
+                return {'views': _said_as_preview(views, self.units)}
             before, journaled = list(project), len(project.journal)
             self.running_op, self.cancel_asked = op.id, False
             try:
-                views = await self._ran(op, project, values, self.op_progress(op.id))
+                views, thinned = await self._ran(op, project, values, self.op_progress(op.id),
+                                                 span=span)
             finally:
                 self.running_op, self.cancel_asked = None, False
-            if (op.edits and (op.edits_when is None or op.edits_when(values))
-                    or list(project) != before or len(project.journal) != journaled):
+            changed = (op.edits and (op.edits_when is None or op.edits_when(values))
+                       or list(project) != before or len(project.journal) != journaled)
+            if changed:
                 state.modified = True
+            elif thinned:
+                # a run that changed nothing can be run again for the span a zoomed plot shows
+                zoom.mark(views, 'op.run', params)
             display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}
 
     async def _ran(self, op: Operation, project: Any, values: dict[str, Any],
-                   report: Callable[[int, int], None] | None = None) -> list[dict]:
-        """The operation's views, with what it says of lengths in words in the display system;
-        `report` its progress (`op_progress`), which an operation's verb reports to."""
+                   report: Callable[[int, int], None] | None = None,
+                   span: tuple[float, float, int] | None = None) -> tuple[list[dict], bool]:
+        """The operation's views, with what it says of lengths in words in the display system,
+        and whether it thinned a trace (`zoom.drawn`); `report` its progress (`op_progress`),
+        which an operation's verb reports to, and `span` the part of x a zoomed plot shows."""
         from hertzforge.core.progress import Cancelled
 
         try:
-            views = await self.service.in_worker(op_progress.running_with, report,
-                                                 display_units.running_in, self.units, op.run,
-                                                 project, values)
+            views, thinned = await self.service.in_worker(
+                zoom.drawn, span, op_progress.running_with, report,
+                display_units.running_in, self.units, op.run, project, values)
         except Cancelled:
             raise refused(f'{op.title} was cancelled; the project is as it was') from None
         except ProtocolError as error:
@@ -577,7 +596,7 @@ class Connection:
             raise
         if op.says_lengths:
             display_units.say_lengths(views, self.units)
-        return views
+        return views, thinned
 
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""

@@ -6,6 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
+import { setSpanAsker } from '$lib/viz/spanSource';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, sendFile, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -2481,6 +2482,12 @@ export class AppState {
 		const analysisFactory = config.mock ? mockSocketFactory(createAnalysisServer(), 80) : undefined;
 		this.analysis = new ServiceClient({ service: 'analysis', url: config.analysisUrl, socketFactory: analysisFactory });
 		this.control = new ServiceClient({ service: 'control', url: config.controlUrl, socketFactory: this.controlFactory(config) });
+		// a zoomed plot asks the analysis service again for the request that drew it
+		setSpanAsker(async (source, span) => {
+			const res = await this.analysis.request<{ views?: View[] }>(source.method, { ...source.params, span }, { timeoutMs: RUN_TIMEOUT_MS });
+			const view = res.views?.[source.view];
+			return view?.view === 'spectrum' ? view : null;
+		});
 		this.analyze = new AnalyzeState(this);
 		this.project = new ProjectState(this);
 		this.fit = new FitState(this);

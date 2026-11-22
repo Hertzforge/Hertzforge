@@ -17,12 +17,72 @@ from: its points sit at uneven times, and an anti-alias filter ahead of
 it would take off the peaks it exists to keep. A record taken to a lower
 sample rate for analysis goes through `core.resample`, which filters
 first.
+
+A plot zoomed into part of a record asks for that part again. Inside a
+`drawing_window`, `peak_decimate` and `peak_decimate_rows` keep the
+samples in the window thinned to the window's own budget, which is
+every sample once the window holds fewer, and thin the rest as before,
+so a curve drawn from the answer is the samples where the plot looks
+and the record's outline everywhere else.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import numpy as np
 from numpy.typing import ArrayLike
+
+#: the span of the abscissa a plot shows, and the points it can draw
+#: across it; None draws the whole record at the caller's budget
+_WINDOW: ContextVar[tuple[float, float, int] | None] = ContextVar(
+    'hertzforge_drawing_window', default=None)
+#: while watched, one entry for each call that left samples out
+_THINNED: ContextVar[list[int] | None] = ContextVar(
+    'hertzforge_thinned', default=None)
+
+
+@contextmanager
+def drawing_window(low: float, high: float, points: int) -> Iterator[None]:
+    """Thin for a plot that shows `low` to `high` of the abscissa and
+    can draw `points` across it.
+
+    Every `peak_decimate` and `peak_decimate_rows` in the block keeps
+    the samples from `low` to `high`, and the sample on either side so
+    the curve runs on past the plot's edges, thinned to `points` (all of
+    them when they are as few), and the rest thinned to the caller's
+    budget. A context variable carries the window, so it reaches only
+    the thread that set it.
+    """
+    if not low < high:
+        raise ValueError(f'a drawing window runs from low to high, not {low} to {high}')
+    if points < 2:
+        raise ValueError(f'a drawing window draws at least 2 points, not {points}')
+    token = _WINDOW.set((float(low), float(high), int(points)))
+    try:
+        yield
+    finally:
+        _WINDOW.reset(token)
+
+
+@contextmanager
+def watching() -> Iterator[list[int]]:
+    """A list that gains an entry each time a thinning in the block
+    leaves samples out: empty when everything was drawn whole."""
+    seen: list[int] = []
+    token = _THINNED.set(seen)
+    try:
+        yield seen
+    finally:
+        _THINNED.reset(token)
+
+
+def _noted() -> None:
+    seen = _THINNED.get()
+    if seen is not None:
+        seen.append(1)
 
 # Vectorized over whole records because of the waterfall: as a per-bin
 # Python loop the same work took 10.6 s on a 320-record million-sample
@@ -48,7 +108,7 @@ def peak_decimate(x: ArrayLike, y: ArrayLike,
     y = np.asarray(y)
     if len(x) <= budget:
         return x, y
-    keep = _extreme_indices(y[np.newaxis], budget // 2)[0]
+    keep = _kept(x, y[np.newaxis], budget)[0]
     return x[keep], y[keep]
 
 
@@ -65,8 +125,42 @@ def peak_decimate_rows(x: ArrayLike, rows: ArrayLike,
     rows = np.atleast_2d(np.asarray(rows))
     if rows.shape[1] <= budget:
         return [(x, rows[k]) for k in range(rows.shape[0])]
-    kept = _extreme_indices(rows, budget // 2)
+    kept = _kept(x, rows, budget)
     return [(x[keep], rows[k][keep]) for k, keep in enumerate(kept)]
+
+
+def _kept(x: np.ndarray, rows: np.ndarray, budget: int) -> list[np.ndarray]:
+    """Per record, the sorted sample indices `peak_decimate_rows` keeps:
+    each slice's extremes, finer inside a `drawing_window`."""
+    _noted()
+    window = _WINDOW.get()
+    if window is None or len(x) != rows.shape[1]:
+        return _extreme_indices(rows, budget // 2)
+    low, high, points = window
+    with np.errstate(invalid='ignore'):
+        below = np.flatnonzero(x < low)
+        above = np.flatnonzero(x > high)
+        inside = (x >= low) & (x <= high)
+    # the sample before the window and the one after it, so the line
+    # leaves the plot at its edges and a window narrower than one
+    # sample still has two to draw between
+    if below.size:
+        inside[below[-1]] = True
+    if above.size:
+        inside[above[0]] = True
+    fine = np.flatnonzero(inside)
+    coarse = np.flatnonzero(~inside)
+    near = _part(rows, fine, points)
+    far = _part(rows, coarse, budget)
+    return [np.union1d(a, b) for a, b in zip(near, far, strict=True)]
+
+
+def _part(rows: np.ndarray, indices: np.ndarray, budget: int) -> list[np.ndarray]:
+    """Per record, the samples of `indices` kept within `budget`: all of
+    them when they fit."""
+    if indices.size <= budget:
+        return [indices] * rows.shape[0]
+    return [indices[keep] for keep in _extreme_indices(rows[:, indices], max(1, budget // 2))]
 
 
 def shared_peak_indices(rows: ArrayLike, budget: int) -> np.ndarray:

@@ -148,7 +148,32 @@
             "status": {"enum": ["pass", "warn", "fail", "info"]}
           }
         }},
-        "x_home": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+        "x_home": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "span": {
+          "type": "object", "required": ["method", "params", "view"], "additionalProperties": false,
+          "properties": {
+            "method": {"enum": ["op.run", "project.show"]},
+            "params": {"type": "object"},
+            "view": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "drawingSpan": {
+      "type": "object", "required": ["low", "high", "points"], "additionalProperties": false,
+      "properties": {
+        "low": {"type": "number"},
+        "high": {"type": "number"},
+        "points": {"type": "integer", "minimum": 2, "maximum": 65536}
+      }
+    },
+    "opRunParams": {
+      "type": "object", "required": ["op"], "additionalProperties": false,
+      "properties": {
+        "op": {"type": "string", "minLength": 1},
+        "params": {"type": "object"},
+        "preview": {"type": "boolean"},
+        "span": {"$ref": "#/$defs/drawingSpan"}
       }
     },
     "barsView": {

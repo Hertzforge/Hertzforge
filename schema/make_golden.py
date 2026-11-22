@@ -472,6 +472,12 @@ TEXT_GOLDENS = {
                 {'name': 'Geometry', 'kind': 'geometry', 'units_defined': True,
                  'groups': []}]}},
     },
+    # a zoomed plot asking again for the request that drew it, over the span it shows
+    'request_op_run_span': {
+        'type': 'request', 'id': 32, 'method': 'op.run',
+        'params': {'op': 'project.plot', 'params': {'data': 'Time History', 'records': '1'},
+                   'span': {'low': 0.34, 'high': 0.55, 'points': 2400}},
+    },
     # table files by path: a channel table saved, a breakpoint table opened
     'request_tables_save': {
         'type': 'request', 'id': 41, 'method': 'tables.save',
@@ -6725,6 +6731,28 @@ def main() -> None:
         'a2': ('f64', [4], [20.0, 80.0, 1000.0, 2000.0]),
         'a3': ('f64', [4], [0.01, 0.04, 0.04, 0.01]),
         'a4': ('u32', [3], [3, 1, 4]),
+    })
+
+    # a thinned trace marked with the request that drew it, which a zoomed plot sends again
+    # with its span (`request_op_run_span`)
+    write('response_spectrum_span', {
+        'type': 'response', 'id': 32,
+        'result': {'views': [
+            {'view': 'spectrum', 'title': 'Time History',
+             'x': {'label': 'Time', 'unit': 's', 'scale': 'linear'},
+             'y': {'label': 'Force', 'unit': 'lbf', 'scale': 'linear'},
+             'series': [{'name': '1Z+', 'role': 'measured', 'x': {'$array': 'a0'},
+                         'y': {'$array': 'a1'}}],
+             'span': {'method': 'op.run',
+                      'params': {'op': 'project.plot',
+                                 'params': {'data': 'Time History', 'records': '1'}},
+                      'view': 0}},
+        ], 'project': {'title': 'Bracket Survey', 'file': None, 'modified': False,
+                       'objects': [{'name': 'Time History', 'kind': 'time_history',
+                                    'records': 1, 'units_defined': True, 'groups': []}]}},
+    }, {
+        'a0': ('f64', [4], [0.0, 0.25, 0.5, 0.75]),
+        'a1': ('f64', [4], [-1.5, 2.0, -0.75, 1.25]),
     })
 
     # an event carrying f32 data with a 2-D shape and u32 connectivity

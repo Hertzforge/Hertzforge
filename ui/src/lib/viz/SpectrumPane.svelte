@@ -28,6 +28,7 @@
 	import { markerIndices, minorSplits, panBy, TICK_SPACE, zoomAbout, type Corner, type GridMode, type LegendMode, type PaneMarks, type PaneNote, type SeriesOverride, type TickDensity, type ZoomChange } from './paneOptions';
 	import { MARKER_WORDS, seriesLooks, type MarkerShape } from './roles';
 	import { stepsPath } from './steps';
+	import { showsWhole, spanAsker, spanSeries } from './spanSource';
 
 	interface Props {
 		view: SpectrumView;
@@ -159,7 +160,12 @@
 		if (!frozen) frozenView = null;
 		else if (!untrack(() => frozenView)) frozenView = untrack(() => viewIn);
 	});
-	const view = $derived(frozenView ?? viewIn);
+	/** The view as the caller gave it (or as it froze). */
+	const baseView = $derived(frozenView ?? viewIn);
+	/** The curves the service sent for the x range shown, while the plot is zoomed (`SpectrumView.span`). */
+	let spanned = $state.raw<{ of: SpectrumView; series: Series[] } | null>(null);
+	/** What is drawn: the view, with the samples of the span shown in place of its thinned curves. */
+	const view = $derived(spanned && spanned.of === baseView ? { ...baseView, series: spanned.series } : baseView);
 	/** The regions drawn: the caller's when it gives some, else the view's own. */
 	const shownRegions = $derived(regions ?? view.regions ?? []);
 	/**
@@ -478,7 +484,8 @@
 				draw: [placePlayLine, placeMarker, placeGuides, placeRegions, placeHandles, drawSeriesMarkers, drawMarks],
 				setScale: [
 					(u, key) => {
-						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
+						if (key === 'x' && !keepingX && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
+						if (key === 'x' && !keepingX) askSpan();
 					}
 				],
 				setSize: [measureArea],
@@ -501,7 +508,7 @@
 		};
 
 		plot = new uPlot(opts, plotData, plotEl);
-		structureKey = keyOf(view);
+		structureKey = keyOf(baseView);
 		playLine = document.createElement('div');
 		playLine.className = 'playline';
 		playLine.title = 'Drag to move playback';
@@ -564,7 +571,7 @@
 
 	function update() {
 		if (!plot) return;
-		if (keyOf(view) !== structureKey) return build();
+		if (keyOf(baseView) !== structureKey) return build();
 		const [xs, ...cols] = alignSeries(view.series, logX, logY);
 		const next = nextYRange(cols, xs as ArrayLike<number>);
 		const plotData = [xs, ...drawOrder.map((o) => cols[o.index])] as uPlot.AlignedData;
@@ -572,9 +579,21 @@
 		// (held for live data, or moved) is what draws it. `redraw()` is not used: before the first
 		// draw it would set the x range from a scale not yet computed.
 		plot.setData(plotData, false);
+		// uPlot finds the samples inside the x range when x is set, not on setData: data of another
+		// length (a span's samples in place of the outline) is drawn only to where the old ended
+		// unless x is set again, here to where it was
+		const sx = plot.scales.x;
+		if (sx.min != null && sx.max != null) {
+			keepingX = true;
+			plot.setScale('x', { min: sx.min, max: sx.max });
+			keepingX = false;
+		}
 		yRange = next;
 		plot.setScale('y', { min: next[0], max: next[1] });
 	}
+
+	/** While update() sets x back to where it was: the range has not moved, so no span is asked for. */
+	let keepingX = false;
 
 	/** The plot's drawing area inside the pane, CSS pixels: where the legend, readouts and notes sit. */
 	let area = $state<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -1408,7 +1427,59 @@
 		return out;
 	}
 
+	/** How long the x range is still before the samples of the span it shows are asked for. */
+	const SPAN_WAIT_MS = 150;
+	/** The most points a span is asked for (the schema's ceiling). */
+	const SPAN_MOST_POINTS = 65536;
+	let spanTimer: ReturnType<typeof setTimeout> | null = null;
+	/** The latest span asked for; an answer to an earlier one is dropped. */
+	let spanAsked = 0;
+
+	/** The x range moved: once it is still, ask for its samples (`SpectrumView.span`). */
+	function askSpan() {
+		if (spanTimer) clearTimeout(spanTimer);
+		spanTimer = null;
+		if (!baseView.span || frozen || !spanAsker()) return;
+		spanTimer = setTimeout(() => void fetchSpan(), SPAN_WAIT_MS);
+	}
+
+	/**
+	 * The request that drew the view, sent again with the x range shown and two points a pixel of
+	 * the plot's width; its curves take the place of the view's. Shown whole, the view's own are drawn.
+	 */
+	async function fetchSpan() {
+		spanTimer = null;
+		const of = baseView;
+		const source = of.span;
+		const ask = spanAsker();
+		if (!plot || !source || !ask) return;
+		const low = plot.scales.x.min;
+		const high = plot.scales.x.max;
+		if (low == null || high == null || !(low < high)) return;
+		const asked = ++spanAsked;
+		if (showsWhole(of, low, high)) {
+			spanned = null;
+			return;
+		}
+		const points = Math.min(SPAN_MOST_POINTS, Math.max(2, Math.round(2 * (area?.width ?? plot.width))));
+		try {
+			const answer = await ask(source, { low, high, points });
+			if (asked !== spanAsked || of !== baseView) return;
+			const series = spanSeries(of, answer);
+			if (series) spanned = { of, series };
+		} catch {
+			// the plot keeps the curves it has: the outline of the record, every extreme in it
+		}
+	}
+
+	// a new view is the service's whole answer again: ask for the span a kept zoom shows
+	$effect(() => {
+		void baseView;
+		untrack(askSpan);
+	});
+
 	onDestroy(() => {
+		if (spanTimer) clearTimeout(spanTimer);
 		if (view.link) cursors.clear(view.link, paneId);
 		unsubscribeCursor?.();
 		unsubscribePlayhead?.();
