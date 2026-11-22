@@ -74,8 +74,8 @@ def test_a_header_with_units_in_brackets(tmp_path):
     assert history.ordinate_dim == ['acceleration', 'force']
     assert np.allclose(history.ordinate[0], a * G), 'g declared, stored in SI'
     assert np.allclose(history.ordinate[1], f * 4.4482216152605)
-    assert history.response_dof == ['', ''], 'a name that is not a DOF'
-    assert history.block == ['Accel', 'Force'], 'labels the record instead'
+    assert history.response_dof == ['Accel', 'Force'], 'a name that is not a DOF is its name'
+    assert history.block is None, 'one recording, not repeats'
     assert history.record_label(0) == 'Accel'
     assert history.comment == ['column 2 of run.csv', 'column 3 of run.csv']
     assert notes == [], 'a clean file says nothing'
@@ -112,7 +112,7 @@ def test_a_tab_file_with_no_header_takes_its_rising_first_column_as_time(tmp_pat
     assert layout.columns == ('column 1', 'column 2', 'column 3')
     history, notes = _read(path)
     assert history.sample_rate == pytest.approx(FS, rel=1e-12)
-    assert history.block == ['column 2', 'column 3'], 'counted from 1'
+    assert history.response_dof == ['column 2', 'column 3'], 'counted from 1'
     assert history.ordinate_dim == ['unknown', 'unknown']
     assert np.array_equal(history.ordinate[0], np.round(a, 12)), 'raw numbers'
     assert any('column 1 rises in an even step' in n for n in notes)
@@ -164,7 +164,7 @@ def test_a_trailing_delimiter_and_trailing_empty_rows_are_not_data(tmp_path):
 def test_a_quoted_name_keeps_its_comma(tmp_path):
     path, _ = _csv(tmp_path, header='Time,"Accel, X (g)",Force')
     history, _notes = _read(path)
-    assert history.block == ['Accel, X', 'Force']
+    assert history.response_dof == ['Accel, X', 'Force']
     assert history.ordinate_unit == ['g', None]
 
 
@@ -411,8 +411,8 @@ def test_a_quantity_claims_without_scaling_and_must_agree_with_the_unit(tmp_path
 def test_names_that_are_dofs_become_the_response(tmp_path):
     path, _ = _csv(tmp_path)
     history, _notes = _read(path, names=['101z', 'drive'])
-    assert history.response_dof == ['101Z+', '']
-    assert history.block == ['', 'drive']
+    assert history.response_dof == ['101Z+', 'drive']
+    assert history.block is None
     assert history.record_label(0) == '101Z+'
     plain, _ = _csv(tmp_path, header='Time,101X+,102Y-', name='dofs.csv')
     named, _notes = _read(plain)
@@ -424,7 +424,7 @@ def test_names_that_are_dofs_become_the_response(tmp_path):
 def test_columns_choose_the_channels_in_the_order_asked(tmp_path):
     path, (_t, a, _f) = _csv(tmp_path)
     history, _notes = _read(path, columns=['Force', 1])
-    assert history.block == ['Force', 'Accel']
+    assert history.response_dof == ['Force', 'Accel']
     assert np.allclose(history.ordinate[1], a * G)
     with pytest.raises(ValueError, match="'Time', which is the time column"):
         read_delimited(path, columns=['Time'])
@@ -458,7 +458,7 @@ def test_import_file_reads_it_and_a_project_journals_the_options(tmp_path):
     assert isinstance(hertzforge.import_file(path), TimeHistory)
     project = hertzforge.Project()
     [added] = project.import_file(path, columns=['Accel'])
-    assert project[added].block == ['Accel']
+    assert project[added].response_dof == ['Accel']
     assert hertzforge.io.importers()[-1].name == 'delimited', (
         'tried last: a text file another reader knows by its content is its')
 
@@ -480,8 +480,7 @@ def test_the_sniffer_takes_numbers_in_columns_and_nothing_else(tmp_path):
 def test_a_history_written_as_csv_reads_back_the_same(tmp_path):
     t, a, f = _signal(300)
     history = TimeHistory(t, np.vstack([a * G, f * 4.4482216152605, f]),
-                          response_dof=['101Z+', '', ''],
-                          block=['', 'drive', 'raw'],
+                          response_dof=['101Z+', 'drive', 'raw'],
                           ordinate_unit=[None, None, None])
     history.define_units({0: 'g', 1: 'lbf'})
     target = str(tmp_path / 'out.csv')
@@ -489,7 +488,7 @@ def test_a_history_written_as_csv_reads_back_the_same(tmp_path):
     header = _text(target).splitlines()[1]
     assert header == 'time (s),101Z+ (g),drive (lbf),raw'
     back, notes = _read(target)
-    assert back.response_dof == ['101Z+', '', ''] and back.block == ['', 'drive', 'raw']
+    assert back.response_dof == ['101Z+', 'drive', 'raw'] and back.block is None
     assert back.ordinate_unit == ['g', 'lbf', None]
     assert np.array_equal(back.ordinate, history.ordinate)
     assert back.sample_rate == history.sample_rate

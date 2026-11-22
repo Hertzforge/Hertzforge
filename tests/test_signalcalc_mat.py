@@ -102,8 +102,10 @@ def test_the_layout_reads_as_one_history_in_si(tmp_path):
     assert np.allclose(history.ordinate[1:], data[1:])
     assert history.sample_rate == pytest.approx(20480.0)
     assert history.abscissa[0] == 0.0
-    assert [history.record_label(i) for i in range(3)] == ['A6501- Z', 'Current', 'Voltage']
-    assert list(history.response_dof) == ['', '', '']
+    assert list(history.response_dof) == ['6501Z+', 'Current', 'Voltage']
+    assert history.block is None
+    assert [str(n) for n in table['node']] == ['6501', '', '']
+    assert list(table['direction']) == ['Z+', '', '']
     assert list(table['channel_type']) == ['acceleration', 'current', 'voltage']
     assert list(table['unit']) == ['g', 'ampere', 'V']
     assert notes == []
@@ -111,10 +113,69 @@ def test_the_layout_reads_as_one_history_in_si(tmp_path):
 
 def test_a_name_that_is_a_dof_becomes_the_records_dof(tmp_path):
     history, table, _ = _read(_export(tmp_path / 'run.mat', names=('101X+', 'Current', '7Z-')))
-    assert list(history.response_dof) == ['101X+', '', '7Z-']
-    assert history.record_label(1) == 'Current'
+    assert list(history.response_dof) == ['101X+', 'Current', '7Z-']
     assert [str(n) for n in table['node']] == ['101', '', '7']
     assert list(table['direction']) == ['X+', '', 'Z-']
+
+
+@pytest.mark.parametrize('name, dof', [
+    ('A6002- X     ', '6002X+'), ('6002X', '6002X+'), ('A6002 Y-', '6002Y-'),
+    ('acc6002-z', '6002Z+'), ('A6002-RX', '6002RX+'), ('A06002- Z', '6002Z+'),
+    ('Drive Limit', 'Drive Limit'), ('Level Check', 'Level Check'),
+])
+def test_a_name_reads_as_a_node_and_an_axis_or_stands_as_the_channels_dof(
+        tmp_path, name, dof):
+    """The hyphen after the node is a separator, not a sign; a name that
+    is not a node and an axis is the channel's DOF as it stands, and the
+    channel table's comment keeps the name either way."""
+    history, table, notes = _read(_export(tmp_path / 'run.mat', names=(name, 'Current', 'Voltage')))
+    assert history.response_dof[0] == dof
+    assert table['comment'][0] == f'{name.strip()}, input 1'
+    assert notes == []
+
+
+@pytest.mark.parametrize('name', ['6002 Accel', 'X'])
+def test_a_name_that_cannot_be_a_dof_leaves_it_empty_and_says_so(tmp_path, name):
+    history, _, notes = _read(_export(tmp_path / 'run.mat', names=(name, 'Current', 'Voltage')))
+    assert list(history.response_dof) == ['', 'Current', 'Voltage']
+    assert notes == [(f"run.mat: {name!r} is not a node and an axis, and a DOF cannot hold it "
+                      'as a name (a name does not start with a digit or read as a direction); '
+                      'its DOF is left empty')]
+
+
+def test_two_channels_that_would_be_one_are_refused(tmp_path):
+    with pytest.raises(ValueError, match=r"run\.mat: rows 1 and 2 of ChanName, 'A6002- X' and "
+                                         r"'6002X\+', are both 6002X\+ in g: one channel twice"):
+        import_file(_export(tmp_path / 'run.mat', names=('A6002- X', '6002X+', 'Voltage'),
+                            units=('g', 'g', 'V')))
+    # one DOF in two quantities is two channels, as a drive point's are
+    history, _, _ = _read(_export(tmp_path / 'b.mat', names=('A6002- X', '6002X+', 'Voltage'),
+                                  units=('g', 'V', 'V')))
+    assert list(history.response_dof) == ['6002X+', '6002X+', 'Voltage']
+
+
+def test_channels_named_alike_in_one_unit_stay_apart_in_one_column(tmp_path):
+    """Two channels with no node in one unit are two channels: each its own
+    PSD and its own row of the tree, every record in one column, since
+    the export is one recording."""
+    from hertzforge.service.tree import grid
+
+    rng = np.random.default_rng(3)
+    data = rng.standard_normal((4, 4096))
+    path = _export(tmp_path / 'run.mat', data=data,
+                   names=('A6002- X', 'Drive Limit', 'Level Check', 'Current'),
+                   units=('g', 'V', 'V', 'ampere'), inputs=[1, 2, 3, 4],
+                   sensitivity=[1.0] * 4)
+    history, _, _ = _read(path)
+    view = grid(history)
+    assert view['columns'] == ['']
+    assert [row['label'] for row in view['rows']] == ['6002X+', 'Drive Limit', 'Level Check',
+                                                      'Current']
+    psds = history.compute_psds()
+    assert list(psds.response_dof) == ['6002X+', 'Drive Limit', 'Level Check', 'Current']
+    cpsds = history.compute_cpsds()
+    pairs = set(zip(cpsds.response_dof, cpsds.reference_dof, strict=True))
+    assert ('Drive Limit', 'Level Check') in pairs and len(pairs) == 16
 
 
 def test_inp_k_is_row_k_whatever_the_input_numbers(tmp_path):
@@ -223,7 +284,7 @@ def test_unreadable_and_missing_units_are_left_undeclared_and_noted(tmp_path):
     history, _, notes = _read(_export(tmp_path / 'run.mat', units=('EU', '', 'V')))
     assert history.ordinate_unit[:2] == [None, None]
     assert history.ordinate_dim[2] == 'voltage'
-    assert any("A6501- Z: the unit 'EU'" in note and 'undeclared' in note for note in notes)
+    assert any("6501Z+: the unit 'EU'" in note and 'undeclared' in note for note in notes)
     assert any('Current: the file states no unit' in note for note in notes)
 
 
@@ -234,7 +295,7 @@ def test_a_dead_channel_and_a_missing_sample_are_noted(tmp_path):
     history, _, notes = _read(_export(tmp_path / 'run.mat', data=data))
     assert np.isnan(history.ordinate[1, 5])
     said = ' '.join(notes)
-    assert 'A6501- Z is constant at 0 g' in said
+    assert '6501Z+ is constant at 0 g' in said
     assert 'Voltage is constant at 3 V' in said
     assert 'Current' in said and 'missing' in said
 
@@ -268,7 +329,7 @@ def _history():
     t = np.arange(SAMPLES) * STEP
     history = TimeHistory(
         t, np.vstack([np.sin(t * 3000), 0.2 * np.cos(t * 900), np.linspace(0, 1, SAMPLES)]),
-        response_dof=['', '101X+', ''], block=['A6501- Z', '', 'gauge'])
+        response_dof=['Drive Limit', '101X+', 'gauge'])
     history.define_units(['g', 'mA', None])
     return history
 
@@ -285,7 +346,7 @@ def test_the_round_trip_in_a_display_system_keeps_values_units_and_names(tmp_pat
     assert np.allclose(back.ordinate, history.ordinate)
     assert back.ordinate_dim == ['acceleration', 'current', history.ordinate_dim[2]]
     assert back.ordinate_unit[2] is None
-    assert [back.record_label(i) for i in range(3)] == ['A6501- Z', '101X+', 'gauge']
+    assert list(back.response_dof) == ['Drive Limit', '101X+', 'gauge']
     assert back.sample_rate == pytest.approx(1 / STEP)
     assert notes == [('out.mat: gauge: the file states no unit; left undeclared, '
                       "holding the file's numbers")]
@@ -322,7 +383,7 @@ def test_the_matrix_layout_reads_as_the_vector_layout_does(tmp_path):
     assert np.allclose(history.ordinate[0], data[0] * 9.80665)
     assert np.allclose(history.ordinate[1:], data[1:])
     assert history.sample_rate == pytest.approx(20480.0)
-    assert [history.record_label(i) for i in range(3)] == ['A6501- Z', 'Current', 'Voltage']
+    assert list(history.response_dof) == ['6501Z+', 'Current', 'Voltage']
     assert history.comment[1] == 'column 2 of TimeData of run.mat'
     assert list(table['comment']) == ['A6501- Z, input 3', 'Current, input 1',
                                       'Voltage, input 2']

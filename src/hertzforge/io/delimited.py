@@ -42,9 +42,10 @@ whole multiples of them, which reads as dropped rows.
 **Channels.** Every column but the time column is a channel, or the
 ones `columns` names. A channel's name is its header, or ``column 3``
 counted from 1 as a spreadsheet counts. A name that is a DOF
-(``101X+``) becomes the record's response DOF; any other name labels the
-record (its block) and leaves its DOF empty, to be set in the channel
-table. `names` renames the channels.
+(``101X+``) becomes the record's response DOF; any other name
+(``Current``) is the record's DOF as it stands, which tells the channel
+from the others and matches no node, until a node and a direction are
+set in the channel table. `names` renames the channels.
 
 **Units.** A unit from the header is declared when it reads as a
 quantity a channel measures, converting the values to SI; one that does
@@ -930,7 +931,7 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
     from ..core.channel_health import channel_health
     from ..core.data import TimeHistory
     from ..core.unit_choices import stored_dimension
-    from ..core.validate import dofs
+    from ..core.validate import dof_or_name
     from ..units import dimension_of, from_si, si_factor
 
     if missing not in ('keep', 'refuse'):
@@ -1101,19 +1102,8 @@ def read_delimited(path: str | os.PathLike, *, delimiter: str | None = None,
             raise ValueError(f'{name}, line {rows[sample][0]}: {labels[channel]} '
                              'has a missing sample')
 
-    response, block = [], []
-    for label in labels:
-        try:
-            [dof] = dofs([label])
-        except ValueError:
-            response.append('')
-            block.append(label)
-        else:
-            response.append(dof)
-            block.append('')
     history = TimeHistory(
-        abscissa, data, response_dof=response,
-        block=block if any(block) else None,
+        abscissa, data, response_dof=[dof_or_name(label) for label in labels],
         dimension_hint=quantity,
         comment=[f'column {k + 1} of {name}' for k in indices])
     for k, unit, reason in declare_stated_units(history, chosen, quantity):
