@@ -761,10 +761,12 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
-projected onto. Which set is projected, and how far a test node may be from the model node it is
-matched to, are the pair's projection, which Project sets (`project.set_projection`, kept in the
-project file) and the MAC, the projection, Match Modes, Add Matches and a Matched Modes object of the
-pair all read. When no node matches at all the answer is a `reading` of how far off the nearest pair
+projected onto. How the pair is brought onto common DOFs (a reduction, one set's modes at the
+other's DOFs, or an expansion, one set expanded through the other's modes), which set is moved, and
+how far a test node may be from the model node it is matched to, are the pair's DOF mapping, which DOF
+Mapping sets (`project.set_projection`, kept in the project file) and the MAC, the projection, Match
+Modes, Add Matches and a Matched Modes object of the pair all read; with none set, the pair is
+reduced. When no node matches at all the answer is a `reading` of how far off the nearest pair
 is and the limit, with the reason in `note`, so the tolerance can be set in Project. With no
 projection set, which set is projected is decided by what the sets measure and not by their order: the
 set with nodes measured in fewer than three translation directions is the one projected onto, since it
@@ -844,12 +846,16 @@ object can be written in, `.hforge` first. The desktop app lists them as the sav
 
 **A row's own words.** A row may carry `labels`, `{param: {option value: words}}`, the words its
 form shows for a param's options in place of the descriptor's. Project for two shape sets on two
-geometries (`project.set_projection`, a form kept as it is changed) names each `direction` after the
-sets, as "A onto B", the one that cannot be made followed by why in parentheses, and fills the pair's
-projection as it stands: the way it goes, set or decided by what the sets measure, never by the order
-they were picked in, and its distance, `0` for 2 % of the target's size. The comparisons that read it
-are listed under it: MAC, Animate Projection, Match Modes, Add Matches, and Add Projected Set
-(`project.project_onto_basis` filled the way the pair is projected, asking nothing).
+geometries (DOF Mapping, `project.set_projection`, a form kept as it is changed) names each of its
+four `mapping`s after the sets, as "Reduction: A at the DOFs of B" or "Expansion: A to the DOFs of
+B", each that cannot be made followed by why in parentheses, and fills the pair's mapping as it
+stands: set, or else the reduction decided by what the sets measure, never by the order they were
+picked in, and its distance, `0` for 2 % of the target's size. The comparisons that read it are
+listed under it: MAC, Animate Projection, Match Modes, Add Matches, Reduce
+(`project.project_onto_basis`) and Expand (`project.expand_modes`), the last two filled the way the
+mapping goes and asking nothing. A shape set picked with a geometry it does not belong on is offered
+Reduce onto that geometry's nodes, or Expand through the shape set linked to it, and its view shows
+what the one that can be made would add, or why neither can.
 
 **The actions a selection takes.** `project.actions`, with the same `objects` and `records`, answers
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered

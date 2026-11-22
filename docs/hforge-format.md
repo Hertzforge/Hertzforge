@@ -92,15 +92,19 @@ root attributes:
                       when the fingerprint holds settings only; absent,
                       only the settings are compared
     projections       optional JSON, how pairs of shape sets on two
-                      geometries are projected when compared, as
-                      Project sets them: [{"first", "second", "source",
-                      "distance"}, ...], "source" the set projected onto
-                      the other and "distance" the node match distance
-                      (meters, or the geometries' own units when theirs
-                      are not defined), or null for 2 % of the size of
-                      the geometry projected onto. Absent when none is
-                      set; a pair with none is projected the way the
-                      sets' measured directions decide
+                      geometries are brought onto common DOFs when
+                      compared, as DOF Mapping sets them: [{"first",
+                      "second", "source", "distance", "method"}, ...],
+                      "source" the set moved onto the other's DOFs,
+                      "method" "reduction" (its modes at the other's
+                      DOFs) or "expansion" (expanded through the
+                      other's modes, SEREP; absent reads as reduction)
+                      and "distance" the node match distance (meters,
+                      or the geometries' own units when theirs are not
+                      defined), or null for 2 % of the size of the
+                      geometry projected onto. Absent when none is set;
+                      a pair with none is reduced the way the sets'
+                      measured directions decide
 
 A project whose data index holds anything also has one dataset at the
 root (absent otherwise):

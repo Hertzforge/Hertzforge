@@ -231,6 +231,7 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.predict': 'drive_prediction',
 	'project.project_onto_basis': 'project',
 	'project.set_projection': 'project',
+	'project.expand_modes': 'project',
 	'project.project_onto_channels': 'project',
 	'project.projection_overlay': 'overlay',
 	'project.pulse_check': 'pulse',

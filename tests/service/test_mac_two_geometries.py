@@ -180,14 +180,14 @@ def test_the_projection_goes_onto_the_uniaxial_set_whichever_is_picked_first(sta
     first = shown(state, 'FEM Shapes', 'Test Shapes', prefs={'projection': True},
                   validate=validate)
     matrix, stage = first['views'][:2]
-    assert matrix['rows']['label'] == 'FEM Shapes, projected'
+    assert matrix['rows']['label'] == 'FEM Shapes, reduced'
     assert matrix['columns']['label'] == 'Test Shapes'
     assert len(stage['nodes']) == test_nodes and 'on Test Geometry' in matrix['title']
     second = shown(state, 'Test Shapes', 'FEM Shapes', prefs={'projection': True},
                    validate=validate)
     matrix, stage = second['views'][:2]
     assert matrix['rows']['label'] == 'Test Shapes'
-    assert matrix['columns']['label'] == 'FEM Shapes, projected'
+    assert matrix['columns']['label'] == 'FEM Shapes, reduced'
     assert len(stage['nodes']) == test_nodes
 
 
