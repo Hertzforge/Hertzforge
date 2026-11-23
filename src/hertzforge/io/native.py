@@ -73,7 +73,7 @@ STAMP = 'hertzforge_schema'
 #: still read (as a geometry) and no longer written. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: the stamp of a file with no object held by reference
 BASE_SCHEMA = 1
@@ -96,6 +96,10 @@ SCAN_SCHEMA = 5
 #: the stamp of a file holding a geometry with measured points, an
 #: element type a build that reads up to schema 4 does not know
 MEASURED_POINT_SCHEMA = 5
+
+#: the stamp of a file holding an element shape set
+#: (`core.element_shapes`), strain and stress per mode element by element
+ELEMENT_SHAPES_SCHEMA = 6
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -1063,6 +1067,38 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
     )
 
 
+def save_element_shapes(shapes: Any, group: h5py.Group) -> None:
+    """Write an element shape set into `group`: the modes' frequencies and
+    damping, each stress point's element, point, position and weight,
+    and the strain and stress (modes x points x 6), with its units."""
+    group.attrs['mass_unit'] = shapes.mass_unit or ''
+    group.attrs['length_unit'] = shapes.length_unit or ''
+    group.attrs['comment'] = shapes.comment
+    group.create_dataset('frequency', data=shapes.frequency)
+    group.create_dataset('damping', data=shapes.damping)
+    group.create_dataset('element', data=shapes.element)
+    group.create_dataset('point', data=shapes.point)
+    _write_array(group, 'xyz', shapes.xyz)
+    _write_array(group, 'weight', shapes.weight)
+    _write_array(group, 'strain', shapes.strain)
+    _write_array(group, 'stress', shapes.stress)
+
+
+def load_element_shapes(group: h5py.Group) -> Any:
+    """Read an element shape set written by `save_element_shapes`; an
+    empty unit reads back as None."""
+    from ..core.element_shapes import ElementShapeSet
+
+    return ElementShapeSet(
+        frequency=group['frequency'][()], damping=group['damping'][()],
+        element=group['element'][()], point=group['point'][()],
+        xyz=_read_array(group['xyz']), weight=_read_array(group['weight']),
+        strain=_read_array(group['strain']), stress=_read_array(group['stress']),
+        mass_unit=group.attrs['mass_unit'] or None,
+        length_unit=group.attrs['length_unit'] or None,
+        comment=str(group.attrs.get('comment', '')))
+
+
 def save_report(report: Report, group: h5py.Group) -> None:
     """Write a report into `group`: title and marking as attributes, its
     blocks as one JSON string. Features and identity are written only
@@ -1544,6 +1580,7 @@ def load_scan(group: h5py.Group) -> Geometry:
 def _savers():
     from ..core.channel_table import ChannelTable
     from ..core.data import DataArray
+    from ..core.element_shapes import ElementShapeSet
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
@@ -1564,6 +1601,7 @@ def _savers():
             (SineLevelSet, 'sine_levels', save_sine_levels),
             (DataArray, 'data', save_data),
             (ShapeSet, 'shapes', save_shapes),
+            (ElementShapeSet, 'element_shapes', save_element_shapes),
             (Report, 'report', save_report),
             (Photos, 'photos', save_photos),
             (MatchedModes, 'matches', save_matches),
@@ -1577,6 +1615,7 @@ _LOADERS = {'geometry': load_geometry,
             'sine_levels': load_sine_levels,
             'data': load_data,
             'shapes': load_shapes,
+            'element_shapes': load_element_shapes,
             'report': load_report,
             'photos': load_photos,
             'scan': load_scan,
@@ -1624,13 +1663,16 @@ def schema_for(kinds: Iterable[str], references: bool = False,
     Returns
     -------
     int
-        `MEASURED_POINT_SCHEMA` when a geometry holds measured points,
+        `ELEMENT_SHAPES_SCHEMA` when any is an element shape set,
+        otherwise `MEASURED_POINT_SCHEMA` when a geometry holds measured points,
         otherwise `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
         `RUN_RECORD_SCHEMA` when any is a run record, otherwise
         `REFERENCE_SCHEMA` for a file with references, otherwise
         `BASE_SCHEMA`.
     """
     kinds = set(kinds)
+    if 'element_shapes' in kinds:
+        return ELEMENT_SHAPES_SCHEMA
     if measured_points:
         return MEASURED_POINT_SCHEMA
     if 'test_setup' in kinds:

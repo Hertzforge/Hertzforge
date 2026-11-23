@@ -21,7 +21,7 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1, 2, 3, 4 or 5   (integer)
+    hertzforge_schema = 1, 2, 3, 4, 5 or 6   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
@@ -33,7 +33,9 @@ points, an element type of a geometry (203), and only a file with a geometry
 holding them is stamped 5, so a build from before them says to update
 where it would otherwise stop at an element type it does not know. For a
 few days in November 2026 schema 5 held measured points as a group of their
-own (`scan/`, below). It is read and no longer written.
+own (`scan/`, below). It is read and no longer written. Schema 6 adds the
+element shape set (`element_shapes/`, below), and only a file holding one
+is stamped 6.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -61,7 +63,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/`, `run_log_extract/`, `run_record/`, `test_setup/` or `scan/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/`, `run_record/`, `test_setup/`, `element_shapes/` or `scan/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -341,6 +343,27 @@ Present only where they mean something:
             modal_damping        only where a source carried one
             reference_only       only where a fit measured some DOFs
                                  as references alone
+
+## `element_shapes/`
+
+A solved model's modes read as strain and stress element by element
+(`core.element_shapes`): one row per stress point, an element at its
+centroid (point 0) or at one of the points of the volume rule its
+stiffness was integrated with (points 1 on).
+
+    attrs   mass_unit and length_unit ('' = undeclared), comment
+    dsets   frequency, damping          one per mode
+            element, point              int64, one per stress point
+            xyz                         stress points × 3, global, m
+            weight                      each point's share of its
+                                        element's volume, m³; 0 at the
+                                        centroid
+            strain, stress              modes × stress points × 6, in
+                                        the order xx yy zz xy yz xz,
+                                        global axes; strain with
+                                        engineering shears, stress in
+                                        Pa, both per unit modal
+                                        coordinate
 
 ## `channel_table/`
 

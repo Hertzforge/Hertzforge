@@ -63,6 +63,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'import_rattlesnake_part': 'Import Part', 'truncate_rattlesnake_file': 'Trim Run',
     'text_preview': 'Preview Text', 'import_text': 'Import Text', 'generate_signal': 'Generate',
     'srs_synthesis': 'Synthesize', 'compute_modal_responses': 'Modal Responses', 'synthesize_modal_frfs': 'Modal FRFs',
+    'element_shapes': 'Strain/Stress', 'color_element_shapes': 'Color By',
     'reprocess_modal_test': 'Estimate Again',
     'sweep_rate': 'Sweep Rate', 'fatigue': 'Fatigue', 'drive_prediction': 'Predict Drive',
     'notch_prediction': 'Predict Notch', 'conditioning': 'Conditioning',

@@ -35,7 +35,8 @@ constraints are held degrees of freedom (`fixed`, `add_ground`) and
 rigid links, which the eigensolution eliminates exactly instead of
 approximating them with a stiff member (`constraint_transform`). There
 is no general multipoint constraint and no static solution; modes are
-the only result. Wiring a surface mesh's edges with `from_geometry`
+the only result, and the strain and stress each mode puts in each solid
+element are read from them (`core.element_shapes`). Wiring a surface mesh's edges with `from_geometry`
 makes a grillage of beams, not plates. That is a modeling choice with a
 known cost, not an approximation hidden inside an element: it shows the
 order of mode density and the mode families a shape has, and it is not
@@ -3713,6 +3714,33 @@ def _mated_links(model: Model, geometry: Geometry) -> None:
     node of a set's first side tied to the point of the second side's
     surface it lies on, along the normal there and across it, as the set
     holds each (`Model.add_tie`)."""
+    for mated, nodes, weights, node, normal, point in mated_ties(geometry):
+        # the node moved onto the point it is tied to, in the model
+        # alone: a tie across even a hair's gap resists a rigid turn
+        # (a shaft tied rigidly in its bore, its nodes a chord's sag
+        # off the bore's facets, kept three of its six free modes,
+        # 2026-10-20)
+        model.move_node(node, *point)
+        model.add_tie(node, nodes, normal, mated.normal_mode, mated.shear_mode,
+                      mated.normal_stiffness, mated.shear_stiffness, group=mated.name,
+                      weights=weights)
+
+
+def mated_ties(geometry: Geometry) -> list[tuple]:
+    """Every tie the geometry's mated surfaces make, as (the set, the
+    second side's nodes, their weights, the tied node, the normal, the
+    point it is moved onto): what `from_geometry` builds them from, and
+    where a tied node sits in the model it solves.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry, with its `mates`.
+
+    Returns
+    -------
+    list of tuple
+    """
     from .mates import links
 
     # a node on the edge between two groups that both rest on one
@@ -3722,6 +3750,7 @@ def _mated_links(model: Model, geometry: Geometry) -> None:
     # out. Two that differ, another surface or another hold, still reach
     # `constraint_transform`, which refuses them by name (2026-10-20)
     held: dict[int, tuple] = {}
+    ties = []
     for mated in getattr(geometry, 'mates', None) or []:
         how = (int(mated.groups[1]), mated.normal_mode, mated.shear_mode,
                float(mated.normal_stiffness), float(mated.shear_stiffness))
@@ -3729,15 +3758,8 @@ def _mated_links(model: Model, geometry: Geometry) -> None:
             if held.get(node) == how:
                 continue
             held.setdefault(node, how)
-            # the node moved onto the point it is tied to, in the model
-            # alone: a tie across even a hair's gap resists a rigid turn
-            # (a shaft tied rigidly in its bore, its nodes a chord's sag
-            # off the bore's facets, kept three of its six free modes,
-            # 2026-10-20)
-            model.move_node(node, *point)
-            model.add_tie(node, nodes, normal, mated.normal_mode, mated.shear_mode,
-                          mated.normal_stiffness, mated.shear_stiffness, group=mated.name,
-                          weights=weights)
+            ties.append((mated, nodes, weights, node, normal, point))
+    return ties
 
 
 def _bring_to(model: Model, total_mass: float) -> None:
@@ -4862,6 +4884,78 @@ def _invert_3x3(matrices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return inverses, determinants
 
 
+#: each solid's centroid in its natural coordinates, by node count: where
+#: an element shape set reads an element's own value (`_solid_strains_many`)
+_SOLID_CENTROIDS = {8: (0.0, 0.0, 0.0), 6: (1.0 / 3.0, 1.0 / 3.0, 0.0),
+                    10: (0.25, 0.25, 0.25)}
+_SOLID_BASES = {8: _hex_basis, 6: _wedge_basis, 10: _tet10_basis}
+
+
+def _lame(material: Material) -> tuple[float, float]:
+    """(lambda, mu), the isotropic elasticity `_isotropic` writes out."""
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    return E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu)), material.shear_modulus
+
+
+def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
+    """The shape function gradients every solid's stiffness and strain
+    are built from, for every element of one kind at once: `xyz` is
+    (elements, nodes, 3).
+
+    Returns (shapes (points, nodes), weights (elements, points),
+    gradients (elements, points, nodes, 3), bubbles (elements, points,
+    3, 3) or None). The points are the element's volume rule (the
+    brick's 2x2x2, the wedge's six, the ten-node tetrahedron's 27, the
+    constant-strain tetrahedron's one), each weighted by its share of
+    the volume; with `centroid`, the centroid comes first, weighted
+    zero, so it adds nothing to an integral. `bubbles` are the brick's
+    three incompatible modes' gradients, through the centroid's
+    Jacobian and scaled by its determinant over the point's (Taylor,
+    Beresford and Wilson, 1976); at the centroid they vanish.
+    """
+    count, nodes = xyz.shape[:2]
+    if nodes == 4:
+        edges = xyz[:, 1:] - xyz[:, :1]
+        inverse, determinants = _invert_3x3(edges)
+        volume = np.abs(determinants) / 6.0
+        gradients = np.concatenate([-inverse.sum(axis=2)[:, None, :],
+                                    inverse.transpose(0, 2, 1)], axis=1)[:, None]
+        shapes = np.full((1, 4), 0.25)
+        weights = volume[:, None]
+        if centroid:
+            shapes = np.vstack([shapes, shapes])
+            weights = np.concatenate([np.zeros((count, 1)), weights], axis=1)
+            gradients = np.concatenate([gradients, gradients], axis=1)
+        return shapes, weights, gradients, None
+    shapes, derivatives, rule = _SOLID_RULES[nodes]
+    if centroid:
+        n0, d0 = _SOLID_BASES[nodes](*_SOLID_CENTROIDS[nodes])
+        shapes = np.vstack([n0[None], shapes])
+        derivatives = np.concatenate([d0[None], derivatives])
+        rule = np.concatenate([[0.0], rule])
+    # J[e, p] = dN[p]^T xyz[e], and dN/dx = dN/dxi J^-1 at every
+    # point of every element: batched products, not einsums, which
+    # are several times slower on these shapes
+    jacobians = np.matmul(derivatives.transpose(0, 2, 1)[None], xyz[:, None])
+    inverses, determinants = _invert_3x3(jacobians)
+    determinants = np.abs(determinants)
+    weights = determinants * rule
+    gradients = np.matmul(derivatives[None], inverses.transpose(0, 1, 3, 2))
+    bubbles = None
+    if nodes == 8:
+        _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
+        inverse_0, det_0 = _invert_3x3(np.matmul(d0.T[None], xyz))
+        det_0 = np.abs(det_0)
+        points = np.array([(xi, eta, zeta) for xi in _GAUSS_2
+                           for eta in _GAUSS_2 for zeta in _GAUSS_2])
+        if centroid:
+            points = np.vstack([np.zeros(3), points])
+        bubble = -2.0 * points[:, :, None] * np.eye(3)[None]
+        bubbles = (np.matmul(bubble[None], inverse_0.transpose(0, 2, 1)[:, None])
+                   * (det_0[:, None] / determinants)[:, :, None, None])
+    return shapes, weights, gradients, bubbles
+
+
 def _solid_matrices_many(material: Material, xyz: np.ndarray
                          ) -> tuple[np.ndarray, np.ndarray]:
     """`_solid_matrices` of every element of one kind and one material
@@ -4873,52 +4967,24 @@ def _solid_matrices_many(material: Material, xyz: np.ndarray
     centroid's Jacobian, the wedge's and the ten-node tetrahedron's
     rules, the constant-strain tetrahedron in closed form — with the
     Jacobians, their inverses and the stiffness products taken over
-    every element in one numpy call each, and the isotropic product
-    B^T D B folded into the gradients (`_stiffness_from_gradients`).
-    The one-element functions are the reference it is tested against
-    and agree with it to round-off.
+    every element in one numpy call each (`_solid_gradients`), and the
+    isotropic product B^T D B folded into the gradients
+    (`_stiffness_from_gradients`). The one-element functions are the
+    reference it is tested against and agree with it to round-off.
     """
     xyz = np.asarray(xyz, dtype=np.float64)
     count, nodes = xyz.shape[:2]
-    E, nu = material.youngs_modulus, material.poissons_ratio
-    lame = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
-    mu = material.shear_modulus
+    lame, mu = _lame(material)
     rho = material.density
-
+    shapes, weights, gradients, bubbles = _solid_gradients(xyz)
+    stiffness = _stiffness_from_gradients(lame, mu, weights, gradients, gradients)
+    if bubbles is not None:
+        k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
+        k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
+        stiffness = stiffness - k_ua @ np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1))
     if nodes == 4:
-        edges = xyz[:, 1:] - xyz[:, :1]
-        inverse, determinants = _invert_3x3(edges)
-        volume = np.abs(determinants) / 6.0
-        gradients = np.concatenate([-inverse.sum(axis=2)[:, None, :],
-                                    inverse.transpose(0, 2, 1)], axis=1)
-        stiffness = _stiffness_from_gradients(lame, mu, volume[:, None],
-                                              gradients[:, None], gradients[:, None])
-        products = (1.0 + np.eye(4))[None] * (rho * volume / 20.0)[:, None, None]
+        products = (1.0 + np.eye(4))[None] * (rho * weights[:, 0] / 20.0)[:, None, None]
     else:
-        shapes, derivatives, rule = _SOLID_RULES[nodes]
-        # J[e, p] = dN[p]^T xyz[e], and dN/dx = dN/dxi J^-1 at every
-        # point of every element: batched products, not einsums, which
-        # are several times slower on these shapes
-        jacobians = np.matmul(derivatives.transpose(0, 2, 1)[None], xyz[:, None])
-        inverses, determinants = _invert_3x3(jacobians)
-        determinants = np.abs(determinants)
-        weights = determinants * rule
-        gradients = np.matmul(derivatives[None], inverses.transpose(0, 1, 3, 2))
-        stiffness = _stiffness_from_gradients(lame, mu, weights, gradients, gradients)
-        if nodes == 8:
-            # the bubble modes' strains through the centroid's Jacobian,
-            # scaled by its determinant over the point's, as `_hex_matrices`
-            _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
-            inverse_0, det_0 = _invert_3x3(np.matmul(d0.T[None], xyz))
-            det_0 = np.abs(det_0)
-            points = np.array([(xi, eta, zeta) for xi in _GAUSS_2
-                               for eta in _GAUSS_2 for zeta in _GAUSS_2])
-            bubble = -2.0 * points[:, :, None] * np.eye(3)[None]
-            bubbles = (np.matmul(bubble[None], inverse_0.transpose(0, 2, 1)[:, None])
-                       * (det_0[:, None] / determinants)[:, :, None, None])
-            k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
-            k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
-            stiffness = stiffness - k_ua @ np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1))
         products = rho * np.tensordot(weights, shapes[:, :, None] * shapes[:, None, :],
                                       axes=(1, 0))
     # the mass couples each node pair's translations alike: the products
@@ -4929,6 +4995,62 @@ def _solid_matrices_many(material: Material, xyz: np.ndarray
     # symmetric to round-off, and not made exactly so: the assemblies
     # read one triangle (`sparse_matrices`) or average the whole
     return stiffness, mass.reshape(count, 3 * nodes, 3 * nodes)
+
+
+def _solid_strains_many(material: Material, xyz: np.ndarray, motion: np.ndarray
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The strain and stress of every element of one kind and one
+    material, for several motions at once.
+
+    `xyz` is (elements, nodes, 3) and `motion` the nodes' translations,
+    (elements, 3 nodes, motions), in the order the stiffness takes them.
+    Each element is read at its centroid and then at the points of the
+    volume rule its stiffness was integrated with (`_solid_gradients`),
+    from the same gradients and the same isotropic elasticity, so the
+    sum over the rule's points of weight times stress dot strain is
+    u^T K u to round-off.
+
+    The brick's three incompatible modes are recovered first: they were
+    condensed out of the stiffness statically, so for nodal motion u
+    they stand at a = -K_aa^-1 K_au u, and the strain is B_u u + B_a a.
+    Left out, the integration-point strains of a brick in bending carry
+    the parasitic shear the modes were added to remove, and the strain
+    energy is that of the stiffer, uncondensed element. Their strains
+    vanish at the centroid, so the centroid value is B_u u alone.
+
+    Returns (strain, stress, positions, weights): strain and stress
+    (elements, points, 6, motions), ordered xx yy zz xy yz xz with
+    engineering shear strains; each point's position (elements, points,
+    3); and its weight (elements, points), its share of the volume,
+    zero at the centroid.
+    """
+    xyz = np.asarray(xyz, dtype=np.float64)
+    count, nodes = xyz.shape[:2]
+    lame, mu = _lame(material)
+    shapes, weights, gradients, bubbles = _solid_gradients(xyz, centroid=True)
+    motions = motion.shape[2]
+    points = gradients.shape[1]
+    # the displacement gradient du_i/dx_j at every point: (e, p, j, i, m)
+    held = motion.reshape(count, nodes, 3 * motions)
+    grad = np.matmul(gradients.transpose(0, 1, 3, 2), held[:, None])
+    if bubbles is not None:
+        k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
+        k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
+        internal = -np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1) @ motion)
+        grad = grad + np.matmul(bubbles.transpose(0, 1, 3, 2),
+                                internal.reshape(count, 3, 3 * motions)[:, None])
+    grad = grad.reshape(count, points, 3, 3, motions)
+    strain = np.empty((count, points, 6, motions), dtype=grad.dtype)
+    for row, (i, j) in enumerate(((0, 0), (1, 1), (2, 2))):
+        strain[:, :, row] = grad[:, :, j, i]
+    for row, (i, j) in enumerate(((0, 1), (1, 2), (0, 2)), start=3):
+        strain[:, :, row] = grad[:, :, j, i] + grad[:, :, i, j]
+    stress = np.empty_like(strain)
+    volumetric = lame * strain[:, :, :3].sum(axis=2)
+    stress[:, :, :3] = volumetric[:, :, None] + 2.0 * mu * strain[:, :, :3]
+    stress[:, :, 3:] = mu * strain[:, :, 3:]
+    positions = np.matmul(shapes[None], xyz)
+    return strain, stress, positions, weights
 
 
 def _solid_volume(xyz: np.ndarray) -> float:

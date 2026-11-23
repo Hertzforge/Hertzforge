@@ -78,6 +78,7 @@
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapBytes, colormapGradient } from './colormap';
+	import { cornerRows, paintElements } from './elementValues';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
@@ -553,6 +554,16 @@
 	/** The elements in their own colors (`element_colors`), over the gray surface. */
 	let elementColors: Mesh | null = null;
 	let coloredLines: LineSegments | null = null;
+	/**
+	 * An element shape set's elements (`element_values`), each triangle corner its own vertex so an
+	 * element keeps one flat color, riding the mode's deflection with the surface.
+	 */
+	let elementValues: Mesh | null = null;
+	let elementShape: BufferAttribute | null = null;
+	let elementShapeImag: BufferAttribute | null = null;
+	let elementColor: BufferAttribute | null = null;
+	/** The largest magnitude among the elements' values in the mode shown, the legend's ends. */
+	let elementPeak = $state(0);
 	/** The selectable elements' faces, not drawn, that a click in Select mode is matched against, and each triangle's element. */
 	let elementPick: Mesh | null = null;
 	let elementOwner: number[] = [];
@@ -650,7 +661,8 @@
 
 	/** The color of a node at `t` of the scale, or the surface's one color when coloring is off. */
 	function paint(colors: Float32Array, n: number, t: number, rgb: [number, number, number]) {
-		if (colored) colormap(t, rgb);
+		// with an element shape set's colors over it, the surface is the gray they stand out on
+		if (colored && !view.element_values) colormap(t, rgb);
 		else {
 			rgb[0] = 0.62;
 			rgb[1] = 0.66;
@@ -684,12 +696,28 @@
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
 		for (let n = 0; n < travel.length; n++) paint(colors, n, travel[n] / maxMag, rgb);
+		loadElementValues(re, im);
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		followBodies(true);
 		dirty = true;
 		paintColors();
+	}
+
+	/** The element shape set's faces moved and colored for the mode shown (`element_values`). */
+	function loadElementValues(re: Float32Array, im: Float32Array | undefined) {
+		const held = view.element_values;
+		if (!held || !elementShape || !elementShapeImag || !elementColor) return;
+		cornerRows(re, held.triangles, elementShape.array as Float32Array);
+		if (im) cornerRows(im, held.triangles, elementShapeImag.array as Float32Array);
+		else (elementShapeImag.array as Float32Array).fill(0);
+		const row = Math.min(Math.max(0, mode), view.modes.length - 1);
+		const perRow = Math.round(held.values.length / Math.max(1, view.modes.length));
+		elementPeak = paintElements(held.values, row, perRow, held.owner, elementColor.array as Float32Array);
+		elementShape.needsUpdate = true;
+		elementShapeImag.needsUpdate = true;
+		elementColor.needsUpdate = true;
 	}
 
 	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
@@ -788,6 +816,7 @@
 		// the colormap starts further in on the dark theme: the shader's copy is made again
 		uniforms.uMap.value.dispose();
 		uniforms.uMap.value = colormapTexture();
+		if (elementValues && current) loadElementValues(current.shape, current.shape_imag);
 		dirty = true;
 	}
 
@@ -1109,6 +1138,26 @@
 			elementColors.frustumCulled = false;
 			scene.add(elementColors);
 		}
+		if (view.element_values?.triangles.length) {
+			const corners = view.element_values.triangles.length;
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(cornerRows(view.nodes, view.element_values.triangles), 3));
+			elementShape = new BufferAttribute(new Float32Array(3 * corners), 3);
+			elementShapeImag = new BufferAttribute(new Float32Array(3 * corners), 3);
+			elementColor = new BufferAttribute(new Float32Array(3 * corners), 3);
+			g.setAttribute('shape', elementShape);
+			g.setAttribute('shapeImag', elementShapeImag);
+			g.setAttribute('color', elementColor);
+			// drawn just in front of the surface they lie on, so the two never fight over a pixel
+			elementValues = new Mesh(
+				g,
+				displaced(
+					new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+				)
+			);
+			elementValues.frustumCulled = false;
+			scene.add(elementValues);
+		}
 		if (view.element_colors?.lines.length) {
 			const { lines, line_colors } = view.element_colors;
 			const xyz = new Float32Array(3 * lines.length);
@@ -1382,7 +1431,7 @@
 			dirty = true;
 		}
 		// a node's color is its offset now over the farthest any node goes: `peak` at this scale
-		const byDeflection = colored && !colors && (!!motion || !!current) ? 1 : 0;
+		const byDeflection = colored && !colors && !view.element_values && (!!motion || !!current) ? 1 : 0;
 		if (uniforms.uScalar.value !== byDeflection || uniforms.uPeak.value !== (peak || 1)) {
 			uniforms.uScalar.value = byDeflection;
 			uniforms.uPeak.value = peak || 1;
@@ -1514,6 +1563,7 @@
 			elementColors.visible = !wireframe;
 		}
 		surface.visible = !(elementColors && !wireframe && opacity < 1);
+		if (elementValues) elementValues.visible = colored && !wireframe && opacity >= 1;
 		dirty = true;
 	});
 	// every node shows as a dot only while clicks make elements of them (Add mode)
@@ -1565,6 +1615,7 @@
 		lit?.geometry.dispose();
 		litEdges?.geometry.dispose();
 		elementColors?.geometry.dispose();
+		elementValues?.geometry.dispose();
 		coloredLines?.geometry.dispose();
 		elementPick?.geometry.dispose();
 		overlayGeometry?.dispose();
@@ -1782,6 +1833,9 @@
 		e.preventDefault();
 	}
 
+	/** The element shape set's legend: minus the mode's largest magnitude, zero, plus it. */
+	const elementTicks = $derived([-1, 0, 1].map((t) => formatNumber(t * elementPeak, 3)));
+
 	const legendTicks = $derived(
 		[0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
 	);
@@ -1975,6 +2029,14 @@
 	<div class="bottom">
 		{#if colors && legend}
 			<div class="legend" aria-label="Color legend">{@render legend()}</div>
+		{:else if view.element_values && colored}
+			<div class="legend" aria-label="Color legend" data-testid="shape3d-element-legend">
+				<div class="ltitle">{view.element_values.label}{view.element_values.unit ? ` (${view.element_values.unit})` : ''}</div>
+				<div class="bar" style:background={colormapGradient()}></div>
+				<div class="ticks num">
+					{#each elementTicks as t, i (i)}<span>{t}</span>{/each}
+				</div>
+			</div>
 		{:else if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">

@@ -306,6 +306,13 @@ def _shape(view: dict, system: Any) -> None:
         pick = view.get('pick')
         if pick is not None and pick.get('target') == 'point' and not pick.get('in_display'):
             pick['to_si'] = [change[0], change[1]]
+    held = view.get('element_values')
+    if held is not None:
+        # each element's strain or stress: a stress in the system's pressure
+        values = _change(held.get('unit'), system)
+        if values is not None:
+            held['values'] = np.asarray(_values(held['values'], values), dtype=np.float32)
+            held['unit'] = values[2]
     motion = view.get('motion')
     if motion is not None:
         values = _change(motion.get('value_unit'), system)

@@ -14,7 +14,10 @@ results and run record. From schema 4 it also holds two test setups:
 one typed, and one taken from the converted run. The frozen schema 5
 file also holds two `scan/` groups, measured points as they were stored
 for a few days in November 2026; nothing writes that group now, so this
-script cannot write that file again. The run log extract is
+script cannot write that file again. From schema 6 it also holds measured
+points (a geometry of type 203 elements) and an element shape set: a
+free brick's two lowest elastic modes read as strain and stress. The run
+log extract is
 taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
 the log is not found beside it, a case a reader must keep too.
@@ -47,7 +50,13 @@ from hertzforge.core.sine import (
     SineSweepSpecification,
     SineTone,
 )
-from hertzforge.io.native import RUN_RECORD_SCHEMA, SCHEMA_VERSION, SUFFIX, TEST_SETUP_SCHEMA
+from hertzforge.io.native import (
+    ELEMENT_SHAPES_SCHEMA,
+    RUN_RECORD_SCHEMA,
+    SCHEMA_VERSION,
+    SUFFIX,
+    TEST_SETUP_SCHEMA,
+)
 
 #: the smallest legal PNG: 1x1, opaque. The corpus needs image *bytes*
 #: that survive verbatim, not a picture.
@@ -188,7 +197,33 @@ def build_project() -> hertzforge.Project:
         add_converted_run(project)
     if SCHEMA_VERSION >= TEST_SETUP_SCHEMA:
         add_test_setups(project)
+    if SCHEMA_VERSION >= ELEMENT_SHAPES_SCHEMA:
+        add_element_shapes(project)
     return project
+
+
+def add_element_shapes(project: hertzforge.Project) -> None:
+    """Schema 6 is the element shape set. A free brick 20 x 10 x 10 mm
+    of 6061, solved, and its two lowest elastic modes read at its
+    centroid and eight rule points; measured points ride along, the
+    schema 5 geometry a project saved now holds."""
+    from hertzforge.core.fem import Model
+    from hertzforge.io.point_files import points_geometry
+
+    project.add('Probed Points', points_geometry(
+        [[10.0, 2.0, 9.0], [11.0, 2.5, 9.0]], 'mm', ['31_1', '31_1'], [0, 1]))
+    brick = Geometry(node_id=list(range(1, 9)),
+                     node_xyz=[[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0], [0, 0.01, 0],
+                               [0, 0, 0.01], [0.02, 0, 0.01], [0.02, 0.01, 0.01],
+                               [0, 0.01, 0.01]])
+    brick.length_unit = 'm'
+    brick.add_element(list(range(1, 9)), 115)
+    brick.group_properties = {int(brick.group_id[0]): GroupProperties(
+        Material('6061-T6', 68.9e9, 2700.0, 0.33))}
+    project.add('Brick', brick)
+    modes = project.add('Brick Modes', Model.from_geometry(brick).eigensolution(num_modes=8))
+    project.link('Brick', modes)
+    project.element_shapes(modes, modes=[6, 7])
 
 
 def add_test_setups(project: hertzforge.Project) -> None:

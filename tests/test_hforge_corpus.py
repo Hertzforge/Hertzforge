@@ -337,3 +337,28 @@ def test_a_project_saved_now_holds_measured_points_as_a_geometry(tmp_path):
         assert f.attrs[native.STAMP] == native.MEASURED_POINT_SCHEMA
         assert 'scan' not in f
     np.testing.assert_allclose(Project.open(path)['Probed'].node_xyz, [[0.001, 0.002, 0.003]])
+
+
+def test_schema6_holds_an_element_shape_set_and_measured_points():
+    """The schema 6 file is the schema 4 project plus measured points and a
+    free brick's two lowest elastic modes read as strain and stress. The
+    set reads back whole: nine stress points, the centroid weighing
+    nothing, and each mode's strain energy half its omega squared."""
+    from hertzforge.core.element_shapes import ElementShapeSet
+    from hertzforge.core.geometry import Geometry
+
+    held = native.load(os.path.join(CORPUS, 'schema6.hforge'))
+    older = native.load(os.path.join(CORPUS, 'schema4.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema6.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.ELEMENT_SHAPES_SCHEMA
+    assert list(held)[:len(older)] == list(older)
+    assert isinstance(held['Probed Points'], Geometry)
+    read = held['Brick Modes Strain and Stress']
+    assert isinstance(read, ElementShapeSet)
+    assert read.strain.shape == read.stress.shape == (2, 9, 6)
+    assert read.element.tolist() == [1] * 9 and read.point.tolist() == list(range(9))
+    assert read.weight[0] == 0.0 and read.weight.sum() == pytest.approx(2e-6, rel=1e-12)
+    assert read.mass_unit == 'kg' and read.length_unit == 'm'
+    np.testing.assert_allclose(read.frequency, [85382.26462276, 135195.50996603], rtol=1e-9)
+    np.testing.assert_allclose(read.strain_energy(), (2 * np.pi * read.frequency) ** 2 / 2,
+                               rtol=1e-9)
