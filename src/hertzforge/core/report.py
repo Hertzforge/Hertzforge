@@ -72,7 +72,11 @@ class Report:
                         'dofs': quantity, 'dofs_source': name,
                         'caption': str}
         ('dofs' + 'dofs_source' make a DOFs scene: labeled arrows at
-        every DOF that one data object measures as that quantity)
+        every DOF that one data object measures as that quantity;
+        'dofs_geometry' names the geometry it was measured on, and its
+        DOFs are then placed on the scene's geometry by position.
+        'node_dots' draws or leaves off the nodes' dots, which are
+        drawn on at most `report.NODE_DOT_LIMIT` nodes when unset)
       {'kind': 'table', 'source': name, 'caption': str}
         (with 'environment' and 'form' 'response' or 'reference', a
         channel table's block is that control loop's transformation

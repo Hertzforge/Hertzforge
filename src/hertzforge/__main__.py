@@ -5,7 +5,8 @@ convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file,
 ``hertzforge export-animation PROJECT -o PAGE --geometry NAME ...`` writes a geometry's
 animation as one page that plays offline (`hertzforge.animation`), and ``hertzforge record
 PROJECT -o VIDEO --geometry NAME ...`` records it to an MP4 with no window open
-(`hertzforge.record`)."""
+(`hertzforge.record`), and ``hertzforge still PROJECT -o PICTURE --geometry NAME --dofs ...``
+draws it with DOFs as arrows to a PNG (`hertzforge.still`)."""
 
 import argparse
 from collections.abc import Callable
@@ -115,6 +116,38 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: the whole model)")
     record.add_argument("--theme", default="dark", choices=("dark", "light"),
                         help="the app's dark or light look (default dark)")
+    still = commands.add_parser(
+        "still",
+        help="draw a geometry with the DOFs of data or channel tables as arrows, as the app's "
+             "3-D view draws them, to a PNG with no window open (needs Chrome)")
+    still.add_argument("project", help="the project file (.hforge)")
+    still.add_argument("-o", "--output", required=True, help="the picture to write (.png)")
+    still.add_argument("--geometry", required=True, help="the geometry drawn")
+    still.add_argument("--dofs", nargs="+", default=(), metavar="OBJECT",
+                       help="data or channel tables whose DOFs are drawn as arrows, a force "
+                            "pointing in")
+    still.add_argument("--on", help="the geometry the DOFs' node ids belong to (default: the "
+                                    "one linked with each object); on another geometry than "
+                                    "--geometry they are placed by position")
+    still.add_argument("--distance", type=float,
+                       help="how far a DOF's node may be from the nearest node of --geometry, "
+                            "meters when the units are defined (default: the match distance "
+                            "DOF Mapping opens on)")
+    still.add_argument("--size", default="1920x1080", help="WIDTHxHEIGHT in pixels "
+                                                           "(default 1920x1080)")
+    still.add_argument("--opacity", type=float, default=1.0,
+                       help="how solid the surface is drawn, above 0 to 1 (default 1, solid)")
+    still.add_argument("--view", default="iso",
+                       help="iso (the geometry's own view), front, back, left, right, top or "
+                            "bottom (default iso)")
+    still.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera, in "
+                                     "place of --view")
+    still.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
+    still.add_argument("--frame", nargs="+", metavar="GROUP",
+                       help="element groups of the geometry to frame, the rest still drawn "
+                            "(default: the whole model)")
+    still.add_argument("--theme", default="dark", choices=("dark", "light"),
+                       help="the app's dark or light look (default dark)")
     args, rest = parser.parse_known_args(argv)
     if args.command == "convert-run":
         if rest:
@@ -140,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
         if rest:
             parser.error(f"unrecognized arguments: {' '.join(rest)}")
         return _record(args)
+    if args.command == "still":
+        if rest:
+            parser.error(f"unrecognized arguments: {' '.join(rest)}")
+        return _still(args)
     if args.command == "serve":
         from hertzforge.service.__main__ import main as serve
 
@@ -297,6 +334,33 @@ def _record(args: argparse.Namespace) -> int:
         print(f"\nhertzforge record: {error}")
         return 1
     print(f"\nwrote {out}")
+    return 0
+
+
+def _still(args: argparse.Namespace) -> int:
+    """`hertzforge still`: the project opened and the picture drawn in headless Chrome."""
+    from hertzforge.project import Project
+    from hertzforge.still import Still, StillError, write_still
+
+    try:
+        width, height = (int(part) for part in args.size.lower().split("x"))
+    except ValueError:
+        print(f"hertzforge still: the size is WIDTHxHEIGHT, as 1920x1080, not {args.size!r}")
+        return 1
+    try:
+        eye, up = _xyz(args.eye), _xyz(args.up)
+    except ValueError as error:
+        print(f"hertzforge still: {error}")
+        return 1
+    still = Still(geometry=args.geometry, dofs=args.dofs, on=args.on, distance=args.distance,
+                  width=width, height=height, opacity=args.opacity, view=args.view, eye=eye,
+                  up=up, frame=args.frame, theme=args.theme)
+    try:
+        out = write_still(Project.open(args.project), still, args.output)
+    except (StillError, OSError, ValueError) as error:
+        print(f"hertzforge still: {error}")
+        return 1
+    print(f"wrote {out}")
     return 0
 
 

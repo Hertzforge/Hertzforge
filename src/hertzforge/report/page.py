@@ -1535,8 +1535,11 @@ function sceneBlock(block) {
        than an element, so it cannot lift a dot through anything in
        front of it. */
     const bias = extent * 0.005;
-    for (let i = 0; i < deformed.length; i++)
-      items.push({ node: i, z: depth[i] + bias });
+    // a model of thousands of nodes is drawn without them: the squares
+    // tile its surface and read as speckle (`node_dots`)
+    if (block.node_dots !== false)
+      for (let i = 0; i < deformed.length; i++)
+        items.push({ node: i, z: depth[i] + bias });
     // deflection colormap, exactly the GUI's reading: |offset| per node
     // on viridis, the top of the scale pinned to this mode's own peak.
     // A flat scene (the matched-pair overlay) keeps its own colors:
