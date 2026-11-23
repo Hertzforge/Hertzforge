@@ -175,6 +175,18 @@ def find_ffmpeg() -> str:
     return found
 
 
+def chrome_arguments(executable: str, profile: str, width: int, height: int) -> list[str]:
+    """The command that starts headless Chrome on a fresh profile at `profile`. It keeps no
+    cookies or passwords, so it is told not to use the system's keychain
+    (`--use-mock-keychain`, `--password-store=basic`): a browser with no keychain item of its
+    own yet, such as a Chromium for testing, otherwise has macOS ask for the login password."""
+    return [executable, '--headless=new', '--remote-debugging-port=0',
+            f'--user-data-dir={profile}', f'--window-size={width},{height}',
+            '--force-device-scale-factor=1', '--hide-scrollbars', '--mute-audio',
+            '--no-first-run', '--no-default-browser-check', '--allow-file-access-from-files',
+            '--use-mock-keychain', '--password-store=basic', 'about:blank']
+
+
 class _Chrome:
     """Headless Chrome on one page, driven over its DevTools protocol."""
 
@@ -183,11 +195,7 @@ class _Chrome:
 
         self._profile = tempfile.TemporaryDirectory(prefix='hertzforge-record-')
         self._process = subprocess.Popen(
-            [executable, '--headless=new', '--remote-debugging-port=0',
-             f'--user-data-dir={self._profile.name}', f'--window-size={width},{height}',
-             '--force-device-scale-factor=1', '--hide-scrollbars', '--mute-audio',
-             '--no-first-run', '--no-default-browser-check', '--allow-file-access-from-files',
-             'about:blank'],
+            chrome_arguments(executable, self._profile.name, width, height),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         port_file = Path(self._profile.name) / 'DevToolsActivePort'
         deadline = time.monotonic() + 30
