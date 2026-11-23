@@ -31,7 +31,7 @@ def test_the_summary_brackets_the_groups_and_marks_what_does_not_fit(validate):
     validate(summary, 'project')
     (group,) = summary['links']
     assert set(group['members']) == set(added), 'the run\'s objects arrive linked'
-    assert group['role'] is None and group['name'] == ''
+    assert group['role'] is None and group['name'] == 'modal.nc4', 'named for its file'
     assert all('issue' not in o for o in summary['objects']), 'the plate data fits its geometry'
 
     project = state.project
