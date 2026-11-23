@@ -172,3 +172,39 @@ def test_the_action_is_offered_with_the_set_and_its_clip_picked_and_drawn_live(t
     assert stage['element_values']['scalar'] == 'von_mises' and 'motion' in stage
     names = [o['name'] for o in ran.get('project', {}).get('objects', [])] or None
     assert names is None or sorted(names) == sorted(state.project), 'it adds nothing'
+
+
+def test_color_by_states_one_scale_for_every_mode_and_colors_the_groups_named():
+    state = _state()
+    added = state.project.element_shapes('Cells Modes', modes=[6, 7, 8])
+    (view,) = _run(state, 'project.color_element_shapes',
+                   {'object': added, 'quantity': 'stress', 'component': 'von_mises',
+                    'color_groups': '1', 'color_max': 4.0e7})
+    held = view['element_values']
+    assert held['max'] == [4.0e7] * 3 and held['stated'] is True
+    assert held['elements'] == 3, 'the three bricks of group 1'
+    (own,) = _run(state, 'project.color_element_shapes',
+                  {'object': added, 'quantity': 'stress', 'component': 'von_mises'})
+    read = state.project[added]
+    assert own['element_values']['max'] == pytest.approx(
+        [float(von_mises(read.stress[k, read.point == 0]).max()) for k in range(3)], rel=1e-6)
+
+
+def test_a_dead_clip_says_it_strains_nothing_and_a_nan_sample_is_passed_over():
+    state = _state()
+    added = _clip(state)
+    state.project.add('Still', TimeHistory(np.arange(8) / 1000.0, np.zeros((2, 8)), ['M9', 'M7'],
+                                           ordinate_dim='modal_length'))
+    views = _run(state, PLAY, {'object': added, 'data': 'Still'})
+    stage = _stage({'views': views})
+    assert stage['element_values']['max'] == [0.0]
+    assert 'Still never strains these elements: they are drawn at zero' in stage['note']
+    clip = state.project['Clip']
+    clean = _stage({'views': _run(state, PLAY, {'object': added, 'data': 'Clip'})})
+    held = np.array(clip.ordinate)
+    held[0, 0] = np.nan
+    state.project.add('Holed', TimeHistory(clip.abscissa, held, list(clip.response_dof),
+                                           ordinate_dim='modal_length'))
+    holed = _stage({'views': _run(state, PLAY, {'object': added, 'data': 'Holed'})})
+    assert holed['element_values']['max'][0] == pytest.approx(clean['element_values']['max'][0],
+                                                              rel=1e-6)

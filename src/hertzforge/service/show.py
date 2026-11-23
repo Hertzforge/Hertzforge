@@ -1014,6 +1014,8 @@ def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[
         notes.append(f'{field["elements"]:,} elements of {coloring["name"]} colored by '
                      f'{field["label"][0].lower()}{field["label"][1:]}, summed over the modes '
                      f'at each instant, on {scale} value')
+        if not field.get('stated') and not field['max'][0] > 0:
+            notes.append(f'{data_name} never strains these elements: they are drawn at zero')
     return [stage, plot], notes
 
 
