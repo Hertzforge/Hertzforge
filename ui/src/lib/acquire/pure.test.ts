@@ -141,11 +141,11 @@ describe('channel table', () => {
 	it('puts each finding on its row and cell, and says what changed between revisions', () => {
 		const f = rowFindings({
 			errors: [{ reason: 'channel_unbound', message: 'unbound', channel: 1 }, { reason: 'no_channel_enabled', message: 'none', channel: null }],
-			warnings: [{ reason: 'iepe_without_bias', message: 'bias', channel: 1 }]
+			warnings: [{ reason: 'bias_on_single_ended', message: 'bias', channel: 1 }]
 		});
 		expect(f.rows.get(1)?.map((x) => [x.level, x.cell])).toEqual([
 			['error', 'physical'],
-			['warning', 'iepe_bias_v']
+			['warning', 'interface']
 		]);
 		expect(f.table.map((x) => x.reason)).toEqual(['no_channel_enabled']);
 

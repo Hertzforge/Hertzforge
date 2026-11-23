@@ -300,7 +300,7 @@
 										<span class="num">{nErr}</span><span class="visually-hidden">errors</span>
 									</span>
 								{/if}
-								<button class="aq-icon-btn" aria-expanded={!!open[i]} aria-label="More for channel {row.index}: number, polarity, control group, IEPE bias, abort limits" data-testid="channel-more-{i}" onclick={() => (open[i] = !open[i])}>
+								<button class="aq-icon-btn" aria-expanded={!!open[i]} aria-label="More for channel {row.index}: number, polarity, control group, abort limits" data-testid="channel-more-{i}" onclick={() => (open[i] = !open[i])}>
 									<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" style:transform={open[i] ? 'rotate(90deg)' : ''}><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
 								</button>
 								{#if !s.virtual && (s.status !== 'present' || !onNi)}
@@ -328,7 +328,6 @@
 										</div>
 									</div>
 									<NumberField id="ch-{i}-group" label="Control group" integer nullable="None" fallback={0} value={row.control_group} onchange={(v) => edit(i, { field: 'control_group', value: v })} errors={errs(row.index, 'control_group')} disabled={locked} />
-									<NumberField id="ch-{i}-bias" label="IEPE bias" unit="V" nullable="None" fallback={24} value={row.iepe_bias_v} onchange={(v) => edit(i, { field: 'iepe_bias_v', value: v })} errors={errs(row.index, 'iepe_bias_v')} warnings={[...warns(row.index, 'iepe_bias_v'), ...warns(row.index, 'interface')]} disabled={locked || drive} />
 									<NumberField id="ch-{i}-ab-g" label="Abort, acceleration" unit="g" nullable="None" fallback={50} value={row.abort.accel_g} onchange={(v) => edit(i, { field: 'abort_accel_g', value: v })} disabled={locked || drive} help="Peak; the run aborts at any level." />
 									<NumberField id="ch-{i}-ab-v" label="Abort, velocity" unit="in/s" nullable="None" fallback={50} value={row.abort.velocity_ips} onchange={(v) => edit(i, { field: 'abort_velocity_ips', value: v })} disabled={locked || drive} />
 									<NumberField id="ch-{i}-ab-d" label="Abort, displacement" unit="mil" nullable="None" fallback={500} value={row.abort.displacement_mil} onchange={(v) => edit(i, { field: 'abort_displacement_mil', value: v })} disabled={locked || drive} />

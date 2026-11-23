@@ -790,7 +790,7 @@
    "table_file": "held"
   },
   {
-   "name": "an IEPE row with no bias",
+   "name": "an IEPE row with no bias is complete (the station settles it)",
    "rule": "iepe_bias",
    "rows": [
     {
@@ -853,9 +853,7 @@
    ],
    "control": "ok",
    "errors": [],
-   "warnings": [
-    "iepe_without_bias"
-   ],
+   "warnings": [],
    "table_file": "held"
   },
   {

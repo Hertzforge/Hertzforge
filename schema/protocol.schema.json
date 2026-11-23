@@ -1494,7 +1494,7 @@
                "control_group_gap", "reference_without_control", "unsupported_schema",
                "channel_unbound", "physical_channel_unknown", "physical_channel_wrong_direction",
                "physical_channel_shared", "mixed_timing_families",
-               "iepe_without_bias", "bias_on_single_ended",
+               "bias_on_single_ended",
                "drive_channel_present", "unit_unknown", "drive_not_in_volts", "abort_not_in_g",
                "profile_empty", "first_row_not_anchor", "row_level_ambiguous",
                "frequency_not_positive", "frequency_not_ascending", "psd_negative",

@@ -374,7 +374,10 @@ pub struct Channel {
     pub index: u32,
     pub enabled: bool,
     pub interface: Interface,
-    /// IEPE bias volts; `None` when interface is `SingleEnded`.
+    /// The sensor's IEPE bias in volts, for the record only: nothing reads it to
+    /// run, and an IEPE row does not need one. The station never asks the
+    /// operator for it; it settles the input itself at arm (the NI backend's
+    /// `iepe_settle`). `None` on a single-ended row.
     pub iepe_bias_v: Option<f64>,
     pub units: Units,
     /// STRICTLY per-channel. Never a global. `eu = volts / (sensitivity_mv_per_eu/1000)`.
@@ -540,14 +543,13 @@ impl std::error::Error for TableError {}
 /// flag configurations that are almost certainly operator mistakes. Returned by
 /// [`ChannelTable::validate_report`] alongside the hard errors.
 ///
-/// The IEPE bias/interface mismatch is intentionally a warning, not a hard error:
-/// the SMART dialog leaves IEPE-bias blank in single-ended mode (`N/A`), and a
-/// mid-edit table may briefly carry an inconsistent pair. The operator, not the
-/// parser, decides whether that is a problem.
+/// A bias on a single-ended row is a warning, not a hard error: a mid-edit table
+/// may briefly carry it, and the operator, not the parser, decides whether that
+/// is a problem. An IEPE row WITHOUT a bias is not a finding at all (2026-11-22):
+/// the bias is never entered by the operator, because the station settles the
+/// input itself before a run is ready.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableWarning {
-    /// Interface is IEPE but no bias voltage is set on this channel.
-    IepeMissingBias(u32),
     /// A bias voltage is set but the interface is single-ended (bias is ignored).
     BiasOnSingleEnded(u32),
     /// Reference channels exist but no Control channel is present. MIMO control
@@ -570,9 +572,6 @@ pub enum TableWarning {
 impl fmt::Display for TableWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableWarning::IepeMissingBias(i) => {
-                write!(f, "channel {i} is IEPE but has no bias voltage set")
-            }
             TableWarning::BiasOnSingleEnded(i) => {
                 write!(f, "channel {i} is single-ended but has an IEPE bias set (ignored)")
             }
@@ -681,7 +680,7 @@ impl ChannelTable {
     /// single pass. Use this for a table editor that wants to surface every problem
     /// at once; use [`ChannelTable::validate`] for the go/no-go gate.
     ///
-    /// Warnings (non-fatal): IEPE/bias interface mismatch per channel, the
+    /// Warnings (non-fatal): a bias on a single-ended row, the
     /// presence of drive-output channels (informational), a unit outside
     /// [`UNIT_VOCABULARY`], a drive not in volts, and an abort limit on a row not
     /// in g. Warnings never block use.
@@ -739,19 +738,12 @@ impl ChannelTable {
             if ch.has_armed_limit() && ch.units != Units::AccelG {
                 report.warnings.push(TableWarning::AbortNotInG(ch.index));
             }
-            // IEPE bias/interface coherence (a warning, not a hard error).
-            match (ch.interface, ch.iepe_bias_v) {
-                (Interface::Iepe, None) => {
-                    report
-                        .warnings
-                        .push(TableWarning::IepeMissingBias(ch.index));
-                }
-                (Interface::SingleEnded, Some(_)) => {
-                    report
-                        .warnings
-                        .push(TableWarning::BiasOnSingleEnded(ch.index));
-                }
-                _ => {}
+            // A bias on a single-ended row is ignored, so say so. An IEPE row
+            // needs none: the station settles the input itself at arm.
+            if ch.interface == Interface::SingleEnded && ch.iepe_bias_v.is_some() {
+                report
+                    .warnings
+                    .push(TableWarning::BiasOnSingleEnded(ch.index));
             }
         }
         if !any_enabled {
@@ -988,16 +980,18 @@ mod tests {
         assert!(t.validate().is_ok());
     }
 
+    /// An IEPE row with no bias is a complete row: no error and no warning. The
+    /// operator is never asked for the bias; the station settles the input.
     #[test]
-    fn iepe_bias_mismatch_is_warning_not_error() {
+    fn an_iepe_row_without_a_bias_is_complete() {
         let mut t = ChannelTable::new();
         let mut c = Channel::new(1);
         c.interface = Interface::Iepe;
-        c.iepe_bias_v = None; // IEPE but no bias -> warn
+        c.iepe_bias_v = None;
         t.channels.push(c);
         let report = t.validate_report();
         assert!(report.is_ok(), "should have no hard errors");
-        assert!(report.warnings.contains(&TableWarning::IepeMissingBias(1)));
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
         assert!(t.validate().is_ok());
     }
 

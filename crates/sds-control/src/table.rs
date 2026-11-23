@@ -718,9 +718,6 @@ pub fn validate(table: &ChannelTable, ctx: &StationContext<'_>) -> Report {
     for w in r.warnings {
         let message = w.to_string();
         report.warnings.push(match w {
-            TableWarning::IepeMissingBias(i) => {
-                Item::channel("iepe_without_bias", Some(i), message)
-            }
             TableWarning::BiasOnSingleEnded(i) => {
                 Item::channel("bias_on_single_ended", Some(i), message)
             }

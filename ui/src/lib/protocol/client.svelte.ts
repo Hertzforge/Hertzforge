@@ -76,6 +76,20 @@ export interface ClientOptions {
 	backoffMaxMs?: number;
 }
 
+/**
+ * How long a request that arms the station may take to answer. Every module's `<module>.arm`
+ * and `<module>.start` answers only once the station's arm has returned, and on hardware the
+ * arm settles each IEPE input first, with nothing driving: about 2 s for a 10 V bias, and up
+ * to the settle's limit (15 s) before it refuses and names the channel. The ordinary request
+ * timeout would report that refusal, or a slow settle, as "no response".
+ */
+export const ARM_REQUEST_TIMEOUT_MS = 60_000;
+
+/** The timeout a request gets when its caller states none. */
+export function requestTimeoutFor(method: string, ordinaryMs: number): number {
+	return /\.(arm|start)$/.test(method) ? Math.max(ordinaryMs, ARM_REQUEST_TIMEOUT_MS) : ordinaryMs;
+}
+
 type EventHandler = (data: Record<string, unknown>, event: Event) => void;
 
 interface Pending {
@@ -170,7 +184,7 @@ export class ServiceClient {
 		params: Record<string, unknown> = {},
 		options: { timeoutMs?: number } = {}
 	): Promise<R> {
-		const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+		const timeoutMs = options.timeoutMs ?? requestTimeoutFor(method, this.requestTimeoutMs);
 		const deadline = Date.now() + timeoutMs;
 		if (!this.isOpen) {
 			if (!this.wanted) throw new RequestError('offline', `The ${this.service} service is not connected.`, method);

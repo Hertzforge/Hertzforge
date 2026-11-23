@@ -8,9 +8,9 @@
 //! |---|---|
 //! | `open()` | load the runtime, read device identity, BUILD the tasks from the stored [`NiConfig`] |
 //! | `configure(table, acq)` | re-derive the assignments from the channel table AND adopt the rate/block request, then rebuild the tasks; reports the ACTUAL rate back |
-//! | `arm()` | state gate + optional `DAQmxTaskControl(verify)`; no data moves |
+//! | `arm()` | state gate, commit AI and AO; with IEPE inputs not yet settled on this task, run AI alone (no drive) until they settle, then stop it back to committed |
 //! | `start()` | start AO first (it waits on the AI clock), then AI |
-//! | `stop()` | stop AO first (drive off), then AI |
+//! | `stop()` | stop AO first (drive off) and unreserve it, then stop AI; an AI task with IEPE inputs stays reserved so its excitation stays on for the whole test |
 //!
 //! `configure()` is OPTIONAL: a caller that already holds a table-derived
 //! [`NiConfig`] plus an [`hertzforge_hal::AcquisitionConfig`] (the selftest, and
@@ -192,6 +192,15 @@ pub struct NiBackend {
     /// check runs either way.
     overload_pollable: bool,
 
+    /// The IEPE inputs of the CURRENT input task have settled, and the task has
+    /// stayed reserved since, so its excitation never went off. The next arm
+    /// skips the settle. Cleared whenever the input task is cleared, rebuilt or
+    /// unreserved (`clear_tasks`, `stop()` on a task without IEPE inputs).
+    iepe_settled: bool,
+    /// Check the first block after this start for an IEPE input at its rail:
+    /// the sign that the excitation went off since the settle.
+    check_first_block: bool,
+
     read_scratch: Vec<f64>,
     write_scratch: Vec<f64>,
     /// When the device last ACCEPTED drive frames. The age of this at the
@@ -352,6 +361,8 @@ impl NiBackend {
             overload_latched: false,
             input_overloaded: Vec::new(),
             overload_pollable: true,
+            iepe_settled: false,
+            check_first_block: false,
             read_scratch: Vec::new(),
             write_scratch: Vec::new(),
             last_write_at: None,
@@ -541,6 +552,131 @@ impl NiBackend {
             .ok_or_else(|| NiError::config("no input task exists; call open() first"))
     }
 
+    /// The IEPE inputs of the AI task, as the settle watches them, in task
+    /// column order.
+    fn iepe_settle_channels(&self) -> Vec<crate::iepe_settle::SettleChannel> {
+        self.cfg
+            .ai_assignments
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.interface == AiInterface::Iepe)
+            .map(|(column, a)| crate::iepe_settle::SettleChannel {
+                physical: a.physical.clone(),
+                table_index: a.table_index,
+                column,
+                range_v: a.range_volts(),
+            })
+            .collect()
+    }
+
+    /// Run the AI task ALONE, with nothing driving, until every IEPE input has
+    /// settled (`crate::iepe_settle`), then stop it back to committed for the
+    /// run's own start. Nothing to do without IEPE inputs or without a driver.
+    ///
+    /// The AO task is committed but never started here, so no drive leaves the
+    /// device: it holds the 0 V every stop leaves it at. The frames read are
+    /// the settle's alone; they are not counted, not scaled and not checked for
+    /// overload, so the run's timebase and its overload marks begin at its own
+    /// start. The stop returns an explicitly committed task to committed (the
+    /// DAQmx task model), which keeps the reservation the arm just took.
+    fn settle_iepe_inputs(&mut self) -> Result<(), HalError> {
+        let channels = self.iepe_settle_channels();
+        if channels.is_empty() || self.iepe_settled {
+            // Nothing to watch, or this task's inputs settled at an earlier arm
+            // and its excitation has stayed on since: a pulse module's every
+            // shot re-arms, and pays nothing here.
+            return Ok(());
+        }
+        let (Ok(d), Some(ai)) = (self.drv(), self.ai) else {
+            return Ok(());
+        };
+        let n_ch = self.cfg.n_input_channels().max(1);
+        let frames = self.acq.block_frames.max(1);
+        let timeout = self.read_timeout_s(frames);
+        let mut settle = crate::iepe_settle::IepeSettle::new(channels, n_ch, self.actual_rate_hz);
+        let mut block = vec![0.0f64; frames * n_ch];
+
+        let wall_limit =
+            std::time::Duration::from_secs_f64(crate::iepe_settle::SETTLE_LIMIT_S + 5.0);
+        let started = std::time::Instant::now();
+        d.start_task(ai).map_err(HalError::from)?;
+        let outcome = loop {
+            let (status, got) = match d.read_analog_f64_raw(ai, frames as i32, timeout, &mut block)
+            {
+                Ok(r) => r,
+                Err(e) => break Err(HalError::from(e)),
+            };
+            if status < 0 && !ffi::is_timeout(status) {
+                let e = d
+                    .check_raw(status, "DAQmxReadAnalogF64 (IEPE settle)")
+                    .expect_err("a negative status is always an error");
+                break Err(HalError::from(e));
+            }
+            let got = got.max(0) as usize;
+            if got == 0 {
+                // The settle's limit is counted in frames, which a task that is
+                // not clocking never delivers; the wall clock bounds that case.
+                if started.elapsed() > wall_limit {
+                    break Err(HalError::Io(format!(
+                        "the IEPE settle read only {:.2} s of input in {:.0} s; the input task \
+                         is not clocking",
+                        settle.elapsed_s(),
+                        wall_limit.as_secs_f64()
+                    )));
+                }
+                continue;
+            }
+            match settle.feed(&block[..got * n_ch], got) {
+                crate::iepe_settle::SettleState::Pending => {}
+                crate::iepe_settle::SettleState::Settled => break Ok(()),
+                crate::iepe_settle::SettleState::TimedOut => {
+                    break Err(HalError::Config(settle.refusal()))
+                }
+            }
+        };
+        // Back to committed whatever happened: the run starts the task itself.
+        let stopped = d.stop_task(ai);
+        for line in settle.report() {
+            self.warnings.push(line);
+        }
+        self.absorb_driver_warnings();
+        outcome?;
+        stopped.map_err(HalError::from)?;
+        self.iepe_settled = true;
+        Ok(())
+    }
+
+    /// Does `stop()` keep the input task reserved? Yes when it has an IEPE
+    /// input, so the excitation current stays on for the whole test.
+    fn keeps_ai_reserved_on_stop(&self) -> bool {
+        self.cfg
+            .ai_assignments
+            .iter()
+            .any(|a| a.interface == AiInterface::Iepe)
+    }
+
+    /// The first block after a start, in VOLTS, interleaved in task order: the
+    /// IEPE inputs that read at their rail in it, with the sample that did. On a
+    /// settled task whose excitation stayed on, there are none; one here means
+    /// the current went off between the settle and this start.
+    fn iepe_rails_in_first_block(&self, volts: &[f64], frames: usize) -> Vec<(String, f64)> {
+        let n_ch = self.cfg.n_input_channels().max(1);
+        let frames = frames.min(volts.len() / n_ch);
+        self.cfg
+            .ai_assignments
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.interface == AiInterface::Iepe)
+            .filter_map(|(c, a)| {
+                let rail = hertzforge_hal::INPUT_OVERLOAD_FRACTION * a.range_volts();
+                (0..frames)
+                    .map(|f| volts[f * n_ch + c])
+                    .find(|v| v.abs() >= rail)
+                    .map(|v| (a.physical.clone(), v))
+            })
+            .collect()
+    }
+
     fn read_timeout_s(&self, frames: usize) -> f64 {
         let rate = if self.actual_rate_hz > 0.0 {
             self.actual_rate_hz
@@ -567,8 +703,11 @@ impl NiBackend {
             self.ao = None;
             self.ai = None;
         }
-        // No task, no generation.
+        // No task, no generation; and no input task, no excitation: the next
+        // arm settles the IEPE inputs again.
         self.generation_frames_written = 0;
+        self.iepe_settled = false;
+        self.check_first_block = false;
         // No task, no host loop: release the 1 ms timer (close, Drop, a rebuild,
         // and the abort path all come through here).
         #[cfg(windows)]
@@ -1638,6 +1777,16 @@ impl Backend for NiBackend {
                         ));
                     }
                 }
+                // SETTLE THE IEPE INPUTS before the run can be ready: the current
+                // coming on puts the sensor's bias across the AC coupling, and the
+                // channel reads its rail until that decays (`crate::iepe_settle`).
+                // After both commits, so the tasks are the ones the start will
+                // run; before the state turns Armed, so a module cannot start a
+                // drive on a channel still at its rail. A channel that does not
+                // settle refuses the arm. ONCE per input task: `stop()` keeps an
+                // IEPE task reserved, so its current stays on through every shot
+                // and play of the test, and later arms skip the settle.
+                self.settle_iepe_inputs()?;
                 // Last, after every check that can refuse: an arm that fails holds
                 // nothing. Released by stop(), the abort, a rebuild, close or Drop.
                 #[cfg(windows)]
@@ -1725,6 +1874,7 @@ impl Backend for NiBackend {
             d.start_task(ai).map_err(HalError::from)?;
         }
         self.overload_latched = false;
+        self.check_first_block = self.iepe_settled;
         self.state = State::Running;
         self.absorb_driver_warnings();
         Ok(())
@@ -1753,8 +1903,21 @@ impl Backend for NiBackend {
                 }
                 if let Some(ai) = self.ai {
                     let _ = d.stop_task(ai);
-                    let _ = d.task_control(ai, val::TASK_UNRESERVE);
+                    // An input task with IEPE inputs stays RESERVED: the stop
+                    // returns the explicitly committed task to committed, and
+                    // its excitation current stays on for the whole test -
+                    // identification, low-level and full-level pulses and every
+                    // play between them - instead of going off and on again at
+                    // every shot (Kevin, 2026-11-23). Only the AO's zombie needed
+                    // the unreserve; a task without IEPE inputs keeps the old
+                    // sequence unchanged.
+                    if !self.keeps_ai_reserved_on_stop() {
+                        let _ = d.task_control(ai, val::TASK_UNRESERVE);
+                    }
                 }
+            }
+            if !self.keeps_ai_reserved_on_stop() {
+                self.iepe_settled = false;
             }
             // The generation is over: the unreserve dropped whatever was still
             // queued, and the next start counts from zero.
@@ -1848,6 +2011,15 @@ impl Backend for NiBackend {
         let got = got.max(0) as usize;
         if got == 0 {
             return Ok(InputRead::NoDataYet);
+        }
+        if std::mem::take(&mut self.check_first_block) {
+            for (physical, v) in self.iepe_rails_in_first_block(&self.read_scratch, got) {
+                self.warnings.push(format!(
+                    "IEPE input {physical} read {v:.2} V, its rail, in the first block after this \
+                     start: its excitation current went off after the settle. Check the bench \
+                     before driving; the settle cannot cover a current that does not stay on"
+                ));
+            }
         }
         // VOLTS -> engineering units, host-side, exactly once. Written as
         // `v * 1000 / sens` so it is bit-identical to `hertzforge_dsp::eu::volts_to_eu`
@@ -2230,6 +2402,110 @@ mod tests {
 
     fn backend(n_in: usize, n_out: usize) -> NiBackend {
         NiBackend::new(cfg(n_in, n_out), acq())
+    }
+
+    /// The settle watches the IEPE inputs only, each at its own task column and
+    /// with its own range in volts, and names them by their table rows.
+    ///
+    /// RED-MUTATION: number the columns among the IEPE rows instead of among all
+    /// inputs (`enumerate` after the filter) and the third input reads column 1,
+    /// which is the single-ended row's.
+    #[test]
+    fn the_iepe_settle_watches_each_iepe_input_at_its_own_column() {
+        let mut inputs = ai(3);
+        inputs[1].interface = AiInterface::Voltage;
+        inputs[2].max_eu = 500.0;
+        inputs[2].sensitivity_mv_per_eu = 10.0;
+        let b = NiBackend::new(NiConfig::new(inputs, ao(1)), acq());
+        let w = b.iepe_settle_channels();
+        assert_eq!(w.len(), 2);
+        assert_eq!(
+            (w[0].column, w[0].table_index, w[0].range_v),
+            (0, Some(1), 1.0)
+        );
+        assert_eq!(
+            (w[1].column, w[1].table_index, w[1].range_v),
+            (2, Some(3), 5.0)
+        );
+        assert_eq!(w[1].physical, "Mod1/ai2");
+    }
+
+    /// The excitation stays on for the whole test: a stop between shots keeps an
+    /// IEPE input task reserved and its settle standing, so the next shot's arm
+    /// skips the settle. Only clearing the task (a rebuild, close, the abort)
+    /// ends it. A task without IEPE inputs is released at every stop, as before.
+    ///
+    /// RED-MUTATION: clear `iepe_settled` at every stop (or unreserve the IEPE
+    /// input task there) and the first assertion after the stop reds: every
+    /// pulse would turn the current off and settle again.
+    #[test]
+    fn a_stop_between_shots_keeps_the_iepe_current_on_and_the_settle_standing() {
+        let mut b = backend(2, 1);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        assert!(b.keeps_ai_reserved_on_stop());
+        for _ in 0..3 {
+            b.state = State::Configured;
+            b.arm().unwrap();
+            b.iepe_settled = true; // what a settle that ran on the bench leaves
+            b.state = State::Running;
+            b.stop().unwrap();
+            assert!(
+                b.iepe_settled,
+                "a stop between shots must not end the settle"
+            );
+        }
+        b.clear_tasks();
+        assert!(
+            !b.iepe_settled,
+            "a cleared task has no current: settle again"
+        );
+
+        let mut inputs = ai(1);
+        inputs[0].interface = AiInterface::Voltage;
+        let mut v = NiBackend::new(NiConfig::new(inputs, ao(1)), acq());
+        assert!(!v.keeps_ai_reserved_on_stop());
+        v.iepe_settled = true;
+        v.state = State::Running;
+        v.stop().unwrap();
+        assert!(!v.iepe_settled);
+    }
+
+    /// The first block after a later start is checked for an IEPE input at its
+    /// rail, which can only mean the current went off since the settle. Only
+    /// IEPE columns are judged, each against its own range.
+    #[test]
+    fn the_first_block_after_a_start_names_an_iepe_input_at_its_rail() {
+        let mut inputs = ai(3); // +/-1 V each
+        inputs[1].interface = AiInterface::Voltage;
+        let b = NiBackend::new(NiConfig::new(inputs, ao(1)), acq());
+        // frame-interleaved: ai0, ai1, ai2
+        let quiet = [0.01, 0.99, -0.02, 0.0, 0.99, 0.01];
+        assert!(
+            b.iepe_rails_in_first_block(&quiet, 2).is_empty(),
+            "ai1 is not IEPE"
+        );
+        let railed = [0.01, 0.0, 0.0, 0.02, 0.0, 0.985];
+        let r = b.iepe_rails_in_first_block(&railed, 2);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].0, "Mod1/ai2");
+        assert!((r[0].1 - 0.985).abs() < 1e-12);
+    }
+
+    /// Without a driver (a developer machine, these tests) there is nothing to
+    /// settle and the arm is the arm it always was; with no IEPE input there is
+    /// nothing to watch at all.
+    #[test]
+    fn an_arm_without_a_driver_skips_the_settle() {
+        let mut b = backend(2, 1);
+        b.ai = Some(Task(std::ptr::null_mut()));
+        b.state = State::Configured;
+        b.arm().unwrap();
+        assert_eq!(b.state, State::Armed);
+        assert!(b.warnings().iter().all(|w| !w.contains("IEPE")));
+        let mut inputs = ai(1);
+        inputs[0].interface = AiInterface::Voltage;
+        let b = NiBackend::new(NiConfig::new(inputs, ao(1)), acq());
+        assert!(b.iepe_settle_channels().is_empty());
     }
 
     /// The software overload check (the NI 9234 refuses DAQmx's own query with

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RequestError, ServiceClient, type SocketLike } from './client.svelte';
+import { ARM_REQUEST_TIMEOUT_MS, RequestError, ServiceClient, requestTimeoutFor, type SocketLike } from './client.svelte';
 import { createAnalysisServer } from './mock/analysis';
 import { createControlServer } from './mock/control';
 import { MockError, MockSocket, mockSocketFactory, type MockServer } from './mock/socket';
@@ -73,6 +73,20 @@ describe('ServiceClient over the mock transport', () => {
 		await c.whenOpen();
 		await expect(c.request('slow.op', {}, { timeoutMs: 40 })).rejects.toMatchObject({ code: 'timeout' });
 		c.close();
+	});
+
+	// A request that arms the station waits for the station's arm, which on hardware settles
+	// every IEPE input first. RED-MUTATION: give `.arm` and `.start` the ordinary timeout and a
+	// 15 s settle refusal reads as "no response within 10 s".
+	it('gives the requests that arm the station a minute, and every other request its own default', () => {
+		for (const m of ['random.arm', 'random.start', 'explorer.start', 'mimo_random.start', 'shock.arm', 'mimo_mixed.start']) {
+			expect(requestTimeoutFor(m, 10_000), m).toBe(ARM_REQUEST_TIMEOUT_MS);
+		}
+		for (const m of ['random.stop', 'random.level', 'channels.get', 'explorer.steer', 'random.start_over', 'started']) {
+			expect(requestTimeoutFor(m, 10_000), m).toBe(10_000);
+		}
+		expect(ARM_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
+		expect(requestTimeoutFor('random.start', 90_000)).toBe(90_000);
 	});
 
 	it('refuses a service that speaks another protocol', async () => {
