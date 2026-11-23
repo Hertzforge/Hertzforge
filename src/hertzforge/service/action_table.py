@@ -86,6 +86,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
     'expand_modes': (('shape_set',), "It needs a model's shape set to expand through"),
     'synthesize_modal_frfs': (('shape_set',), 'It needs real modes'),
+    'element_shapes': (('shape_set',), 'It needs real modes on a model with a group of solids'),
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
 }
 
@@ -95,7 +96,8 @@ INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
 #: readings whose form has no Apply either: drawn as the form opens and again after each change,
 #: since running them changes nothing. Live rows that carry `shows`
-SHOWN_LIVE = frozenset({'project.wavelet'})
+SHOWN_LIVE = frozenset({'project.wavelet', 'project.color_element_shapes',
+                        'project.play_element_shapes'})
 #: readings of one record that ask which, by name, when more than one is in play: the records
 #: picked under the object, or all of them when it is picked whole
 CHOOSES_RECORD = frozenset({'project.wavelet'})
@@ -112,6 +114,8 @@ PICKED_ONE = frozenset({'record', 'drawn'})
 #: `channels` or `rows` param takes that object's picks without being listed here
 _TWO_SETS = {'first_modes': 'first', 'second_modes': 'second'}
 PICKED = {'project.synthesize_modal_frfs': {'modes': 'source'},
+          'project.element_shapes': {'modes': 'source'},
+          'project.color_element_shapes': {'modes': 'object'},
           'project.transform': {'modes': 'shapes'},
           'project.project_onto_basis': {'modes': 'source'},
           'project.expand_modes': {'modes': 'source', 'basis': 'onto'},
@@ -378,6 +382,8 @@ def defaults(project: Any, kinds: list[str], names: list[str],
         kind = kinds[0]
         if kind == 'shape_set':
             return ['Animate' if names and _on_geometry(project, names[0]) else 'Table']
+        if kind == 'element_shape_set':
+            return ['Animate'] if names and _on_geometry(project, names[0]) else []
         if kind in ('channel_table', 'matched_modes'):
             return ['Table']
         return [] if kind in NO_VIEW else ['Plot']

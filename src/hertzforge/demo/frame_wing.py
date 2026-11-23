@@ -62,6 +62,7 @@ from typing import Any
 import numpy as np
 
 from hertzforge import View, fem
+from hertzforge.demo import color_groups
 
 # Built with the app's verbs so that students can follow the
 # documentation and make it themselves (Brandon, 2026-10-11).
@@ -224,6 +225,10 @@ def _wing(project: Any, name: str, wing: str, washers: bool,
 #: what each element group is made of, by name — the Element Groups table
 MATERIALS = {'frame': ALUMINUM, 'inserts': INSERT, 'screws': STEEL,
              'washers': STEEL, **{name: ALUMINUM for name in WINGS}}
+#: each element group's color (`drawing.viz.geometry.PALETTE`), so the
+#: frame, its inserts, the wing and the parts that bolt it on read apart
+COLORS = {'frame': 1, 'inserts': 2, 'screws': 4, 'washers': 5, 'screw heads': 9,
+          **{name: 3 for name in WINGS}}
 
 
 def _materials(geometry: Any) -> None:
@@ -270,6 +275,7 @@ def _model(project: Any, name: str, choice: str, size: float,
     _materials(project[name])
     if part != 'frame' and not alone:
         _bolt(project, name, part)
+    color_groups(project[name], COLORS)
     project[name].view = VIEW
 
 

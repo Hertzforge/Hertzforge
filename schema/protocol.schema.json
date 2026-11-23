@@ -278,7 +278,7 @@
         }},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "node_ids": {"$ref": "#/$defs/arrayRef"},
-        "home": {"type": "object", "required": ["eye", "up"], "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}},
+        "home": {"type": "object", "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "frame": {"type": "object", "required": ["lo", "hi"], "properties": {"lo": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "hi": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}}}, "dependentRequired": {"up": ["eye"], "eye": ["up"]}},
         "cursor": {"const": "frequency"},
         "arrows": {
           "type": "object", "required": ["tails", "directions", "axes", "length", "labels", "inward"],
@@ -286,7 +286,7 @@
             "tails": {"$ref": "#/$defs/arrayRef"}, "directions": {"$ref": "#/$defs/arrayRef"},
             "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0},
             "labels": {"type": "array", "items": {"type": "string"}}, "inward": {"$ref": "#/$defs/arrayRef"},
-            "follow": {"$ref": "#/$defs/arrayRef"}
+            "follow": {"$ref": "#/$defs/arrayRef"}, "lengths": {"$ref": "#/$defs/arrayRef"}
           }
         },
         "bodies": {
@@ -314,6 +314,25 @@
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
         "overlay_lines": {"$ref": "#/$defs/arrayRef"},
+        "element_values": {
+          "type": "object",
+          "required": ["quantity", "label", "unit", "scalar", "elements", "triangles", "owner", "shapes", "max"],
+          "additionalProperties": false,
+          "properties": {
+            "quantity": {"enum": ["strain", "stress"]},
+            "label": {"type": "string"},
+            "unit": {"type": "string"},
+            "scalar": {"enum": ["von_mises", "tresca", "max_principal", "mid_principal", "min_principal",
+                                "xx", "yy", "zz", "xy", "yz", "xz"]},
+            "elements": {"type": "integer", "minimum": 0},
+            "triangles": {"$ref": "#/$defs/arrayRef"},
+            "owner": {"$ref": "#/$defs/arrayRef"},
+            "shapes": {"$ref": "#/$defs/arrayRef"},
+            "shapes_imag": {"$ref": "#/$defs/arrayRef"},
+            "max": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 1},
+            "stated": {"type": "boolean"}
+          }
+        },
         "element_colors": {
           "type": "object", "required": ["triangles", "triangle_colors", "lines", "line_colors"],
           "additionalProperties": false,

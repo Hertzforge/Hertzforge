@@ -175,7 +175,7 @@
 				</p>
 			{/if}
 		{:else}
-			<p class="muted">Empty. Import a file, or drop one on the window in the desktop app.</p>
+			<p class="muted">Empty. Import a file, or drop one on the window.</p>
 		{/if}
 	{:else if !p.asking && !p.busy}
 		<p class="muted">Open a project or import your own files. In the desktop app, drop them on the window.</p>

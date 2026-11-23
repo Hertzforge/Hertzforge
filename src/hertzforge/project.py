@@ -41,6 +41,7 @@ from .core.data import (
 from .core.data_index import DataIndex, IndexEntry, Reference, file_state
 from .core.data_index import digest as digest_file
 from .core.data_index import now as _index_now
+from .core.element_shapes import ElementShapeSet
 from .core.field_limit import CONFIDENCE as _FIELD_CONFIDENCE
 from .core.field_limit import COVERAGE as _FIELD_COVERAGE
 from .core.field_limit import MAX_BREAKPOINTS as _FIELD_BREAKPOINTS
@@ -85,7 +86,7 @@ ObjectGroup = dict[str, Any]
 # record, where an FRF and a coherence need a reference as well.
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
-              _CoherenceBase, ShapeSet, MatchedModes, Predictions,
+              _CoherenceBase, ShapeSet, ElementShapeSet, MatchedModes, Predictions,
               RunLogExtract, RunRecord, TestSetup, Report)
 
 
@@ -112,6 +113,9 @@ def describe(obj: Any) -> str:
                 'are not physical'
                 if getattr(obj, 'unscaled', False) else '')
         return f'{obj.num_shapes} modes{span}{note}'
+    elif isinstance(obj, ElementShapeSet):
+        counts = [(obj.num_shapes, 'mode'), (len(obj.elements), 'element'),
+                  (obj.num_points, 'stress point')]
     elif isinstance(obj, SineLevelSet):
         return (f'{len(obj.levels)} tone{"s" * (len(obj.levels) != 1)}, '
                 f'{len(obj.response_dof)} channel'
@@ -246,7 +250,8 @@ _PARAMS_NAMING: dict[str, tuple[str, ...]] = {
     'compute_modal_responses': ('shapes',),
     'extract_sine': ('specification',),
     'derive_specification': ('sources',),
-    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',)}
+    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',),
+    'element_shapes': ('geometry',)}
 
 
 def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
@@ -294,6 +299,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('frf', 'frfs', Frf),
     ('coherence', 'coherences', _CoherenceBase),
     ('shapes', 'shape_sets', ShapeSet),
+    ('element_shapes', 'element_shape_sets', ElementShapeSet),
     ('matches', 'match_sets', MatchedModes),
     ('predictions', 'prediction_sets', Predictions),
     ('run_log_extract', 'run_log_extracts', RunLogExtract),
@@ -370,6 +376,8 @@ class Selection:
         coherences: list[_CoherenceBase]
         shapes: ShapeSet
         shape_sets: list[ShapeSet]
+        element_shapes: ElementShapeSet
+        element_shape_sets: list[ElementShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
         predictions: Predictions
@@ -546,6 +554,8 @@ class Project(dict):
         coherences: list[_CoherenceBase]
         shapes: ShapeSet
         shape_sets: list[ShapeSet]
+        element_shapes: ElementShapeSet
+        element_shape_sets: list[ElementShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
         predictions: Predictions
@@ -4104,7 +4114,9 @@ class Project(dict):
         response and monitor channel against each reference channel,
         through the set the modal FRFs are of (`modal_basis`). Each row
         answers in what its channel measures, turned from the modal FRFs'
-        quantity by (iω)^p. When the set and the table are each linked
+        quantity by (iω)^p; a strain channel is a gauge on the model the
+        set was solved on (`gauge_strains`), its strain per force turned as
+        a displacement is. When the set and the table are each linked
         to a geometry and the geometries differ, the shapes are taken at
         the channels as Project onto Basis DOFs takes them, nearest node
         within `tolerance`; otherwise the set's own DOFs are read. A
@@ -4281,6 +4293,104 @@ class Project(dict):
         target = ShapeSet([], [], dofs, np.zeros((0, len(dofs))))
         return project_shapes(set_obj, self[theirs], target, self[home],
                               tolerance=tolerance, distance=distance)
+
+    def gauge_strains(self, shapes: Any, table: Any, *,
+                      channels: Iterable[int] | None = None,
+                      modes: Sequence[int] | None = None,
+                      tolerance: float = 0.02,
+                      distance: float | None = None) -> tuple[np.ndarray, list[str], dict]:
+        """The strain each strain channel of a channel table reads in each
+        mode of a shape set solved on a model of solids: a gauge at the
+        channel's node, along its direction in the node's displacement
+        frame (`core.element_shapes.gauge_strains`).
+
+        When the set and the table are each linked to a geometry and the
+        two differ, each channel's node is matched to the model's nearest
+        node within `tolerance`, as Project onto Basis DOFs matches it
+        (`core.correlate.project_shapes`), and the channel's direction is
+        taken on the table's geometry. A channel with no node in reach is
+        dropped and named in the report.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The solved shape set, linked with its model.
+        table : str or object
+            The channel table; its channels of type strain are read.
+        channels : iterable of int, optional
+            Rows of the table (0-based) to read, of those measuring
+            strain. Every strain channel when omitted.
+        modes : sequence of int, optional
+            The set's modes, by index from 0. Every mode when omitted.
+        tolerance : float, default 0.02
+            How far the nearest node may be, as a fraction of the
+            table's geometry's extent (as `project_onto_basis`).
+        distance : float, optional
+            The same as a distance; it takes the place of `tolerance`.
+
+        Returns
+        -------
+        tuple of (numpy.ndarray, list of str, dict)
+            The strains (modes, channels read), per unit modal
+            coordinate; each read channel's DOF; and a report: 'nodes',
+            each read channel's model node, and 'dropped', the strain
+            channels with no node in reach.
+        """
+        from .core.correlate import project_shapes
+        from .core.element_shapes import gauge_strains
+        from .deform import dof_directions
+
+        shapes, table = self.name_of(shapes), self.name_of(table)
+        modal, channels_obj = self[shapes], self[table]
+        if not isinstance(modal, ShapeSet):
+            raise TypeError(f'{shapes!r} is not a shape set')
+        if not isinstance(channels_obj, ChannelTable):
+            raise TypeError(f'{table!r} is not a channel table')
+        dofs, kinds = channels_obj.dof_strings(), channels_obj.types()
+        rows = (range(len(dofs)) if channels is None
+                else list(dict.fromkeys(int(r) for r in channels)))
+        outside = [r for r in rows if not 0 <= r < len(dofs)]
+        if outside:
+            raise ValueError(f'{table} has {len(dofs)} channels; rows {outside} are not '
+                             'among them')
+        wanted = [dofs[r] for r in rows if kinds[r] == 'strain' and dofs[r]]
+        wanted = list(dict.fromkeys(wanted))
+        if not wanted:
+            raise ValueError(f'{table} has no strain channel with a node and direction'
+                             if channels is None else
+                             'none of the picked channels measures strain at a node and '
+                             'direction')
+        found = self.geometry_for(shapes)
+        if found is None:
+            raise ValueError(f'{shapes} has no geometry: link it with the model it was '
+                             'solved on')
+        model_name, model = found
+        home = self.geometry_for(table)
+        home_name, home_geometry = home if home is not None else found
+        rows_at, directions, used = dof_directions(home_geometry, wanted)
+        dropped = [dof for dof, ok in zip(wanted, used) if not ok]
+        read = [dof for dof, ok in zip(wanted, used) if ok]
+        node_of = {}
+        if home_name == model_name:
+            node_of = {dof: int(home_geometry.node_id[row]) for dof, row in zip(read, rows_at)}
+        else:
+            target = ShapeSet([], [], read, np.zeros((0, len(read))))
+            _projected, report = project_shapes(modal, model, target, home_geometry,
+                                                tolerance=tolerance, distance=distance)
+            pairs = dict(report['pairs'])
+            for dof, row in zip(read, rows_at):
+                test = int(home_geometry.node_id[row])
+                if test in pairs:
+                    node_of[dof] = int(pairs[test])
+        kept = [k for k, dof in enumerate(read) if dof in node_of]
+        dropped += [read[k] for k in range(len(read)) if read[k] not in node_of]
+        if not kept:
+            raise ValueError(f'no strain channel of {table} has a node of {model_name} in '
+                             'reach')
+        values = gauge_strains(model, modal, [(node_of[read[k]], directions[k]) for k in kept],
+                               modes=modes)
+        names = [read[k] for k in kept]
+        return values, names, {'nodes': [node_of[d] for d in names], 'dropped': dropped}
 
     def drive_points(self, table: Any) -> list[str]:
         """The DOFs a channel table says a force is applied at: its
@@ -4755,6 +4865,65 @@ class Project(dict):
         return self._derive(source, _synthesized(self, source, params),
                             name or f'{source} Modal FRFs',
                             recipe=('synthesize_modal_frfs', params))
+
+    def element_shapes(self, shapes: Any, *, groups: Sequence[Any] | None = None,
+                       modes: Sequence[int] | None = None,
+                       name: str | None = None) -> str:
+        """Read a solved model's modes as strain and stress at each solid
+        element's centroid and rule points (Strain and Stress), as an
+        element shape set beside the shape set.
+
+        The model is the geometry in the shape set's group, its element
+        groups carrying their materials. Each element is read through its
+        own strain matrix and elasticity (`core.element_shapes`): the six
+        strain and six stress components, global axes, SI, per unit modal
+        coordinate. Only solids are read: bricks, wedges and tetrahedra.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The solved shape set, by name or as the object itself.
+        groups : sequence of int or str, optional
+            The element groups to read, by id or name. Every group of
+            solids when omitted.
+        modes : sequence of int, optional
+            Which modes, by index from zero; all of them when omitted.
+        name : str, optional
+            What to call the result. Defaults to the set's name followed
+            by 'Strain and Stress'.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project.
+
+        Raises
+        ------
+        TypeError
+            If `shapes` is not a shape set.
+        ValueError
+            When the set has no geometry, or as
+            `core.element_shapes.element_shapes`: a group that holds
+            anything but solids, a set that does not reach the model's
+            nodes, a mode not in the set, or a set too large to hold.
+        """
+        source = self.name_of(shapes)
+        if not isinstance(self[source], ShapeSet):
+            raise TypeError(f'{source!r} is not a shape set')
+        found = self.geometry_for(source)
+        if found is None:
+            raise ValueError(f'{source} has no geometry: link it with the model it was '
+                             'solved on')
+        geometry_name, geometry = found
+        params: dict[str, Any] = {'geometry': geometry_name}
+        if groups is not None:
+            params['groups'] = [self._group_of(geometry, g) for g in groups]
+        if modes is not None:
+            params['modes'] = [int(k) for k in modes]
+        return self._derive(source, _read_in_elements(self, source, params),
+                            name or f'{source} Strain and Stress',
+                            recipe=('element_shapes', params))
 
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
@@ -6626,7 +6795,10 @@ class Project(dict):
         target's group. A channel table as the target puts a model's
         modes at a test's sensors and drives before there are test modes
         to compare with: its channels' DOFs, on the geometry the table
-        answers to. `channels` narrows a channel table to some of its
+        answers to. A strain channel is left out unless a motion channel
+        shares its node and direction, since a shape set holds
+        displacements; the report's 'strain' names those left out, and
+        `gauge_strains` reads them. `channels` narrows a channel table to some of its
         rows, such as the drives alone; each row's values are the same as
         in the projection onto the whole table. A geometry as the target
         puts the set on another model: its X, Y and Z at each of the
@@ -6733,8 +6905,21 @@ class Project(dict):
                 if outside:
                     raise ValueError(f'{onto} has {len(labels)} channels; '
                                      f'rows {outside} are not among them')
+            # a strain channel reads a gauge, not a displacement: left out
+            # here, unless a motion channel shares its node and direction,
+            # and read where its strain is asked for (`gauge_strains`)
+            kinds = self[onto].types()
+            moving = {labels[row] for row in rows if labels[row] and kinds[row] != 'strain'}
+            strained = list(dict.fromkeys(labels[row] for row in rows if labels[row]
+                                          and kinds[row] == 'strain'
+                                          and labels[row] not in moving))
             dofs = list(dict.fromkeys(labels[row] for row in rows
-                                      if labels[row]))
+                                      if labels[row] and labels[row] not in strained))
+            if not dofs and strained:
+                raise ValueError(
+                    f'the channels of {onto} picked all measure strain, and a shape set '
+                    'holds displacements: Expand at the table reads a strain channel as a '
+                    'gauge')
             if not dofs:
                 raise ValueError(
                     f'{onto} has no channel with a node and direction'
@@ -6779,7 +6964,9 @@ class Project(dict):
                                            tolerance=tolerance,
                                            distance=distance)
         # how it was made travels with it: matched and dropped counts,
-        # the worst distance accepted
+        # the worst distance accepted, and the strain channels left out
+        if target is not None and onto is not None and isinstance(self[onto], ChannelTable):
+            report['strain'] = strained
         projected.projection_report = report
         return projected, basis_name, name or f'{source} @ Basis DOFs'
 
@@ -9917,7 +10104,10 @@ class Project(dict):
         'compute_modal_responses': 'pair+model',
         # a mode's own FRF reads its frequency, damping and modal mass,
         # never its shape (2026-11-11)
-        'synthesize_modal_frfs': 'model'}
+        'synthesize_modal_frfs': 'model',
+        # the modes and the model they were solved on: a moved node, a
+        # new material or a mated surface changes the strain
+        'element_shapes': 'elements'}
 
     #: the fingerprints that hold settings only: a verb reading one reads
     #: the record's values as well, and those are compared on their own
@@ -9973,6 +10163,8 @@ class Project(dict):
                                table.types()):
                     digest.update('|'.join(column).encode())
             return ('content', digest.hexdigest())
+        if reads == 'elements':
+            return ('elements', _elements_digest(obj, self.get((params or {}).get('geometry'))))
         if reads == 'model':
             import hashlib
 
@@ -10709,6 +10901,9 @@ _VERB_APPLIES: tuple = (
     ('synthesize_modal_frfs', lambda p, o: (isinstance(o, ShapeSet)
                                             and o.num_shapes > 0
                                             and not o.is_complex)),
+    # modes solved on a model of solids, read as strain and stress element
+    # by element (2026-11-22, for the benchmark's stress table)
+    ('element_shapes', lambda p, o: _on_solids(p, o)),
     # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.group_properties))),
@@ -11076,7 +11271,7 @@ _JOURNALED_VERBS = (
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
+    'element_shapes', 'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
@@ -11187,6 +11382,7 @@ _RECOMPUTE = {
                                else _through(p, s, k, 'to_physical')),
     'compute_modal_responses': lambda p, s, k: _answered(p, s, k),
     'synthesize_modal_frfs': lambda p, s, k: _synthesized(p, s, k),
+    'element_shapes': lambda p, s, k: _read_in_elements(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
     'derive_specification': lambda p, s, k: _derived_again(p, k),
 }
@@ -11280,7 +11476,7 @@ def _at_channels(project, source, params):
         if not dof or role not in ('reference', 'response', 'monitor'):
             continue
         wanted = ('force',) if role == 'reference' else (
-            'acceleration', 'velocity', 'length')
+            'acceleration', 'velocity', 'length', 'strain')
         if kind not in wanted:
             label = kind or 'no type'
             skipped[label] = skipped.get(label, 0) + 1
@@ -11292,9 +11488,18 @@ def _at_channels(project, source, params):
         raise ValueError(f'{table!r} has no reference channel measuring force')
     if not responses:
         raise ValueError(f'{table!r} has no response or monitor channel '
-                         'measuring a motion')
+                         'measuring a motion or a strain')
+    strains, gauges = {}, None
+    if any(kind == 'strain' for _dof, kind in responses):
+        # each strain channel a gauge on the model the set was solved on
+        values, read, gauges = project.gauge_strains(
+            basis, table, tolerance=params.get('tolerance', 0.02),
+            distance=params.get('distance'))
+        strains = {dof: values[:, k] for k, dof in enumerate(read)}
     result, report = frfs_at_channels(modal, shapes, references, responses,
-                                      records=params.get('records'))
+                                      records=params.get('records'), strains=strains)
+    if gauges is not None:
+        report.dropped += [dof for dof in gauges['dropped'] if dof not in report.dropped]
     # a channel the projection could not reach is not in the projected
     # set, so the expansion has already named it among the dropped
     report.skipped.update(skipped)
@@ -11316,6 +11521,81 @@ def _synthesized(project, source, params):
         shapes, params['sample_rate'], params['frame_length'],
         quantity=params.get('quantity', 'acceleration'),
         modes=params.get('modes'), label=source)
+
+
+def _read_in_elements(project, source, params):
+    """The element shape set `element_shapes` makes, from its recipe:
+    read first and when refreshed."""
+    from .core.element_shapes import element_shapes
+
+    shapes = project[source]
+    if not isinstance(shapes, ShapeSet):
+        raise TypeError(f'{source!r} is not a shape set')
+    geometry = params.get('geometry')
+    if geometry not in project or not isinstance(project[geometry], Geometry):
+        raise ValueError(f'{source!r} was read on the geometry {geometry!r}, which is gone')
+    return element_shapes(project[geometry], shapes, groups=params.get('groups'),
+                          modes=params.get('modes'), comment=source)
+
+
+def _on_solids(project, obj) -> bool:
+    """Whether `obj` is a set of real modes on a geometry with a group of
+    solids that has a material: what `element_shapes` reads."""
+    if not isinstance(obj, ShapeSet) or not obj.num_shapes or obj.is_complex:
+        return False
+    try:
+        found = project.geometry_for(obj)
+    except (KeyError, ValueError):
+        return False
+    if found is None:
+        return False
+    geometry = found[1]
+    solid = {int(g) for g, props in (geometry.group_properties or {}).items()
+             if getattr(props, 'kind', '') == 'solid'}
+    rows = np.flatnonzero(np.isin(np.asarray(geometry.elem_group, dtype=np.int64), list(solid)))
+    if not len(rows):
+        return False
+    # the first and last solid's nodes stand for the rest: a set at a test's
+    # DOFs misses them, and reading every node of a large model each time the
+    # action table asks would hold it up
+    lookup = obj._dof_lookup()
+    return all(f'{int(node)}{axis}' in lookup for row in (rows[0], rows[-1])
+               for node in geometry.elem_conn[row] for axis in 'XYZ')
+
+
+def _elements_digest(shapes, geometry) -> str | None:
+    """The digest of what an element shape set is read from: the modes
+    and the model they were solved on, nodes, elements, frames, materials
+    and mated surfaces."""
+    import hashlib
+
+    if not isinstance(shapes, ShapeSet) or not isinstance(geometry, Geometry):
+        return None
+    digest = hashlib.blake2b(digest_size=16)
+    for array in (shapes.shape_matrix, shapes.frequency, shapes.damping,
+                  geometry.node_id, geometry.node_xyz, geometry.node_disp_cs,
+                  geometry.cs_matrix, geometry.elem_id, geometry.elem_group):
+        digest.update(np.ascontiguousarray(array).tobytes())
+    digest.update(','.join(shapes.coordinate).encode())
+    conn = [np.asarray(c, dtype=np.int64) for c in geometry.elem_conn]
+    digest.update(np.array([len(c) for c in conn], dtype=np.int64).tobytes())
+    if conn:
+        digest.update(np.concatenate(conn).tobytes())
+    # by value, not by repr: a density typed 2700 reads back 2700.0
+    for group, props in sorted((geometry.group_properties or {}).items()):
+        material = getattr(props, 'material', None)
+        digest.update(np.array([int(group)], dtype=np.int64).tobytes())
+        digest.update(props.kind.encode())
+        if material is not None:
+            digest.update(np.array([material.youngs_modulus, material.poissons_ratio,
+                                    material.shear_modulus], dtype=np.float64).tobytes())
+    for mated in getattr(geometry, 'mates', None) or []:
+        digest.update(f'{mated.normal_mode} {mated.shear_mode}'.encode())
+        for array in (mated.groups, mated.nodes_a, mated.nodes_b):
+            digest.update(np.asarray(array, dtype=np.int64).tobytes())
+        digest.update(np.array([mated.normal_stiffness, mated.shear_stiffness],
+                               dtype=np.float64).tobytes())
+    return digest.hexdigest()
 
 
 def _answered(project, source, params):

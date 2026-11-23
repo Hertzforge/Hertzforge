@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .animation import AnimationError, opening_camera, staged
+from .animation import AnimationError, amplitude_unit, framed, opening_camera, staged
 from .animation import animation_view as _shown
 
 #: seconds a mode takes to swing once, as the app plays it (`Shape3DPane` CYCLE_S)
@@ -52,7 +52,25 @@ class Recording:
     video's length; a mode swings for `cycles` cycles unless `seconds` says otherwise. `scale`
     multiplies the app's own amplitude (the largest deflection drawn at 7.5 % of the model's
     size). `opacity` is how solid the surface is drawn, 1 solid. `view` names a camera from
-    `animation.VIEWS` ('iso' the geometry's own view), or `eye` and `up` give one.
+    `animation.VIEWS` ('iso' the geometry's own view), or `eye` and `up` give one. `frame` names
+    element groups of the geometry to fit the camera to, in place of the whole model: the rest
+    is still drawn, running out of the frame, and the amplitude is still a share of the whole
+    model's size, so framing closer does not change how far the motion is magnified.
+    `magnification`, in place of `scale`, states that directly for measured displacement: the
+    displacement drawn over the true one, so recordings of different models share one scale.
+
+    `strain_stress` names an element shape set of the geometry whose elements are colored as
+    the model moves, the rest drawn gray: with `data`, modal coordinates of the shape set it was
+    read from, each element's tensor summed over the modes at each instant; with no data, its
+    own modes, each through its cycle. `quantity` is 'stress' or 'strain', and `color` the
+    scalar of the summed tensor the elements are colored by: 'von_mises', 'tresca',
+    'max_principal', 'mid_principal', 'min_principal' (stress), a component ('xx' ... 'xz'), or
+    'largest', the component that reaches furthest. `color_groups` names the element groups
+    colored (every element read when None). `color_max` states the top of the color scale, a
+    stress in `units`' pressure (MPa for 'mm-kg-N-s', psi for 'in-slinch-lbf-s'), so recordings
+    of one model under different loads read on the same colors; the clip's largest value, or
+    each mode's own, when None. The legend, drawn into every frame, names the scalar, its unit
+    in `units`, and a stated scale.
     """
 
     geometry: str
@@ -66,52 +84,139 @@ class Recording:
     seconds: float | None = None
     cycles: float = 3.0
     scale: float = 1.0
+    magnification: float | None = None
     opacity: float = 1.0
     view: str = 'iso'
     eye: Sequence[float] | None = None
     up: Sequence[float] | None = None
+    frame: Sequence[str] | None = None
     theme: str = 'dark'
     records: Sequence[int] = field(default_factory=tuple)
+    strain_stress: str | None = None
+    quantity: str = 'stress'
+    color: str = 'von_mises'
+    color_max: float | None = None
+    color_groups: Sequence[str] | None = None
+    units: str = 'm-kg-N-s'
+
+
+def coloring(project: Any, recording: Recording) -> dict[str, Any] | None:
+    """How the recording colors its elements (`service.show.element_coloring`), None when it
+    colors none; RecordError for a setting that cannot be read one way."""
+    from .service import display_units
+    from .service.show import element_coloring
+
+    if recording.units not in display_units.systems():
+        raise RecordError(f'the units are one of {", ".join(display_units.systems())}; not '
+                          f'{recording.units!r}')
+    if recording.strain_stress is None:
+        if (recording.color_max is not None or recording.color_groups
+                or recording.color != 'von_mises' or recording.quantity != 'stress'
+                or recording.units != display_units.DEFAULT):
+            raise RecordError('a color, a color scale, colored groups or units need the strain '
+                              'and stress to color by (strain_stress)')
+        return None
+    groups = ''
+    if recording.color_groups:
+        if recording.geometry not in project:
+            raise RecordError(f'the project has no object named {recording.geometry!r}')
+        geometry = project[recording.geometry]
+        ids = dict(zip(map(str, geometry.group_name), map(int, geometry.group_id), strict=True))
+        missing = [g for g in recording.color_groups if str(g) not in ids]
+        if missing:
+            raise RecordError(f'{recording.geometry} has no element group named '
+                              f'{missing[0]!r}; it has {", ".join(ids)}')
+        groups = ', '.join(str(ids[str(g)]) for g in recording.color_groups)
+    top = 0.0
+    if recording.color_max is not None:
+        if not recording.color_max > 0:
+            raise RecordError(f'the top of the color scale is above 0, not {recording.color_max}')
+        top = display_units.pressure_to_si(recording.color_max, recording.units)
+    return element_coloring(recording.strain_stress, recording.quantity, recording.color,
+                            groups, top)
 
 
 def animation_view(project: Any, recording: Recording) -> dict[str, Any]:
     """The `shape3d` view the app shows for the recording's selection, opening at its opacity
     and from its camera, or RecordError saying why there is none to play."""
+    from .service.display_units import element_values_in
+
     try:
         view = _shown(project, recording.geometry, recording.data, recording.shapes,
-                      recording.records)
+                      recording.records, coloring(project, recording))
         view = staged(view, recording.opacity,
-                      opening_camera(recording.view, recording.eye, recording.up))
+                      opening_camera(recording.view, recording.eye, recording.up),
+                      framed(project, recording.geometry, view, recording.frame))
     except RecordError:
         raise
     except AnimationError as error:
         raise RecordError(str(error)) from None
+    element_values_in(view, recording.units)
     if view.get('motion') is None and not 1 <= recording.mode <= len(view['modes']):
         raise RecordError(f'{recording.shapes or recording.data} has modes 1 to '
                           f'{len(view["modes"])}; not {recording.mode}')
     return view
 
 
+def drawn_scale(view: dict[str, Any], recording: Recording) -> float:
+    """The amplitude the view is drawn at, as a multiple of the app's own: the recording's
+    `scale`, or for a `magnification` the multiple that draws the motion's largest true
+    displacement (`motion.peak`, in meters as the nodes are) that many times over."""
+    if recording.magnification is None:
+        return float(recording.scale)
+    magnification = float(recording.magnification)
+    if recording.scale != 1.0:
+        raise RecordError('give the scale or the magnification, not both')
+    if not magnification > 0:
+        raise RecordError(f'the magnification is above 0, not {recording.magnification}')
+    motion = view.get('motion')
+    if motion is None:
+        raise RecordError("a magnification is of measured displacement, and a mode's size is "
+                          'arbitrary; set the scale instead')
+    # a displacement's dimension is length ('modal_length' for modal coordinates)
+    if str(motion.get('quantity', '')).lower() not in ('length', 'displacement'):
+        raise RecordError(f'a magnification is of displacement, and {recording.data} is '
+                          f'{str(motion.get("quantity") or "of no stated quantity").lower()}; '
+                          'set the scale instead')
+    if view.get('unit') == 'undefined':
+        raise RecordError(f'{recording.geometry} has no length unit to magnify against; '
+                          'set the scale instead')
+    peak = float(motion.get('peak') or 0.0)
+    if not peak > 0:
+        raise RecordError(f'{recording.data} never moves, so it has no magnification')
+    return magnification * peak / amplitude_unit(view)
+
+
 def record_page(project: Any, recording: Recording) -> str:
     """The report viewer's page with the recording's view in it, ready for a browser to draw."""
-    from .report.viewer import DATA, THEMES, viewer_page
-    from .service import frames
+    from .report.viewer import THEMES
 
     if recording.theme not in THEMES:
         raise RecordError(f'the theme is light or dark, not {recording.theme!r}')
     view = animation_view(project, recording)
     setup: dict[str, Any] = {'width': int(recording.width), 'height': int(recording.height),
-                             'scale': float(recording.scale)}
+                             'scale': drawn_scale(view, recording)}
     if view.get('motion') is None:
         setup['mode'] = recording.mode - 1
+    return stage_page(view, setup, recording.theme)
+
+
+def stage_page(view: dict[str, Any], setup: Mapping[str, Any], theme: str) -> str:
+    """The report viewer's page with `view` alone on it, drawn by the app's 3-D view at
+    `setup`'s size, scale and mode, in the `light` or `dark` theme."""
+    from .report.viewer import DATA, THEMES, viewer_page
+    from .service import frames
+
+    if theme not in THEMES:
+        raise RecordError(f'the theme is light or dark, not {theme!r}')
     frame = frames.pack({'type': 'response', 'id': 0,
-                         'result': {'record': {'view': view, 'setup': setup}}})
+                         'result': {'record': {'view': view, 'setup': dict(setup)}}})
     data = frame.encode('utf-8') if isinstance(frame, str) else frame
     page = viewer_page()
     if DATA not in page:
         raise RecordError('the report viewer holds no place for data; build it again')
     page = page.replace(DATA, base64.b64encode(data).decode('ascii'), 1)
-    return page.replace('<html lang="en">', f'<html lang="en" data-theme="{recording.theme}">', 1)
+    return page.replace('<html lang="en">', f'<html lang="en" data-theme="{theme}">', 1)
 
 
 def frame_times(info: Mapping[str, Any], recording: Recording) -> list[float]:
@@ -258,6 +363,65 @@ class _Chrome:
         self._profile.cleanup()
 
 
+def opened(browser: _Chrome, path: Path) -> None:
+    """The recording page at `path` opened in `browser` and drawn, ready for its frames, or
+    RecordError saying why the page did not draw it."""
+    browser.call('Page.enable')
+    browser.call('Runtime.enable')
+    browser.call('Inspector.enable')
+    browser.call('Page.navigate', {'url': path.as_uri()})
+    deadline = time.monotonic() + READY_S
+    while not browser.evaluate('!!window.__hertzforgeRecorder'):
+        failure = browser.evaluate(
+            "window.__hertzforgeRecorderFailed"
+            " ?? document.querySelector('.failure')?.textContent ?? null")
+        if failure or time.monotonic() > deadline:
+            why = failure or (browser.errors[-1] if browser.errors else None)
+            raise RecordError(f'the page did not draw the view in {READY_S:g} s'
+                              + (f': {why}' if why else '; it said nothing'))
+        time.sleep(0.1)
+
+
+def frame_at(info: Mapping[str, Any], at: float | None) -> float:
+    """Where one picture of the recording is drawn (`frame_times`' terms): for motion the sample
+    at time `at` in the data's own time (its first sample when None), for a mode `at` of its
+    cycle (a quarter, its full deflection, when None)."""
+    if not info.get('motion'):
+        return 0.25 if at is None else float(at) % 1.0
+    samples, start, step = int(info['samples']), float(info['start']), float(info['step'])
+    if at is None:
+        return 0.0
+    k = (float(at) - start) / step if step > 0 else 0.0
+    if not -1e-9 <= k <= samples - 1 + 1e-9:
+        raise RecordError(f'the data runs from {start:g} to {start + (samples - 1) * step:g} '
+                          f'{info.get("unit") or "s"}; {at:g} is outside it')
+    return min(max(0.0, round(k, 9)), samples - 1.0)
+
+
+def picture(project: Any, recording: Recording, output: str | os.PathLike,
+            at: float | None = None) -> Path:
+    """One frame of the recording, as the video would show it at `at` (`frame_at`), written to
+    `output`, a PNG; its path."""
+    if recording.width < 16 or recording.height < 16:
+        raise RecordError('the picture is at least 16 by 16 pixels')
+    page = record_page(project, recording)
+    chrome = find_chrome()
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='hertzforge-record-page-') as folder:
+        path = Path(folder) / 'record.html'
+        path.write_text(page, encoding='utf-8')
+        browser = _Chrome(chrome, recording.width, recording.height)
+        try:
+            opened(browser, path)
+            where = frame_at(browser.evaluate('window.__hertzforgeRecorder.info()'), at)
+            url = browser.evaluate(f'window.__hertzforgeRecorder.frame({where!r})')
+        finally:
+            browser.close()
+    output.write_bytes(base64.b64decode(url.split(',', 1)[1]))
+    return output
+
+
 def record(project: Any, recording: Recording, output: str | os.PathLike,
            progress: Any = None) -> Path:
     """The recording drawn and written to `output`, an MP4; its path. `progress`, when given, is
@@ -276,20 +440,7 @@ def record(project: Any, recording: Recording, output: str | os.PathLike,
         path.write_text(page, encoding='utf-8')
         browser = _Chrome(chrome, recording.width, recording.height)
         try:
-            browser.call('Page.enable')
-            browser.call('Runtime.enable')
-            browser.call('Inspector.enable')
-            browser.call('Page.navigate', {'url': path.as_uri()})
-            deadline = time.monotonic() + READY_S
-            while not browser.evaluate('!!window.__hertzforgeRecorder'):
-                failure = browser.evaluate(
-                    "window.__hertzforgeRecorderFailed"
-                    " ?? document.querySelector('.failure')?.textContent ?? null")
-                if failure or time.monotonic() > deadline:
-                    why = failure or (browser.errors[-1] if browser.errors else None)
-                    raise RecordError(f'the page did not draw the view in {READY_S:g} s'
-                                      + (f': {why}' if why else '; it said nothing'))
-                time.sleep(0.1)
+            opened(browser, path)
             info = browser.evaluate('window.__hertzforgeRecorder.info()')
             times = frame_times(info, recording)
             encoder = subprocess.Popen(

@@ -24,6 +24,7 @@ export const KIND_COLORS: Record<string, string> = {
 	coherence: '#bcbd22',
 	multiple_coherence: '#bcbd22',
 	shape_set: '#d94f8a',
+	element_shape_set: '#a0306b',
 	channel_table: '#4bb3fd',
 	report: '#d2c14e',
 	photos: '#b07d62',
@@ -81,6 +82,7 @@ export const KIND_ORDER = [
 	'coherence',
 	'multiple_coherence',
 	'shape_set',
+	'element_shape_set',
 	'matched_modes',
 	'predictions',
 	'run_log_extract',
@@ -249,6 +251,15 @@ export const OBJECT_DRAW: Record<string, (color: string) => string> = {
 		const points = round(sine(45, 32, 16, 2));
 		return polyline(points, c, 5) + [0, 11, 22, 33, 44].map((i) => dot(points[i], 5, c)).join('');
 	},
+	// the elements of a model each in its own shade: strain and stress read element by element
+	element_shape_set: (c) =>
+		rect(12, 14, 20, 18, c, 0, 60 / 255) +
+		rect(32, 14, 20, 18, c, 0, 150 / 255) +
+		rect(12, 32, 20, 18, c, 0, 1) +
+		rect(32, 32, 20, 18, c, 0, 110 / 255) +
+		rect(12, 14, 40, 36, c, 4, null, 2) +
+		line([32, 14], [32, 50], c, 4) +
+		line([12, 32], [52, 32], c, 4),
 	matched_modes: (c) => {
 		let out = '';
 		for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) out += rect(12 + j * 14, 12 + i * 14, 11, 11, c, 0, 70 / 255);

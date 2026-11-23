@@ -1458,11 +1458,19 @@ function sceneBlock(block) {
   const view = orbitView(canvas, block.home,
                          () => { if (!playing) draw(); });
   resetView.onclick = () => { view.home(); draw(); };
+  /* a scene framed on part of the model (`export_html`'s frame) looks
+     at the middle of that box and fits it, the rest still drawn around
+     it; the shapes still swing by the whole model's extent */
+  const F = block.frame;
+  const looked = F ? [0, 1, 2].map(a => (F.lo[a] + F.hi[a]) / 2) : center;
+  const fitted = F ? [0, 1, 2, 3, 4, 5, 6, 7].map(k =>
+    [k & 1 ? F.hi[0] : F.lo[0], k & 2 ? F.hi[1] : F.lo[1],
+     k & 4 ? F.hi[2] : F.lo[2]]) : P;
   // fit to what the home view actually projects, not the bounding
   // sphere — a flat model would otherwise open far too small
   let fitX = 0, fitY = 0;
-  P.forEach(p => {
-    const d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
+  fitted.forEach(p => {
+    const d = [p[0] - looked[0], p[1] - looked[1], p[2] - looked[2]];
     fitX = Math.max(fitX, Math.abs(d[0] * view.basis[0][0]
       + d[1] * view.basis[0][1] + d[2] * view.basis[0][2]));
     fitY = Math.max(fitY, Math.abs(d[0] * view.basis[1][0]
@@ -1497,8 +1505,8 @@ function sceneBlock(block) {
       if (m) p = [0, 1, 2].map(a => p[a]
         + amplitude * (m.real[i][a] * cos - m.imag[i][a] * sin));
       world.push(p);
-      const dx = p[0] - center[0], dy = p[1] - center[1],
-            dz = p[2] - center[2];
+      const dx = p[0] - looked[0], dy = p[1] - looked[1],
+            dz = p[2] - looked[2];
       deformed.push([
         width / 2 + scale * (dx * view.basis[0][0] + dy * view.basis[0][1]
                              + dz * view.basis[0][2]),
@@ -1527,8 +1535,11 @@ function sceneBlock(block) {
        than an element, so it cannot lift a dot through anything in
        front of it. */
     const bias = extent * 0.005;
-    for (let i = 0; i < deformed.length; i++)
-      items.push({ node: i, z: depth[i] + bias });
+    // a model of thousands of nodes is drawn without them: the squares
+    // tile its surface and read as speckle (`node_dots`)
+    if (block.node_dots !== false)
+      for (let i = 0; i < deformed.length; i++)
+        items.push({ node: i, z: depth[i] + bias });
     // deflection colormap, exactly the GUI's reading: |offset| per node
     // on viridis, the top of the scale pinned to this mode's own peak.
     // A flat scene (the matched-pair overlay) keeps its own colors:
@@ -1653,8 +1664,8 @@ function sceneBlock(block) {
     // thicken with zoom, and never read as pasted-on sprites
     const named = (block.arrows || []).length <= 40;
     const project = p => {
-      const dx = p[0] - center[0], dy = p[1] - center[1],
-            dz = p[2] - center[2];
+      const dx = p[0] - looked[0], dy = p[1] - looked[1],
+            dz = p[2] - looked[2];
       return [width / 2 + scale * (dx * view.basis[0][0] + dy * view.basis[0][1]
                                    + dz * view.basis[0][2]),
               height / 2 - scale * (dx * view.basis[1][0] + dy * view.basis[1][1]

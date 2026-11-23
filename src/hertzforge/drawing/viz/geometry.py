@@ -237,27 +237,95 @@ def dof_arrow_vectors(geometry: Geometry, dofs: Sequence[str]
     return out
 
 
+def dof_arrows_on(geometry: Geometry, dofs: Sequence[str], measured_on: Geometry | None = None,
+                  distance: float | None = None) -> list[tuple[int, np.ndarray, int]]:
+    """For each DOF, (node row of `geometry`, global direction, axis) for its arrow, or
+    ValueError naming the DOFs that have no place on `geometry`.
+
+    `measured_on` is the geometry whose node ids the DOFs name. When it is None or
+    `geometry` itself the ids are `geometry`'s own (`dof_arrow_vectors`). Otherwise each
+    DOF's node is found on `measured_on`, its direction turned by that node's displacement
+    system there, and the arrow is drawn at the node of `geometry` nearest it, as DOF
+    Mapping matches a test geometry to a model (`core.correlate.project_shapes`): no
+    further than `distance` (meters when the units are defined), or the match distance
+    (`core.correlate.match_distance`) when none is given. A test's node 101 is
+    usually some other node of a finite element mesh, so the ids are never read
+    across two geometries.
+    """
+    from ...core.correlate import match_distance, si_points
+
+    on = geometry if measured_on is None else measured_on
+    found = dof_arrow_vectors(on, dofs)
+    lost = [str(dof) for dof, hit in zip(dofs, found, strict=True) if hit is None]
+    if lost:
+        where = 'no node or direction on the geometry they were measured on' \
+            if on is not geometry else 'no node or direction on the geometry'
+        raise ValueError(f'{_counted(lost)} {"has" if len(lost) == 1 else "have"} {where}: '
+                         f'{_listed(lost)}')
+    if on is geometry:
+        return list(found)
+    if geometry.units_defined != on.units_defined:
+        raise ValueError('the geometry the DOFs were measured on and the one they are drawn on '
+                         'need units defined (or neither) to be matched by position')
+    if distance is not None and not (np.isfinite(distance) and distance > 0):
+        raise ValueError(f'the node match distance is {distance}; it must be above zero')
+    from scipy.spatial import cKDTree
+
+    limit = float(distance) if distance is not None else match_distance(geometry, on)
+    gaps, nearest = cKDTree(si_points(geometry)).query(si_points(on)[[hit[0] for hit in found]])
+    far = sorted({int(on.node_id[hit[0]]) for hit, gap in zip(found, gaps, strict=True)
+                  if gap > limit})
+    if far:
+        unit = 'm' if geometry.units_defined else 'in model units'
+        raise ValueError(
+            f'{_counted([str(n) for n in far], "measured node")} ({_listed([str(n) for n in far])}) '
+            f'{"has" if len(far) == 1 else "have"} no node of the geometry within '
+            f'{limit:.4g} {unit} (the furthest is {float(gaps.max()):.4g} {unit} away); check '
+            'that the geometries overlay, or give a larger distance')
+    return [(int(row), vector, axis)
+            for row, (_row, vector, axis) in zip(nearest, found, strict=True)]
+
+
+def _counted(items: Sequence[str], what: str = 'DOF') -> str:
+    return f'{len(items)} {what}{"s" * (len(items) != 1)}'
+
+
+def _listed(items: Sequence[str], shown: int = 8) -> str:
+    more = f' and {len(items) - shown} more' if len(items) > shown else ''
+    return ', '.join(items[:shown]) + more
+
+
 def dof_arrow_solids(xyz: np.ndarray,
                      drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
-                     length: float, labels: Sequence[str]) -> dict[str, Any]:
-    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
-    (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
-    node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
-    f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
-    (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
-    u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
-    node. A caller whose arrows move with the model adds `follow` u32 [A], the row of the
-    view's `nodes` whose motion each arrow takes."""
+                     length: float | Sequence[float], labels: Sequence[str]) -> dict[str, Any]:
+    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long, or each its own
+    length when `length` holds one per arrow. `drawn` is (points in, (node row, direction,
+    axis)) per arrow; an arrow pointing in ends on its node, the others start there. `tails`
+    f32 [A, 3] is where each starts, `directions` f32 [A, 3] the unit vector it points along,
+    and `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which picks its color. With one length
+    each they are `lengths` f32 [A], and `length` is the longest. `labels` names each arrow's DOF
+    and `inward` u8 [A] is 1 for an arrow that points in, so a label can sit at the end away
+    from the node. A caller whose arrows move with the model adds `follow` u32 [A], the row of
+    the view's `nodes` whose motion each arrow takes."""
+    each = np.ndim(length) > 0
+    lengths = (np.asarray(length, dtype=float) if each
+               else np.full(len(drawn), float(length)))
+    if each and len(lengths) != len(drawn):
+        raise ValueError(f'{len(lengths)} arrow lengths for {len(drawn)} arrows')
     tails = np.zeros((len(drawn), 3), dtype=np.float32)
     directions = np.zeros((len(drawn), 3), dtype=np.float32)
     axes = np.zeros(len(drawn), dtype=np.uint8)
     for k, (into, (row, vector, axis)) in enumerate(drawn):
-        tails[k] = xyz[row] - length * vector if into else xyz[row]
+        tails[k] = xyz[row] - lengths[k] * vector if into else xyz[row]
         directions[k] = vector
         axes[k] = axis
-    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length),
-            'labels': [str(label) for label in labels],
-            'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
+    out = {'tails': tails, 'directions': directions, 'axes': axes,
+           'length': float(lengths.max(initial=0.0)) if each else float(length),
+           'labels': [str(label) for label in labels],
+           'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
+    if each:
+        out['lengths'] = lengths.astype(np.float32)
+    return out
 
 
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:

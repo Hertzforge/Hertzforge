@@ -71,7 +71,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
+	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPlaces, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { fixedWideLines, wideLines } from './wideLines';
@@ -82,13 +82,14 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
+	import { COMPONENTS, legendValues, modeTensors, motionTensors, scalars, scaleAt, signed } from './stress';
 	import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedShapes, modelPlane, nearestEdge, nearestNode, numbered, pickClicks, placedPoint, setTriangles, toggledSurface } from './pick';
 	import { isAdding, setAdding } from './editMode.svelte';
 	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
-	import { linearColors, span as pointSpan } from './points';
+	import { amplitudeUnit, linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
-	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
+	import { homeFit, homePose as poseOf } from './fit';
 	import { StageCamera, lookAtFace } from './projection';
 
 	interface Props {
@@ -252,8 +253,6 @@
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
-	/** An amplitude of 1, as a fraction of the model's diagonal: the slider's default position, and its scale. */
-	const AMP_UNIT = 0.075;
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
@@ -318,12 +317,17 @@
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
+	/** Elements colored by strain or stress (`view.element_values`): with the colormap on, they color the elements named and the rest of the surface is gray. */
+	const stress = $derived(view.element_values);
+	const stressShown = $derived(colored && !!stress?.triangles.length && !colors);
 	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
 	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** Each DOF arrow's label written at its free end; kept across views and launches. */
 	const LABELS_KEY = 'hertzforge.shape3d.dofLabels';
 	let dofLabels = $state(readDofLabels());
+	/** A recording's frames carry the DOF labels drawn into them (`recordSetup`). */
+	let recordLabels = false;
 	function readDofLabels(): boolean {
 		try {
 			return localStorage.getItem(LABELS_KEY) === '1';
@@ -419,7 +423,7 @@
 	 */
 	function setAmplitudeMax(text: string) {
 		const value = Number(text);
-		const perUnit = AMP_UNIT * diagonal * display.factor;
+		const perUnit = perAmplitude * display.factor;
 		if (!Number.isFinite(value) || !(perUnit > 0)) return;
 		amplitudeMax = Math.min(1000, Math.max(0.1, value / perUnit));
 		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
@@ -455,16 +459,10 @@
 		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz), ...(view.segments ?? []).map((layer) => layer.xyz)]);
 	}
 
-	/** Model diagonal, from the undeformed nodes and any point layers. */
-	const diagonal = $derived.by(() => {
-		const { lo, hi } = span();
-		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
-		// that puts every point nowhere
-		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
-		return Number.isFinite(across) && across > 0 ? across : 1;
-	});
+	/** The deflection an amplitude of 1 draws: a share of the whole model's diagonal (`amplitudeUnit`), whatever the view is framed on. */
+	const perAmplitude = $derived(amplitudeUnit(view));
 
-	const peak = $derived(amplitude * AMP_UNIT * diagonal);
+	const peak = $derived(amplitude * perAmplitude);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
 	const extents = $derived.by(() => span());
@@ -475,7 +473,7 @@
 		return { factor: 1, unit: view.unit };
 	});
 	/** The slider's top as the peak deflection there, in the display units. */
-	const topPeak = $derived(amplitudeMax * AMP_UNIT * diagonal * display.factor);
+	const topPeak = $derived(amplitudeMax * perAmplitude * display.factor);
 
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
@@ -559,6 +557,16 @@
 	/** The elements in their own colors (`element_colors`), over the gray surface. */
 	let elementColors: Mesh | null = null;
 	let coloredLines: LineSegments | null = null;
+	/** The faces of the elements colored by stress, a corner per vertex so each face keeps its element's color, moving with their nodes. */
+	let stressMesh: Mesh | null = null;
+	let stressShape: BufferAttribute | null = null;
+	let stressShapeImag: BufferAttribute | null = null;
+	let stressColor: BufferAttribute | null = null;
+	/** Each element's summed tensor and its scalar at the instant drawn. */
+	let stressTensors = new Float32Array(0);
+	let stressValues = new Float32Array(0);
+	/** The mode and point of its cycle the stress colors were last formed at, so a still frame forms them once. */
+	let stressAt = '';
 	/** The selectable elements' faces, not drawn, that a click in Select mode is matched against, and each triangle's element. */
 	let elementPick: Mesh | null = null;
 	let elementOwner: number[] = [];
@@ -591,11 +599,7 @@
 	let resizeObs: ResizeObserver | null = null;
 	/** The box the model is framed by: the drawn nodes with the bodies and frames around them. */
 	let fitBox = new Box3();
-	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
-	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
-	}
-	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
+	/** The way the view opens looking from, and which way is up: `view.home`'s (the geometry's own, or the one a recording asked for), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
 		return poseOf(view.home);
 	}
@@ -660,7 +664,7 @@
 
 	/** The color of a node at `t` of the scale, or the surface's one color when coloring is off. */
 	function paint(colors: Float32Array, n: number, t: number, rgb: [number, number, number]) {
-		if (colored) colormap(t, rgb);
+		if (colored && !stressShown) colormap(t, rgb);
 		else {
 			rgb[0] = 0.62;
 			rgb[1] = 0.66;
@@ -698,8 +702,49 @@
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		followBodies(true);
+		followStress(true);
+		stressAt = '';
 		dirty = true;
 		paintColors();
+	}
+
+	/** Give the stress faces' corners their nodes' offsets: the real part, and the imaginary too when `both`. */
+	function followStress(both: boolean) {
+		if (!stress || !stressShape || !stressShapeImag) return;
+		followed(shapeAttr.array as Float32Array, stress.triangles, stressShape.array as Float32Array);
+		stressShape.needsUpdate = true;
+		if (both) {
+			followed(shapeImagAttr.array as Float32Array, stress.triangles, stressShapeImag.array as Float32Array);
+			stressShapeImag.needsUpdate = true;
+		}
+	}
+
+	/** The top of the color scale: the motion's, or the mode's shown. */
+	function stressMax(): number {
+		if (!stress) return 1;
+		return motion ? stress.max[0] : (stress.max[Math.min(Math.max(0, mode), stress.max.length - 1)] ?? stress.max[0]);
+	}
+
+	/** Color each stress face by its element's scalar now (`stressValues`), on the scale stated or found. */
+	function paintStress() {
+		if (!stress || !stressColor) return;
+		const out = stressColor.array as Float32Array;
+		const max = stressMax();
+		const isSigned = signed(stress.scalar);
+		const rgb: [number, number, number] = [0, 0, 0];
+		for (let f = 0; f < stress.owner.length; f++) {
+			colormap(scaleAt(stressValues[stress.owner[f]], max, isSigned), rgb);
+			const r = srgbToLinear(rgb[0]);
+			const g = srgbToLinear(rgb[1]);
+			const b = srgbToLinear(rgb[2]);
+			for (let c = 0; c < 3; c++) {
+				out[9 * f + 3 * c] = r;
+				out[9 * f + 3 * c + 1] = g;
+				out[9 * f + 3 * c + 2] = b;
+			}
+		}
+		stressColor.needsUpdate = true;
+		dirty = true;
 	}
 
 	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
@@ -769,6 +814,12 @@
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		followBodies(false);
+		if (stressMesh && stress && motion.modes) {
+			followStress(false);
+			motionTensors(stress, motion.values, samples, k, stressTensors);
+			scalars(stressTensors, stress.scalar, stressValues);
+			paintStress();
+		}
 		shownSample = k;
 		sample = k;
 		dirty = true;
@@ -798,14 +849,16 @@
 		// the colormap starts further in on the dark theme: the shader's copy is made again
 		uniforms.uMap.value.dispose();
 		uniforms.uMap.value = colormapTexture();
+		if (stressMesh) paintStress();
 		dirty = true;
 	}
 
 	function resetView() {
 		if (!renderer) return;
 		const { dir, up } = homePose();
-		controls.target.set(centre.x, centre.y, centre.z);
-		camera.position.copy(centre).addScaledVector(dir, fitDistance(dir, up));
+		const { target, distance } = homeFit(view.home, fitBox, centre, dir, up, camera.fov, camera.aspect);
+		controls.target.copy(target);
+		camera.position.copy(target).addScaledVector(dir, distance);
 		camera.up.copy(up);
 		controls.update();
 		dirty = true;
@@ -956,7 +1009,7 @@
 			labelAt = labelPoints(view.arrows);
 			if (view.arrows.follow) {
 				// arrows that ride their nodes (a force on the node it pushes): where each rests
-				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.length);
+				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.lengths ?? view.arrows.length);
 				labelRest = labelAt.slice();
 				arrowGone = new Float32Array(labelAt.length);
 			}
@@ -1134,6 +1187,31 @@
 			coloredLines.frustumCulled = false;
 			scene.add(coloredLines);
 		}
+		if (stress?.triangles.length) {
+			// each face its element's color: every corner its own vertex, riding its node's offset
+			const { triangles } = stress;
+			const xyz = new Float32Array(3 * triangles.length);
+			for (let v = 0; v < triangles.length; v++) xyz.set(view.nodes.subarray(3 * triangles[v], 3 * triangles[v] + 3), 3 * v);
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			stressShape = new BufferAttribute(new Float32Array(xyz.length), 3);
+			stressShapeImag = new BufferAttribute(new Float32Array(xyz.length), 3);
+			stressColor = new BufferAttribute(new Float32Array(xyz.length).fill(srgbToLinear(REST_GRAY)), 3);
+			g.setAttribute('shape', stressShape);
+			g.setAttribute('shapeImag', stressShapeImag);
+			g.setAttribute('color', stressColor);
+			// drawn just in front of the surface they lie on, so the two never fight over a pixel
+			stressMesh = new Mesh(
+				g,
+				displaced(
+					new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+				)
+			);
+			stressMesh.frustumCulled = false;
+			scene.add(stressMesh);
+			stressTensors = new Float32Array(stress.elements * COMPONENTS);
+			stressValues = new Float32Array(stress.elements);
+		}
 		const selectable = view.mark_sets?.find((set) => set.clicks);
 		if (selectable?.faces) {
 			const { index, owner } = setTriangles(selectable);
@@ -1237,15 +1315,15 @@
 		const h = Math.max(1, canvasHost.clientHeight);
 		labelsSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 		let drawn = '';
-		for (let k = 0; k < labels.length; k++) {
-			corner.set(labelAt[3 * k], labelAt[3 * k + 1], labelAt[3 * k + 2]).project(camera);
-			if (corner.z < -1 || corner.z > 1) continue;
-			const x = ((corner.x + 1) / 2) * w;
-			const y = ((1 - corner.y) / 2) * h;
-			if (x < 0 || x > w || y < 0 || y > h) continue;
-			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(labels[k])}</text>`;
+		for (const { x, y, text } of labelPlaces(labelAt, labels, toScreen, w, h)) {
+			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(text)}</text>`;
 		}
 		labelsSvg.innerHTML = drawn;
+	}
+	/** A point of the model in normalized device coordinates, through the camera. */
+	function toScreen(x: number, y: number, z: number): [number, number, number] {
+		corner.set(x, y, z).project(camera);
+		return [corner.x, corner.y, corner.z];
 	}
 	/** Past this many nodes the numbers are not offered: every node is projected on each frame the view moves. */
 	const NUMBERED_MODEL = 300_000;
@@ -1384,6 +1462,16 @@
 			const theta = 2 * Math.PI * phase;
 			re = scale * Math.sin(theta);
 			im = scale * Math.cos(theta);
+			if (stressMesh && stress && current) {
+				// the stress is the mode's own, at this point of its cycle: the amplitude only magnifies the drawing
+				const at = `${mode}:${theta}`;
+				if (at !== stressAt) {
+					modeTensors(stress, Math.min(Math.max(0, mode), view.modes.length - 1), Math.sin(theta), Math.cos(theta), stressTensors);
+					scalars(stressTensors, stress.scalar, stressValues);
+					paintStress();
+					stressAt = at;
+				}
+			}
 		}
 		if (uniforms.uRe.value !== re || uniforms.uIm.value !== im) {
 			uniforms.uRe.value = re;
@@ -1391,7 +1479,7 @@
 			dirty = true;
 		}
 		// a node's color is its offset now over the farthest any node goes: `peak` at this scale
-		const byDeflection = colored && !colors && (!!motion || !!current) ? 1 : 0;
+		const byDeflection = colored && !colors && !stressShown && (!!motion || !!current) ? 1 : 0;
 		if (uniforms.uScalar.value !== byDeflection || uniforms.uPeak.value !== (peak || 1)) {
 			uniforms.uScalar.value = byDeflection;
 			uniforms.uPeak.value = peak || 1;
@@ -1406,9 +1494,10 @@
 	 * at the model's centre with `up` up (the pane's own view when absent), the mode `modeAt` for a
 	 * shape set, playback paused, and the plot's own background painted in as Record paints it.
 	 */
-	export function recordSetup(o: { width: number; height: number; scale?: number; modeAt?: number }) {
+	export function recordSetup(o: { width: number; height: number; scale?: number; modeAt?: number; labels?: boolean }) {
 		if (!renderer) throw new Error('the 3-D view is not drawn yet');
 		playing = false;
+		recordLabels = !!o.labels;
 		resizeObs?.disconnect();
 		renderer.setPixelRatio(1);
 		renderer.setSize(o.width, o.height, false);
@@ -1416,7 +1505,8 @@
 		camera.updateProjectionMatrix();
 		if (o.scale !== undefined) amplitude = o.scale;
 		if (o.modeAt !== undefined) mode = Math.min(Math.max(0, o.modeAt), view.modes.length - 1);
-		// the view's own opening camera (`home`), fitted to the video's frame
+		// the view's own opening camera (`home`), fitted to the video's frame: the whole model, or
+		// the part `home.frame` names
 		resetView();
 		renderer.setClearColor(plotBackground(renderer.domElement), 1);
 		dirty = true;
@@ -1439,7 +1529,69 @@
 		else phase = ((at % 1) + 1) % 1;
 		deflect();
 		renderer.render(scene, camera);
-		return renderer.domElement.toDataURL('image/png');
+		const labels = view.arrows?.labels;
+		const writeLabels = recordLabels && !!labelAt && !!labels?.length;
+		// the legend of an element coloring belongs in the frame: without it the colors read as nothing
+		const writeLegend = stressShown && !!stress;
+		if (!writeLabels && !writeLegend) return renderer.domElement.toDataURL('image/png');
+		// the labels and the legend are written over the canvas in the pane, so a frame draws them
+		// in itself, as the pane writes them: bold, in the text color, edged in the background's
+		const picture = renderer.domElement;
+		const out = document.createElement('canvas');
+		out.width = picture.width;
+		out.height = picture.height;
+		const g = out.getContext('2d')!;
+		g.drawImage(picture, 0, 0);
+		const css = getComputedStyle(canvasHost);
+		const size = Math.max(11, Math.round(out.height / 60));
+		const ink = css.getPropertyValue('--text-1').trim() || css.color;
+		g.lineJoin = 'round';
+		g.lineWidth = Math.max(3, size / 4);
+		g.strokeStyle = plotBackground(picture);
+		g.fillStyle = ink;
+		if (writeLabels) {
+			g.font = `600 ${size}px ${css.fontFamily}`;
+			g.textAlign = 'center';
+			g.textBaseline = 'middle';
+			for (const { x, y, text } of labelPlaces(labelAt!, labels!, toScreen, out.width, out.height)) {
+				g.strokeText(text, x, y);
+				g.fillText(text, x, y);
+			}
+		}
+		if (writeLegend) drawLegend(g, size, css.fontFamily, out.height, ink);
+		return out.toDataURL('image/png');
+	}
+
+	/**
+	 * The color legend drawn into a recorded frame, at its bottom left as the pane shows it: the
+	 * scalar and its unit, the colormap as a bar, and the scale's ends and middle under it.
+	 */
+	function drawLegend(g: CanvasRenderingContext2D, size: number, family: string, height: number, ink: string) {
+		const width = 18 * size;
+		const bar = Math.round(0.9 * size);
+		const left = 1.5 * size;
+		const bottom = height - 1.5 * size;
+		const top = bottom - size - bar;
+		g.textBaseline = 'alphabetic';
+		g.font = `600 ${size}px ${family}`;
+		g.textAlign = 'left';
+		g.strokeText(legendTitle, left, top - 0.4 * size);
+		g.fillText(legendTitle, left, top - 0.4 * size);
+		const rgb: [number, number, number] = [0, 0, 0];
+		const steps = 128;
+		for (let i = 0; i < steps; i++) {
+			colormap((i + 0.5) / steps, rgb);
+			g.fillStyle = `rgb(${Math.round(rgb[0] * 255)} ${Math.round(rgb[1] * 255)} ${Math.round(rgb[2] * 255)})`;
+			g.fillRect(left + (i * width) / steps, top, width / steps + 1, bar);
+		}
+		g.fillStyle = ink;
+		g.font = `500 ${Math.round(0.9 * size)}px ${family}`;
+		legendTicks.forEach((text, i) => {
+			g.textAlign = i === 0 ? 'left' : i === legendTicks.length - 1 ? 'right' : 'center';
+			const x = left + (i * width) / (legendTicks.length - 1);
+			g.strokeText(text, x, bottom);
+			g.fillText(text, x, bottom);
+		});
 	}
 
 	onMount(init);
@@ -1486,8 +1638,19 @@
 		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
-		// the colors are the surface's: a wireframe or a see-through model shows the gray mesh
-		if (elementColors) elementColors.visible = !wireframe && opacity >= 1;
+		// the colors are the surface's: a wireframe shows the gray mesh, and a see-through model
+		// keeps its colors at the surface's opacity, so the parts still read apart. The gray
+		// surface is not drawn under them then: two see-through layers mix the colors to gray.
+		if (elementColors) {
+			const m = elementColors.material as MeshLambertMaterial;
+			m.transparent = opacity < 1;
+			m.opacity = opacity;
+			m.depthWrite = opacity >= 1;
+			m.needsUpdate = true;
+			elementColors.visible = !wireframe;
+		}
+		surface.visible = !(elementColors && !wireframe && opacity < 1);
+		if (stressMesh) stressMesh.visible = stressShown && !wireframe && opacity >= 1;
 		dirty = true;
 	});
 	// every node shows as a dot only while clicks make elements of them (Add mode)
@@ -1539,6 +1702,7 @@
 		lit?.geometry.dispose();
 		litEdges?.geometry.dispose();
 		elementColors?.geometry.dispose();
+		stressMesh?.geometry.dispose();
 		coloredLines?.geometry.dispose();
 		elementPick?.geometry.dispose();
 		overlayGeometry?.dispose();
@@ -1756,8 +1920,18 @@
 		e.preventDefault();
 	}
 
+	const legendTitle = $derived(
+		stressShown && stress
+			? `${stress.label}${stress.unit ? ` (${stress.unit})` : ''}${stress.stated ? ', stated scale' : ''}`
+			: motion
+				? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}`
+				: `Displacement (${display.unit})`
+	);
+
 	const legendTicks = $derived(
-		[0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
+		stressShown && stress
+			? legendValues(stress.max[motion ? 0 : Math.min(Math.max(0, mode), stress.max.length - 1)] ?? stress.max[0], signed(stress.scalar)).map((v) => formatNumber(v, 3))
+			: [0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
 	);
 </script>
 
@@ -1873,7 +2047,7 @@
 			</button>
 			{/if}
 			{#if moves}
-			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
+			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title={stress ? `Color the elements by ${stress.quantity}` : 'Color by deflection'}>Color</button>
 			{/if}
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
@@ -1949,13 +2123,11 @@
 	<div class="bottom">
 		{#if colors && legend}
 			<div class="legend" aria-label="Color legend">{@render legend()}</div>
-		{:else if moves && colored}
+		{:else if (moves || stressShown) && colored}
 		<div class="legend" aria-label="Color legend">
-			<div class="ltitle">
-				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
-			</div>
+			<div class="ltitle" data-testid="shape3d-legend-title">{legendTitle}</div>
 			<div class="bar" style:background={colormapGradient()}></div>
-			<div class="ticks num">
+			<div class="ticks num" data-testid="shape3d-legend-ticks">
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
 			</div>
 		</div>

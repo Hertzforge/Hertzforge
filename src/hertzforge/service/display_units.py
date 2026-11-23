@@ -284,6 +284,8 @@ def _shape(view: dict, system: Any) -> None:
             # the arrows over the model, in its coordinates
             arrows['tails'] = np.asarray(_values(arrows['tails'], change), dtype=np.float32)
             arrows['length'] = float(arrows['length'] / change[0])
+            if arrows.get('lengths') is not None:
+                arrows['lengths'] = np.asarray(arrows['lengths'] / change[0], dtype=np.float32)
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)
@@ -304,6 +306,7 @@ def _shape(view: dict, system: Any) -> None:
         pick = view.get('pick')
         if pick is not None and pick.get('target') == 'point' and not pick.get('in_display'):
             pick['to_si'] = [change[0], change[1]]
+    _element_values(view, system)
     motion = view.get('motion')
     if motion is not None:
         values = _change(motion.get('value_unit'), system)
@@ -311,6 +314,42 @@ def _shape(view: dict, system: Any) -> None:
             motion['values'] = _values(motion['values'], values)
             motion['peak'] = abs(float(_values(motion['peak'], values)))
             motion['value_unit'] = values[2]
+            held = view.get('element_values')
+            if held is not None:
+                # the shell sums each element's tensors times these modal coordinates, now
+                # in the system's length: the tensors take the length's scale back, so the
+                # sum is the same stress
+                held['shapes'] = (np.asarray(held['shapes']) * values[0]).astype(np.float32)
+
+
+def _element_values(view: dict, system: Any) -> None:
+    held = view.get('element_values')
+    if held is None:
+        return
+    # each element's stress tensors and the top of their color scale, in the system's
+    # pressure; strain has no unit
+    values = _change(held.get('unit'), system)
+    if values is not None:
+        held['shapes'] = np.asarray(_values(held['shapes'], values), dtype=np.float32)
+        if 'shapes_imag' in held:
+            held['shapes_imag'] = np.asarray(_values(held['shapes_imag'], values),
+                                             dtype=np.float32)
+        held['max'] = [abs(float(_values(m, values))) for m in held['max']]
+        held['unit'] = values[2]
+
+
+def element_values_in(view: dict, name: str) -> dict:
+    """A `shape3d` view's `element_values` put into the system `name`, in place, and
+    nothing else of it: a recording draws the model in meters and says its stress in the
+    system chosen. Returned for chaining."""
+    if name != DEFAULT:
+        _element_values(view, _system(name))
+    return view
+
+
+def pressure_to_si(value: float, name: str) -> float:
+    """A stress typed in the system `name`, in pascals."""
+    return float(value) * float(_system(name).transform('pressure')[0])
 
 
 def convert(views: list[dict], name: str) -> list[dict]:

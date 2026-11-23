@@ -201,6 +201,31 @@ def test_a_scene_is_a_mesh_with_its_modes():
     assert mode['shape_imag'].shape == (4, 3)
 
 
+def test_a_model_scene_draws_each_part_in_its_color_from_its_own_view():
+    """The model report's figure of the model draws every element group in
+    its own color, opening on the geometry's own view (the BARC is built Y
+    up, and opened on its side); the figure of its modes stays colored by
+    displacement, since the colored elements do not move."""
+    from hertzforge.demo import barc
+    from hertzforge.drawing.viz.geometry import color_rgb
+
+    project = hertzforge.Project('BARC')
+    project.add('BARC', barc.solid_geometry('removable component', 0.25))
+    project.solve_modes('BARC', num_modes=7)
+    name = project.generate_report('model')
+    model, modes = [view for block in page_blocks(project[name], dict(project.items()))
+                    for view in block.get('views') or [] if view['view'] == 'shape3d']
+    _valid([model, modes])
+    drawn = {tuple(c) for c in model['element_colors']['triangle_colors'].tolist()}
+    groups = [barc.COLORS[g] for g in ('right channel', 'left channel', 'beam')]
+    assert drawn == {tuple(round(255 * c) for c in color_rgb(k)) for k in groups}
+    assert len(model['element_colors']['triangles']) == len(model['triangles'])
+    eye = np.asarray(barc.VIEW.eye) / np.linalg.norm(barc.VIEW.eye)
+    assert np.allclose(model['home']['eye'], eye)
+    assert model['home']['up'][1] > 0.5, 'Y up'
+    assert 'element_colors' not in modes and modes['modes']
+
+
 def test_a_map_a_mac_a_verdict_and_a_photo_are_their_views():
     coherence = {'kind': 'map', 'label': 'Figure 7', 'x': [10.0, 20.0],
                  'xlabel': 'frequency [Hz]', 'zlabel': 'coherence', 'labels': ['a', 'b'],

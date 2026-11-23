@@ -42,7 +42,7 @@ SAVED_KINDS = ('geometry', 'time_history', 'spectrum', 'frf', 'psd', 'coherence'
                'shock_specification', 'sine_target', 'sine_level', 'shape_set',
                'channel_table', 'report', 'photos', 'matched_modes',
                'sine_sweep_specification', 'sine_level_set', 'predictions',
-               'run_log_extract')
+               'run_log_extract', 'element_shape_set')
 
 NATIVE = Option('hforge', 'Hertzforge object (.hforge)')
 

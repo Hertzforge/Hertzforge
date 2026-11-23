@@ -228,6 +228,36 @@ export interface Motion {
 	peak: number;
 }
 
+/** One scalar of a stress tensor: von Mises, Tresca, a principal stress or one component. */
+export type StressScalar = 'von_mises' | 'tresca' | 'max_principal' | 'mid_principal' | 'min_principal' | 'xx' | 'yy' | 'zz' | 'xy' | 'yz' | 'xz';
+
+/**
+ * Elements colored by strain or stress (schema/PROTOCOL.md, `element_values`): each mode's tensor at
+ * each colored element, summed per frame with the modal coordinates (`viz/stress.ts`).
+ */
+export interface ElementValues {
+	quantity: 'strain' | 'stress';
+	/** What the legend says, such as 'Von Mises stress'. */
+	label: string;
+	/** The display system's stress unit, or '' for strain. */
+	unit: string;
+	scalar: StressScalar;
+	/** The number of colored elements, E. */
+	elements: number;
+	/** u32 [T, 3]: the colored elements' drawn faces, rows of `nodes`. */
+	triangles: Uint32Array;
+	/** u32 [T]: the element each face belongs to, 0 to E - 1. */
+	owner: Uint32Array;
+	/** f32 [M, E, 6]: each mode's tensor at each element, xx yy zz xy yz xz, per unit modal coordinate. */
+	shapes: Float32Array;
+	/** f32 [M, E, 6]: the imaginary part of a complex mode's. */
+	shapes_imag?: Float32Array;
+	/** The top of the color scale in `unit`: one for a motion, one per mode for modes. */
+	max: number[];
+	/** Whether `max` was stated rather than taken from the largest value shown. */
+	stated?: boolean;
+}
+
 export interface Shape3DView {
 	view: 'shape3d';
 	title: string;
@@ -241,10 +271,12 @@ export interface Shape3DView {
 	modes: Mode[];
 	/** Measured data to play back, with `modes` empty. */
 	motion?: Motion;
+	/** Elements colored by stress as the model moves, through `motion.modes` or `modes`. */
+	element_values?: ElementValues;
 	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
 	node_ids?: Uint32Array;
-	/** The way the view opens looking from: `eye` the direction from the model to the camera, `up` the way up on screen (the geometry's own view); from the front right, Z up, when absent. */
-	home?: { eye: number[]; up: number[] };
+	/** The way the view opens looking from: `eye` the direction from the model to the camera, `up` the way up on screen (the geometry's own view), from the front right, Z up, when absent; `frame` the box (`lo`, `hi`) the camera is fitted to in place of the whole model. */
+	home?: { eye?: number[]; up?: number[]; frame?: { lo: number[]; hi: number[] } };
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
 	/**
@@ -254,7 +286,7 @@ export interface Shape3DView {
 	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node. With
 	 * `follow` [A] the arrows move: each takes the motion of that row of `nodes` (2^32 − 1 stays put).
 	 */
-	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; lengths?: Float32Array; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
 	/**
 	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
@@ -297,6 +329,11 @@ export interface Shape3DView {
 	mark_sets?: MarkSet[];
 	/** The elements in their own colors: triangles and lines (rows of `nodes`) and each one's color, u8 RGB. */
 	element_colors?: { triangles: Uint32Array; triangle_colors: Uint8Array; lines: Uint32Array; line_colors: Uint8Array };
+	/**
+	 * One component of each element's strain or stress, per mode: the elements' outside as rows of
+	 * `nodes`, each triangle's element as its column of `values` (f32 [modes, elements], the modes in
+	 * `modes` order), drawn each element its own color over the deflected surface.
+	 */
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
