@@ -242,3 +242,127 @@ def test_a_frame_the_scene_cannot_have_is_refused(tmp_path):
     measured, _spec = _pair()
     with pytest.raises(ValueError, match='a plot has none'):
         hertzforge.export_html(tmp_path / 'x.html', measured, frame=['b'])
+
+
+def test_node_dots_are_left_off_a_large_model_unless_asked_for(tmp_path):
+    """On a finite element mesh the canvas's node squares tile the surface and read as
+    speckle; a test geometry of a few hundred points keeps them."""
+    from hertzforge import mesh
+    from hertzforge.report import NODE_DOT_LIMIT
+
+    def dots(geometry, **options):
+        path = hertzforge.export_html(tmp_path / 'g.html', geometry=geometry, **options)
+        [block] = _payload(path)[1]['blocks']
+        return len(block['points']), block['node_dots']
+
+    small = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.1, unit=None)
+    large = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.025, unit=None)
+    assert dots(small) == (121, True)
+    count, drawn = dots(large)
+    assert count > NODE_DOT_LIMIT and drawn is False
+    assert dots(large, node_dots=True) == (count, True)
+    assert dots(small, node_dots=False) == (121, False)
+    with pytest.raises(ValueError, match="node_dots draws a scene's nodes, and a plot has none"):
+        hertzforge.export_html(tmp_path / 'p.html', _pair()[0], node_dots=False)
+
+
+def _test_on(plate, seats, ids):
+    """A test geometry: nodes `ids` at the places of `plate`'s nodes `seats`."""
+    from hertzforge import Geometry
+
+    rows = [int(np.flatnonzero(plate.node_id == seat)[0]) for seat in seats]
+    return Geometry(node_id=np.asarray(ids, dtype=np.int64),
+                    node_xyz=np.asarray(plate.node_xyz, dtype=float)[rows],
+                    node_def_cs=np.ones(len(ids), dtype=np.int64),
+                    node_disp_cs=np.ones(len(ids), dtype=np.int64), cs_id=np.array([1]),
+                    cs_name=[''], cs_type=np.zeros(1, dtype=np.int64),
+                    cs_matrix=np.array([np.vstack([np.eye(3), np.zeros(3)])]),
+                    length_unit=plate.length_unit)
+
+
+def test_a_tests_dofs_are_drawn_where_they_were_measured(tmp_path):
+    """Node 1 of a test is some other node of a model: given the geometry the data was
+    measured on, each arrow is drawn at the model's node nearest the sensor; without it, a DOF
+    the model has no node for is refused rather than left out."""
+    from hertzforge import mesh
+    from hertzforge.core.data import TimeHistory
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.1, unit=None)
+    seats = [int(plate.node_id[-1]), int(plate.node_id[60])]
+    test = _test_on(plate, seats, [1, 2])
+    history = TimeHistory(np.arange(4) / 4.0, np.ones((2, 4)), ['1Z+', '2X+'],
+                          ordinate_dim='acceleration')
+    path = hertzforge.export_html(tmp_path / 'd.html', geometry=plate,
+                                  dofs=('acceleration', history, test))
+    [block] = _payload(path)[1]['blocks']
+    points = np.asarray(block['points'])
+    xyz = np.asarray(plate.node_xyz)
+    drawn = [points[arrow['node']] for arrow in block['arrows']]
+    assert drawn == [pytest.approx(xyz[np.flatnonzero(plate.node_id == seat)[0]])
+                     for seat in seats]
+    assert [arrow['label'] for arrow in block['arrows']] == ['1Z+', '2X+']
+    # by id, node 1 of the plate is its corner, not where the sensor was
+    corner = hertzforge.export_html(tmp_path / 'c.html', geometry=plate,
+                                    dofs=('acceleration', history))
+    [by_id] = _payload(corner)[1]['blocks']
+    assert np.asarray(by_id['points'])[by_id['arrows'][0]['node']] == pytest.approx(xyz[0])
+    far = TimeHistory(np.arange(4) / 4.0, np.ones((2, 4)), ['1Z+', '9999X+'],
+                      ordinate_dim='acceleration')
+    with pytest.raises(ValueError, match=r'1 DOF has no node or direction on the geometry: '
+                                         r'9999X\+'):
+        hertzforge.export_html(tmp_path / 'f.html', geometry=plate, dofs=('acceleration', far))
+    with pytest.raises(ValueError, match=r'1 DOF has no node or direction on the geometry '
+                                         r'they were measured on: 9999X\+'):
+        hertzforge.export_html(tmp_path / 'f.html', geometry=plate,
+                               dofs=('acceleration', far, test))
+    with pytest.raises(ValueError, match=r'dofs is \(quantity, data\) or'):
+        hertzforge.export_html(tmp_path / 'f.html', geometry=plate,
+                               dofs=('acceleration', history, test, test))
+
+
+@pytest.mark.slow
+def test_the_page_draws_no_node_squares_when_told_not_to(tmp_path):
+    """Measured on the drawn canvas, in headless Chrome: the squares in the nodes' own color
+    are there with node_dots and gone without, while the plate itself is drawn both times."""
+    import time
+
+    from hertzforge import mesh
+    from hertzforge.drawing.viz.geometry import PALETTE
+    from hertzforge.record import RecordError, _Chrome, find_chrome
+
+    try:
+        chrome = find_chrome()
+    except RecordError as error:
+        pytest.skip(str(error))
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.1, unit=None)
+    plate.node_color[:] = 4
+    red = [round(255 * c) for c in PALETTE[4]]
+    count = f"""(() => {{
+        const c = document.querySelector('canvas');
+        if (!c || !c.width) return null;
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let node = 0, drawn = 0;
+        for (let i = 0; i < d.length; i += 4) {{
+            if (d[i + 3]) drawn++;
+            if (d[i] === {red[0]} && d[i + 1] === {red[1]} && d[i + 2] === {red[2]}) node++;
+        }}
+        return [node, drawn];
+    }})()"""
+    seen = {}
+    for dots in (True, False):
+        path = tmp_path / f'dots-{dots}.html'
+        hertzforge.export_html(path, geometry=plate, node_dots=dots, theme='light')
+        browser = _Chrome(chrome, 800, 600)
+        try:
+            browser.call('Page.enable')
+            browser.call('Runtime.enable')
+            browser.call('Page.navigate', {'url': path.as_uri()})
+            deadline = time.monotonic() + 30
+            while not (found := browser.evaluate(count)) or not found[1]:
+                assert time.monotonic() < deadline, f'the page drew nothing: {browser.errors}'
+                time.sleep(0.1)
+            seen[dots] = found
+        finally:
+            browser.close()
+    assert seen[True][0] > 100, '121 nodes, a 4 by 4 square each, some behind others'
+    assert seen[False][0] == 0 and seen[False][1] > 10_000

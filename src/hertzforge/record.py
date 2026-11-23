@@ -131,8 +131,7 @@ def drawn_scale(view: dict[str, Any], recording: Recording) -> float:
 
 def record_page(project: Any, recording: Recording) -> str:
     """The report viewer's page with the recording's view in it, ready for a browser to draw."""
-    from .report.viewer import DATA, THEMES, viewer_page
-    from .service import frames
+    from .report.viewer import THEMES
 
     if recording.theme not in THEMES:
         raise RecordError(f'the theme is light or dark, not {recording.theme!r}')
@@ -141,14 +140,25 @@ def record_page(project: Any, recording: Recording) -> str:
                              'scale': drawn_scale(view, recording)}
     if view.get('motion') is None:
         setup['mode'] = recording.mode - 1
+    return stage_page(view, setup, recording.theme)
+
+
+def stage_page(view: dict[str, Any], setup: Mapping[str, Any], theme: str) -> str:
+    """The report viewer's page with `view` alone on it, drawn by the app's 3-D view at
+    `setup`'s size, scale and mode, in the `light` or `dark` theme."""
+    from .report.viewer import DATA, THEMES, viewer_page
+    from .service import frames
+
+    if theme not in THEMES:
+        raise RecordError(f'the theme is light or dark, not {theme!r}')
     frame = frames.pack({'type': 'response', 'id': 0,
-                         'result': {'record': {'view': view, 'setup': setup}}})
+                         'result': {'record': {'view': view, 'setup': dict(setup)}}})
     data = frame.encode('utf-8') if isinstance(frame, str) else frame
     page = viewer_page()
     if DATA not in page:
         raise RecordError('the report viewer holds no place for data; build it again')
     page = page.replace(DATA, base64.b64encode(data).decode('ascii'), 1)
-    return page.replace('<html lang="en">', f'<html lang="en" data-theme="{recording.theme}">', 1)
+    return page.replace('<html lang="en">', f'<html lang="en" data-theme="{theme}">', 1)
 
 
 def frame_times(info: Mapping[str, Any], recording: Recording) -> list[float]:
@@ -295,6 +305,25 @@ class _Chrome:
         self._profile.cleanup()
 
 
+def opened(browser: _Chrome, path: Path) -> None:
+    """The recording page at `path` opened in `browser` and drawn, ready for its frames, or
+    RecordError saying why the page did not draw it."""
+    browser.call('Page.enable')
+    browser.call('Runtime.enable')
+    browser.call('Inspector.enable')
+    browser.call('Page.navigate', {'url': path.as_uri()})
+    deadline = time.monotonic() + READY_S
+    while not browser.evaluate('!!window.__hertzforgeRecorder'):
+        failure = browser.evaluate(
+            "window.__hertzforgeRecorderFailed"
+            " ?? document.querySelector('.failure')?.textContent ?? null")
+        if failure or time.monotonic() > deadline:
+            why = failure or (browser.errors[-1] if browser.errors else None)
+            raise RecordError(f'the page did not draw the view in {READY_S:g} s'
+                              + (f': {why}' if why else '; it said nothing'))
+        time.sleep(0.1)
+
+
 def record(project: Any, recording: Recording, output: str | os.PathLike,
            progress: Any = None) -> Path:
     """The recording drawn and written to `output`, an MP4; its path. `progress`, when given, is
@@ -313,20 +342,7 @@ def record(project: Any, recording: Recording, output: str | os.PathLike,
         path.write_text(page, encoding='utf-8')
         browser = _Chrome(chrome, recording.width, recording.height)
         try:
-            browser.call('Page.enable')
-            browser.call('Runtime.enable')
-            browser.call('Inspector.enable')
-            browser.call('Page.navigate', {'url': path.as_uri()})
-            deadline = time.monotonic() + READY_S
-            while not browser.evaluate('!!window.__hertzforgeRecorder'):
-                failure = browser.evaluate(
-                    "window.__hertzforgeRecorderFailed"
-                    " ?? document.querySelector('.failure')?.textContent ?? null")
-                if failure or time.monotonic() > deadline:
-                    why = failure or (browser.errors[-1] if browser.errors else None)
-                    raise RecordError(f'the page did not draw the view in {READY_S:g} s'
-                                      + (f': {why}' if why else '; it said nothing'))
-                time.sleep(0.1)
+            opened(browser, path)
             info = browser.evaluate('window.__hertzforgeRecorder.info()')
             times = frame_times(info, recording)
             encoder = subprocess.Popen(

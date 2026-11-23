@@ -2442,6 +2442,12 @@ def _scene_home(geometry):
             for axis in geometry.opening_view.basis()]
 
 
+#: past this many drawn nodes a scene leaves its node dots off unless told otherwise: the
+#: canvas draws each as a square of a few pixels, and on a finite element mesh they tile the
+#: surface and read as speckle, while a test geometry of a few hundred points needs them
+NODE_DOT_LIMIT = 1000
+
+
 def _scene_block(block, geometry, shapes, us, objects):
     points, node_colors, lines, faces = _scene_geometry(geometry, us)
     shown = _shown_rows(geometry, faces)
@@ -2467,6 +2473,8 @@ def _scene_block(block, geometry, shapes, us, objects):
         # the shapes still swing by the whole model's extent
         built['frame'] = frame_box(geometry, block['frame'], points,
                                    np.asarray(geometry.node_id)[shown])
+    dots = block.get('node_dots')
+    built['node_dots'] = bool(len(points) <= NODE_DOT_LIMIT if dots is None else dots)
     quantity = block.get('dofs', '')
     if quantity:
         # a DOFs scene: labeled arrows where its one named data
@@ -2479,6 +2487,7 @@ def _scene_block(block, geometry, shapes, us, objects):
             AXIS_COLORS,
             dof_arrow_length,
             dof_arrow_vectors,
+            dof_arrows_on,
         )
 
         source = objects.get(block.get('dofs_source'))
@@ -2486,7 +2495,11 @@ def _scene_block(block, geometry, shapes, us, objects):
             return None
         arrows = []
         dofs = series_quantity_dofs([('', source, None)], quantity)
-        for dof, found in zip(dofs, dof_arrow_vectors(geometry, dofs)):
+        measured_on = objects.get(block.get('dofs_geometry') or '')
+        # measured on another geometry, the DOFs are placed by position, or refused by name
+        placed = (dof_arrows_on(geometry, dofs, measured_on) if measured_on is not None
+                  else dof_arrow_vectors(geometry, dofs))
+        for dof, found in zip(dofs, placed):
             if found is None:
                 continue
             row, vector, axis = found
@@ -3968,7 +3981,8 @@ COMPONENTS = ('magnitude', 'phase', 'real', 'imag')
 def _figure_payload(data, specification, channel, mode, geometry, shapes,
                     dofs, name, caption, theme, unit_system, fill,
                     channels, max_points,
-                    component='magnitude', frame=None) -> dict[str, Any]:
+                    component='magnitude', frame=None,
+                    node_dots=None) -> dict[str, Any]:
     """The payload of one figure, as `export_html` and `export_figure`
     both write it: built as a report of one block would be, then
     narrowed to `channels` and thinned to `max_points`."""
@@ -3985,6 +3999,9 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
     if frame is not None and geometry is None:
         raise ValueError('frame chooses the part of a scene it opens on, '
                          'and a plot has none; give a geometry')
+    if node_dots is not None and geometry is None:
+        raise ValueError('node_dots draws a scene\'s nodes, and a plot has '
+                         'none; give a geometry')
     if max_points is not None and geometry is not None:
         raise ValueError('max_points thins a plot\'s curves, and a scene has '
                          'none; choose its modes by passing fewer shapes')
@@ -4028,10 +4045,24 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
             holder.add('Shapes', shapes)
             holder.link('Geometry', 'Shapes')
             block['shapes'] = 'Shapes'
+        if node_dots is not None:
+            block['node_dots'] = bool(node_dots)
         if dofs is not None:
-            quantity, source = dofs
+            quantity, source, *on = dofs
+            if len(on) > 1:
+                raise ValueError('dofs is (quantity, data) or (quantity, data, the geometry '
+                                 'the data was measured on)')
+            from ..core.report import series_quantity_dofs
+            from ..drawing.viz.geometry import dof_arrows_on
+
+            # refused here, by name, rather than drawn with arrows missing or on other nodes
+            dof_arrows_on(geometry, series_quantity_dofs([('', source, None)], quantity),
+                          on[0] if on else None)
             holder.add('Measured', source)
             block.update(dofs=quantity, dofs_source='Measured')
+            if on:
+                holder.add('Measured On', on[0])
+                block['dofs_geometry'] = 'Measured On'
     elif data is not None:
         label = name or ('Response' if specification is not None else 'Data')
         holder.add(label, data)
@@ -4064,7 +4095,7 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
 def export_html(path: str | os.PathLike, data: Any = None, *,
                 specification: Any = None, channel: str | None = None,
                 mode: str = 'curves', geometry: Any = None,
-                shapes: Any = None, dofs: tuple[str, Any] | None = None,
+                shapes: Any = None, dofs: tuple[Any, ...] | None = None,
                 name: str | None = None, caption: str = '',
                 theme: str | None = None,
                 unit_system: UnitSystem | None = None,
@@ -4072,7 +4103,8 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
                 channels: Sequence[str] | None = None,
                 max_points: int | None = None,
                 component: str = 'magnitude',
-                frame: Sequence[str] | None = None) -> str:
+                frame: Sequence[str] | None = None,
+                node_dots: bool | None = None) -> str:
     """Write one interactive figure as a single self-contained HTML file.
 
         hertzforge.export_html('spec.html', psd, specification=spec,
@@ -4088,7 +4120,9 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
 
     Given a `geometry`, the figure is a scene of it, with its `shapes`
     animating or, with `dofs`, the DOFs one object measures as a
-    quantity, ``('acceleration', frf)``, drawn as labeled arrows.
+    quantity, ``('acceleration', frf)``, drawn as labeled arrows; a
+    test's DOFs drawn on a model, ``('acceleration', history, test)``,
+    are placed by position on it rather than by node id.
     `frame` names element groups of the geometry the scene opens
     framed on, the rest of it still drawn around them; the shapes
     still swing by the whole model's size. Otherwise it is a plot of `data`, against `specification` and its
@@ -4118,8 +4152,12 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
         Makes the figure a scene.
     shapes : ShapeSet, optional
         What the scene animates.
-    dofs : (str, object), optional
+    dofs : (str, object) or (str, object, Geometry), optional
         A quantity and an object: its DOFs of that quantity, as arrows.
+        Their node ids are `geometry`'s own unless a third item names the
+        geometry the object was measured on; then each is drawn at the
+        nearest node of `geometry`, as DOF Mapping matches a test to a
+        model. A DOF with no place on `geometry` is refused by name.
     name : str, optional
         What the legend calls `data`.
     caption : str, optional
@@ -4139,6 +4177,10 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
         reads it.
     frame : sequence of str, optional
         Element groups of `geometry` the scene opens framed on.
+    node_dots : bool, optional
+        Draw a dot at each node of the scene. Unset, the dots are drawn
+        on a geometry of at most `NODE_DOT_LIMIT` (1000) drawn nodes and
+        left off a larger one, where they tile the surface.
 
     Returns
     -------
@@ -4151,8 +4193,9 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
         When neither `data` nor `geometry` is given, when `channels`
         names a channel `data` does not hold, when nothing of the
         figure can be drawn, when `max_points` is under 16, when
-        `component` is not one of the four, or when `frame` is given
-        without a geometry or names a group it does not have.
+        `component` is not one of the four, when `frame` or `node_dots`
+        is given without a geometry or `frame` names a group it does not
+        have, or when a DOF of `dofs` has no place on `geometry`.
     """
     # `fill` was added for an interactive slide deck made by the scripts
     # that draw a paper's printed figures (Brandon, 2026-09-27).
@@ -4161,7 +4204,7 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     payload = _figure_payload(data, specification, channel, mode, geometry,
                               shapes, dofs, name, caption, theme,
                               unit_system, fill, channels, max_points,
-                              component, frame)
+                              component, frame, node_dots)
     path = pathlib.Path(path)
     path.write_text(_page_html(payload), encoding='utf-8')
     return str(path)
@@ -4172,7 +4215,7 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
                   specification: Any = None, channel: str | None = None,
                   mode: str = 'curves', geometry: Any = None,
                   shapes: Any = None,
-                  dofs: tuple[str, Any] | None = None,
+                  dofs: tuple[Any, ...] | None = None,
                   name: str | None = None, caption: str = '',
                   theme: str | None = None,
                   unit_system: UnitSystem | None = None,
@@ -4180,7 +4223,8 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
                   channels: Sequence[str] | None = None,
                   max_points: int | None = None,
                   component: str = 'magnitude',
-                  frame: Sequence[str] | None = None) -> str:
+                  frame: Sequence[str] | None = None,
+                  node_dots: bool | None = None) -> str:
     """Write one interactive figure as a JSON data file, and optionally
     the script that draws it, for a page that mounts the figure itself.
 
@@ -4227,8 +4271,12 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
         Makes the figure a scene.
     shapes : ShapeSet, optional
         What the scene animates.
-    dofs : (str, object), optional
+    dofs : (str, object) or (str, object, Geometry), optional
         A quantity and an object: its DOFs of that quantity, as arrows.
+        Their node ids are `geometry`'s own unless a third item names the
+        geometry the object was measured on; then each is drawn at the
+        nearest node of `geometry`, as DOF Mapping matches a test to a
+        model. A DOF with no place on `geometry` is refused by name.
     name : str, optional
         What the legend calls `data`.
     caption : str, optional
@@ -4249,6 +4297,10 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
         reads it.
     frame : sequence of str, optional
         Element groups of `geometry` the scene opens framed on.
+    node_dots : bool, optional
+        Draw a dot at each node of the scene. Unset, the dots are drawn
+        on a geometry of at most `NODE_DOT_LIMIT` (1000) drawn nodes and
+        left off a larger one, where they tile the surface.
 
     Returns
     -------
@@ -4268,7 +4320,7 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
     payload = _figure_payload(data, specification, channel, mode, geometry,
                               shapes, dofs, name, caption, theme,
                               unit_system, fill, channels, max_points,
-                              component, frame)
+                              component, frame, node_dots)
     payload['format'] = FIGURE_FORMAT
     path = pathlib.Path(path)
     path.write_text(json.dumps(payload, allow_nan=False, separators=(',', ':')),
