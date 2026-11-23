@@ -297,6 +297,12 @@ export interface Shape3DView {
 	mark_sets?: MarkSet[];
 	/** The elements in their own colors: triangles and lines (rows of `nodes`) and each one's color, u8 RGB. */
 	element_colors?: { triangles: Uint32Array; triangle_colors: Uint8Array; lines: Uint32Array; line_colors: Uint8Array };
+	/**
+	 * One component of each element's strain or stress, per mode: the elements' outside as rows of
+	 * `nodes`, each triangle's element as its column of `values` (f32 [modes, elements], the modes in
+	 * `modes` order), drawn each element its own color over the deflected surface.
+	 */
+	element_values?: { triangles: Uint32Array; owner: Uint32Array; values: Float32Array; label: string; unit: string };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */

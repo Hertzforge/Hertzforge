@@ -511,8 +511,20 @@ def _alone(project: Any, name: str, picks: list[int],
         views = _run(project, 'project.waterfall', data=name, component=component)
         _faced(views, obj)
         return views, []
+    from hertzforge.core.element_shapes import ElementShapeSet
     from hertzforge.core.report import Report
 
+    if isinstance(obj, ElementShapeSet):
+        # on its model, colored by its stress's largest component until Color
+        # By picks another; the modes picked in the tree are the ones drawn
+        from .ops_element_shapes import element_view
+
+        if _geometry_for(project, name) is None:
+            return [], [f'{name} has no geometry to be drawn on: link it with its model']
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < obj.num_shapes})
+        notes = [f'mode {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} modes picked'] if picked else []
+        return [element_view(project, name, picked or None)], notes
     if isinstance(obj, Report):
         blocks = len(getattr(obj, 'blocks', ()) or ())
         return [v.reading(name, [

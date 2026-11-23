@@ -229,6 +229,14 @@ def children(project: Any, name: str) -> dict[str, Any]:
         return _geometry(obj)
     if isinstance(obj, DataArray):
         return grid(obj)
+    from hertzforge.core.element_shapes import ElementShapeSet
+
+    if isinstance(obj, ElementShapeSet):
+        # its modes, each picked alone or together as a shape set's are
+        return {'kind': 'modes', 'modes': [
+            {'index': k + 1, 'frequency': float(obj.frequency[k]),
+             'damping': float(obj.damping[k]), 'description': ''}
+            for k in range(int(obj.num_shapes))]}
     if isinstance(obj, ShapeSet):
         descriptions = list(getattr(obj, 'description', None) or [])
         return {'kind': 'modes', 'modes': [
@@ -306,8 +314,12 @@ def opens(obj: Any) -> bool:
     from hertzforge.core.shapes import ShapeSet
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
+    from hertzforge.core.element_shapes import ElementShapeSet
+
     if isinstance(obj, Predictions):
         return bool(len(obj.predictions))
+    if isinstance(obj, ElementShapeSet):
+        return bool(obj.num_shapes)
     if isinstance(obj, Report):
         return bool(obj.blocks)
     return isinstance(obj, (Geometry, DataArray, ShapeSet, ChannelTable, Photos,

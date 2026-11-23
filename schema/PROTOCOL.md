@@ -470,6 +470,17 @@ every element in its own palette color over the gray surface. A see-through surf
 colors at its opacity, in place of the gray surface, and a wireframe leaves them off. A mode
 shape's view colors by deflection and carries none.
 
+An element shape set's view (`project.element_shapes`, `project.color_element_shapes`, the set
+picked) carries `element_values`: `{"triangles","owner","values","label","unit"}`, the outside of
+the elements read as u32 rows of `nodes` [T, 3], each triangle's element as its column of `values`
+(u32 [T]), and `values` f32 [modes, elements], one component of each element's strain or stress at
+its centroid for each mode of `modes`, in order. `label` names the quantity and component
+(`Stress xx`) and `unit` its unit in the display system (`''` for strain). The shell draws those
+triangles over the deflected model, each in the colormap by its element's value over the largest
+magnitude in the mode shown, from minus that to plus it, with a legend; the rest of the surface is
+drawn gray. Strain and stress jump from one element to the next, so each element keeps its own
+flat color.
+
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
 screen. The view opens looking from there, and Reset View returns there; without `eye` the view

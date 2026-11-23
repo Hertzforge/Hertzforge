@@ -99,14 +99,14 @@ class ElementShapeSet:
                  xyz: Any, weight: Any, strain: Any, stress: Any,
                  mass_unit: str | None = None, length_unit: str | None = None,
                  comment: str = '') -> None:
-        self.frequency = np.asarray(frequency, dtype=np.float64).reshape(-1)
-        self.damping = np.asarray(damping, dtype=np.float64).reshape(-1)
-        self.element = np.asarray(element, dtype=np.int64).reshape(-1)
-        self.point = np.asarray(point, dtype=np.int64).reshape(-1)
-        self.xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
-        self.weight = np.asarray(weight, dtype=np.float64).reshape(-1)
-        self.strain = np.asarray(strain)
-        self.stress = np.asarray(stress)
+        self.frequency: np.ndarray = np.asarray(frequency, dtype=np.float64).reshape(-1)
+        self.damping: np.ndarray = np.asarray(damping, dtype=np.float64).reshape(-1)
+        self.element: np.ndarray = np.asarray(element, dtype=np.int64).reshape(-1)
+        self.point: np.ndarray = np.asarray(point, dtype=np.int64).reshape(-1)
+        self.xyz: np.ndarray = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+        self.weight: np.ndarray = np.asarray(weight, dtype=np.float64).reshape(-1)
+        self.strain: np.ndarray = np.asarray(strain)
+        self.stress: np.ndarray = np.asarray(stress)
         rows, modes = len(self.element), len(self.frequency)
         if len(self.damping) != modes:
             raise ValueError(f'{modes} frequencies but {len(self.damping)} damping values')
@@ -118,9 +118,9 @@ class ElementShapeSet:
             if getattr(self, name).shape != (modes, rows, 6):
                 raise ValueError(f'{name} is {getattr(self, name).shape}, not '
                                  f'({modes}, {rows}, 6): modes, stress points, components')
-        self.mass_unit = mass_unit or None
-        self.length_unit = length_unit or None
-        self.comment = str(comment)
+        self.mass_unit: str | None = mass_unit or None
+        self.length_unit: str | None = length_unit or None
+        self.comment: str = str(comment)
 
     @property
     def num_shapes(self) -> int:

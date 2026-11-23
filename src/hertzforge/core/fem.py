@@ -35,7 +35,8 @@ constraints are held degrees of freedom (`fixed`, `add_ground`) and
 rigid links, which the eigensolution eliminates exactly instead of
 approximating them with a stiff member (`constraint_transform`). There
 is no general multipoint constraint and no static solution; modes are
-the only result. Wiring a surface mesh's edges with `from_geometry`
+the only result, and the strain and stress each mode puts in each solid
+element are read from them (`core.element_shapes`). Wiring a surface mesh's edges with `from_geometry`
 makes a grillage of beams, not plates. That is a modeling choice with a
 known cost, not an approximation hidden inside an element: it shows the
 order of mode density and the mode families a shape has, and it is not

@@ -322,6 +322,15 @@
             "lines": {"$ref": "#/$defs/arrayRef"}, "line_colors": {"$ref": "#/$defs/arrayRef"}
           }
         },
+        "element_values": {
+          "type": "object", "required": ["triangles", "owner", "values", "label", "unit"],
+          "additionalProperties": false,
+          "properties": {
+            "triangles": {"$ref": "#/$defs/arrayRef"}, "owner": {"$ref": "#/$defs/arrayRef"},
+            "values": {"$ref": "#/$defs/arrayRef"},
+            "label": {"type": "string"}, "unit": {"type": "string"}
+          }
+        },
         "paired": {"type": "boolean"},
         "link": {"type": "string"},
         "note": {"type": "string"},

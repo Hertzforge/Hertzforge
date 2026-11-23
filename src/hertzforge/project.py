@@ -11422,8 +11422,18 @@ def _on_solids(project, obj) -> bool:
         return False
     if found is None:
         return False
-    return any(getattr(props, 'kind', '') == 'solid'
-               for props in (found[1].group_properties or {}).values())
+    geometry = found[1]
+    solid = {int(g) for g, props in (geometry.group_properties or {}).items()
+             if getattr(props, 'kind', '') == 'solid'}
+    rows = np.flatnonzero(np.isin(np.asarray(geometry.elem_group, dtype=np.int64), list(solid)))
+    if not len(rows):
+        return False
+    # the first and last solid's nodes stand for the rest: a set at a test's
+    # DOFs misses them, and reading every node of a large model each time the
+    # action table asks would hold it up
+    lookup = obj._dof_lookup()
+    return all(f'{int(node)}{axis}' in lookup for row in (rows[0], rows[-1])
+               for node in geometry.elem_conn[row] for axis in 'XYZ')
 
 
 def _elements_digest(shapes, geometry) -> str | None:
