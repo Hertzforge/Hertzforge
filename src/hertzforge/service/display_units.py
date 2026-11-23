@@ -22,7 +22,8 @@ length unit, and a
 measured motion's values in their own; its shapes are a picture and stay as
 they are, and a click that places a point (`pick`) says how to take its
 coordinates back to SI. A geometry whose units are undefined is drawn in
-its file's own numbers. A `matrix` carries its own words.
+its file's own numbers. A `matrix` whose `value_label` ends in "[<SI unit>]" (a scalogram's
+level) has its values, its color range and that unit converted; any other carries its own words.
 """
 
 from __future__ import annotations
@@ -345,6 +346,13 @@ def convert(views: list[dict], name: str) -> list[dict]:
                 row['value'] = float(_values(float(row['value']), change))
         elif kind == 'table':
             _table(view, system)
+        elif kind == 'matrix':
+            found = HEADING.match(view.get('value_label') or '')
+            change = _change(found.group(2), system) if found else None
+            if found and change is not None:
+                view['value_label'] = f'{found.group(1)} [{change[2]}]'
+                view['values'] = _values(view['values'], change)
+                view['value_range'] = [float(_values(v, change)) for v in view['value_range']]
         elif kind == 'shape3d':
             _shape(view, system)
         elif kind == 'waterfall':

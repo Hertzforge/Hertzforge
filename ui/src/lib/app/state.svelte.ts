@@ -50,6 +50,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	OperationDescriptor,
 	OpResult,
 	ParamDescriptor,
+	ParamOption,
 	FitStateView,
 	ProjectProgress,
 	UnitsTables,
@@ -69,6 +70,12 @@ import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
 import { ANALYSIS, canOpen, isWorkspace, moduleOf, shownWorkspaces, STUDIES, type WorkspaceInfo } from './workspaces';
+
+/** The options a row offers by name for a param that has none of its own, valued as the param is typed. */
+export function offered(param: ParamDescriptor, words: Record<string, string>): ParamOption[] {
+	const numeric = param.type === 'integer' || param.type === 'number';
+	return Object.entries(words).map(([value, label]) => ({ value: numeric ? Number(value) : value, label }));
+}
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -219,6 +226,7 @@ class AnalyzeState {
 				// the row's own words for a param's options, and the options it offers: DOF Mapping's
 				// ways name the two objects, and a geometry is never the one moved
 				const words = row?.labels?.[p.name];
+				if (words && !p.options) return { ...p, type: 'enum' as const, options: offered(p, words) };
 				return words && p.options ? { ...p, options: p.options.filter((o) => String(o.value) in words).map((o) => ({ ...o, label: words[String(o.value)] })) } : p;
 			});
 	}
@@ -542,6 +550,8 @@ class AnalyzeState {
 		// a form that applies as it goes is filled in full and opens all the same
 		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
+		// a reading with no Apply is drawn as its form opens
+		if (this.formOpen && row.shows) await this.run();
 		// a preview that is quick and asks nothing is shown as the form opens
 		if (this.formOpen && op.commits && op.opens_previewed) await this.run(true);
 	}
@@ -560,8 +570,16 @@ class AnalyzeState {
 	private followRow(row: ActionRow): void {
 		const was = this.formRow?.id === row.id ? (this.formRow.fill ?? {}) : {};
 		const fill = Object.fromEntries(Object.entries(row.fill ?? {}).filter(([key, text]) => was[key] !== text));
+		// a choice the row offers by name holds one of them: a record no longer picked gives way to the first that is
+		for (const [key, words] of Object.entries(row.labels ?? {})) {
+			const param = this.op?.params.find((p) => p.name === key);
+			if (param && !param.options && !(String(this.currentValues[key]) in words) && !(key in fill)) fill[key] = row.fill?.[key] ?? Object.keys(words)[0];
+		}
+		const before = JSON.stringify(this.currentValues);
 		this.pickAction({ id: row.id, fill });
 		this.formRow = row;
+		// a reading with no Apply follows the picks: drawn again when they change what it reads
+		if (row.shows && JSON.stringify(this.currentValues) !== before) void this.run();
 	}
 
 	/** Export in the desktop app: the native save window says where and in which format. */
@@ -693,8 +711,9 @@ class AnalyzeState {
 		} catch {
 			// kept for this session only
 		}
-		// the shell's own choices redraw what is already here; the rest are the service's to answer
-		if (key !== 'bars') void this.showSelection();
+		// the shell's own choices redraw what is already here; the rest are the service's to answer.
+		// A reading on show stays: its own 3D/2D toggle sets `flat` too
+		if (key !== 'bars') void this.showSelection(false, this.reading !== null);
 	}
 
 	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */

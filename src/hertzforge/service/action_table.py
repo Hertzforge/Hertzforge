@@ -93,6 +93,12 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 #: forms with no Apply: each change is stored as it is made, and drawn where it is seen
 LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
+#: readings whose form has no Apply either: drawn as the form opens and again after each change,
+#: since running them changes nothing. Live rows that carry `shows`
+SHOWN_LIVE = frozenset({'project.wavelet'})
+#: readings of one record that ask which, by name, when more than one is in play: the records
+#: picked under the object, or all of them when it is picked whole
+CHOOSES_RECORD = frozenset({'project.wavelet'})
 
 #: params that number the channels, records or rows of the object an action runs on:
 #: several as text ('1-3, 7', blank for all), or one. They are filled from what is picked
@@ -527,6 +533,26 @@ def _row(row_id: str, verb: str, kind: str, reason: str = '', **more: Any) -> di
     return row
 
 
+def _record_choices(project: Any, op: Operation, fill: dict[str, str],
+                    picked: list[int]) -> dict[str, str] | None:
+    """The records a one-record reading can be shown for, by number to label: those picked
+    under its object, or every one when it is picked whole. None when there is only one, which
+    the form does not ask. Two records with one label (an acceleration and a force at one
+    DOF) give every label its quantity, and two that are still alike their number."""
+    name = next((fill[p.name] for p in _object_params(op) if fill.get(p.name) in project), None)
+    held = project[name] if name is not None else None
+    count = getattr(held, 'num_records', 0)
+    shown = sorted(picked) if picked else list(range(count))
+    if len(shown) < 2:
+        return None
+    labels = {i: held.record_label(i) for i in shown}
+    if len(set(labels.values())) < len(labels):
+        labels = {i: f'{text} {held.ordinate_dim[i]}' for i, text in labels.items()}
+    texts = list(labels.values())
+    return {str(i + 1): f'{text}, record {i + 1}' if texts.count(text) > 1 else text
+            for i, text in labels.items()}
+
+
 def _op_row(op: Operation, reason: str = '', **more: Any) -> dict[str, Any]:
     return _row(op.id, verbs.VERBS[op.id], 'run', reason, modules=list(verbs.modules_of(op)),
                 **more)
@@ -655,6 +681,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         # (Brandon, 2026-11-17)
         picked = next((r for r in picks if r), [])
         unasked = list(explicit)
+        named: dict[str, dict[str, str]] = {}
         for param in op.params:
             if param.name in explicit:
                 continue
@@ -666,7 +693,12 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 # rows picked, not a row of the table
                 if picked and op.id != 'project.create_specification':
                     fill[param.name] = str(picked[0] + 1)
-                unasked.append(param.name)
+                choices = (_record_choices(project, op, fill, picked)
+                           if op.id in CHOOSES_RECORD else None)
+                if choices:
+                    named[param.name] = choices
+                else:
+                    unasked.append(param.name)
             elif param.name == 'picked':
                 # an operation on one channel that runs on every channel picked
                 # (`parsing.each_picked`): the param that numbers its one channel is not
@@ -694,6 +726,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         more: dict[str, Any] = {'part': True} if homes else {}
         if unasked:
             more['omit'] = list(dict.fromkeys(unasked))
+        if named:
+            more['labels'] = named
         if where and part:
             # what the pick fills is not asked again: the groups, solids or mates picked are
             # the ones it acts on, and more are picked in the tree (Brandon, 2026-11-10)
@@ -789,8 +823,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 fill[param] = _runs(items) if items else ''
         if op.id in MATCHED and 'distance' not in more.get('omit', ()):
             fill.update(_match_fill(project, op.id, fill))
-        if op.id in LIVE:
+        if op.id in LIVE or op.id in SHOWN_LIVE:
             more['live'] = True
+        if op.id in SHOWN_LIVE:
+            more['shows'] = True
         said = more.pop('verb', None)
         rows.append({**_op_row(op, fill=fill, **more), **({'verb': said} if said else {})})
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:

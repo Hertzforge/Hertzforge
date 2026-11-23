@@ -955,7 +955,7 @@ def wavelet(project: Any, params: dict[str, Any]) -> list[dict]:
                        {'label': 'Frequency', 'ticks': [f'{f:.4g} Hz'
                                                         for f in frequencies[::-1]]},
                        {'label': 'Time', 'ticks': [f'{t:.4g} s' for t in clock]},
-                       magnitude[::-1], f'{history.ordinate_dim[row]}'
+                       magnitude[::-1], str(history.ordinate_dim[row]).capitalize()
                        + (f' [{unit}]' if unit else ''), (0.0, top if top > 0.0 else 1.0))
     surface = v.waterfall(
         f'Scalogram of {name}, {label}', v.axis('Time', 's', 'linear'),

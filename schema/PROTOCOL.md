@@ -351,7 +351,9 @@ surface with its cone of influence as two walls.
 The shell draws one cell per value, colored on the sequential colormap over `value_range` with a
 numeric legend, the first row at the top and the first column at the left, and writes each value
 in its cell when the cells are large enough to hold it. Hovering a cell reads its row, column and
-value. A pinned range makes two matrices of the same quantity read alike.
+value. A pinned range makes two matrices of the same quantity read alike. A result that carries
+both a `waterfall` and a `matrix` (Wavelet's scalogram) draws one set of values two ways, as a
+surface and flat: the shell shows one of them, chosen by the frame's 3D/2D toggle.
 
 A matrix that compares two sets of shapes (a MAC) may come with the `shape3d` view of those shapes
 in the same result, and then says `"selects":"shape3d"`. That view's `modes` are the rows' shapes
@@ -878,7 +880,11 @@ object can be written in, `.hforge` first. The desktop app lists them as the sav
 
 **A row's own words.** A row may carry `labels`, `{param: {option value: words}}`, the words its
 form shows for a param's options in place of the descriptor's; the form offers only the options it
-names. DOF Mapping for two shape sets on two geometries (`project.set_projection`, a form
+names. For a param with no options of its own, `labels` are the options it offers, valued as the
+param is typed. Wavelet asks its `record` this way when more than one record is in play: by label,
+among the records picked under the time history, or among all of them when it is picked whole.
+Labels two records share (an acceleration and a force at one DOF) are given each record's quantity,
+and any still alike their number. One record in play fills `record` and leaves it out (`omit`). DOF Mapping for two shape sets on two geometries (`project.set_projection`, a form
 kept as it is changed) fills the pair's mapping as it stands: set, or else the way decided by what
 the sets measure, never by the order they were picked in, and its distance, `0` for 2 % of the
 target's size. It asks its `direction`, whose nodes are matched to whose DOFs, only when both ways
@@ -909,7 +915,7 @@ operation that reads an object whole whatever is picked under it says why in the
 
 The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is
-`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?,"omit"?,"instant"?,"live"?,"formats"?,"under"?,"open"?}`. `kind` is `group`
+`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?,"omit"?,"instant"?,"live"?,"shows"?,"labels"?,"formats"?,"under"?,"open"?}`. `kind` is `group`
 for a row that is not an action and holds the ones `under` it, `default`
 for what the selection draws by itself (`id` starting `show.`), `run` for an operation (`id` is the
 operation's) or another of a lone shape set's views (`id` starting `show.`), and `self` for an act on the selection that is not an operation (`id` starting
@@ -934,7 +940,7 @@ geometry named Geometry (then Geometry (2) and on) in the display system's lengt
 `unit` names another, and the shell picks it; so is New Channel Table, named Channel Table. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
-it, and a live form is run each time a changed field is left, with no Apply button. Averaging's row is live too: each change to its form is stored on the time history as it is made. Edit Solid stays for
+it, and a live form is run each time a changed field is left, with no Apply button. Averaging's row is live too: each change to its form is stored on the time history as it is made. A live row with `"shows": true` is a reading that changes nothing (Wavelet): the shell runs it as its form opens, again each time a changed field is left, and again when a change of picks fills it differently. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out, because the tree's picks fill them (above) or because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
@@ -957,8 +963,9 @@ edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit'
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
 typed into (`edit`) is converted too when each of its cells is one number, and `edit.to_si` gives,
 by column key, the [scale, offset] the shell takes a value typed back to SI by before it sends it;
-a column of several numbers to a cell stays in SI. A unit it does
-not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
+a column of several numbers to a cell stays in SI. A `matrix` whose `value_label` ends in
+"[<SI unit>]" (a scalogram's level) has its values, its `value_range` and that unit converted. A
+unit it does not recognize, and any other `matrix`, are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has one project of its own, and it ends with the connection. A
 connection starts with an empty project titled "Project", so every operation has one to work on. A

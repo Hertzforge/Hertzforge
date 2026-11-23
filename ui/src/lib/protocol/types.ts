@@ -745,9 +745,11 @@ export interface ActionRow {
 	instant?: true;
 	/** Its form applies each change as it is made: a field when it is left, a gimbal when it is let go. */
 	live?: true;
+	/** A live form that only reads: it runs as it opens, and again after each change and each new pick, with no Apply (Wavelet). */
+	shows?: true;
 	/** Export: the formats this object can be written in. */
 	formats?: ExportFormat[];
-	/** The words a param's options read in this row, by param and option value (Project's directions, named after the two sets). */
+	/** The words a param's options read in this row, by param and option value (Project's directions, named after the two sets); for a param with no options of its own, the options it offers (Wavelet's records). */
 	labels?: Record<string, Record<string, string>>;
 }
 

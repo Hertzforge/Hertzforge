@@ -409,6 +409,96 @@ describe('a value typed into an open form', () => {
 	});
 });
 
+describe('a reading drawn as its form opens', () => {
+	// Brandon, 2026-11-22: Wavelet drawn at once and again after each change, with no Apply, and a
+	// choice of record when the history is picked whole or several of its records are
+	const wavelet = {
+		id: 'project.wavelet',
+		title: 'Wavelet',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		outputs: ['waterfall', 'matrix', 'spectrum', 'reading'],
+		params: [
+			{ name: 'history', label: 'Time history', type: 'enum', options_from: 'objects:time_history' },
+			{ name: 'record', label: 'Record', type: 'integer', default: 1, min: 1 },
+			{ name: 'per_octave', label: 'Per octave', type: 'integer', default: 12, min: 1 }
+		]
+	} as unknown as OperationDescriptor;
+
+	function reading() {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const runs: Sent[] = [];
+		const offer: { fill: Record<string, string>; labels: Record<string, string> } = { fill: { history: 'T' }, labels: { '1': '1Z+', '2': '2Z+', '3': '3Z+' } };
+		const opened = () => ({ id: wavelet.id, verb: 'Wavelet', kind: 'run', ready: true, live: true, shows: true, fill: { ...offer.fill }, labels: { record: { ...offer.labels } } }) as unknown as ActionRow;
+		const held = { ...summary, objects: [...summary.objects, { name: 'T', kind: 'time_history', records: 3, groups: [], verbs: [] }] } as unknown as ProjectSummary;
+		const request = vi.fn(async (method: string, params: Sent) => {
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: `record ${params.params?.record}`, rows: [] }], project: held };
+			}
+			if (method === 'project.actions') return { table: { columns: [{ kinds: ['time_history'], current: true, rows: [opened()] }] } };
+			if (method === 'project.show') return { title: 'shown', views: [], note: '' };
+			return {};
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		Object.defineProperty(app.analysis, 'isOpen', { get: () => true });
+		app.catalog = { operations: [wavelet] } as never;
+		app.project.summary = held;
+		return { a: app.analyze, runs, offer, opened };
+	}
+	const records = (runs: Sent[]) => runs.map((r) => r.params?.record);
+
+	it('is drawn as the form opens, with no Apply to press', async () => {
+		const { a, runs, opened } = reading();
+		await a.perform(opened(), column);
+		expect(a.formOpen).toBe(true);
+		expect(records(runs)).toEqual([1]);
+		expect(said(a)).toBe('record 1');
+	});
+
+	it('asks the record by the names its row gives, valued as the record is typed', async () => {
+		const { a, opened } = reading();
+		await a.perform(opened(), column);
+		const record = a.formParams.find((p) => p.name === 'record');
+		expect(record?.type).toBe('enum');
+		expect(record?.options).toEqual([
+			{ value: 1, label: '1Z+' },
+			{ value: 2, label: '2Z+' },
+			{ value: 3, label: '3Z+' }
+		]);
+	});
+
+	it('is drawn again when a change of picks fills it differently, and not when nothing changed', async () => {
+		const { a, runs, offer, opened } = reading();
+		await a.perform(opened(), column);
+		await a.loadActions();
+		expect(records(runs), 'the same picks run nothing again').toEqual([1]);
+		offer.fill = { history: 'T', record: '3' };
+		offer.labels = { '3': '3Z+', '2': '2Z+' };
+		await a.loadActions();
+		await vi.waitFor(() => expect(records(runs)).toEqual([1, 3]));
+		expect(said(a)).toBe('record 3');
+	});
+
+	it('gives way to a record still offered when the one it holds is no longer picked', async () => {
+		const { a, opened, offer } = reading();
+		await a.perform(opened(), column);
+		a.values = { ...a.values, [wavelet.id]: { ...a.currentValues, record: 2 } };
+		offer.labels = { '1': '1Z+', '3': '3Z+' };
+		await a.loadActions();
+		expect(a.currentValues.record).toBe(1);
+	});
+
+	it('keeps the reading when the 3D/2D toggle is set', async () => {
+		const { a, opened } = reading();
+		await a.perform(opened(), column);
+		a.setPref('flat', !a.prefs.flat);
+		expect(said(a)).toBe('record 1');
+		a.setPref('flat', !a.prefs.flat);
+		expect(said(a)).toBe('record 1');
+	});
+});
+
 describe('a finished run opened in Analysis', () => {
 	const runObjects = ['Channel Table', 'inputs', 'drives', 'Specification', 'Run Record'].map((name) => ({ name, kind: 'time_history', records: 1, groups: ['run'], verbs: [] }));
 	function runApp(start: ProjectSummary | null) {
