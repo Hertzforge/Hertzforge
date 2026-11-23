@@ -83,6 +83,8 @@ def test_with_no_data_the_sets_own_modes_swing_each_on_its_own_scale(cells):
 @pytest.mark.parametrize(('options', 'said'), [
     ({'color_max': 2.0}, 'need the strain and stress to color by'),
     ({'color_groups': ['wedges']}, 'need the strain and stress to color by'),
+    ({'color': 'tresca'}, 'need the strain and stress to color by'),
+    ({'units': 'mm-kg-N-s'}, 'need the strain and stress to color by'),
     ({'strain_stress': 'READ', 'color_groups': ['beams']},
      "Cells has no element group named 'beams'; it has bricks, wedges"),
     ({'strain_stress': 'READ', 'color_max': 0.0}, 'top of the color scale is above 0'),

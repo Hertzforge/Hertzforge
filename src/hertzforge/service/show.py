@@ -897,8 +897,8 @@ def _three_played(project: Any, objects: list[str], records: dict[str, list[int]
                   ) -> tuple[list[dict], list[str]] | None:
     """A geometry, a shape set and modal coordinates selected together: the coordinates
     played through that set, with the elements of an element shape set selected as well
-    colored by their von Mises stress (or their largest strain component when the set holds
-    no stress) summed each frame. None for any other three or four."""
+    colored by the von Mises stress of their tensor summed each frame, on the clip's largest
+    value (Play Strain/Stress chooses otherwise). None for any other three or four."""
     from hertzforge.core.data import TimeHistory
     from hertzforge.core.element_shapes import ElementShapeSet
     from hertzforge.core.geometry import Geometry

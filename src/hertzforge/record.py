@@ -110,9 +110,11 @@ def coloring(project: Any, recording: Recording) -> dict[str, Any] | None:
         raise RecordError(f'the units are one of {", ".join(display_units.systems())}; not '
                           f'{recording.units!r}')
     if recording.strain_stress is None:
-        if recording.color_max is not None or recording.color_groups:
-            raise RecordError('a color scale or colored groups need the strain and stress to '
-                              'color by (strain_stress)')
+        if (recording.color_max is not None or recording.color_groups
+                or recording.color != 'von_mises' or recording.quantity != 'stress'
+                or recording.units != display_units.DEFAULT):
+            raise RecordError('a color, a color scale, colored groups or units need the strain '
+                              'and stress to color by (strain_stress)')
         return None
     groups = ''
     if recording.color_groups:
