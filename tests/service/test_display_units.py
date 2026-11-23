@@ -139,3 +139,17 @@ def test_measured_motion_plays_in_the_systems_units():
     assert motion['value_unit'] == 'g' and motion['peak'] == pytest.approx(2.0)
     assert np.asarray(motion['values']).ravel() == pytest.approx([1.0, -2.0], rel=1e-6)
     assert motion['unit'] == 's' and motion['step'] == 0.001
+
+
+def test_a_matrix_with_a_unit_in_its_label_is_converted_and_a_mac_is_not():
+    rows = {'label': 'Frequency', 'ticks': ['20 Hz', '10 Hz']}
+    columns = {'label': 'Time', 'ticks': ['0 s', '1 s']}
+    level = v.matrix('Scalogram', rows, columns, np.array([[G, 2 * G], [0.0, 4 * G]]),
+                     'Acceleration [m/s²]', (0.0, 4 * G))
+    mac = v.matrix('MAC', rows, columns, np.eye(2), 'MAC', (0.0, 1.0))
+    display_units.convert([level, mac], US)
+    assert level['value_label'] == 'Acceleration [g]'
+    assert level['values'] == pytest.approx(np.array([[1.0, 2.0], [0.0, 4.0]]), rel=1e-6)
+    assert level['value_range'] == pytest.approx([0.0, 4.0])
+    assert mac['value_label'] == 'MAC' and mac['value_range'] == [0.0, 1.0]
+    assert np.array_equal(mac['values'], np.eye(2))

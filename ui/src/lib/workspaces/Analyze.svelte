@@ -9,7 +9,7 @@
 	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
-	import { lonePlot } from './readingLayout';
+	import { lonePlot, shownForms, twoForms } from './readingLayout';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
@@ -135,13 +135,22 @@
 			<button class="btn ghost sm chip tablechip" data-testid="action-table-back" title="Bring the action table back" onclick={() => { tableAway = false; keepTable(); }}><Icon name="chevron" size={12} /> Actions</button>
 		{/if}
 		{#if a.reading}
+			{@const readViews = shownForms(a.reading.views, a.prefs.flat)}
 			<section class="selected" data-testid="reading-view" aria-label="The reading">
 				<header>
 					<h3>{a.reading.title}</h3>
 					<p class="meta">{a.shown?.title ?? ''}</p>
+					{#if twoForms(a.reading.views)}
+						<div class="bar" role="toolbar" aria-label="How the reading is drawn">
+							<div class="seg" role="radiogroup" aria-label="Surface or flat">
+								<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="reading-3d" title="The surface, in 3-D" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
+								<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="reading-flat" title="The same values flat, colored by level" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>2D</button>
+							</div>
+						</div>
+					{/if}
 				</header>
-				<div class="svviews" class:several={a.reading.views.length > 1} class:lone={lonePlot(a.reading.views)} style:--beside={Math.max(a.reading.views.length - 1, 1)}>
-					{#each a.reading.views as v, i (i)}
+				<div class="svviews" class:several={readViews.length > 1} class:lone={lonePlot(readViews)} style:--beside={Math.max(readViews.length - 1, 1)}>
+					{#each readViews as v, i (i)}
 						<div class="view {v.view}">
 							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)}
 								onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editReadingCell(v.edit!, row, column, value) : undefined}

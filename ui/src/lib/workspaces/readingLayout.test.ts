@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { View } from '$lib/protocol/types';
-import { lonePlot } from './readingLayout';
+import { lonePlot, shownForms, twoForms } from './readingLayout';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./Analyze.svelte', import.meta.url)), 'utf-8');
 const STYLE = SOURCE.slice(SOURCE.indexOf('<style>'), SOURCE.indexOf('</style>'));
@@ -64,6 +64,25 @@ describe("a reading's one plot", () => {
 		expect(lonePlot(of('table'))).toBe(false);
 		expect(lonePlot(of('reading'))).toBe(false);
 		expect(lonePlot(of('spectrum', 'reading'))).toBe(false);
-		expect(SOURCE).toContain('class:lone={lonePlot(a.reading.views)}');
+		expect(SOURCE).toContain('class:lone={lonePlot(readViews)}');
+	});
+});
+
+describe('a surface drawn two ways', () => {
+	const surface = { view: 'waterfall', title: 'Scalogram' } as unknown as View;
+	const flat = { view: 'matrix', title: 'Scalogram' } as unknown as View;
+	const ridge = { view: 'spectrum', title: 'Ridge' } as unknown as View;
+	const mac = { view: 'matrix', title: 'MAC' } as unknown as View;
+
+	it('shows the surface in 3D and the flat map in 2D, with what else the reading holds', () => {
+		expect(twoForms([surface, flat, ridge])).toBe(true);
+		expect(shownForms([surface, flat, ridge], false)).toEqual([surface, ridge]);
+		expect(shownForms([surface, flat, ridge], true)).toEqual([flat, ridge]);
+	});
+
+	it('leaves a reading with only one of them as it is', () => {
+		expect(twoForms([mac, ridge])).toBe(false);
+		expect(shownForms([mac, ridge], false)).toEqual([mac, ridge]);
+		expect(shownForms([surface, ridge], true)).toEqual([surface, ridge]);
 	});
 });

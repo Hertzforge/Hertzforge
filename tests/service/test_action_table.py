@@ -732,14 +732,16 @@ def test_an_action_runs_on_what_is_picked_in_the_tree_and_asks_for_no_channel(pl
     assert picked['project.rescale']['fill']['records'] == '2-3'
     assert whole['project.rescale']['fill']['records'] == ''
     assert 'records' in whole['project.rescale']['omit']
-    # no row of an object asks for its channels, records or rows by number
+    # no row of an object asks for its channels, records or rows by number; one that asks which
+    # record asks by name, among those its row labels (Wavelet)
     by_id = {op.id: op for op in OPERATIONS}
     for row in whole.values():
         op = by_id.get(row['id'])
         if op is None or not row['ready']:
             continue
-        asked = {p.name for p in op.params} - set(row.get('omit', ()))
+        asked = {p.name for p in op.params} - set(row.get('omit', ())) - set(row.get('labels', ()))
         assert not asked & {'records', 'channels', 'rows', 'record', 'drawn', 'picked'}, row['id']
+    assert set(whole['project.wavelet']['labels']) == {'record'}
 
 
 def test_a_channels_role_is_set_on_every_channel_picked(plate):

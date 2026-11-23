@@ -209,7 +209,11 @@
 			{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
 			<ParamForm params={a.formParams} bind:values={a.values[a.op.id]} showAllErrors={a.triedRun} idPrefix={a.op.id.replace('.', '-')} oncommit={liveForm ? () => a.applyLive() : undefined} onsuggest={(p) => a.suggest(p)} />
 			{#if liveForm}
-				<p class="muted live" data-testid="form-live">Each change applies when you leave its field{a.formRow?.part ? ', or let go of the gimbal' : ', or let go of a handle on the plot'}.</p>
+				{#if a.formRow?.shows}
+					<p class="muted live" data-testid="form-live">Drawn again after each change, when you leave its field.</p>
+				{:else}
+					<p class="muted live" data-testid="form-live">Each change applies when you leave its field{a.formRow?.part ? ', or let go of the gimbal' : ', or let go of a handle on the plot'}.</p>
+				{/if}
 			{:else}
 			<div class="runrow">
 				{#if a.op.commits && !a.op.opens_previewed}
