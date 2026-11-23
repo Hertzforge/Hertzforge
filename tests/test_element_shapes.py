@@ -327,3 +327,60 @@ def test_a_set_too_large_is_refused_with_its_size(monkeypatch):
                                          r'0\.0 GB .*choose fewer element groups or fewer'):
         es.element_shapes(geometry, shapes)
     assert es.element_shapes(geometry, shapes, modes=[6]).num_shapes == 1
+
+
+def _project():
+    import hertzforge
+
+    project = hertzforge.Project('p')
+    project.add('Cells', _cells(along=4))
+    modes = project.solve_modes('Cells', num_modes=9)
+    return project, modes
+
+
+def test_the_project_reads_a_set_beside_its_modes_and_keeps_it_current(tmp_path):
+    """Strain and Stress adds the set in the shape set's group, by its
+    recipe: a moved node badges it stale, a refresh reads it again, a
+    renamed geometry keeps the recipe pointing at it, and a save opens
+    with the same numbers."""
+    import hertzforge
+
+    project, modes = _project()
+    assert 'element_shapes' in [verb for verb, _ in project.verbs(modes)]
+    added = project.element_shapes(modes, groups=['bricks'], modes=[6, 7, 8])
+    assert added == 'Cells Modes Strain and Stress'
+    read = project[added]
+    assert read.num_shapes == 3 and len(read.elements) == 3
+    assert added in project.object_group_of(modes)
+    assert project.provenance[added]['params'] == {
+        'geometry': 'Cells', 'groups': [int(project['Cells'].group_id[
+            list(project['Cells'].group_name).index('bricks')])], 'modes': [6, 7, 8]}
+    assert added not in project.stale()
+    project['Cells'].node_xyz[5] += 1e-4
+    assert added in project.stale()
+    project.refresh(added)
+    assert added not in project.stale()
+    assert not np.array_equal(project[added].stress, read.stress)
+    project.rename('Cells', 'Model')
+    assert project.provenance[added]['params']['geometry'] == 'Model'
+    project.refresh(added)
+    path = tmp_path / 'p.hforge'
+    project.save(path)
+    again = hertzforge.Project.open(path)
+    assert again[added] == project[added]
+    assert added not in again.stale()
+
+
+def test_the_project_refuses_a_set_with_no_model():
+    import hertzforge
+
+    project, modes = _project()
+    with pytest.raises(ValueError, match="no element group 'walls'"):
+        project.element_shapes(modes, groups=['walls'])
+    loose = hertzforge.Project('q')
+    loose.add('Modes', project[modes])
+    assert 'element_shapes' not in [verb for verb, _ in loose.verbs('Modes')]
+    with pytest.raises(ValueError, match='Modes has no geometry: link it with the model'):
+        loose.element_shapes('Modes')
+    with pytest.raises(TypeError, match="'Cells' is not a shape set"):
+        project.element_shapes('Cells')

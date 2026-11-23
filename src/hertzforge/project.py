@@ -38,6 +38,7 @@ from .core.data import (
     TransientSpecification,
     _CoherenceBase,
 )
+from .core.element_shapes import ElementShapeSet
 from .core.data_index import DataIndex, IndexEntry, Reference, file_state
 from .core.data_index import digest as digest_file
 from .core.data_index import now as _index_now
@@ -85,7 +86,7 @@ ObjectGroup = dict[str, Any]
 # record, where an FRF and a coherence need a reference as well.
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
-              _CoherenceBase, ShapeSet, MatchedModes, Predictions,
+              _CoherenceBase, ShapeSet, ElementShapeSet, MatchedModes, Predictions,
               RunLogExtract, RunRecord, TestSetup, Report)
 
 
@@ -112,6 +113,9 @@ def describe(obj: Any) -> str:
                 'are not physical'
                 if getattr(obj, 'unscaled', False) else '')
         return f'{obj.num_shapes} modes{span}{note}'
+    elif isinstance(obj, ElementShapeSet):
+        counts = [(obj.num_shapes, 'mode'), (len(obj.elements), 'element'),
+                  (obj.num_points, 'stress point')]
     elif isinstance(obj, SineLevelSet):
         return (f'{len(obj.levels)} tone{"s" * (len(obj.levels) != 1)}, '
                 f'{len(obj.response_dof)} channel'
@@ -246,7 +250,8 @@ _PARAMS_NAMING: dict[str, tuple[str, ...]] = {
     'compute_modal_responses': ('shapes',),
     'extract_sine': ('specification',),
     'derive_specification': ('sources',),
-    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',)}
+    'plan_instrumentation': ('geometry',), 'transform_responses': ('table',),
+    'element_shapes': ('geometry',)}
 
 
 def _renamed(value: Any, mapping: Mapping[str, str]) -> Any:
@@ -294,6 +299,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('frf', 'frfs', Frf),
     ('coherence', 'coherences', _CoherenceBase),
     ('shapes', 'shape_sets', ShapeSet),
+    ('element_shapes', 'element_shape_sets', ElementShapeSet),
     ('matches', 'match_sets', MatchedModes),
     ('predictions', 'prediction_sets', Predictions),
     ('run_log_extract', 'run_log_extracts', RunLogExtract),
@@ -370,6 +376,8 @@ class Selection:
         coherences: list[_CoherenceBase]
         shapes: ShapeSet
         shape_sets: list[ShapeSet]
+        element_shapes: ElementShapeSet
+        element_shape_sets: list[ElementShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
         predictions: Predictions
@@ -546,6 +554,8 @@ class Project(dict):
         coherences: list[_CoherenceBase]
         shapes: ShapeSet
         shape_sets: list[ShapeSet]
+        element_shapes: ElementShapeSet
+        element_shape_sets: list[ElementShapeSet]
         matches: MatchedModes
         match_sets: list[MatchedModes]
         predictions: Predictions
@@ -4755,6 +4765,65 @@ class Project(dict):
         return self._derive(source, _synthesized(self, source, params),
                             name or f'{source} Modal FRFs',
                             recipe=('synthesize_modal_frfs', params))
+
+    def element_shapes(self, shapes: Any, *, groups: Sequence[Any] | None = None,
+                       modes: Sequence[int] | None = None,
+                       name: str | None = None) -> str:
+        """Read a solved model's modes as strain and stress at each solid
+        element's centroid and rule points (Strain and Stress), as an
+        element shape set beside the shape set.
+
+        The model is the geometry in the shape set's group, its element
+        groups carrying their materials. Each element is read through its
+        own strain matrix and elasticity (`core.element_shapes`): the six
+        strain and six stress components, global axes, SI, per unit modal
+        coordinate. Only solids are read: bricks, wedges and tetrahedra.
+
+        Parameters
+        ----------
+        shapes : str or object
+            The solved shape set, by name or as the object itself.
+        groups : sequence of int or str, optional
+            The element groups to read, by id or name. Every group of
+            solids when omitted.
+        modes : sequence of int, optional
+            Which modes, by index from zero; all of them when omitted.
+        name : str, optional
+            What to call the result. Defaults to the set's name followed
+            by 'Strain and Stress'.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project.
+
+        Raises
+        ------
+        TypeError
+            If `shapes` is not a shape set.
+        ValueError
+            When the set has no geometry, or as
+            `core.element_shapes.element_shapes`: a group that holds
+            anything but solids, a set that does not reach the model's
+            nodes, a mode not in the set, or a set too large to hold.
+        """
+        source = self.name_of(shapes)
+        if not isinstance(self[source], ShapeSet):
+            raise TypeError(f'{source!r} is not a shape set')
+        found = self.geometry_for(source)
+        if found is None:
+            raise ValueError(f'{source} has no geometry: link it with the model it was '
+                             'solved on')
+        geometry_name, geometry = found
+        params: dict[str, Any] = {'geometry': geometry_name}
+        if groups is not None:
+            params['groups'] = [self._group_of(geometry, g) for g in groups]
+        if modes is not None:
+            params['modes'] = [int(k) for k in modes]
+        return self._derive(source, _read_in_elements(self, source, params),
+                            name or f'{source} Strain and Stress',
+                            recipe=('element_shapes', params))
 
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None,
@@ -9917,7 +9986,10 @@ class Project(dict):
         'compute_modal_responses': 'pair+model',
         # a mode's own FRF reads its frequency, damping and modal mass,
         # never its shape (2026-11-11)
-        'synthesize_modal_frfs': 'model'}
+        'synthesize_modal_frfs': 'model',
+        # the modes and the model they were solved on: a moved node, a
+        # new material or a mated surface changes the strain
+        'element_shapes': 'elements'}
 
     #: the fingerprints that hold settings only: a verb reading one reads
     #: the record's values as well, and those are compared on their own
@@ -9973,6 +10045,8 @@ class Project(dict):
                                table.types()):
                     digest.update('|'.join(column).encode())
             return ('content', digest.hexdigest())
+        if reads == 'elements':
+            return ('elements', _elements_digest(obj, self.get((params or {}).get('geometry'))))
         if reads == 'model':
             import hashlib
 
@@ -10709,6 +10783,9 @@ _VERB_APPLIES: tuple = (
     ('synthesize_modal_frfs', lambda p, o: (isinstance(o, ShapeSet)
                                             and o.num_shapes > 0
                                             and not o.is_complex)),
+    # modes solved on a model of solids, read as strain and stress element
+    # by element (2026-11-22, for the benchmark's stress table)
+    ('element_shapes', lambda p, o: _on_solids(p, o)),
     # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.group_properties))),
@@ -11076,7 +11153,7 @@ _JOURNALED_VERBS = (
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
+    'element_shapes', 'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
@@ -11187,6 +11264,7 @@ _RECOMPUTE = {
                                else _through(p, s, k, 'to_physical')),
     'compute_modal_responses': lambda p, s, k: _answered(p, s, k),
     'synthesize_modal_frfs': lambda p, s, k: _synthesized(p, s, k),
+    'element_shapes': lambda p, s, k: _read_in_elements(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
     'derive_specification': lambda p, s, k: _derived_again(p, k),
 }
@@ -11316,6 +11394,71 @@ def _synthesized(project, source, params):
         shapes, params['sample_rate'], params['frame_length'],
         quantity=params.get('quantity', 'acceleration'),
         modes=params.get('modes'), label=source)
+
+
+def _read_in_elements(project, source, params):
+    """The element shape set `element_shapes` makes, from its recipe:
+    read first and when refreshed."""
+    from .core.element_shapes import element_shapes
+
+    shapes = project[source]
+    if not isinstance(shapes, ShapeSet):
+        raise TypeError(f'{source!r} is not a shape set')
+    geometry = params.get('geometry')
+    if geometry not in project or not isinstance(project[geometry], Geometry):
+        raise ValueError(f'{source!r} was read on the geometry {geometry!r}, which is gone')
+    return element_shapes(project[geometry], shapes, groups=params.get('groups'),
+                          modes=params.get('modes'), comment=source)
+
+
+def _on_solids(project, obj) -> bool:
+    """Whether `obj` is a set of real modes on a geometry with a group of
+    solids that has a material: what `element_shapes` reads."""
+    if not isinstance(obj, ShapeSet) or not obj.num_shapes or obj.is_complex:
+        return False
+    try:
+        found = project.geometry_for(obj)
+    except (KeyError, ValueError):
+        return False
+    if found is None:
+        return False
+    return any(getattr(props, 'kind', '') == 'solid'
+               for props in (found[1].group_properties or {}).values())
+
+
+def _elements_digest(shapes, geometry) -> str | None:
+    """The digest of what an element shape set is read from: the modes
+    and the model they were solved on, nodes, elements, frames, materials
+    and mated surfaces."""
+    import hashlib
+
+    if not isinstance(shapes, ShapeSet) or not isinstance(geometry, Geometry):
+        return None
+    digest = hashlib.blake2b(digest_size=16)
+    for array in (shapes.shape_matrix, shapes.frequency, shapes.damping,
+                  geometry.node_id, geometry.node_xyz, geometry.node_disp_cs,
+                  geometry.cs_matrix, geometry.elem_id, geometry.elem_group):
+        digest.update(np.ascontiguousarray(array).tobytes())
+    digest.update(','.join(shapes.coordinate).encode())
+    conn = [np.asarray(c, dtype=np.int64) for c in geometry.elem_conn]
+    digest.update(np.array([len(c) for c in conn], dtype=np.int64).tobytes())
+    if conn:
+        digest.update(np.concatenate(conn).tobytes())
+    # by value, not by repr: a density typed 2700 reads back 2700.0
+    for group, props in sorted((geometry.group_properties or {}).items()):
+        material = getattr(props, 'material', None)
+        digest.update(np.array([int(group)], dtype=np.int64).tobytes())
+        digest.update(props.kind.encode())
+        if material is not None:
+            digest.update(np.array([material.youngs_modulus, material.poissons_ratio,
+                                    material.shear_modulus], dtype=np.float64).tobytes())
+    for mated in getattr(geometry, 'mates', None) or []:
+        digest.update(f'{mated.normal_mode} {mated.shear_mode}'.encode())
+        for array in (mated.groups, mated.nodes_a, mated.nodes_b):
+            digest.update(np.asarray(array, dtype=np.int64).tobytes())
+        digest.update(np.array([mated.normal_stiffness, mated.shear_stiffness],
+                               dtype=np.float64).tobytes())
+    return digest.hexdigest()
 
 
 def _answered(project, source, params):
