@@ -712,6 +712,10 @@ pub struct PlantLoop {
     /// The previous segment's undelivered drive frames, carried across the
     /// boundary so the next segment does not start on primed ZEROS.
     carry_queue: Vec<Vec<f32>>,
+    /// The previous segment's abort integrators, carried across a warm seam
+    /// with the drive: the acquisition is one gapless stream, and a fresh
+    /// integrator seeded mid-noise reads its first sample as a step.
+    carry_watchdog: Option<Vec<hertzforge_engine::ChannelLimiter>>,
     backend: Box<dyn Backend>,
     table: ChannelTable,
     ecfg: EngineConfig,
@@ -969,6 +973,7 @@ impl PlantLoop {
             last_boundary: None,
             output_primed: false,
             carry_queue: Vec::new(),
+            carry_watchdog: None,
             backend,
             window_len: cfg.window_len() as u64,
             table,
@@ -998,6 +1003,7 @@ impl PlantLoop {
     pub fn mark_drive_discontinuity(&mut self) {
         self.output_primed = false;
         self.carry_queue.clear();
+        self.carry_watchdog = None;
     }
 
     /// How many frames of synthesized LEAD-IN the next segment should bring if
@@ -1236,6 +1242,16 @@ impl PlantLoop {
             // zeros, which also carries the real drive across the seam instead
             // of merely not-zeroing it.
             let mut engine = Engine::new(clone_cfg(&self.ecfg), &self.table, &self.backend);
+            // A warm seam continues the previous segment's integrators; a cold
+            // start (after a suspend: a real gap) starts fresh, as integration
+            // must never span a discontinuity.
+            if self.output_primed {
+                if let Some(state) = self.carry_watchdog.take() {
+                    engine.adopt_watchdog_integrators(state);
+                }
+            } else {
+                self.carry_watchdog = None;
+            }
             if self.output_primed {
                 engine.mark_output_prefilled();
                 engine.adopt_output_queue(std::mem::take(&mut self.carry_queue));
@@ -1310,6 +1326,7 @@ impl PlantLoop {
             // Carry whatever real drive the engine had not yet delivered into
             // the next segment.
             self.carry_queue = engine.take_output_queue();
+            self.carry_watchdog = Some(engine.watchdog_integrators());
             let faulted = fault_message(&report.reason).map(|f| {
                 // A fault message that does not say what the boundary did is a
                 // fault nobody can attribute (2026-08-03: three deploy cycles

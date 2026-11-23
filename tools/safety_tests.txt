@@ -382,6 +382,9 @@ hertzforge-explorer-host tests/arm_gate_consulted.rs           a_hardware_statio
 hertzforge-engine       src/watchdog.rs                        accel_over_limit_trips_and_calls_estop                    watchdog       an acceleration over its limit trips the emergency stop
 hertzforge-engine       src/watchdog.rs                        velocity_limit_trips_on_integrated_signal                 watchdog       the velocity limit trips on the integrated signal
 hertzforge-engine       src/limits.rs                          accel_trips_on_sustained_over_limit                       watchdog       a sustained over-limit acceleration trips
+hertzforge-engine       src/watchdog.rs                        integrators_carried_across_a_gapless_seam_see_only_the_motion  watchdog  a seam between engines is not a step to the displacement abort
+hertzforge-engine       src/watchdog.rs                        integrator_state_for_other_channels_is_not_adopted        watchdog       carried integrators are adopted only for the same channels
+hertzforge-random       tests/seam_watchdog.rs                 a_tone_across_warm_seams_does_not_trip_the_displacement_abort  watchdog  Random's segment seams do not trip the displacement abort
 hertzforge-engine       tests/engine.rs                        over_limit_spike_trips_watchdog_and_estops                watchdog       an over-limit spike trips the watchdog and emergency stops
 hertzforge-engine       tests/engine.rs                        multichannel_tail_breach_still_reaches_the_watchdog       watchdog       a breach on the last channel still reaches the watchdog
 hertzforge-engine       tests/safety_gates.rs                  a_dropped_raw_frame_fails_a_limits_armed_run              watchdog       a dropped raw frame fails a limits-armed run
@@ -429,9 +432,11 @@ hertzforge-station      src/lock.rs                            a_second_holder_i
 hertzforge-hal-ni       src/config.rs                          a_row_asking_more_volts_than_its_module_measures_is_refused_by_name  arm-gate  a row asking more volts than its module has is refused
 hertzforge-hal-ni       src/timing.rs                          drive_on_a_different_family_than_the_inputs_is_refused    arm-gate       a drive on another clock than its inputs is refused
 hertzforge-hal-ni       src/iepe_settle.rs                     a_block_at_the_rail_is_not_quiet                          arm-gate  an IEPE input at its rail is never ready to run
-hertzforge-hal-ni       src/iepe_settle.rs                     a_ten_volt_bias_rails_then_settles_in_about_two_seconds   arm-gate  an IEPE input is ready only once its bias offset has decayed
+hertzforge-hal-ni       src/iepe_settle.rs                     a_ten_volt_bias_rails_then_settles_once_its_offset_stops_moving  arm-gate  an IEPE input is ready only once its bias offset stops moving
+hertzforge-hal-ni       src/iepe_settle.rs                     what_the_settle_leaves_moves_the_displacement_abort_by_less_than_a_quarter_of_its_limit  arm-gate  the offset left at ready cannot trip the displacement abort
+hertzforge-hal-ni       src/iepe_settle.rs                     a_constant_offset_is_settled_at_the_second_window         arm-gate  a steady offset is ready without waiting for it to reach zero
 hertzforge-hal-ni       src/iepe_settle.rs                     a_channel_that_stays_railed_refuses_and_says_what_it_reads  arm-gate  an IEPE input that never settles refuses the arm and names the channel
-hertzforge-hal-ni       src/iepe_settle.rs                     a_disturbance_restarts_the_hold                           arm-gate  the settle hold restarts after any loud block
+hertzforge-hal-ni       src/iepe_settle.rs                     a_knock_spoils_its_window_and_the_next                    arm-gate  a knock during the settle delays ready past it
 hertzforge-hal-ni       src/backend.rs                         the_iepe_settle_watches_each_iepe_input_at_its_own_column  arm-gate  the settle watches every IEPE input at its own column
 hertzforge-hal-ni       src/backend.rs                         a_stop_between_shots_keeps_the_iepe_current_on_and_the_settle_standing  arm-gate  the IEPE current stays on across stops for the whole test
 hertzforge-hal-ni       src/backend.rs                         the_first_block_after_a_start_names_an_iepe_input_at_its_rail  overload  an IEPE input whose current went off is named at the next start

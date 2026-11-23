@@ -874,6 +874,22 @@ impl Engine {
         self.output.take_queue()
     }
 
+    /// This engine's abort integrators, to hand to a successor that continues
+    /// the same gapless acquisition. See [`AbortWatchdog::integrator_state`].
+    pub fn watchdog_integrators(&self) -> Vec<crate::limits::ChannelLimiter> {
+        self.watchdog.integrator_state()
+    }
+
+    /// Continue a predecessor's abort integrators across a gapless seam, in
+    /// place of seeding fresh ones on this engine's first sample. Returns
+    /// whether they were adopted. See [`AbortWatchdog::adopt_integrator_state`].
+    pub fn adopt_watchdog_integrators(
+        &mut self,
+        state: Vec<crate::limits::ChannelLimiter>,
+    ) -> bool {
+        self.watchdog.adopt_integrator_state(state)
+    }
+
     /// Frames the device accepted of this engine's own zero prefill: 0 until
     /// [`Engine::prefill_output`] has run, and 0 when the caller declared the
     /// output primed. Read-only: a caller that states how many frames went

@@ -79,8 +79,9 @@ export interface ClientOptions {
 /**
  * How long a request that arms the station may take to answer. Every module's `<module>.arm`
  * and `<module>.start` answers only once the station's arm has returned, and on hardware the
- * arm settles each IEPE input first, with nothing driving: about 2 s for a 10 V bias, and up
- * to the settle's limit (15 s) before it refuses and names the channel. The ordinary request
+ * arm settles each IEPE input first, with nothing driving: until its offset stops moving, about
+ * 8 s for a 10 mV/g accelerometer on the NI 9234, and up to the settle's limit (45 s, plus 5 s
+ * of margin) before it refuses and names the channel. The ordinary request
  * timeout would report that refusal, or a slow settle, as "no response".
  */
 export const ARM_REQUEST_TIMEOUT_MS = 60_000;
