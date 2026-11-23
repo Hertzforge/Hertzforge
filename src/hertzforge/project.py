@@ -38,10 +38,10 @@ from .core.data import (
     TransientSpecification,
     _CoherenceBase,
 )
-from .core.element_shapes import ElementShapeSet
 from .core.data_index import DataIndex, IndexEntry, Reference, file_state
 from .core.data_index import digest as digest_file
 from .core.data_index import now as _index_now
+from .core.element_shapes import ElementShapeSet
 from .core.field_limit import CONFIDENCE as _FIELD_CONFIDENCE
 from .core.field_limit import COVERAGE as _FIELD_COVERAGE
 from .core.field_limit import MAX_BREAKPOINTS as _FIELD_BREAKPOINTS

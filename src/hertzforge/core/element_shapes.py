@@ -45,7 +45,7 @@ from typing import Any
 import numpy as np
 
 from .geometry import ELEMENT_TYPES, Geometry
-from .shapes import ShapeSet, _split_sign
+from .shapes import ShapeSet
 
 #: the six components of a strain or stress, in the order the
 #: elasticity matrix takes them; xy, yz and xz strains are engineering

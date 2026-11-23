@@ -306,6 +306,7 @@ def opens(obj: Any) -> bool:
     """
     from hertzforge.core.channel_table import ChannelTable
     from hertzforge.core.data import DataArray
+    from hertzforge.core.element_shapes import ElementShapeSet
     from hertzforge.core.geometry import Geometry
     from hertzforge.core.matches import MatchedModes
     from hertzforge.core.photos import Photos
@@ -313,8 +314,6 @@ def opens(obj: Any) -> bool:
     from hertzforge.core.report import Report
     from hertzforge.core.shapes import ShapeSet
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
-
-    from hertzforge.core.element_shapes import ElementShapeSet
 
     if isinstance(obj, Predictions):
         return bool(len(obj.predictions))

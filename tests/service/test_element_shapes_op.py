@@ -18,7 +18,7 @@ from hertzforge.service.server import OPERATIONS
 from .test_projects import _exchange
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_element_shapes import _cells  # noqa: E402
+from test_element_shapes import _cells
 
 OP = 'project.element_shapes'
 
