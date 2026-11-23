@@ -264,8 +264,10 @@ def test_a_mate_stiffness_is_typed_and_said_in_the_display_system():
 
 def test_the_system_says_its_stiffness_unit():
     (inches,) = answers(('units.system', {}))
+    # a stress typed for a color scale is said in the system's pressure
     assert inches['result']['quantities'] == {
-        'force/length': {'unit': 'lbf/in', 'to_si': pytest.approx(LBF_PER_IN)}}
+        'force/length': {'unit': 'lbf/in', 'to_si': pytest.approx(LBF_PER_IN)},
+        'pressure': {'unit': 'psi', 'to_si': pytest.approx(6894.757293168)}}
 
 
 def test_every_stiffness_of_a_solids_form_is_marked():

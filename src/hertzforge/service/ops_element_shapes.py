@@ -48,6 +48,8 @@ COLOR_GROUPS = Param('color_groups', 'Colored element groups, blank for every el
 COLOR_MAX = Param('color_max', 'Top of the stress color scale, 0 for the largest shown', 'number',
                   default=0.0, unit='Pa', min=0.0, quantity='pressure')
 DATA = Param('data', 'Modal coordinates', 'enum', options_from='objects:time_history')
+DATA_RECORDS = Param('data_records', 'Modal coordinates picked, blank for all', 'string',
+                     default='')
 SOURCE = Param('source', 'Shape set', 'enum', options_from='verb:element_shapes')
 GROUPS = Param('groups', 'Element groups, blank for every solid group', 'string', default='')
 MODES = Param('modes', 'Modes, blank for all', 'string', default='')
@@ -356,7 +358,10 @@ def play_element_shapes(project: Any, params: dict[str, Any]) -> list[dict]:
     coloring = element_coloring(name, params['quantity'], params['component'],
                                 params.get('color_groups', ''),
                                 float(params.get('color_max') or 0.0))
-    views, notes = modal_motion_of(project, found[0], data, [], source, coloring)
+    # the modal coordinates picked under the clip are the modes played, all when none are
+    picks = parse_optional_picks(params.get('data_records', ''),
+                                 len(project[data].response_dof), 'record') or []
+    views, notes = modal_motion_of(project, found[0], data, picks, source, coloring)
     if not views:
         raise refused(notes[0] if notes else f'{data} holds no modal coordinates to play')
     if notes:
@@ -384,6 +389,6 @@ OPERATIONS = (
                 'set was read from, each element colored by one scalar of its strain or stress '
                 'summed over the modes at each instant, on the clip\'s largest value or a stated '
                 'scale.',
-        params=(OBJECT, DATA, QUANTITY, COMPONENT, COLOR_GROUPS, COLOR_MAX),
+        params=(OBJECT, DATA, DATA_RECORDS, QUANTITY, COMPONENT, COLOR_GROUPS, COLOR_MAX),
         outputs=('shape3d', 'spectrum'), run=play_element_shapes),
 )

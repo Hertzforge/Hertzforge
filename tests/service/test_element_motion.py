@@ -155,7 +155,8 @@ def test_the_action_is_offered_with_the_set_and_its_clip_picked_and_drawn_live(t
     state = _state()
     added = _clip(state)
     row = _row(state, [added, 'Clip'], PLAY)
-    assert row is not None and row['ready'] and row['fill'] == {'object': added, 'data': 'Clip'}
+    assert row is not None and row['ready']
+    assert row['fill'] == {'object': added, 'data': 'Clip', 'data_records': ''}
     assert row['live'] and row['shows']
     color = _row(state, [added], 'project.color_element_shapes')
     assert color['live'] and color['shows']
@@ -227,3 +228,21 @@ def test_in_inches_the_summed_stress_is_the_same_stress_in_psi():
     np.testing.assert_allclose(psi, pascals / 6894.757293168, rtol=1e-4)
     assert held['max'][0] == pytest.approx(top / 6894.757293168, rel=1e-6)
     assert held['unit'] == 'psi' and stage['motion']['value_unit'] == 'in'
+
+
+def test_the_modal_coordinates_picked_under_the_clip_are_the_modes_played():
+    state = _state()
+    added = _clip(state)
+    row = _row_of(state, [added, 'Clip'], {'Clip': [1]})
+    assert row['fill']['data_records'] == '2'
+    views = _run(state, PLAY, {'object': added, 'data': 'Clip', 'data_records': '2'})
+    held = _stage({'views': views})['element_values']
+    read = state.project[added]
+    # record 2 is M7, the first mode the set was read at
+    np.testing.assert_allclose(held['shapes'], read.stress[[0]][:, read.point == 0], rtol=1e-6)
+
+
+def _row_of(state, objects, records):
+    from .test_element_shapes_op import _row
+
+    return _row(state, objects, PLAY, records)
