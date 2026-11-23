@@ -15,9 +15,22 @@ import hertzforge as hz
 from hertzforge import Geometry
 from hertzforge.__main__ import main
 from hertzforge.core.data import TimeHistory
-from hertzforge.drawing.viz.geometry import dof_arrow_vectors, dof_arrows_on
+from hertzforge.drawing.viz.geometry import (
+    dof_arrow_length,
+    dof_arrow_solids,
+    dof_arrow_vectors,
+    dof_arrows_on,
+)
 from hertzforge.record import RecordError, find_chrome
-from hertzforge.still import Still, StillError, still_page, still_view, write_still
+from hertzforge.report.viewer import read_viewer
+from hertzforge.still import (
+    LABEL_LIMIT,
+    Still,
+    StillError,
+    still_page,
+    still_view,
+    write_still,
+)
 
 PLATE = Path(__file__).resolve().parent.parent / 'testdata' / 'plate'
 
@@ -142,10 +155,10 @@ def test_the_still_marks_each_dof_where_it_was_measured(plate):
     assert arrows['inward'].tolist() == [0, 0, 0, 1], 'the force points in'
     xyz = np.asarray(model.node_xyz, dtype=float)
     seats = xyz[[_row(model, seat) for seat in SEATS]]
-    length = arrows['length']
+    length = arrows['lengths'][3]
     assert 0 < length
     assert arrows['tails'][:3] == pytest.approx(seats[:3].astype(np.float32))
-    # the force ends on its node: it starts one length back along global Y
+    # the force ends on its node: it starts its own length back along global Y
     assert arrows['tails'][3] == pytest.approx(seats[3] - length * np.array([0, 1, 0]), abs=1e-6)
     assert arrows['axes'].tolist() == [0, 1, 2, 0]
     assert view['opacity'] == 0.4 and view['home']['eye'] == [0.0, 0.0, 1.0]
@@ -219,3 +232,143 @@ def test_a_still_is_drawn_to_a_png_with_no_window(plate, tmp_path):
     out = write_still(plate, Still('Geometry', dofs=['Kick'], width=320, height=200,
                                    theme='light'), tmp_path / 'still.png')
     assert _png_size(out) == (320, 200)
+
+
+def test_each_objects_forces_and_responses_are_sized_to_their_own_spacing(plate):
+    """One length for every arrow held the RC plate's corner forces, 0.7 in. apart, to what its
+    triaxes 0.5 in. apart allowed. Each set (an object's DOFs pointing in, or out) now takes the
+    longest its own spacing allows."""
+    model = plate['Geometry']
+    # two responses a node apart, one force alone
+    plate.add('Close', _test_geometry(model, seats=(707, 708, 1313), ids=(1, 2, 3)))
+    plate.add('Hits', _measured(dofs=('1Z+', '2Z+', '3X+'), forces=('3X+',)))
+    plate.link('Close', 'Hits')
+    arrows = still_view(plate, Still('Geometry', dofs=['Hits', 'Kick']))['arrows']
+    xyz = np.asarray(model.node_xyz, dtype=float)
+    from hertzforge.service.ops_geometry import _extent
+
+    extent = _extent(xyz)
+    out = dof_arrow_length(xyz[[_row(model, 707), _row(model, 708)]], extent)
+    alone = dof_arrow_length(xyz[[_row(model, 1313)]], extent)
+    kick_out = dof_arrow_length(xyz[[_row(model, seat) for seat in SEATS[:3]]], extent)
+    assert out == pytest.approx(0.9 * 0.0254), 'the pair: nine tenths of their spacing'
+    assert alone == pytest.approx(0.12 * extent), 'the lone force: 12 % of the model'
+    assert arrows['labels'] == ['1Z+', '2Z+', '3X+', '101X+', '102Y+', '103Z+', '104X+']
+    assert arrows['lengths'].tolist() == pytest.approx(
+        [out, out, alone, kick_out, kick_out, kick_out, alone])
+    assert arrows['length'] == pytest.approx(alone), 'the longest'
+
+
+def test_one_length_each_is_held_to_one_per_arrow():
+    xyz = np.zeros((2, 3))
+    hits = [(False, (0, np.array([1.0, 0, 0]), 0)), (True, (1, np.array([0, 0, 1.0]), 2))]
+    one = dof_arrow_solids(xyz, hits, 0.5, ['a', 'b'])
+    assert one['length'] == 0.5 and 'lengths' not in one
+    each = dof_arrow_solids(xyz, hits, [0.5, 2.0], ['a', 'b'])
+    assert each['lengths'].tolist() == [0.5, 2.0] and each['length'] == 2.0
+    assert each['tails'][1].tolist() == [0.0, 0.0, -2.0], 'a force starts its own length back'
+    with pytest.raises(ValueError, match='3 arrow lengths for 2 arrows'):
+        dof_arrow_solids(xyz, hits, [0.5, 2.0, 1.0], ['a', 'b'])
+
+
+def test_labels_are_written_for_a_few_arrows_unless_told(plate):
+    def labeled(**options):
+        return read_viewer(still_page(plate, Still('Geometry', **options)))['record']['setup']['labels']
+
+    assert labeled(dofs=['Kick']) is True, 'four arrows'
+    assert labeled(dofs=['Kick'], labels=False) is False
+    assert labeled() is False, 'no arrows, nothing to write'
+    many = [f'{n}Z+' for n in plate['Geometry'].node_id[:LABEL_LIMIT + 1]]
+    plate.add('Many', _measured(dofs=many, forces=()))
+    assert labeled(dofs=['Many'], on='Geometry') is False
+    assert labeled(dofs=['Many'], on='Geometry', labels=True) is True
+    with pytest.raises(StillError, match='labels name the DOF arrows, and the picture has none'):
+        still_page(plate, Still('Geometry', labels=True))
+
+
+def _frame_counts(project, still, count_js):
+    """`count_js`, a JavaScript function of the frame's pixels (an ImageData), run on the still's
+    one frame in headless Chrome."""
+    import tempfile
+
+    from hertzforge.record import _Chrome, opened
+
+    try:
+        chrome = find_chrome()
+    except RecordError as error:
+        pytest.skip(str(error))
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / 'still.html'
+        path.write_text(still_page(project, still), encoding='utf-8')
+        browser = _Chrome(chrome, still.width, still.height)
+        try:
+            opened(browser, path)
+            result = browser.call('Runtime.evaluate', {
+                'expression': f"""(async () => {{
+                    const image = new Image();
+                    image.src = window.__hertzforgeRecorder.frame(0);
+                    await image.decode();
+                    const c = document.createElement('canvas');
+                    c.width = image.width; c.height = image.height;
+                    const g = c.getContext('2d');
+                    g.drawImage(image, 0, 0);
+                    const text = getComputedStyle(document.documentElement).getPropertyValue('--text-1');
+                    g.fillStyle = text; g.fillRect(0, 0, 1, 1);
+                    const ink = Array.from(g.getImageData(0, 0, 1, 1).data.slice(0, 3));
+                    g.drawImage(image, 0, 0);
+                    return ({count_js})(g.getImageData(0, 0, c.width, c.height), ink);
+                }})()""", 'awaitPromise': True, 'returnByValue': True})
+        finally:
+            browser.close()
+    return result['result']['value']
+
+
+@pytest.mark.slow
+def test_the_labels_are_drawn_into_the_picture(plate):
+    """Counted on the frame itself: pixels in the labels' own color, there with labels and gone
+    without, since the pane writes them over its canvas and not in it."""
+    ink = """(image, ink) => { let n = 0; const d = image.data;
+        for (let i = 0; i < d.length; i += 4)
+            if (d[i] === ink[0] && d[i + 1] === ink[1] && d[i + 2] === ink[2]) n++;
+        return n; }"""
+    shown = _frame_counts(plate, Still('Geometry', dofs=['Kick'], width=640, height=400,
+                                       theme='light', labels=True), ink)
+    hidden = _frame_counts(plate, Still('Geometry', dofs=['Kick'], width=640, height=400,
+                                        theme='light', labels=False), ink)
+    assert hidden < 20 and shown > hidden + 100, (shown, hidden)
+
+
+@pytest.mark.slow
+def test_a_see_through_picture_keeps_the_element_colors(plate):
+    """The RC drawn see-through to show the forces behind the plate turned the whole model gray,
+    so its parts could not be told apart."""
+    plate['Geometry'].elem_color[:] = 3
+    green = """(image) => { let n = 0; const d = image.data;
+        for (let i = 0; i < d.length; i += 4)
+            if (d[i + 1] > d[i] + 40 && d[i + 1] > d[i + 2] + 40) n++;
+        return n; }"""
+    solid = _frame_counts(plate, Still('Geometry', width=640, height=400, theme='light'), green)
+    through = _frame_counts(plate, Still('Geometry', width=640, height=400, theme='light',
+                                         opacity=0.4), green)
+    assert solid > 10_000 and through > 10_000, (solid, through)
+
+
+
+def test_a_view_of_arrows_of_their_own_lengths_is_one_the_protocol_allows(plate):
+    import json
+
+    import jsonschema
+
+    from hertzforge.service import frames
+
+    schema = json.loads((Path(__file__).resolve().parent.parent / 'schema'
+                         / 'protocol.schema.json').read_text(encoding='utf-8'))
+    check = jsonschema.Draft202012Validator(
+        {'$schema': schema['$schema'], '$defs': schema['$defs'], '$ref': '#/$defs/views'})
+    view = still_view(plate, Still('Geometry', dofs=['Kick']))
+    assert len(view['arrows']['lengths']) == 4
+    wire, _arrays = frames.to_wire({'views': [view]})
+    check.validate(wire['views'])
+    wire['views'][0]['arrows']['lengths'] = 0.5
+    with pytest.raises(jsonschema.ValidationError):
+        check.validate(wire['views'])

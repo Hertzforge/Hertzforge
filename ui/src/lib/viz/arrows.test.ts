@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Color, Vector3 } from 'three';
 import { Matrix4 } from 'three';
-import { arrowGeometry, arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets } from './arrows';
+import { arrowGeometry, arrowMatrices, arrowMesh, labelPlaces, labelPoints, moveArrows, riddenOffsets } from './arrows';
 import { AXIS_COLORS } from './pick';
 
 describe('solid arrows', () => {
@@ -20,6 +20,31 @@ describe('solid arrows', () => {
 		expect(new Vector3(0, 1, 0).applyMatrix4(out).toArray().map((v) => +v.toFixed(6))).toEqual([1.5, 2, 3]);
 		// an arrow pointing in starts a length away and ends on its node
 		expect(new Vector3(0, 1, 0).applyMatrix4(into).toArray().map((v) => +v.toFixed(6))).toEqual([0, 0, 0]);
+	});
+
+	it('draws each arrow at its own length when the view gives one each', () => {
+		// a picture of a test's forces and responses sizes each set to its own spacing
+		const mesh = arrowMesh({ tails: [0, 0, 0, 0, 0, 1], directions: [1, 0, 0, 0, 0, -1], axes: [0, 2], length: 3, lengths: new Float32Array([3, 0.5]) });
+		const head = (k: number) => {
+			const m = new Matrix4();
+			mesh.getMatrixAt(k, m);
+			return new Vector3(0, 1, 0).applyMatrix4(m).toArray().map((v) => +v.toFixed(6));
+		};
+		expect(head(0)).toEqual([3, 0, 0]);
+		expect(head(1)).toEqual([0, 0, 0.5]);
+		const at = labelPoints({ tails: [0, 0, 0, 0, 0, 1], directions: [1, 0, 0, 0, 0, -1], inward: [0, 1], length: 3, lengths: [3, 0.5] }, 0.2);
+		expect(Array.from(at).map((v) => +v.toFixed(6))).toEqual([3.6, 0, 0, 0, 0, 1.1]);
+	});
+
+	it('places each label on the picture, leaving out one behind the camera or off the edge', () => {
+		// a camera whose device coordinates are the points' own x and y, and z for depth
+		const project = (x: number, y: number, z: number): [number, number, number] => [x, y, z];
+		const at = [0, 0, 0, 1, 1, 0, 0.5, -0.5, 2, 1.5, 0, 0];
+		const places = labelPlaces(at, ['middle', 'corner', 'behind', 'off'], project, 200, 100);
+		expect(places).toEqual([
+			{ x: 100, y: 50, text: 'middle' },
+			{ x: 200, y: 0, text: 'corner' }
+		]);
 	});
 
 	it('colors each arrow by its own axis, as the orientation axes are', () => {

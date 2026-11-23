@@ -297,25 +297,35 @@ def _listed(items: Sequence[str], shown: int = 8) -> str:
 
 def dof_arrow_solids(xyz: np.ndarray,
                      drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
-                     length: float, labels: Sequence[str]) -> dict[str, Any]:
-    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
-    (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
-    node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
-    f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
-    (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
-    u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
-    node. A caller whose arrows move with the model adds `follow` u32 [A], the row of the
-    view's `nodes` whose motion each arrow takes."""
+                     length: float | Sequence[float], labels: Sequence[str]) -> dict[str, Any]:
+    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long, or each its own
+    length when `length` holds one per arrow. `drawn` is (points in, (node row, direction,
+    axis)) per arrow; an arrow pointing in ends on its node, the others start there. `tails`
+    f32 [A, 3] is where each starts, `directions` f32 [A, 3] the unit vector it points along,
+    and `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which picks its color. With one length
+    each they are `lengths` f32 [A], and `length` is the longest. `labels` names each arrow's DOF
+    and `inward` u8 [A] is 1 for an arrow that points in, so a label can sit at the end away
+    from the node. A caller whose arrows move with the model adds `follow` u32 [A], the row of
+    the view's `nodes` whose motion each arrow takes."""
+    each = np.ndim(length) > 0
+    lengths = (np.asarray(length, dtype=float) if each
+               else np.full(len(drawn), float(length)))
+    if each and len(lengths) != len(drawn):
+        raise ValueError(f'{len(lengths)} arrow lengths for {len(drawn)} arrows')
     tails = np.zeros((len(drawn), 3), dtype=np.float32)
     directions = np.zeros((len(drawn), 3), dtype=np.float32)
     axes = np.zeros(len(drawn), dtype=np.uint8)
     for k, (into, (row, vector, axis)) in enumerate(drawn):
-        tails[k] = xyz[row] - length * vector if into else xyz[row]
+        tails[k] = xyz[row] - lengths[k] * vector if into else xyz[row]
         directions[k] = vector
         axes[k] = axis
-    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length),
-            'labels': [str(label) for label in labels],
-            'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
+    out = {'tails': tails, 'directions': directions, 'axes': axes,
+           'length': float(lengths.max(initial=0.0)) if each else float(length),
+           'labels': [str(label) for label in labels],
+           'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
+    if each:
+        out['lengths'] = lengths.astype(np.float32)
+    return out
 
 
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:

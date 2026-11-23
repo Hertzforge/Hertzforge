@@ -153,3 +153,12 @@ def test_a_matrix_with_a_unit_in_its_label_is_converted_and_a_mac_is_not():
     assert level['value_range'] == pytest.approx([0.0, 4.0])
     assert mac['value_label'] == 'MAC' and mac['value_range'] == [0.0, 1.0]
     assert np.array_equal(mac['values'], np.eye(2))
+
+
+def test_arrows_of_their_own_lengths_are_as_long_in_the_systems_unit():
+    view = _plate('m')
+    view['arrows']['lengths'] = np.array([0.0254], dtype=np.float32)
+    (out,) = display_units.convert([view], US)
+    assert out['arrows']['lengths'].dtype == np.float32
+    assert out['arrows']['lengths'][0] == pytest.approx(1.0)
+

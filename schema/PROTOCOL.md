@@ -466,8 +466,9 @@ elements, the first 10,000, with their faces and edges; past that the view's `no
 of `project.view_entities` for nodes, and the view the Nodes part shows. A geometry drawn on its
 own (the geometry picked, one of its parts, its Edit views) also carries `element_colors`
 (`{"triangles","triangle_colors","lines","line_colors"}`, u32 rows of `nodes` and u8 RGB each),
-every element in its own palette color over the gray surface, shown while the surface is solid. A
-mode shape's view colors by deflection and carries none.
+every element in its own palette color over the gray surface. A see-through surface keeps the
+colors at its opacity, in place of the gray surface, and a wireframe leaves them off. A mode
+shape's view colors by deflection and carries none.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
@@ -824,7 +825,9 @@ set shows the picked records with their resynthesis following dashed (`follows`)
 every stage. The arrows are `arrows` on the `shape3d`, solids that stay put while the model moves:
 `tails` f32 [A, 3] where each starts, in the geometry's coordinates, `directions` f32 [A, 3] the
 unit vector it points along, `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which the shell
-colors it by as it colors the orientation axes, `length`, one for all of them, `labels`, each
+colors it by as it colors the orientation axes, `length`, one for all of them, or with `lengths`
+f32 [A] each its own (a picture of several objects' DOFs sizes each object's to its own spacing),
+`labels`, each
 arrow's DOF, which the shell writes at the arrow's free end when asked, and `inward` u8 [A], 1 for
 an arrow that points in and ends on its node. With `follow` u32 [A] the arrows move instead: each
 takes the motion of that row of the view's `nodes`, as a body's points do (2^32 − 1 stays put), and

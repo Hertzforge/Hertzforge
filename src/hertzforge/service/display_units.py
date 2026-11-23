@@ -284,6 +284,8 @@ def _shape(view: dict, system: Any) -> None:
             # the arrows over the model, in its coordinates
             arrows['tails'] = np.asarray(_values(arrows['tails'], change), dtype=np.float32)
             arrows['length'] = float(arrows['length'] / change[0])
+            if arrows.get('lengths') is not None:
+                arrows['lengths'] = np.asarray(arrows['lengths'] / change[0], dtype=np.float32)
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)

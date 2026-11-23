@@ -3,9 +3,11 @@
 The picture is drawn by the app's own 3-D view, as the recorder draws a video's frames
 (`record`): the geometry's surface and mesh lines as the app shows it, in the light or dark
 theme, with a solid arrow at each DOF the named objects measure, in its axis's color. A force
-or a drive voltage points in and ends on its node; every other DOF points out from it. Free
-nodes, those no element is drawn through, are left off: on a finite element model they are
-masses and spider centers that read as specks.
+or a drive voltage points in and ends on its node; every other DOF points out from it. Each
+object's arrows that point in, and those that point out, are sized to their own spacing, and a
+few arrows have their DOFs written at their free ends. Free nodes, those no element is drawn
+through, are left off: on a finite element model they are masses and spider centers that read
+as specks. Drawn see-through, the surface keeps its element colors.
 
 A test's DOFs name the nodes of the test geometry they were measured on, which are other nodes
 of a finite element mesh, so the DOFs are placed by position when they are drawn on a geometry
@@ -29,6 +31,10 @@ import numpy as np
 from .animation import AnimationError, framed, opening_camera, staged
 from .record import RecordError
 
+#: past this many arrows a still writes no DOF labels unless asked: they would cover the model,
+#: as the report page's scenes judge it
+LABEL_LIMIT = 40
+
 
 class StillError(RecordError):
     """A picture that cannot be made, in words for the person making it."""
@@ -47,7 +53,8 @@ class Still:
     `geometry` (meters when the units are defined; the match distance DOF Mapping opens on
     when None). `opacity`, `view`, `eye`, `up`, `frame` and `theme` are the recorder's
     (`record.Recording`): how solid the surface is, the camera, the element groups it is
-    framed on, and the light or dark look.
+    framed on, and the light or dark look. `labels` writes each arrow's DOF at its free end; when
+    None they are written for at most `LABEL_LIMIT` arrows.
     """
 
     geometry: str
@@ -62,6 +69,7 @@ class Still:
     up: Sequence[float] | None = None
     frame: Sequence[str] | None = None
     theme: str = 'dark'
+    labels: bool | None = None
 
 
 def measured_on(project: Any, name: str) -> str | None:
@@ -134,6 +142,8 @@ def still_view(project: Any, still: Still) -> dict[str, Any]:
     view.pop('bodies', None)
     hits: list[tuple[bool, tuple[int, np.ndarray, int]]] = []
     labels: list[str] = []
+    #: each arrow's set: the object it is of, and whether it points in
+    sets: list[tuple[str, bool]] = []
     for name in still.dofs:
         dofs, into = marked_dofs(project[name], name)
         if not dofs:
@@ -150,10 +160,19 @@ def still_view(project: Any, still: Still) -> dict[str, Any]:
             raise StillError(f'{name} on {still.geometry}: {error}') from None
         hits += list(zip(into, placed, strict=True))
         labels += dofs
+        sets += [(name, inward) for inward in into]
     if hits:
+        # each set's arrows are sized to their own spacing (`dof_arrow_length`): one length for
+        # all held a corner's forces, 0.7 in. apart, to the 0.45 in. that a pair of triaxes
+        # 0.5 in. apart allows, and drawn solid most of each force was lost behind the plate
         xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-        length = dof_arrow_length(xyz[[hit[0] for _into, hit in hits]], _extent(xyz))
-        view['arrows'] = dof_arrow_solids(xyz, hits, length, labels)
+        extent = _extent(xyz)
+        rows = np.array([hit[0] for _into, hit in hits])
+        keys = np.array([f'{name}\0{inward}' for name, inward in sets])
+        lengths = np.zeros(len(hits))
+        for key in set(keys.tolist()):
+            lengths[keys == key] = dof_arrow_length(xyz[rows[keys == key]], extent)
+        view['arrows'] = dof_arrow_solids(xyz, hits, lengths, labels)
     try:
         return staged(view, still.opacity, opening_camera(still.view, still.eye, still.up),
                       framed(project, still.geometry, view, still.frame))
@@ -167,8 +186,14 @@ def still_page(project: Any, still: Still) -> str:
 
     if still.width < 16 or still.height < 16:
         raise StillError('the picture is at least 16 by 16 pixels')
-    return stage_page(still_view(project, still),
-                      {'width': int(still.width), 'height': int(still.height)}, still.theme)
+    view = still_view(project, still)
+    count = len(view['arrows']['labels']) if 'arrows' in view else 0
+    if still.labels and not count:
+        raise StillError('labels name the DOF arrows, and the picture has none; name objects '
+                         'whose DOFs to draw')
+    labels = count <= LABEL_LIMIT if still.labels is None else bool(still.labels)
+    return stage_page(view, {'width': int(still.width), 'height': int(still.height),
+                             'labels': bool(labels and count)}, still.theme)
 
 
 def write_still(project: Any, still: Still, output: str | os.PathLike) -> Path:
