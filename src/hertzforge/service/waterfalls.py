@@ -95,7 +95,7 @@ def waterfall_view(title: str, data: Any, page: int = 1,
     phase reads on a linear axis. One quantity is drawn, the
     group `quantity` names (`quantity_key`) or else the largest; when the
     object has more than one, the view lists them as `quantities` for the
-    shell to offer. `records` draws those alone (the sub-items picked in
+    shell to offer, and its `note` names those not drawn. `records` draws those alone (the sub-items picked in
     the tree). An object with no records is refused."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import (
@@ -122,11 +122,18 @@ def waterfall_view(title: str, data: Any, page: int = 1,
         else limits,
         page={'number': arrays['page'] + 1, 'count': pages,
               'records': arrays['of_quantity']} if pages > 1 else None)
-    groups = waterfall_groups(data)
+    # the quantities among the records asked for, so each choice draws something
+    groups = waterfall_groups(data, records)
     if len(groups) > 1:
         view['quantities'] = [
             {'value': quantity_key(key), 'label': quantity_label(key).capitalize(),
              'records': len(records)} for key, records in groups]
         view['quantity'] = quantity_key((data.ordinate_dim[first],
                                          data.dimension_hint[first]))
+        rest = [q for q in view['quantities'] if q['value'] != view['quantity']]
+        named = [f'{q["label"].lower()} ({q["records"]} record{"s" * (q["records"] != 1)})'
+                 for q in rest]
+        text = named[0] if len(named) == 1 else ', '.join(named[:-1]) + ' and ' + named[-1]
+        view['note'] = (f'Not drawn: {text}. '
+                        f'Choose {"it" if len(rest) == 1 else "one"} under Quantity.')
     return view

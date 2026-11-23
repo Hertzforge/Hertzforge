@@ -1244,6 +1244,8 @@
 
 	.seg {
 		display: inline-flex;
+		flex-wrap: wrap;
+		max-width: 100%;
 		align-items: center;
 		padding: 2px;
 		background: var(--bg-2);
@@ -1274,9 +1276,13 @@
 	}
 
 	.note {
-		padding-top: 6px;
+		margin-top: 4px;
+		padding: 2px 6px;
 		font-size: var(--text-xs);
 		color: var(--text-3);
+		/* it lies over the scene, as the toolbar does, so it is read on the same backing */
+		background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+		border-radius: var(--radius-md);
 	}
 
 	.legend {

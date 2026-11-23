@@ -331,8 +331,9 @@ thinned, so the area under it is its mean square), and a breakpoint specificatio
 its power law. The shell colors every point by its level on the sequential colormap, with a
 numeric legend, and names at most 40 records, every nth past that. One quantity is drawn on a
 stage, since one level axis cannot hold accelerations and newtons at once; an object holding more
-than one lists them in `quantities`, and choosing another reruns the operation with its `quantity`
-param set to that `value`, starting again at page 1. Hovering a curve reads its record, abscissa
+than one among the records drawn from lists them in `quantities`, and choosing another reruns the
+operation with its `quantity` param set to that `value`, starting again at page 1 (a selection's
+stage sets `prefs.quantity` instead), and its `note` names the quantities not drawn. Hovering a curve reads its record, abscissa
 and level. Records that do not fit one
 scene are on later pages, never drawn coarser. This is the 3-D data view
 (`hertzforge.drawing.viz.waterfall`).
@@ -829,7 +830,9 @@ connection's display units, as an operation's do. `prefs` is how the window read
 selections: `limits` (the warning and abort limits of a specification drawn on its 2-D plot, each as the specification is drawn, role `tolerance` for a warning and `abort` for an abort; true when absent, offered as `limits` when a selected object carries any; `project.plot` takes the same as a param), `flat` (the plot in place of the stage for a whole data
 object) and `component` (`magnitude`, `real`, `imag`
 or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
-read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a
+read at (null for the loudest line), and `quantity`, the quantity a data object's stage draws when its
+records hold more than one (a `waterfall`'s `quantities` value; null, or one the object does not hold,
+draws the largest); `offers` says which of them the selection can take (`flat` for a
 data object, `complex` for complex frequency data). A frequency axis is made linear or log on the
 plot itself, as the stage's is. A
 `shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,

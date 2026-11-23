@@ -451,7 +451,7 @@ export interface WaterfallView {
 	z_range?: [number, number];
 	/** Which page of how many, of how many records. */
 	page?: { number: number; count: number; records: number };
-	/** The quantities the object holds, two or more; choosing one reruns with `quantity` set. */
+	/** The quantities among the records drawn from, two or more; choosing one reruns with `quantity` set. */
 	quantities?: { value: string; label: string; records: number }[];
 	/** The value of the quantity drawn. */
 	quantity?: string;
@@ -861,6 +861,8 @@ export interface ShowPrefs {
 	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
 	tone: string | null;
 	sine_reading: 'curves' | 'bars';
+	/** The quantity a data object's stage draws when it holds several; null for the largest. Not kept. */
+	quantity: string | null;
 	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
 }
