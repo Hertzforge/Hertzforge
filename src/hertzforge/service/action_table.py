@@ -96,7 +96,8 @@ INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
 #: readings whose form has no Apply either: drawn as the form opens and again after each change,
 #: since running them changes nothing. Live rows that carry `shows`
-SHOWN_LIVE = frozenset({'project.wavelet'})
+SHOWN_LIVE = frozenset({'project.wavelet', 'project.color_element_shapes',
+                        'project.play_element_shapes'})
 #: readings of one record that ask which, by name, when more than one is in play: the records
 #: picked under the object, or all of them when it is picked whole
 CHOOSES_RECORD = frozenset({'project.wavelet'})

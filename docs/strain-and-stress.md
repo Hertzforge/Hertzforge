@@ -93,7 +93,41 @@ values, dofs, report = project.gauge_strains('RC Plate Modes', 'RC Plate Channel
 ## The view
 
 The set opens on its model, animated in the modes picked, with each element read drawn in its own
-flat color by one component at its centroid, from minus the mode's largest value to plus it, in the
-display system's units (psi in the inch systems). The rest of the model is drawn gray. Color By
-draws it by another quantity or component. The view reads the displacement from the shape set the
-strain was read from; with that set gone, the modes are drawn still.
+flat color at its centroid, in the display system's units (psi in the inch systems); the rest of
+the model is drawn gray. Color By draws it by another quantity and scalar: one component of the
+strain, or for stress also von Mises, Tresca or a principal stress. It can limit the colors to some
+of the element groups read, and state the top of the color scale. Each mode's scalar is formed
+from its tensor at each point of its cycle, so the colors swing with the shape; a component runs
+from minus the mode's largest value to plus it, von Mises and Tresca from zero. The view reads the
+displacement from the shape set the strain was read from; with that set gone, the modes are drawn
+still.
+
+## Stress as the model moves
+
+Modal coordinates played on the model color the elements the same way. Pick the geometry, the
+shape set, the modal displacements and the element shape set together, or pick the element shape
+set and the clip and run Play Strain/Stress, whose form says what to color by, which groups, and
+the top of the scale. At every frame each element's tensor is the sum over the played modes of its
+stress shape times the mode's coordinate at that instant, and the color is the scalar of that sum:
+the service sends each mode's tensors once, and the 3-D view sums them as it sums the displacement,
+so a long clip on a large model is never stored element by element in time. The scale is the
+clip's largest value of the scalar over every element and frame, or the value stated, so every
+frame, and every clip drawn on one stated scale, reads on the same colors. The clip has to be
+modal displacement of the shape set the strain was read from, and the set has to hold every mode
+the clip plays.
+
+A recording does the same with no window open, the legend drawn into each frame:
+
+```python
+from hertzforge.record import Recording, record
+
+record(project, Recording(geometry='RC Plate', data='Pseudoinverse Deformation',
+                          shapes='RC Plate Modes', strain_stress=name, color='von_mises',
+                          frame=['right channel', 'left channel', 'beam'],
+                          color_groups=['right channel', 'left channel', 'beam'],
+                          color_max=25.0, units='mm-kg-N-s'), 'pinv.mp4')
+```
+
+`hertzforge record` takes the same settings as `--strain-stress`, `--quantity`, `--color`,
+`--color-max`, `--color-groups` and `--units`, and `hertzforge still` with them draws one frame of
+the clip at `--at` seconds, or of a mode at `--at` of its cycle, to a PNG.

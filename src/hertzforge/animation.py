@@ -133,16 +133,25 @@ def framed(project: Any, geometry: str, view: dict[str, Any],
 
 
 def animation_view(project: Any, geometry: str, data: str | None = None,
-                   shapes: str | None = None, records: Sequence[int] = ()) -> dict[str, Any]:
+                   shapes: str | None = None, records: Sequence[int] = (),
+                   coloring: dict[str, Any] | None = None) -> dict[str, Any]:
     """The `shape3d` view the app shows for `geometry` with `data` and/or `shapes` (with
-    `records` of `data` picked when given), or AnimationError saying why there is none."""
+    `records` of `data` picked when given), or AnimationError saying why there is none. With
+    `coloring` (`service.show.element_coloring`), an element shape set's elements are colored
+    by their strain or stress as the model moves: the modal coordinates `data` played through
+    their shape set, or with no data the set's own modes, as the app's Play Strain and Stress
+    and Color By draw them."""
     from .service import show as showing
     from .service.protocol import ProtocolError
 
     objects = [name for name in (geometry, data, shapes) if name]
+    if coloring is not None:
+        objects.append(coloring['name'])
     missing = [name for name in objects if name not in project]
     if missing:
         raise AnimationError(f'the project has no object named {missing[0]!r}')
+    if coloring is not None:
+        return _colored(project, geometry, data, shapes, records, coloring)
     picks = {data: list(records)} if data and records else {}
     try:
         shown = showing.show(project, objects, picks, None, dict(showing.PREFS))
@@ -153,6 +162,43 @@ def animation_view(project: Any, geometry: str, data: str | None = None,
     if view is None:
         why = f': {shown["note"]}' if shown.get('note') else ''
         raise AnimationError(f'{" with ".join(objects)} show no animation{why}')
+    return view
+
+
+def _colored(project: Any, geometry: str, data: str | None, shapes: str | None,
+             records: Sequence[int], coloring: dict[str, Any]) -> dict[str, Any]:
+    """`animation_view` with an element shape set's elements colored."""
+    from .core.element_shapes import ElementShapeSet
+    from .service import show as showing
+    from .service.ops_element_shapes import element_view
+    from .service.protocol import ProtocolError
+
+    name = coloring['name']
+    if not isinstance(project[name], ElementShapeSet):
+        raise AnimationError(f'{name} is not a set of strain and stress shapes')
+    found = project.geometry_for(name)
+    if found is None or found[0] != geometry:
+        raise AnimationError(f'{name} was read on {found[0] if found else "no geometry"}, '
+                             f'not {geometry}')
+    try:
+        if data is None:
+            if shapes is not None:
+                raise AnimationError(f'the modes of {name} are those it was read at; name no '
+                                     'shape set without data')
+            return element_view(project, name, None, coloring['quantity'],
+                                coloring['component'], color_groups=coloring['groups'],
+                                color_max=coloring['color_max'])
+        played = showing.modal_motion_of(project, geometry, data, list(records), shapes,
+                                         coloring)
+    except ProtocolError as error:
+        raise AnimationError(error.message) from None
+    if played is None:
+        raise AnimationError(f'{data} holds no modal coordinates, and strain and stress are '
+                             'colored from modal coordinates')
+    views, notes = played
+    view = next((v for v in views if v.get('view') == 'shape3d'), None)
+    if view is None:
+        raise AnimationError(notes[0] if notes else f'{data} shows no animation')
     return view
 
 
