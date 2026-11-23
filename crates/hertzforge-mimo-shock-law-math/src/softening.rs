@@ -391,6 +391,9 @@ pub struct SofteningFamily {
     pending: Option<Vec<(f64, f64, f64)>>,
     pred_error: f64,
     errors: Vec<(f64, f64)>,
+    /// When set, the measured power is resolved upward: see
+    /// [`SofteningFamily::with_resolved_power`].
+    resolved_gate: Option<f64>,
 }
 
 impl SofteningFamily {
@@ -439,7 +442,18 @@ impl SofteningFamily {
             pending: None,
             pred_error: 1.0,
             errors: Vec::new(),
+            resolved_gate: None,
         })
+    }
+
+    /// The power bound of `followed-hold`: a power measured from two levels'
+    /// drops both at least `gate` is rounded up by what the fit cannot
+    /// resolve, half its fine step on each drop,
+    /// `p + (h / d1 + h / d2) / |ln(a2 / a1)|` with `h` half the fine step,
+    /// before the bound to `[0, p_max]`. Off unless set.
+    pub fn with_resolved_power(mut self, gate: f64) -> Self {
+        self.resolved_gate = Some(gate);
+        self
     }
 
     /// Start from an assumed drop of `drop` in every band (a hand-set family)
@@ -512,7 +526,12 @@ impl SofteningFamily {
                             && a1 > 0.0
                             && (a2 / a1 - 1.0).abs() > 1e-6 =>
                     {
-                        ((d2 / d1).ln() / (a2 / a1).ln()).clamp(0.0, self.plan.p_max)
+                        let mut pm = (d2 / d1).ln() / (a2 / a1).ln();
+                        if self.resolved_gate.is_some_and(|g| d1.min(d2) >= g) {
+                            let h = 0.5 * self.plan.fit.fine.1;
+                            pm += (h / d1 + h / d2) / (a2 / a1).ln().abs();
+                        }
+                        pm.clamp(0.0, self.plan.p_max)
                     }
                     _ => self.plan.p_max.min(1.0),
                 };
