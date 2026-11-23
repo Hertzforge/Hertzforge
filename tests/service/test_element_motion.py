@@ -208,3 +208,22 @@ def test_a_dead_clip_says_it_strains_nothing_and_a_nan_sample_is_passed_over():
     holed = _stage({'views': _run(state, PLAY, {'object': added, 'data': 'Holed'})})
     assert holed['element_values']['max'][0] == pytest.approx(clean['element_values']['max'][0],
                                                               rel=1e-6)
+
+
+def test_in_inches_the_summed_stress_is_the_same_stress_in_psi():
+    """The clip's modal coordinates are drawn in the display system's length, so the tensors
+    the shell multiplies them by take that scale back: in the inch system, shapes times
+    coordinates at an instant is the SI stress in psi, not 39.37 times it."""
+    state = _state()
+    added = _clip(state)
+    views = _run(state, PLAY, {'object': added, 'data': 'Clip'})
+    stage = _stage({'views': views})
+    k = 21
+    pascals = modal_stress(stage['element_values']['shapes'], stage['motion']['values'][:, k])
+    top = stage['element_values']['max'][0]
+    display_units.convert(views, 'in-slinch-lbf-s')
+    held = stage['element_values']
+    psi = modal_stress(held['shapes'], stage['motion']['values'][:, k])
+    np.testing.assert_allclose(psi, pascals / 6894.757293168, rtol=1e-4)
+    assert held['max'][0] == pytest.approx(top / 6894.757293168, rel=1e-6)
+    assert held['unit'] == 'psi' and stage['motion']['value_unit'] == 'in'

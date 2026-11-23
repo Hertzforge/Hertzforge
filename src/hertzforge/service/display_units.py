@@ -314,6 +314,12 @@ def _shape(view: dict, system: Any) -> None:
             motion['values'] = _values(motion['values'], values)
             motion['peak'] = abs(float(_values(motion['peak'], values)))
             motion['value_unit'] = values[2]
+            held = view.get('element_values')
+            if held is not None:
+                # the shell sums each element's tensors times these modal coordinates, now
+                # in the system's length: the tensors take the length's scale back, so the
+                # sum is the same stress
+                held['shapes'] = (np.asarray(held['shapes']) * values[0]).astype(np.float32)
 
 
 def _element_values(view: dict, system: Any) -> None:
