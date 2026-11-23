@@ -17,6 +17,7 @@ from hertzforge.record import (
     RecordError,
     Recording,
     animation_view,
+    chrome_arguments,
     find_chrome,
     find_ffmpeg,
     frame_times,
@@ -110,6 +111,15 @@ def _tools():
         return find_chrome(), find_ffmpeg()
     except RecordError as error:
         pytest.skip(str(error))
+
+
+def test_chrome_is_started_without_the_system_keychain():
+    """A Chromium for testing with no keychain item of its own had macOS ask for the login
+    password partway through a recording."""
+    command = chrome_arguments('/bin/chrome', '/tmp/profile', 640, 480)
+    assert command[0] == '/bin/chrome' and command[-1] == 'about:blank'
+    assert {'--use-mock-keychain', '--password-store=basic', '--headless=new',
+            '--user-data-dir=/tmp/profile', '--window-size=640,480'} <= set(command)
 
 
 @pytest.mark.slow
