@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { baseName, canDragOut, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops, PIECE_BYTES, sendFile, startDragOut, type UploadPiece } from './files';
 
@@ -236,5 +238,13 @@ describe('a file sent by its contents', () => {
 		expect(pieces.map((p) => p.data.byteLength)).toEqual([0]);
 		const folder = { name: 'run-7', size: 0, slice: () => ({ arrayBuffer: () => Promise.reject(new Error('NotFound')) }) } as unknown as File;
 		await expect(sendFile(folder, async () => ({ upload: 'u3', received: 0 }))).rejects.toThrow('run-7 cannot be read here: a browser sends files, not folders');
+	});
+});
+
+describe('the empty project', () => {
+	it('offers a drop on the window without sending a browser to the desktop app', () => {
+		const panel = readFileSync(fileURLToPath(new URL('./ProjectPanel.svelte', import.meta.url)), 'utf-8');
+		expect(panel).toContain('Empty. Import a file, or drop one on the window.');
+		expect(panel).not.toContain('in the desktop app');
 	});
 });
