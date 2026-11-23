@@ -328,6 +328,7 @@ class AnalyzeState {
 						table_view: this.prefs.table_view,
 						tone: this.prefs.tone,
 						sine_reading: this.prefs.sine_reading,
+						quantity: this.prefs.quantity,
 						averaging: this.averagingDraft
 					}
 				},
@@ -1666,7 +1667,8 @@ function readPrefs(): ShowPrefs {
 		environment: null,
 		table_view: 'channels',
 		tone: null,
-		sine_reading: 'curves'
+		sine_reading: 'curves',
+		quantity: null
 	};
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;

@@ -89,7 +89,8 @@ PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'drive': None,
          'sensors': True,
          'averaging': None,
-         'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
+         'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves',
+         'quantity': None}
 
 TABLE_VIEWS = ('channels', 'response', 'reference')
 
@@ -500,7 +501,7 @@ def _alone(project: Any, name: str, picks: list[int],
             # the sub-items picked on the stage, as the whole object is: 3D is the choice
             # the bar shows, picks or none (Brandon, 2026-11-14)
             view = waterfall_view(name, obj, component=component,
-                                  records=sorted(set(picks)))
+                                  quantity=prefs['quantity'] or '', records=sorted(set(picks)))
             _faced([view], obj)
             return [view], []
         if prefs['flat']:
@@ -508,7 +509,8 @@ def _alone(project: Any, name: str, picks: list[int],
             return _run(project, 'project.plot', data=name,
                         records=_runs(list(range(int(obj.num_records)))),
                         component=component, limits=bool(prefs['limits'])), []
-        views = _run(project, 'project.waterfall', data=name, component=component)
+        views = _run(project, 'project.waterfall', data=name, component=component,
+                     quantity=prefs['quantity'] or '')
         _faced(views, obj)
         return views, []
     from hertzforge.core.element_shapes import ElementShapeSet

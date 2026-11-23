@@ -937,3 +937,23 @@ describe("Project's direction, worded by its row", () => {
 		expect(runs).toHaveLength(0);
 	});
 });
+
+describe('the quantity a picked object draws', () => {
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	it('is asked of the service, and a new launch starts at the largest again', async () => {
+		const made = make();
+		const asked: (string | null)[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: { prefs?: { quantity: string | null } }) => {
+			if (method !== 'project.show') return { table: { columns: [] } };
+			asked.push(params.prefs!.quantity);
+			return { title: 'shown', note: '', views: [] };
+		});
+		made.app.project.selection = { objects: ['Run'], records: {} } as never;
+		await made.a.showSelection();
+		made.a.setPref('quantity', 'voltage|');
+		await rest();
+		expect(asked).toEqual([null, 'voltage|']);
+		expect(make().a.prefs.quantity).toBeNull();
+	});
+});

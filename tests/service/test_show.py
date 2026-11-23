@@ -975,3 +975,54 @@ def test_the_action_table_names_the_view_picks_make(validate):
                                  {'Run 1': [0]}) == ['Stack']
     assert action_table.defaults(project, ['psd', 'psd'], ['Run 1', 'Force'],
                                  {'Run 1': [0]}) == []
+
+
+def _mixed_history():
+    """Four accelerations, a voltage and a current in one time history, as a shaker run
+    records them."""
+    from hertzforge import Project
+
+    rng = np.random.default_rng(7)
+    values = rng.standard_normal((6, 512))
+    data = TimeHistory(np.arange(512) / 1024.0, values,
+                       response_dof=['1Z+', '2Z+', '3Z+', '4Z+', '5X+', '5X+'],
+                       ordinate_dim=['acceleration'] * 4 + ['voltage', 'current'])
+    project = Project()
+    project.add('Run', data)
+    return projects.OpenProject(project=project)
+
+
+def test_a_history_of_several_quantities_draws_the_one_chosen_and_names_the_rest(validate):
+    state = _mixed_history()
+    whole = shown(state, 'Run', validate=validate)
+    view = whole['views'][0]
+    assert view['view'] == 'waterfall' and len(view['records']) == 4
+    assert [q['label'] for q in view['quantities']] == ['Acceleration', 'Voltage', 'Current']
+    assert view['note'] == ('Not drawn: voltage (1 record) and current (1 record). '
+                             'Choose one under Quantity.')
+    voltage = shown(state, 'Run', prefs={'quantity': 'voltage|'}, validate=validate)
+    drawn = voltage['views'][0]
+    assert drawn['quantity'] == 'voltage|' and len(drawn['records']) == 1
+    assert drawn['z']['unit'] == 'V', 'the level axis is the voltage\'s'
+    assert 'acceleration (4 records) and current (1 record)' in drawn['note']
+    # a choice kept from another object, which this one does not hold, draws the largest
+    other = shown(state, 'Run', prefs={'quantity': 'force|'})
+    assert other['views'][0]['quantity'] == 'acceleration|'
+
+
+def test_picked_records_offer_only_their_own_quantities(validate):
+    state = _mixed_history()
+    picked = shown(state, 'Run', records={'Run': [0, 1, 4]}, prefs={'quantity': 'voltage|'},
+                   validate=validate)
+    view = picked['views'][0]
+    assert view['quantity'] == 'voltage|' and len(view['records']) == 1
+    assert [q['label'] for q in view['quantities']] == ['Acceleration', 'Voltage']
+    assert view['note'] == 'Not drawn: acceleration (2 records). Choose it under Quantity.'
+    one = shown(state, 'Run', records={'Run': [0, 1]})
+    assert 'quantities' not in one['views'][0] and 'note' not in one['views'][0]
+
+
+@pytest.mark.parametrize('records', [None, {'Run': [0, 4]}])
+def test_the_quantity_pref_is_a_text_or_null(records):
+    with pytest.raises(ProtocolError, match='"quantity" is a quantity the view lists'):
+        shown(_mixed_history(), 'Run', records=records, prefs={'quantity': 3})
