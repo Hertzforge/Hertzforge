@@ -436,6 +436,11 @@ def _report_rows(report: dict, units_defined: bool) -> list[dict]:
     dropped = report['dropped']
     rows.append(v.row('Dropped', f'{len(dropped)}: {", ".join(map(str, dropped))}'
                       if dropped else 'none', None, 'warn' if dropped else 'pass'))
+    strained = report.get('strain') or []
+    if strained:
+        rows.append(v.row('Strain channels',
+                          f'{len(strained)} left out, a shape set holding displacements: '
+                          'Expand at the table reads each as a gauge', None, 'info'))
     return rows
 
 

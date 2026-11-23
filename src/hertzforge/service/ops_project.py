@@ -561,6 +561,13 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('FRFs', float(made.num_records), '', 'info'),
             v.row('Through', str(report.basis), None, 'info')]
     projection = report.projection
+    gauges = {str(d) for d, dim in zip(made.response_dof, made.ordinate_dim)
+              if str(dim).startswith('dimensionless/')}
+    if gauges:
+        # each strain channel read as a gauge on the model, not as a shape's DOF
+        rows.append(v.row('Gauges', f'{len(gauges)} strain channel'
+                          f'{"" if len(gauges) == 1 else "s"} read on {report.basis}\'s model',
+                          None, 'info'))
     if projection:
         rows.append(v.row('Shapes', f'projected: {projection.get("matched")} of '
                           f'{projection.get("total")} channels matched a node', None, 'info'))

@@ -225,6 +225,22 @@ class ElementShapeSet:
                 f'{self.num_points} stress points)')
 
 
+def _picked_modes(shapes: ShapeSet, modes: Sequence[int] | None) -> np.ndarray:
+    """The modes to read, by index: every one when None; a set with no
+    modes, an empty choice and a mode past the set's last are refused."""
+    if not shapes.num_shapes:
+        raise ValueError('the shape set has no modes')
+    picked = (np.arange(shapes.num_shapes) if modes is None
+              else np.asarray([int(m) for m in modes], dtype=np.int64))
+    if not len(picked):
+        raise ValueError('no modes were chosen')
+    outside = picked[(picked < 0) | (picked >= shapes.num_shapes)]
+    if len(outside):
+        raise ValueError(f'mode {int(outside[0]) + 1} is not in the shape set, '
+                         f'which has {shapes.num_shapes}')
+    return picked
+
+
 def _elements_chosen(geometry: Geometry, groups: Sequence[int] | None) -> np.ndarray:
     """The rows of the geometry's elements to read, in its order: those
     of `groups`, or of every group that holds solids. An element that is
@@ -346,16 +362,7 @@ def element_shapes(geometry: Geometry, shapes: ShapeSet,
     """
     from .fem import _solid_strains_many, mated_ties
 
-    if not shapes.num_shapes:
-        raise ValueError('the shape set has no modes')
-    picked = (np.arange(shapes.num_shapes) if modes is None
-              else np.asarray([int(m) for m in modes], dtype=np.int64))
-    if not len(picked):
-        raise ValueError('no modes were chosen')
-    outside = picked[(picked < 0) | (picked >= shapes.num_shapes)]
-    if len(outside):
-        raise ValueError(f'mode {int(outside[0]) + 1} is not in the shape set, '
-                         f'which has {shapes.num_shapes}')
+    picked = _picked_modes(shapes, modes)
     rows = _elements_chosen(geometry, groups)
     sizes = np.array([len(geometry.elem_conn[r]) for r in rows])
     # a centroid and then the rule's points: 9, 7, 2 and 28 rows
@@ -425,3 +432,144 @@ def element_shapes(geometry: Geometry, shapes: ShapeSet,
                            mass_unit=shapes.mass_unit,
                            length_unit=geometry.length_unit if geometry.units_defined else None,
                            comment=comment)
+
+
+#: each node of a solid in its natural coordinates, by node count, in the
+#: element's node order: where a gauge on that node reads the element
+_NATURAL_NODES = {
+    8: [tuple(float(v) for v in corner) for corner in
+        ((-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+         (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1))],
+    6: [(0.0, 0.0, -1.0), (1.0, 0.0, -1.0), (0.0, 1.0, -1.0),
+        (0.0, 0.0, 1.0), (1.0, 0.0, 1.0), (0.0, 1.0, 1.0)],
+    4: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)],
+    # the corners, then the midsides of edges 1-2, 2-3, 1-3, 1-4, 2-4, 3-4
+    10: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0),
+         (0.5, 0.0, 0.0), (0.5, 0.5, 0.0), (0.0, 0.5, 0.0),
+         (0.0, 0.0, 0.5), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)],
+}
+#: how far a gauge's direction may lean out of the surface it is bonded
+#: to, in degrees: a faceted mesh of a curved surface leans its faces by
+#: a few degrees, and a direction further out than this is not one a
+#: gauge on that surface can read
+SURFACE_LEAN = 10.0
+
+
+def _surface_normals(geometry: Geometry, node: int, rows: list[int]) -> list[np.ndarray]:
+    """The unit normals of the outside faces at `node` of the solids in
+    `rows` (geometry element rows): the faces holding the node that no
+    second solid there shares. A face two solids share has both of them
+    on the node, so the solids at the node are all it takes."""
+    from .geometry import solid_faces
+
+    index = {int(n): k for k, n in enumerate(geometry.node_id)}
+    xyz = np.asarray(geometry.node_xyz, dtype=np.float64)
+    faces: dict[tuple[int, ...], tuple[int, ...]] = {}
+    for row in rows:
+        conn = [int(n) for n in geometry.elem_conn[row]]
+        for face in solid_faces(len(conn)):
+            corners = tuple(conn[k] for k in face)
+            if node not in corners:
+                continue
+            key = tuple(sorted(corners))
+            if key in faces:
+                del faces[key]
+            else:
+                faces[key] = corners
+    normals = []
+    for corners in faces.values():
+        p = xyz[[index[c] for c in corners]]
+        normal = np.cross(p[1] - p[0], p[-1] - p[0])
+        size = np.linalg.norm(normal)
+        if size > 0.0:
+            normals.append(normal / size)
+    return normals
+
+
+def gauge_strains(geometry: Geometry, shapes: ShapeSet,
+                  gauges: Sequence[tuple[int, Sequence[float]]],
+                  modes: Sequence[int] | None = None) -> np.ndarray:
+    """The strain a gauge on a solid's surface reads in each mode: at a
+    node, along a direction in the surface.
+
+    Each solid meeting at the node is read at that node through its own
+    strain matrix (`fem._solid_strains_many` at the node's natural
+    coordinates, the brick's incompatible modes recovered), and the
+    tensors are averaged over those solids. The gauge reads the normal
+    strain along its direction d, the tensor's d . E . d, so a gauge
+    turned end for end reads the same. It is the strain at a point: a
+    gauge averages over its grid, which a mesh finer than the grid
+    resolves and a coarser one does not.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The model the shapes were solved on.
+    shapes : ShapeSet
+        The solved modes, with translations at every node of the solids
+        at each gauge.
+    gauges : sequence of (int, sequence of float)
+        Each gauge's node and its direction in the global axes (any
+        length; it is made a unit vector).
+    modes : sequence of int, optional
+        The modes, by index from 0. Every mode when omitted.
+
+    Returns
+    -------
+    numpy.ndarray
+        (modes, gauges), strain per unit modal coordinate.
+    """
+    from .fem import SOLID_CODES, _solid_strains_many
+
+    picked = _picked_modes(shapes, modes)
+    if not len(gauges):
+        raise ValueError('no gauges were given')
+    properties = dict(getattr(geometry, 'group_properties', {}) or {})
+    group_of = np.asarray(geometry.elem_group, dtype=np.int64)
+    solid_groups = {int(g) for g, props in properties.items()
+                    if getattr(props, 'kind', '') == 'solid'}
+    at_node: dict[int, list[int]] = {}
+    for row, conn in enumerate(geometry.elem_conn):
+        if int(group_of[row]) in solid_groups and len(conn) in SOLID_CODES:
+            for n in conn:
+                at_node.setdefault(int(n), []).append(row)
+    index = {int(n): k for k, n in enumerate(geometry.node_id)}
+    xyz = np.asarray(geometry.node_xyz, dtype=np.float64)
+    lean = np.sin(np.radians(SURFACE_LEAN))
+    out = np.zeros((len(picked), len(gauges)), dtype=shapes.shape_matrix.dtype)
+    for g, (node, direction) in enumerate(gauges):
+        node = int(node)
+        d = np.asarray(direction, dtype=np.float64).reshape(3)
+        size = np.linalg.norm(d)
+        if not np.isfinite(size) or size == 0.0:
+            raise ValueError(f'the gauge at node {node} has no direction')
+        d = d / size
+        if node not in index:
+            raise ValueError(f'the geometry has no node {node} for a gauge')
+        rows = at_node.get(node)
+        if not rows:
+            raise ValueError(f'node {node} is on no solid element with a material, so a '
+                             'gauge there reads nothing')
+        normals = _surface_normals(geometry, node, rows)
+        if not normals:
+            raise ValueError(f'node {node} is inside the solid: a gauge sits on its surface')
+        leans = [abs(float(d @ n)) for n in normals]
+        if min(leans) > lean:
+            angle = float(np.degrees(np.arcsin(min(min(leans), 1.0))))
+            raise ValueError(
+                f'the gauge at node {node} points {angle:.0f} degrees out of the surface '
+                f'there, past the {SURFACE_LEAN:g} a gauge bonded to it can read: give '
+                'it a direction in the surface')
+        tensors = []
+        for row in rows:
+            conn = [int(n) for n in geometry.elem_conn[row]]
+            corner = _NATURAL_NODES[len(conn)][conn.index(node)]
+            motion = _translations(shapes, geometry, np.asarray(conn), picked)
+            strain, _stress, _p, _w = _solid_strains_many(
+                properties[int(group_of[row])].material, xyz[[index[c] for c in conn]][None],
+                motion.reshape(1, 3 * len(conn), len(picked)), at=corner)
+            tensors.append(strain[0, 0])                       # (6, modes)
+        e = np.mean(tensors, axis=0)
+        out[:, g] = (e[0] * d[0] ** 2 + e[1] * d[1] ** 2 + e[2] * d[2] ** 2
+                     + e[3] * d[0] * d[1] + e[4] * d[1] * d[2] + e[5] * d[0] * d[2])
+    return out

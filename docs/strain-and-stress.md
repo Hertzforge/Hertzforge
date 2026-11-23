@@ -50,6 +50,33 @@ Solids are covered: bricks (element types 115 and 104), wedges (112 and 101) and
 and 118). A group of plates, beams or any other element is refused by name; point masses, springs,
 rigid links and grounds hold no strain field and are passed over when no groups are named.
 
+## Strain at a gauge
+
+A channel table's channel of type strain, with a node and a direction, is a strain gauge: it reads
+the normal strain along its direction at its node, in the node's displacement frame. Each solid
+meeting at the node is read there through its own strain matrix, the brick's incompatible modes
+included, and the strain tensors are averaged over those solids. A gauge turned end for end reads
+the same. The node has to be on the solid's surface, and the direction in the surface there, within
+10 degrees of one of the outside faces at the node; an inside node, a node on no solid with a
+material, and a direction out of the surface are refused by name. A gauge reads the strain at a
+point, where a real gauge averages over its grid, so the mesh around a gauge wants to be finer than
+the grid is long.
+
+When the table is on a test geometry and the shape set on the model, each strain channel's node is
+matched to the model's nearest node, as Project onto Basis DOFs matches it, and its direction is
+taken on the test geometry. A channel with no model node in reach is dropped and named.
+
+Expand to Physical Responses with modal FRFs and a channel table answers each strain channel with
+its strain per unit force, each mode's gauge strain standing where a shape's row would, beside an
+acceleration at the same node and direction if there is one. The reading says how many strain
+channels it read as gauges. Project onto Basis DOFs onto a table leaves strain-only channels out,
+since a shape set holds displacements, and its reading says which. From Python:
+
+```python
+values, dofs, report = project.gauge_strains('RC Plate Modes', 'RC Plate Channels')
+# values is (modes, strain channels), strain per unit modal coordinate
+```
+
 ## Reading it with care
 
 - A truncated set of modes converges more slowly for stress than for displacement. A response built
