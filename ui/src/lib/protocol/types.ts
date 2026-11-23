@@ -254,7 +254,7 @@ export interface Shape3DView {
 	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node. With
 	 * `follow` [A] the arrows move: each takes the motion of that row of `nodes` (2^32 − 1 stays put).
 	 */
-	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; lengths?: Float32Array; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
 	/**
 	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.

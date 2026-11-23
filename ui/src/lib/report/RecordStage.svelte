@@ -14,6 +14,8 @@
 		height: number;
 		scale?: number;
 		mode?: number;
+		/** Draw each DOF arrow's label into the frames. */
+		labels?: boolean;
 	}
 
 	interface Props {
@@ -30,7 +32,7 @@
 		for (let k = 0; k < 200; k++) {
 			await tick();
 			try {
-				pane?.recordSetup({ width: setup.width, height: setup.height, scale: setup.scale, modeAt: setup.mode });
+				pane?.recordSetup({ width: setup.width, height: setup.height, scale: setup.scale, modeAt: setup.mode, labels: setup.labels });
 				last = null;
 				break;
 			} catch (err) {

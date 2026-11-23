@@ -43,14 +43,21 @@ export function arrowGeometry(shape: { shaft: number; head: number; headRadius: 
 
 const UP = new Vector3(0, 1, 0);
 
-/** Where each arrow sits: its tail, the unit vector it points along and the one length, as a matrix per arrow. */
-export function arrowMatrices(tails: ArrayLike<number>, directions: ArrayLike<number>, length: number): Matrix4[] {
+/** Arrow `k`'s length: its own from `lengths` when the arrows carry one each, else the one `length`. */
+export function arrowLength(arrows: { length: number; lengths?: ArrayLike<number> }, k: number): number {
+	return arrows.lengths?.[k] ?? arrows.length;
+}
+
+/** Where each arrow sits: its tail, the unit vector it points along and its length (one for all, or one each), as a matrix per arrow. */
+export function arrowMatrices(tails: ArrayLike<number>, directions: ArrayLike<number>, length: number | ArrayLike<number>): Matrix4[] {
 	const out: Matrix4[] = [];
 	const at = new Vector3();
 	const along = new Vector3();
 	const turn = new Quaternion();
-	const size = new Vector3(length, length, length);
+	const size = new Vector3();
 	for (let k = 0; k < tails.length / 3; k++) {
+		const l = typeof length === 'number' ? length : length[k];
+		size.set(l, l, l);
 		at.set(tails[3 * k], tails[3 * k + 1], tails[3 * k + 2]);
 		along.set(directions[3 * k], directions[3 * k + 1], directions[3 * k + 2]).normalize();
 		turn.setFromUnitVectors(UP, along);
@@ -60,8 +67,8 @@ export function arrowMatrices(tails: ArrayLike<number>, directions: ArrayLike<nu
 }
 
 /** The arrows of a view as one instanced mesh, each in the color of its own axis. */
-export function arrowMesh(arrows: { tails: ArrayLike<number>; directions: ArrayLike<number>; axes: ArrayLike<number>; length: number }): InstancedMesh {
-	const matrices = arrowMatrices(arrows.tails, arrows.directions, arrows.length);
+export function arrowMesh(arrows: { tails: ArrayLike<number>; directions: ArrayLike<number>; axes: ArrayLike<number>; length: number; lengths?: ArrayLike<number> }): InstancedMesh {
+	const matrices = arrowMatrices(arrows.tails, arrows.directions, arrows.lengths ?? arrows.length);
 	const mesh = new InstancedMesh(arrowGeometry(), new MeshLambertMaterial(), matrices.length);
 	const color = new Color();
 	matrices.forEach((matrix, k) => {
@@ -238,10 +245,30 @@ export function placeCubeLetters(marker: Element, q: Quaternion): void {
  * Where each arrow's label sits: a little past its free end, which is the head of an arrow that
  * points out and the tail of one that points in and ends on its node.
  */
-export function labelPoints(arrows: { tails: ArrayLike<number>; directions: ArrayLike<number>; inward: ArrayLike<number>; length: number }, past = 0.18): Float32Array {
+/**
+ * Where each label of `labels` is written on a picture `w` by `h` pixels: its point in `at`
+ * (`labelPoints`) taken to the screen by `project`, which gives normalized device coordinates
+ * (x and y from -1 to 1, z from -1 near to 1 far). A label behind the camera or off the picture
+ * is left out. The 3-D view writes these over its canvas, and a recorded still draws them in.
+ */
+export function labelPlaces(at: ArrayLike<number>, labels: readonly string[], project: (x: number, y: number, z: number) => [number, number, number], w: number, h: number): { x: number; y: number; text: string }[] {
+	const out: { x: number; y: number; text: string }[] = [];
+	for (let k = 0; k < labels.length; k++) {
+		const [nx, ny, nz] = project(at[3 * k], at[3 * k + 1], at[3 * k + 2]);
+		if (nz < -1 || nz > 1) continue;
+		const x = ((nx + 1) / 2) * w;
+		const y = ((1 - ny) / 2) * h;
+		if (x < 0 || x > w || y < 0 || y > h) continue;
+		out.push({ x, y, text: labels[k] });
+	}
+	return out;
+}
+
+export function labelPoints(arrows: { tails: ArrayLike<number>; directions: ArrayLike<number>; inward: ArrayLike<number>; length: number; lengths?: ArrayLike<number> }, past = 0.18): Float32Array {
 	const out = new Float32Array(arrows.tails.length);
 	for (let k = 0; k < arrows.tails.length / 3; k++) {
-		const reach = arrows.inward[k] ? -past * arrows.length : (1 + past) * arrows.length;
+		const l = arrowLength(arrows, k);
+		const reach = arrows.inward[k] ? -past * l : (1 + past) * l;
 		for (let c = 0; c < 3; c++) out[3 * k + c] = arrows.tails[3 * k + c] + reach * arrows.directions[3 * k + c];
 	}
 	return out;

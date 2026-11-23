@@ -148,6 +148,12 @@ def main(argv: list[str] | None = None) -> int:
                             "(default: the whole model)")
     still.add_argument("--theme", default="dark", choices=("dark", "light"),
                        help="the app's dark or light look (default dark)")
+    labels = still.add_mutually_exclusive_group()
+    labels.add_argument("--labels", dest="labels", action="store_true", default=None,
+                        help="write each arrow's DOF at its free end (default: for 40 arrows or "
+                             "fewer)")
+    labels.add_argument("--no-labels", dest="labels", action="store_false",
+                        help="write no DOF labels")
     args, rest = parser.parse_known_args(argv)
     if args.command == "convert-run":
         if rest:
@@ -354,7 +360,7 @@ def _still(args: argparse.Namespace) -> int:
         return 1
     still = Still(geometry=args.geometry, dofs=args.dofs, on=args.on, distance=args.distance,
                   width=width, height=height, opacity=args.opacity, view=args.view, eye=eye,
-                  up=up, frame=args.frame, theme=args.theme)
+                  up=up, frame=args.frame, theme=args.theme, labels=args.labels)
     try:
         out = write_still(Project.open(args.project), still, args.output)
     except (StillError, OSError, ValueError) as error:

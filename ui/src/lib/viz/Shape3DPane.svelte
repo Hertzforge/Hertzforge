@@ -71,7 +71,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
+	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPlaces, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { fixedWideLines, wideLines } from './wideLines';
@@ -322,6 +322,8 @@
 	/** Each DOF arrow's label written at its free end; kept across views and launches. */
 	const LABELS_KEY = 'hertzforge.shape3d.dofLabels';
 	let dofLabels = $state(readDofLabels());
+	/** A recording's frames carry the DOF labels drawn into them (`recordSetup`). */
+	let recordLabels = false;
 	function readDofLabels(): boolean {
 		try {
 			return localStorage.getItem(LABELS_KEY) === '1';
@@ -945,7 +947,7 @@
 			labelAt = labelPoints(view.arrows);
 			if (view.arrows.follow) {
 				// arrows that ride their nodes (a force on the node it pushes): where each rests
-				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.length);
+				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.lengths ?? view.arrows.length);
 				labelRest = labelAt.slice();
 				arrowGone = new Float32Array(labelAt.length);
 			}
@@ -1226,15 +1228,15 @@
 		const h = Math.max(1, canvasHost.clientHeight);
 		labelsSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 		let drawn = '';
-		for (let k = 0; k < labels.length; k++) {
-			corner.set(labelAt[3 * k], labelAt[3 * k + 1], labelAt[3 * k + 2]).project(camera);
-			if (corner.z < -1 || corner.z > 1) continue;
-			const x = ((corner.x + 1) / 2) * w;
-			const y = ((1 - corner.y) / 2) * h;
-			if (x < 0 || x > w || y < 0 || y > h) continue;
-			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(labels[k])}</text>`;
+		for (const { x, y, text } of labelPlaces(labelAt, labels, toScreen, w, h)) {
+			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(text)}</text>`;
 		}
 		labelsSvg.innerHTML = drawn;
+	}
+	/** A point of the model in normalized device coordinates, through the camera. */
+	function toScreen(x: number, y: number, z: number): [number, number, number] {
+		corner.set(x, y, z).project(camera);
+		return [corner.x, corner.y, corner.z];
 	}
 	/** Past this many nodes the numbers are not offered: every node is projected on each frame the view moves. */
 	const NUMBERED_MODEL = 300_000;
@@ -1395,9 +1397,10 @@
 	 * at the model's centre with `up` up (the pane's own view when absent), the mode `modeAt` for a
 	 * shape set, playback paused, and the plot's own background painted in as Record paints it.
 	 */
-	export function recordSetup(o: { width: number; height: number; scale?: number; modeAt?: number }) {
+	export function recordSetup(o: { width: number; height: number; scale?: number; modeAt?: number; labels?: boolean }) {
 		if (!renderer) throw new Error('the 3-D view is not drawn yet');
 		playing = false;
+		recordLabels = !!o.labels;
 		resizeObs?.disconnect();
 		renderer.setPixelRatio(1);
 		renderer.setSize(o.width, o.height, false);
@@ -1429,7 +1432,30 @@
 		else phase = ((at % 1) + 1) % 1;
 		deflect();
 		renderer.render(scene, camera);
-		return renderer.domElement.toDataURL('image/png');
+		const labels = view.arrows?.labels;
+		if (!recordLabels || !labelAt || !labels?.length) return renderer.domElement.toDataURL('image/png');
+		// the labels are written over the canvas in the pane, so a frame draws them in itself, as
+		// the pane writes them: bold, in the text color, edged in the background's
+		const picture = renderer.domElement;
+		const out = document.createElement('canvas');
+		out.width = picture.width;
+		out.height = picture.height;
+		const g = out.getContext('2d')!;
+		g.drawImage(picture, 0, 0);
+		const css = getComputedStyle(canvasHost);
+		const size = Math.max(11, Math.round(out.height / 60));
+		g.font = `600 ${size}px ${css.fontFamily}`;
+		g.textAlign = 'center';
+		g.textBaseline = 'middle';
+		g.lineJoin = 'round';
+		g.lineWidth = Math.max(3, size / 4);
+		g.strokeStyle = plotBackground(picture);
+		g.fillStyle = css.getPropertyValue('--text-1').trim() || css.color;
+		for (const { x, y, text } of labelPlaces(labelAt, labels, toScreen, out.width, out.height)) {
+			g.strokeText(text, x, y);
+			g.fillText(text, x, y);
+		}
+		return out.toDataURL('image/png');
 	}
 
 	onMount(init);
@@ -1476,8 +1502,18 @@
 		}
 		ghostSurface.visible = ghost;
 		if (ghostOutline) ghostOutline.visible = ghost;
-		// the colors are the surface's: a wireframe or a see-through model shows the gray mesh
-		if (elementColors) elementColors.visible = !wireframe && opacity >= 1;
+		// the colors are the surface's: a wireframe shows the gray mesh, and a see-through model
+		// keeps its colors at the surface's opacity, so the parts still read apart. The gray
+		// surface is not drawn under them then: two see-through layers mix the colors to gray.
+		if (elementColors) {
+			const m = elementColors.material as MeshLambertMaterial;
+			m.transparent = opacity < 1;
+			m.opacity = opacity;
+			m.depthWrite = opacity >= 1;
+			m.needsUpdate = true;
+			elementColors.visible = !wireframe;
+		}
+		surface.visible = !(elementColors && !wireframe && opacity < 1);
 		dirty = true;
 	});
 	// every node shows as a dot only while clicks make elements of them (Add mode)
