@@ -186,3 +186,21 @@ def test_a_still_of_the_clip_is_drawn_with_its_legend(cells, tmp_path):
     # the legend's bar runs the colormap at the bottom left: its yellow end is drawn
     corner = image[250:, :400].reshape(-1, 3).astype(int)
     assert np.any((corner[:, 0] > 220) & (corner[:, 1] > 200) & (corner[:, 2] < 80))
+
+
+def test_the_colored_view_opens_from_the_geometrys_own_camera(cells):
+    """A model built with Y up opens upright colored as it does plain: a recording framed on
+    the RC once opened from below the plate, the geometry's own view lost."""
+    from hertzforge.core.geometry import View
+
+    project, read = cells
+    project['Cells'].view = View(eye=(1.0, 1.0, -1.0), up=(0.0, 1.0, 0.0))
+    try:
+        plain = animation_view(project, Recording('Cells', data='Clip', shapes='Cells Modes'))
+        for recording in (Recording('Cells', data='Clip', shapes='Cells Modes',
+                                    strain_stress=read),
+                          Recording('Cells', strain_stress=read)):
+            assert animation_view(project, recording)['home'] == plain['home']
+        assert plain['home']['up'] == [0.0, 1.0, 0.0]
+    finally:
+        project['Cells'].view = None

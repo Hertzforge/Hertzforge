@@ -934,8 +934,12 @@ def element_coloring(name: str, quantity: str = 'stress', component: str = 'von_
 def modal_motion_of(project: Any, geometry_name: str, data_name: str, picks: list[int],
                     shapes_name: str | None = None, coloring: dict[str, Any] | None = None
                     ) -> tuple[list[dict], list[str]] | None:
-    """`_modal_motion`, with the elements colored as `coloring` (`element_coloring`) says."""
-    return _modal_motion(project, geometry_name, data_name, picks, shapes_name, coloring)
+    """`_modal_motion`, with the elements colored as `coloring` (`element_coloring`) says, and
+    the geometry's own view as its camera, as `show` gives it."""
+    played = _modal_motion(project, geometry_name, data_name, picks, shapes_name, coloring)
+    if played is not None:
+        _home(project, played[0], [geometry_name])
+    return played
 
 
 def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[int],

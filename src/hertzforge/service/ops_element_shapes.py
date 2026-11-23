@@ -253,6 +253,10 @@ def element_view(project: Any, name: str, picked: list[int] | None = None,
                     node_ids=np.asarray(geometry.node_id)[every],
                     normalization='mass')
     out['element_values'] = field
+    from .show import _home
+
+    # the geometry's own view, so a model built with Y up opens upright, as `show` draws it
+    _home(project, [out], [geometry_name])
     notes = []
     if any(shapes.frequency[k] == 0.0 for k in picks):
         notes.append('a rigid-body mode at 0 Hz strains nothing, and is drawn at zero')
