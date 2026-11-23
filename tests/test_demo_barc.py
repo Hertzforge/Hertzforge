@@ -25,6 +25,16 @@ INCH = 0.0254
 INCH3 = INCH ** 3
 
 
+def _one_color_each(geometry):
+    """Each element group's color: one per group, none shared, so the parts
+    of the model read apart in 3-D."""
+    colors = {name: sorted(set(geometry.elem_color[geometry.elem_group == group].tolist()))
+              for group, name in zip(geometry.group_id, geometry.group_name)}
+    assert all(len(c) == 1 for c in colors.values()), colors
+    assert len({c[0] for c in colors.values()}) == len(colors), colors
+    return {name: c[0] for name, c in colors.items()}
+
+
 @pytest.fixture(scope='module')
 def solved():
     model = barc.build()
@@ -263,6 +273,8 @@ def test_the_example_project_is_the_band_average_studys_barc():
         'BARC', 'BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD']
     assert len(built['BARC'].mates) == 4
     assert list(built['BARC Test Geometry'].group_name) == ['Component', 'Box', 'Nodes']
+    _one_color_each(built['BARC Test Geometry'])
+    _one_color_each(built['BARC'])
     table = built['BARC Channels']
     roles = list(table['role'])
     assert roles.count('reference') == 12 and roles.count('response') == 48
@@ -274,6 +286,20 @@ def test_the_example_project_is_the_band_average_studys_barc():
     assert np.all(cpsd.ordinate[1] == 0), 'uncorrelated'
     assert built.object_groups[-1] == {
         'members': ['BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD'], 'role': 'Basis'}
+
+
+def test_every_part_has_a_color_of_its_own():
+    """A mesh comes out all color 1, and the 3-D view draws each element in
+    its own color: the box, the channels, the beam and the bolts each get one
+    of their own, the box not the gray of an unpicked thing, on the plates,
+    on the bricks and on the removable component alone."""
+    for geometry in (barc.geometry(), barc.solid_geometry('BARC', 0.25),
+                     barc.solid_geometry('removable component', 0.25)):
+        colors = _one_color_each(geometry)
+        assert colors.get('box', 1) != 0, colors
+    assert _one_color_each(barc.solid_geometry('BARC', 0.25)) == {
+        'box': 1, 'right channel': 2, 'left channel': 3, 'beam': 5,
+        'foot bolts': 4, 'top bolts': 9}
 
 
 @pytest.mark.slow

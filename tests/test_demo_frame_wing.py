@@ -26,6 +26,16 @@ INCH = 0.0254
 #: member, no fillets
 COARSE = 0.25
 
+
+def _one_color_each(geometry):
+    """Each element group's color: one per group, none shared, so the parts
+    of the model read apart in 3-D."""
+    colors = {name: sorted(set(geometry.elem_color[geometry.elem_group == group].tolist()))
+              for group, name in zip(geometry.group_id, geometry.group_name)}
+    assert all(len(c) == 1 for c in colors.values()), colors
+    assert len({c[0] for c in colors.values()}) == len(colors), colors
+    return {name: c[0] for name, c in colors.items()}
+
 #: the wiki's measured frequencies of frame SN003, Hz, laser vibrometer
 MEASURED_FRAME = [234.18, 291.71, 624.38, 652.81, 715.31, 751.99,
                   1118.75, 1155.31, 1241.27]
@@ -111,6 +121,16 @@ def test_the_assembly_bolts_the_wing_on_through_four_washers():
     assert len(model.pieces()) == 1 and not model.rigid_links and model.ties
     assert len(model.masses) == 4
     assert sum(m.mass for m in model.masses) == pytest.approx(4 * frame_wing.SCREW_MASS)
+
+
+def test_every_part_has_a_color_of_its_own():
+    """The frame blue, its inserts, the wing, and the screws, washers and
+    screw heads that bolt it on each a color of their own."""
+    assert _one_color_each(frame_wing.geometry('thin wing', COARSE, COARSE)) == {
+        'frame': 1, 'inserts': 2, 'thin wing': 3, 'screws': 4, 'washers': 5,
+        'screw heads': 9}
+    assert _one_color_each(frame_wing.geometry('thick wing alone', wing_size=COARSE)) == {
+        'thick wing': 3}
 
 
 def test_the_project_is_the_app_workflow(tmp_path):

@@ -17,6 +17,16 @@ from hertzforge.demo import barc, rc_plate
 INCH = 0.0254
 
 
+def _one_color_each(geometry):
+    """Each element group's color: one per group, none shared, so the parts
+    of the model read apart in 3-D."""
+    colors = {name: sorted(set(geometry.elem_color[geometry.elem_group == group].tolist()))
+              for group, name in zip(geometry.group_id, geometry.group_name)}
+    assert all(len(c) == 1 for c in colors.values()), colors
+    assert len({c[0] for c in colors.values()}) == len(colors), colors
+    return {name: c[0] for name, c in colors.items()}
+
+
 @pytest.fixture(scope='module')
 def built():
     return rc_plate.project()
@@ -85,6 +95,21 @@ def test_the_test_geometry_draws_its_traces_and_every_node(built):
     traced = {int(n) for name in ('Component', 'Plate') for e in geometry.elements_in(name)
               for n in geometry.elem_conn[int(np.flatnonzero(geometry.elem_id == e)[0])]}
     assert traced == set(geometry.node_id.tolist())
+
+
+def test_every_part_has_a_color_of_its_own_in_the_saved_file(built, tmp_path):
+    """The plate blue, each channel, the beam and each kind of bolt a color of
+    its own, and the test geometry's traces apart from its nodes, as the
+    downloaded file opens."""
+    import hertzforge
+
+    built.save(tmp_path / 'rc-plate.hforge')
+    opened = hertzforge.load(tmp_path / 'rc-plate.hforge')
+    assert _one_color_each(opened['RC Plate']) == {
+        'plate': 1, 'right channel': 2, 'left channel': 3, 'beam': 5,
+        'foot bolts': 4, 'top bolts': 9}
+    assert _one_color_each(opened['RC Plate Test Geometry']) == {
+        'Component': 1, 'Plate': 2, 'Nodes': 0}
 
 
 def test_drive_points_add_an_accelerometer_at_every_force(built):

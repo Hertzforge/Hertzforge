@@ -219,16 +219,26 @@ def _runs(marks: Any, x: np.ndarray, edges: np.ndarray | None, kind: str) -> lis
     return spans
 
 
+def _rgb(colors: list[str]) -> np.ndarray:
+    """'#rrggbb' colors as u8 RGB rows [N, 3]."""
+    return np.array([[int(color[k:k + 2], 16) for k in (1, 3, 5)] for color in colors],
+                    dtype=np.uint8).reshape(-1, 3)
+
+
 def _scene(built: Mapping[str, Any], title: str, unit: str) -> dict[str, Any]:
     """A scene as one `shape3d`: its faces as triangles (a fan each), its
-    lines, and its modes."""
+    lines, and its modes; with no modes, each face and line in its
+    element's color (`element_colors`), as the app's 3-D view draws a
+    geometry."""
     nodes = np.asarray(built.get('points') or np.zeros((0, 3)), dtype=float).reshape(-1, 3)
-    triangles = []
+    triangles, triangle_colors = [], []
     for face in built.get('faces') or []:
         corners = [int(n) for n in face['nodes']]
         for k in range(1, len(corners) - 1):
             triangles.append((corners[0], corners[k], corners[k + 1]))
+            triangle_colors.append(face['color'])
     lines = [(int(line[0]), int(line[1])) for line in built.get('lines') or []]
+    line_colors = [line[2] for line in built.get('lines') or []]
     modes = []
     for k, mode in enumerate(built.get('modes') or []):
         info = mode.get('info') or {}
@@ -242,6 +252,21 @@ def _scene(built: Mapping[str, Any], title: str, unit: str) -> dict[str, Any]:
     view = v.shape3d(title, unit, nodes, modes,
                      triangles=np.asarray(triangles, dtype=np.uint32).reshape(-1, 3),
                      lines=np.asarray(lines, dtype=np.uint32).reshape(-1, 2))
+    home = built.get('home')
+    if home:
+        # the page's (right, up) back to the eye the 3-D view opens from: the
+        # geometry's own view, or a model built Y up opens on its side
+        right, up = (np.asarray(axis, dtype=float) for axis in home)
+        view['home'] = {'eye': [float(c) for c in np.cross(right, up)],
+                        'up': [float(c) for c in up]}
+    # the colored elements stand still, so a scene that animates its modes
+    # keeps the surface colored by displacement
+    if (triangles or lines) and not modes:
+        view['element_colors'] = {
+            'triangles': np.asarray(triangles, dtype=np.uint32).reshape(-1, 3),
+            'triangle_colors': _rgb(triangle_colors),
+            'lines': np.asarray(lines, dtype=np.uint32).reshape(-1, 2),
+            'line_colors': _rgb(line_colors)}
     if built.get('arrows'):
         # the solids the 3-D view draws for a channel table's DOFs
         from ..drawing.viz.geometry import dof_arrow_solids
