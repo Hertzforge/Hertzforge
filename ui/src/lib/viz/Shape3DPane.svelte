@@ -1530,9 +1530,12 @@
 		deflect();
 		renderer.render(scene, camera);
 		const labels = view.arrows?.labels;
-		if (!recordLabels || !labelAt || !labels?.length) return renderer.domElement.toDataURL('image/png');
-		// the labels are written over the canvas in the pane, so a frame draws them in itself, as
-		// the pane writes them: bold, in the text color, edged in the background's
+		const writeLabels = recordLabels && !!labelAt && !!labels?.length;
+		// the legend of an element coloring belongs in the frame: without it the colors read as nothing
+		const writeLegend = stressShown && !!stress;
+		if (!writeLabels && !writeLegend) return renderer.domElement.toDataURL('image/png');
+		// the labels and the legend are written over the canvas in the pane, so a frame draws them
+		// in itself, as the pane writes them: bold, in the text color, edged in the background's
 		const picture = renderer.domElement;
 		const out = document.createElement('canvas');
 		out.width = picture.width;
@@ -1541,18 +1544,54 @@
 		g.drawImage(picture, 0, 0);
 		const css = getComputedStyle(canvasHost);
 		const size = Math.max(11, Math.round(out.height / 60));
-		g.font = `600 ${size}px ${css.fontFamily}`;
-		g.textAlign = 'center';
-		g.textBaseline = 'middle';
+		const ink = css.getPropertyValue('--text-1').trim() || css.color;
 		g.lineJoin = 'round';
 		g.lineWidth = Math.max(3, size / 4);
 		g.strokeStyle = plotBackground(picture);
-		g.fillStyle = css.getPropertyValue('--text-1').trim() || css.color;
-		for (const { x, y, text } of labelPlaces(labelAt, labels, toScreen, out.width, out.height)) {
-			g.strokeText(text, x, y);
-			g.fillText(text, x, y);
+		g.fillStyle = ink;
+		if (writeLabels) {
+			g.font = `600 ${size}px ${css.fontFamily}`;
+			g.textAlign = 'center';
+			g.textBaseline = 'middle';
+			for (const { x, y, text } of labelPlaces(labelAt!, labels!, toScreen, out.width, out.height)) {
+				g.strokeText(text, x, y);
+				g.fillText(text, x, y);
+			}
 		}
+		if (writeLegend) drawLegend(g, size, css.fontFamily, out.height, ink);
 		return out.toDataURL('image/png');
+	}
+
+	/**
+	 * The color legend drawn into a recorded frame, at its bottom left as the pane shows it: the
+	 * scalar and its unit, the colormap as a bar, and the scale's ends and middle under it.
+	 */
+	function drawLegend(g: CanvasRenderingContext2D, size: number, family: string, height: number, ink: string) {
+		const width = 18 * size;
+		const bar = Math.round(0.9 * size);
+		const left = 1.5 * size;
+		const bottom = height - 1.5 * size;
+		const top = bottom - size - bar;
+		g.textBaseline = 'alphabetic';
+		g.font = `600 ${size}px ${family}`;
+		g.textAlign = 'left';
+		g.strokeText(legendTitle, left, top - 0.4 * size);
+		g.fillText(legendTitle, left, top - 0.4 * size);
+		const rgb: [number, number, number] = [0, 0, 0];
+		const steps = 128;
+		for (let i = 0; i < steps; i++) {
+			colormap((i + 0.5) / steps, rgb);
+			g.fillStyle = `rgb(${Math.round(rgb[0] * 255)} ${Math.round(rgb[1] * 255)} ${Math.round(rgb[2] * 255)})`;
+			g.fillRect(left + (i * width) / steps, top, width / steps + 1, bar);
+		}
+		g.fillStyle = ink;
+		g.font = `500 ${Math.round(0.9 * size)}px ${family}`;
+		legendTicks.forEach((text, i) => {
+			g.textAlign = i === 0 ? 'left' : i === legendTicks.length - 1 ? 'right' : 'center';
+			const x = left + (i * width) / (legendTicks.length - 1);
+			g.strokeText(text, x, bottom);
+			g.fillText(text, x, bottom);
+		});
 	}
 
 	onMount(init);
@@ -1881,6 +1920,14 @@
 		e.preventDefault();
 	}
 
+	const legendTitle = $derived(
+		stressShown && stress
+			? `${stress.label}${stress.unit ? ` (${stress.unit})` : ''}${stress.stated ? ', stated scale' : ''}`
+			: motion
+				? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}`
+				: `Displacement (${display.unit})`
+	);
+
 	const legendTicks = $derived(
 		stressShown && stress
 			? legendValues(stress.max[motion ? 0 : Math.min(Math.max(0, mode), stress.max.length - 1)] ?? stress.max[0], signed(stress.scalar)).map((v) => formatNumber(v, 3))
@@ -2078,11 +2125,7 @@
 			<div class="legend" aria-label="Color legend">{@render legend()}</div>
 		{:else if (moves || stressShown) && colored}
 		<div class="legend" aria-label="Color legend">
-			<div class="ltitle" data-testid="shape3d-legend-title">
-				{stressShown && stress
-					? `${stress.label}${stress.unit ? ` (${stress.unit})` : ''}${stress.stated ? ', stated scale' : ''}`
-					: motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
-			</div>
+			<div class="ltitle" data-testid="shape3d-legend-title">{legendTitle}</div>
 			<div class="bar" style:background={colormapGradient()}></div>
 			<div class="ticks num" data-testid="shape3d-legend-ticks">
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
