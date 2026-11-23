@@ -66,6 +66,7 @@ from typing import Any
 import numpy as np
 
 from hertzforge import View, fem, mesh
+from hertzforge.demo import color_groups
 
 # The plate model follows the steps a person takes in the app (Brandon,
 # 2026-09-26), and the bolts are tied over patches the way the app's Tie
@@ -151,6 +152,12 @@ def _planes(size: float) -> list:
 #: so the model keeps its frame and opens upright everywhere: from the
 #: front, above and to the right, y up.
 VIEW = View(eye=(1.0, 1.0, -1.0), up=(0.0, 1.0, 0.0))
+#: each element group's color (`drawing.viz.geometry.PALETTE`): the box,
+#: or the RC plate's plate, blue, each channel and the beam a color of its
+#: own, and the bolts red at the feet and cyan at the beam, so every part
+#: reads apart in 3-D
+COLORS = {'box': 1, 'plate': 1, 'right channel': 2, 'left channel': 3, 'beam': 5,
+          'bolts': 4, 'foot bolts': 4, 'top bolts': 9}
 
 
 def geometry(size: float = SIZE) -> Any:
@@ -179,6 +186,7 @@ def geometry(size: float = SIZE) -> Any:
     for bolt in BOLTS:
         patch, below = bolt_patch(whole, bolt)
         mesh.tie(whole, patch, below, group='bolts')
+    color_groups(whole, COLORS)
     return whole
 
 
@@ -426,6 +434,7 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
         whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
         whole.group_properties[group] = fem.GroupProperties(
             mass=BOLT_MASS[kind] * POUND)
+    color_groups(whole, COLORS)
     return whole
 
 

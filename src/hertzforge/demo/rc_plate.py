@@ -45,7 +45,7 @@ from typing import Any
 
 import numpy as np
 
-from hertzforge.demo import barc
+from hertzforge.demo import barc, color_groups
 
 #: the plate, inches: (center, widths); x -5..5, y 2..3, z -3.5..6.5
 PLATE = ((0.0, 2.5, 1.5), (10.0, 1.0, 10.0))
@@ -90,9 +90,10 @@ PLATE_TRACES = [[202, 208, 207, 210, 211, 205, 204, 201, 202], [201, 203, 202],
 
 def draw(geometry: Any, traces: dict[str, list[list[int]]]) -> None:
     """Give a test geometry trace lines, an element group per entry of
-    `traces` ({name: [line of node ids, ...]}), and a point element at every
-    node, in the element group 'Nodes'. The app draws elements, not bare
-    nodes, so without them a test geometry shows nothing.
+    `traces` ({name: [line of node ids, ...]}), each in its own color from
+    1 on, and a point element at every node, in the element group 'Nodes',
+    gray. The app draws elements, not bare nodes, so without them a test
+    geometry shows nothing.
     """
     for color, (name, lines) in enumerate(traces.items(), start=1):
         group = geometry.add_group(name)
@@ -101,6 +102,7 @@ def draw(geometry: Any, traces: dict[str, list[list[int]]]) -> None:
     nodes = [int(n) for n in geometry.node_id]
     group = geometry.add_group('Nodes')
     geometry.add_elements([[n] for n in nodes], [161] * len(nodes), [group] * len(nodes))
+    color_groups(geometry, {'Nodes': 0})
 
 
 def drives() -> dict[str, tuple[tuple[float, float, float], str]]:
@@ -178,6 +180,7 @@ def solid_geometry(size: float = barc.SIZE) -> Any:
         whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
         whole.group_properties[group] = fem.GroupProperties(
             mass=barc.BOLT_MASS[kind] * barc.POUND)
+    color_groups(whole, barc.COLORS)
     return whole
 
 
