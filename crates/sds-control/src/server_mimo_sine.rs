@@ -398,6 +398,7 @@ impl Service {
             data_root: self.opts.data_root.clone(),
             bind: self.opts.bind.clone(),
             law,
+            law_budget: self.opts.mimo_sine_law_budget,
             revision,
             devices,
         })

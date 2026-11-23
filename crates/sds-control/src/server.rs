@@ -282,6 +282,15 @@ pub struct ServiceOptions {
     /// (`crate::table_keep`). The service itself does; the default is off, so a
     /// service made in a test reads no table it did not write.
     pub keep_table: bool,
+    /// The deadline of every MIMO Sine law call on the simulator, in place of the
+    /// setup's `guards.law_budget` (`None`: the setup's). A hardware station
+    /// ignores it and keeps the setup's (`hertzforge_mimo_sine::service::law_budget_s`).
+    /// The setup's deadline is a quarter of a 10 ms tick on the wall clock, and a
+    /// loaded machine can hold a thread longer than that; at engage, where one miss
+    /// stops the run, that stopped a run with nothing wrong in it. So the wire
+    /// tests pass `hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET` by name, as the
+    /// MIMO Sine engine's own tests do.
+    pub mimo_sine_law_budget: Option<Duration>,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -343,6 +352,7 @@ impl Default for ServiceOptions {
             twr_engine: None,
             record: crate::record::RecordOptions::default(),
             keep_table: false,
+            mimo_sine_law_budget: None,
         }
     }
 }
