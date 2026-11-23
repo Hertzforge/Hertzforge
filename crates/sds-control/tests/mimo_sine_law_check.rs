@@ -364,13 +364,21 @@ fn mimo_sine_the_arming_gate_refuses_a_missing_or_failing_record() {
 /// setup's budget, which the service's check keeps: the refused answers and
 /// the late ones among them, the calls, the slowest and the median call, and
 /// how many were over the budget. A case that could not run has them null.
+/// The run holds each call to the engine's test-only budget, as this binary's
+/// service does, so a busy machine cannot end the dwell early; the line still
+/// reports the calls against the setup's budget.
 #[test]
 fn mimo_sine_a_case_line_carries_the_law_call_times() {
     use hertzforge_mimo_sine_laws::check::{self as mcheck, MimoSineCheckCase};
     use sds_control::mimo_sine::law_check::{case_json, station};
     let law = hertzforge_mimo_sine::laws::builtin("ratio").unwrap();
     let case = MimoSineCheckCase::DwellAwayFromResonance;
-    let r = mcheck::check_case(case, law, &mut station);
+    let r = mcheck::check_case_with(
+        case,
+        law,
+        &mut station,
+        Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+    );
     let m = r.measure.as_ref().expect("the case ran");
     let line = case_json(&r.verdict, Some(m), "ratio");
     assert_eq!(line["case"], case.name());

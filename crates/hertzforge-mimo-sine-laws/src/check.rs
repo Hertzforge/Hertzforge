@@ -36,9 +36,11 @@
 //!    for one. An answer refused only for coming late is not a law fault.
 //! 3. **`on_time`**: the run does not end on the miss rule for late answers
 //!    (the engine's own rule: [`DEFAULT_LAW_MISSES`] refused in a row), and
-//!    the median call is within the budget in force. A single late call
+//!    the median call is within the budget in force. A single late update
 //!    cannot fail it: one late answer is held and the run goes on, and one
-//!    call does not move the median. Every case reports the law's call
+//!    call does not move the median. An engage (the run's start, or a step)
+//!    holds no miss, so one late answer there ends the run and fails it; the
+//!    detail says so. Every case reports the law's call
 //!    times: the slowest, the median, and how many were over the setup's
 //!    budget (a quarter of the update), whatever budget the run had.
 //! 4. **`within_ceiling`**: no sample of any drive over its ceiling, and the
@@ -1016,8 +1018,16 @@ pub struct CaseMeasure {
     /// in force).
     pub late_misses: usize,
     /// Whether the run ended on a law fault because its last refused
-    /// answers came late (the miss rule's count in a row).
+    /// answers came late (the miss rule's count in a row, or one at an
+    /// engage, which holds no miss).
     pub ended_late: bool,
+    /// The late answers in a row at the end of the run: the last law calls
+    /// whose answers were refused for coming late (0 when the last call was
+    /// answered in time).
+    pub late_in_a_row: usize,
+    /// Whether the run's last law call was an engage (the run's start, or a
+    /// step) whose answer was refused, which ends the run on its own.
+    pub ended_at_engage: bool,
     /// The law's calls (the engage and every update).
     pub calls: usize,
     /// The slowest call, s.
@@ -1434,6 +1444,13 @@ fn measure(
         .map(|t| t.law_s)
         .collect();
     let last_miss = ticks.iter().rev().find_map(|t| t.miss);
+    let called: Vec<&TickRecord> = ticks.iter().filter(|t| t.law_called).collect();
+    let late_in_a_row = called
+        .iter()
+        .rev()
+        .take_while(|t| t.miss == Some(LATE))
+        .count();
+    let ended_at_engage = called.last().is_some_and(|t| t.engage && t.miss.is_some());
     CaseMeasure {
         case: None,
         outcome,
@@ -1441,6 +1458,8 @@ fn measure(
         misses: ticks.iter().filter(|t| t.miss.is_some()).count(),
         late_misses: ticks.iter().filter(|t| t.miss == Some(LATE)).count(),
         ended_late: outcome == Some(Outcome::LawFault) && last_miss == Some(LATE),
+        late_in_a_row,
+        ended_at_engage,
         calls: call_s.len(),
         slowest_call_s: largest(call_s.iter().copied()),
         calls_over_budget: call_s.iter().filter(|&&s| s > st.law_budget_s).count(),
@@ -1592,11 +1611,19 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
     }
     if m.ended_late || m.median_call_s > m.budget_in_force_s {
         let why = if m.ended_late {
-            format!(
-                "the run ended {}{at} after {} late answers in a row",
-                outcome_str(m.outcome),
-                DEFAULT_LAW_MISSES
-            )
+            // The count measured, not the miss rule's: an engage ends the
+            // run on one late answer.
+            let ended = match (m.ended_at_engage, m.late_in_a_row) {
+                (true, n) if n <= 1 => {
+                    "on a late answer at an engage (an engage holds no miss)".to_string()
+                }
+                (true, n) => format!(
+                    "after {n} late answers in a row, the last at an engage \
+                     (an engage holds no miss)"
+                ),
+                (false, n) => format!("after {n} late answers in a row"),
+            };
+            format!("the run ended {}{at} {ended}", outcome_str(m.outcome))
         } else {
             format!(
                 "the median call took {:.3} ms against a budget of {:.3} ms",
@@ -1984,6 +2011,8 @@ mod tests {
             misses: 0,
             late_misses: 0,
             ended_late: false,
+            late_in_a_row: 0,
+            ended_at_engage: false,
             calls: 600,
             slowest_call_s: 0.0004,
             median_call_s: 0.0001,
@@ -2207,13 +2236,32 @@ mod tests {
             m.misses = 3;
             m.late_misses = 3;
             m.ended_late = true;
+            m.late_in_a_row = 3;
             m.outcome = Some(Outcome::LawFault);
         });
         assert_eq!(ended.failed.as_deref(), Some("on_time"));
         assert!(
-            ended.detail.contains("late answers in a row"),
+            ended.detail.contains("after 3 late answers in a row"),
             "{}",
             ended.detail
+        );
+        // One late answer at the engage ends the run on its own: the detail
+        // gives the count measured, not the miss rule's.
+        let engage = with(C::DwellAwayFromResonance, &|m| {
+            m.misses = 1;
+            m.late_misses = 1;
+            m.ended_late = true;
+            m.late_in_a_row = 1;
+            m.ended_at_engage = true;
+            m.calls = 1;
+            m.outcome = Some(Outcome::LawFault);
+        });
+        assert_eq!(engage.failed.as_deref(), Some("on_time"));
+        assert!(
+            engage.detail.contains("on a late answer at an engage")
+                && !engage.detail.contains("in a row"),
+            "{}",
+            engage.detail
         );
         // A law slower than the budget as a rule: its median call is over.
         let slow = with(C::Stepped, &|m| m.median_call_s = 0.003);
