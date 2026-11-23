@@ -6,7 +6,8 @@
 //!
 //! One test holds a law that comes late to the setup's real budget, as a
 //! check on a user's machine does: a single late answer is held and the case
-//! passes, and a law late on every update fails `on_time`, not `no_law_fault`.
+//! passes, a law late on every update fails `on_time`, not `no_law_fault`, and
+//! a law late at its engage fails `on_time` after its one call.
 //! It sleeps on the wall clock, so it runs on the timing list.
 
 use hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET;
@@ -14,8 +15,8 @@ use hertzforge_mimo_sine::law::{LawDescriptor, LawManifest, LawSetup, LawValues}
 use hertzforge_mimo_sine::laws::builtin;
 use hertzforge_mimo_sine::{LawFault, MimoSineLaw, MimoSineLawFactory, TickInputs, TickOutputs};
 use hertzforge_mimo_sine_laws::check::{
-    call_times, check_case, check_law_with, check_passed, sim_station, MimoSineCheckCase,
-    CHECK_CEILING_V,
+    call_times, check_case, check_case_with, check_law_with, check_passed, sim_station,
+    MimoSineCheckCase, CHECK_CEILING_V,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,8 @@ enum Wrong {
     LateOnce,
     /// From the 150th update, 5 ms late on every update.
     LateAlways,
+    /// 5 ms late at the engage only.
+    LateAtEngage,
 }
 
 struct WrongFactory(Arc<dyn MimoSineLawFactory>, Wrong);
@@ -49,7 +52,11 @@ impl MimoSineLaw for WrongLaw {
         o: &mut TickOutputs,
         v: &mut LawValues,
     ) -> Result<(), LawFault> {
-        self.0.engage(x, o, v)
+        self.0.engage(x, o, v)?;
+        if let Wrong::LateAtEngage = self.1 {
+            std::thread::sleep(LATE);
+        }
+        Ok(())
     }
     fn tick(
         &mut self,
@@ -172,4 +179,36 @@ fn mimo_sine_check_a_late_law_is_held_to_the_real_budget() {
     assert_eq!(v.failed.as_deref(), Some("on_time"), "{v:?}");
     assert!(m.ended_late);
     assert_eq!(m.misses, m.late_misses);
+    assert_eq!(m.late_in_a_row, m.misses, "{m:?}");
+    assert!(!m.ended_at_engage);
+    assert!(
+        v.detail
+            .contains(&format!("after {} late answers in a row", m.late_in_a_row)),
+        "{v:?}"
+    );
+    // Late at the engage: the engage holds no miss, so the run ends after
+    // one call, and the detail says that rather than the miss rule's count.
+    let (v, m) = run(Wrong::LateAtEngage);
+    assert_eq!(v.failed.as_deref(), Some("on_time"), "{v:?}");
+    assert!(m.ended_late && m.ended_at_engage, "{m:?}");
+    assert_eq!(
+        (m.calls, m.misses, m.late_misses, m.late_in_a_row),
+        (1, 1, 1, 1)
+    );
+    assert!(
+        v.detail.contains("on a late answer at an engage") && !v.detail.contains("in a row"),
+        "{v:?}"
+    );
+    // Under the engine's test-only budget the same late engage is taken and
+    // the case runs its whole dwell: a slow call on a busy machine cannot end
+    // a test's run early.
+    let law = Arc::new(WrongFactory(
+        builtin("matrix").unwrap(),
+        Wrong::LateAtEngage,
+    ));
+    let r = check_case_with(case, law, &mut sim_station, Some(TEST_RELAX_COMPUTE_BUDGET));
+    let m = r.measure.expect("the case ran");
+    assert!(r.verdict.passed, "{:?}", r.verdict);
+    assert!(m.calls > 500 && m.misses == 0, "{m:?}");
+    assert!(m.calls_over_budget >= 1, "{m:?}");
 }

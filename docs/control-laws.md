@@ -1084,8 +1084,10 @@ can be seen, and never fail a law.
 A late answer is not a wrong one. The check holds every call to the run's budget (a quarter of the
 update) as a run on hardware does: a call past it is refused and the drive in force held. "On time"
 fails only when the run ends on the controller's own rule of three late answers in a row, or when
-the law's median call is over the budget, so one call that a busy computer delays cannot fail a
-case. Every case's line in the report gives the law's call times: its calls, the slowest and the
+the law's median call is over the budget, so one update that a busy computer delays cannot fail a
+case. The engage is the exception: the run's start and each step hold no miss, so a late answer
+there ends the run and fails the case, and the case's detail says it ended at an engage. Every
+case's line in the report gives the law's call times: its calls, the slowest and the
 median call, how many were over the budget (`over_budget` of `budget_ms`), and its refused answers
 with the late ones among them (`misses`, `late`).
 
