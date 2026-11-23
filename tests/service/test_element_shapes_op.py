@@ -177,3 +177,14 @@ def test_a_rigid_body_mode_is_drawn_at_zero_with_a_note():
     assert 'rigid-body mode at 0 Hz strains nothing' in view['note']
     assert np.abs(state.project[added].values('stress', 'xx', 0)).max() > 0, \
         'the round-off is kept in the set itself'
+
+
+def test_with_its_shape_set_gone_the_set_is_drawn_still():
+    state = _state()
+    added = state.project.element_shapes('Cells Modes', modes=[6, 7])
+    state.project.remove('Cells Modes')
+    (view,) = _run(state, 'project.color_element_shapes',
+                   {'object': added, 'quantity': 'stress', 'component': 'xx'})
+    assert all(np.abs(m['shape']).max() == 0 for m in view['modes'])
+    assert 'was read from is gone, so its modes are drawn still' in view['note']
+    assert np.abs(view['element_values']['values']).max() > 0

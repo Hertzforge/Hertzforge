@@ -128,6 +128,7 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/control-laws.md`](docs/control-laws.md), [`docs/control-law-spec.md`](docs/control-law-spec.md) | Writing a control law as a law file, and the interface it is written against |
 | [`docs/reference-file.md`](docs/reference-file.md), [`docs/reference-from-field-data.md`](docs/reference-from-field-data.md) | Reference files, and references from field data |
 | [`docs/sensor-positions.md`](docs/sensor-positions.md) | Sensor positions from a measuring arm: accelerometers fitted to probed points, and the test geometry and channel table made from them |
+| [`docs/strain-and-stress.md`](docs/strain-and-stress.md) | Strain and stress shapes: a solved model's modes read element by element, and how far to trust them |
 | [`docs/hforge-format.md`](docs/hforge-format.md) | The layout inside a `.hforge` file (projects, measurements, tables), for reading one without Hertzforge |
 | [`docs/run-folder.md`](docs/run-folder.md) | The run folder a control run leaves on disk, and what a Random run saves |
 | [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |
