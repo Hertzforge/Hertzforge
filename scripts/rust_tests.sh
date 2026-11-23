@@ -19,6 +19,15 @@
 # the wrong target, or a name another test binary shares) fails the run
 # instead of leaving a test that neither pass runs.
 #
+# The timing pass builds one package at a time (`cargo test -p`), which on its
+# own would build that package with only its default features. The parallel
+# pass builds the whole workspace, where features are unified: a package gets
+# every feature any other member turns on for it, and a target whose
+# `required-features` are among them is built. So each timing run is given the
+# features the workspace build resolves for its package, plus its target's
+# `required-features`, both read from `cargo metadata` (python3 reads the
+# JSON).
+#
 # Written for bash 3.2, the bash macOS ships.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,7 +62,38 @@ laws() {
   bash "$ROOT/scripts/build_laws.sh" || fail "the guest laws did not build (scripts/build_laws.sh)"
 }
 LOG="$(mktemp)"
-trap 'rm -f "$LOG"' EXIT
+FEATURES="$(mktemp)"
+trap 'rm -f "$LOG" "$FEATURES"' EXIT
+
+# Every workspace target as "package target features" lines, target as the
+# list names it (lib, test:NAME, bin:NAME) and features comma-separated, or
+# "-" for none: the features the workspace build resolves for the package on
+# this host, plus the target's own required-features.
+features() {
+  local host
+  host=$(rustc -vV | sed -n 's/^host: //p' | tr -d '\r')
+  [ -n "$host" ] || fail "rustc -vV names no host"
+  cargo metadata --locked --format-version 1 --filter-platform "$host" </dev/null |
+    python3 -c '
+import json, sys
+m = json.load(sys.stdin)
+members = set(m["workspace_members"])
+resolved = {n["id"]: n["features"] for n in m["resolve"]["nodes"]}
+libs = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+for p in m["packages"]:
+    if p["id"] not in members:
+        continue
+    for t in p["targets"]:
+        if libs & set(t["kind"]):
+            target = "lib"
+        elif t["kind"] in (["test"], ["bin"]):
+            target = t["kind"][0] + ":" + t["name"]
+        else:
+            continue
+        f = sorted(set(resolved.get(p["id"], [])) | set(t.get("required-features", [])))
+        print(p["name"], target, ",".join(f) or "-")
+'
+}
 
 parallel() {
   local skips=() n=0 pkg target name
@@ -78,8 +118,9 @@ parallel() {
 }
 
 timing() {
-  local status=0 n=0 passed=0 failed=0 ignored=0 broken="" pkg target name names sel s p f i
+  local status=0 n=0 passed=0 failed=0 ignored=0 broken="" pkg target name names sel feat s p f i
   laws
+  features >"$FEATURES" || fail "cargo metadata did not give the workspace's targets and features"
   # One cargo invocation per package and test target, in the order listed. A
   # failing target does not stop the ones after it.
   while read -r pkg target <&3; do
@@ -93,6 +134,9 @@ timing() {
       bin:*) sel=(--bin "${target#bin:}") ;;
       *) fail "unknown target '$target' for $pkg in $LIST (lib, test:NAME or bin:NAME)" ;;
     esac
+    feat=$(awk -v p="$pkg" -v t="$target" '$1 == p && $2 == t { print $3 }' "$FEATURES")
+    [ -n "$feat" ] || fail "$LIST names $pkg $target, which is not a target in the workspace"
+    [ "$feat" = - ] || sel+=(--features "$feat")
     echo "rust_tests: ${#names[@]} timing tests in $pkg ${sel[*]}, one at a time"
     cargo test --locked -p "$pkg" "${sel[@]}" ${CARGO_ARGS[@]+"${CARGO_ARGS[@]}"} \
       -- --exact --test-threads=1 "${names[@]}" </dev/null 2>&1 | tee "$LOG"
