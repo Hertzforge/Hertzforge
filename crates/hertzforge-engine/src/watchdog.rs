@@ -259,6 +259,39 @@ impl AbortWatchdog {
         self.estop_calls
     }
 
+    /// The per-channel limiters (integrators and debounce counters), to hand to
+    /// the watchdog of an engine that continues the SAME gapless acquisition.
+    ///
+    /// A caller that runs one continuous acquisition as a chain of fresh engines
+    /// (Random's segments) must carry this across each seam. A fresh limiter
+    /// seeds its high-pass on its first sample, and mid-run that sample is
+    /// anywhere in the noise: the filter takes its distance from the mean as a
+    /// step, and the displacement, which has no high-pass after its last
+    /// integration, keeps about tau squared times that step. At a 5 Hz corner
+    /// that is about 390 mil per g, so a 0.5 g sample at a seam was a 200 mil
+    /// trip with nothing moving (bench, 2026-11-23, Random system ID).
+    pub fn integrator_state(&self) -> Vec<ChannelLimiter> {
+        self.monitored.iter().map(|m| m.limiter.clone()).collect()
+    }
+
+    /// Continue from a previous watchdog's [`Self::integrator_state`]. Adopted
+    /// only when it watches the same channels in the same order; otherwise
+    /// nothing changes and `false` is returned (a fresh start is the safe
+    /// fallback, never a mixed one).
+    pub fn adopt_integrator_state(&mut self, state: Vec<ChannelLimiter>) -> bool {
+        let same = state.len() == self.monitored.len()
+            && state
+                .iter()
+                .zip(&self.monitored)
+                .all(|(s, m)| s.channel_index() == m.limiter.channel_index());
+        if same {
+            for (m, s) in self.monitored.iter_mut().zip(state) {
+                m.limiter = s;
+            }
+        }
+        same
+    }
+
     /// Reset all integrators (call across an epoch boundary or marked gap so integration
     /// never spans a discontinuity). Does NOT clear a latched trip.
     pub fn reset_integrators(&mut self) {
@@ -347,6 +380,75 @@ mod tests {
         c.role = ChannelRole::Control;
         t.channels.push(c);
         t
+    }
+
+    /// One gapless acquisition watched by a chain of watchdogs, a new one every
+    /// `seg` frames (as Random builds a fresh engine per segment), with or
+    /// without the integrators carried across each seam. The signal is a 1 g,
+    /// 400 Hz tone: about 0.06 mil of real displacement. Returns the first trip.
+    fn chained_watch(carry: bool) -> Option<AbortTrip> {
+        let table = one_channel_table(AbortLimits {
+            accel_g: Some(50.0),
+            velocity_ips: Some(50.0),
+            displacement_mil: Some(200.0),
+        });
+        let fs = 51_200.0;
+        // 64 cycles and a quarter: successive seams land at 90, 180, 270 degrees.
+        let seg = 8192 + 32;
+        let mut backend = MockBackend::new(1);
+        let mut state: Option<Vec<ChannelLimiter>> = None;
+        for k in 0..6 {
+            let (p, c) = ring::channel(256, 1);
+            let mut wd = AbortWatchdog::new(&table, c, fs, 5.0, 1);
+            if let (true, Some(s)) = (carry, state.take()) {
+                assert!(wd.adopt_integrator_state(s), "same table, same channels");
+            }
+            for i in 0..seg {
+                let t = (k * seg + i) as f64 / fs;
+                p.push(&[(std::f64::consts::TAU * 400.0 * t).sin() as f32]);
+                if i % 64 == 63 {
+                    if let Some(trip) = wd.poll(&mut backend) {
+                        return Some(trip);
+                    }
+                }
+            }
+            if let Some(trip) = wd.poll(&mut backend) {
+                return Some(trip);
+            }
+            state = Some(wd.integrator_state());
+        }
+        None
+    }
+
+    /// RED-MUTATION: do not adopt the carried state (or carry a fresh one) and
+    /// this reds: each new watchdog seeds on a sample up to 1 g from the mean
+    /// and the displacement keeps about 390 mil per g of it.
+    #[test]
+    fn integrators_carried_across_a_gapless_seam_see_only_the_motion() {
+        assert_eq!(chained_watch(true), None);
+        let fresh = chained_watch(false).expect("fresh integrators at each seam trip");
+        assert_eq!(fresh.axis, AbortAxis::Displacement);
+    }
+
+    #[test]
+    fn integrator_state_for_other_channels_is_not_adopted() {
+        let limits = AbortLimits {
+            accel_g: Some(50.0),
+            velocity_ips: None,
+            displacement_mil: Some(200.0),
+        };
+        let (_p, c) = ring::channel(16, 1);
+        let mut wd = AbortWatchdog::new(&one_channel_table(limits), c, 1000.0, 5.0, 1);
+        let mut other = ChannelTable::new();
+        let mut ch = Channel::new(7);
+        ch.abort = limits;
+        ch.role = ChannelRole::Control;
+        other.channels.push(ch);
+        let (_p2, c2) = ring::channel(16, 1);
+        let wd7 = AbortWatchdog::new(&other, c2, 1000.0, 5.0, 1);
+        assert!(!wd.adopt_integrator_state(wd7.integrator_state()));
+        assert!(!wd.adopt_integrator_state(Vec::new()));
+        assert_eq!(wd.integrator_state()[0].channel_index(), 1);
     }
 
     #[test]
