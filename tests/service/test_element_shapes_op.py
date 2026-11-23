@@ -56,9 +56,16 @@ def test_the_action_reads_the_modes_picked_and_draws_each_element_its_own_color(
     assert read.num_shapes == 2
     held = view['element_values']
     assert held['label'] == 'Stress xx' and held['unit'] == 'Pa'
-    # one value per element and mode, the elements' centroid xx stress in order
-    assert held['values'].shape == (2, len(read.elements))
-    np.testing.assert_allclose(held['values'][1], read.values('stress', 'xx', 1), rtol=1e-6)
+    assert held['scalar'] == 'xx' and held['quantity'] == 'stress'
+    # one tensor per element and mode, the elements' centroid stress in order, which the
+    # shell sums and colors by its xx component
+    assert held['shapes'].shape == (2, len(read.elements), 6)
+    assert held['elements'] == len(read.elements)
+    np.testing.assert_allclose(held['shapes'][1, :, 0], read.values('stress', 'xx', 1), rtol=1e-6)
+    # each mode's color scale is its own largest xx, wherever its sign
+    assert held['max'] == pytest.approx([np.abs(read.values('stress', 'xx', k)).max()
+                                         for k in (0, 1)], rel=1e-6)
+    assert 'stated' not in held
     # the outside of 3 bricks and 2 wedges in a row: each triangle names its element
     assert held['owner'].max() == len(read.elements) - 1
     assert held['triangles'].shape[1] == 3 and len(held['triangles']) == len(held['owner'])
@@ -94,7 +101,7 @@ def test_the_set_opens_on_its_model_and_color_by_picks_another_component():
                      {**row['fill'], 'quantity': 'strain', 'component': 'yz'})
     assert strain['element_values']['label'] == 'Strain yz'
     assert strain['element_values']['unit'] == ''
-    np.testing.assert_allclose(strain['element_values']['values'][0],
+    np.testing.assert_allclose(strain['element_values']['shapes'][0, :, 4],
                                state.project[added].values('strain', 'yz', 0), rtol=1e-6)
 
 
@@ -114,11 +121,13 @@ def test_a_stress_is_drawn_in_the_display_systems_pressure():
     added = state.project.element_shapes('Cells Modes', modes=[6])
     (view,) = _run(state, 'project.color_element_shapes',
                    {'object': added, 'quantity': 'stress', 'component': 'xx'})
-    pascals = np.array(view['element_values']['values'])
+    pascals = np.array(view['element_values']['shapes'])
+    top = view['element_values']['max'][0]
     display_units.convert([view], 'in-slinch-lbf-s')
     assert view['element_values']['unit'] == 'psi'
-    np.testing.assert_allclose(view['element_values']['values'], pascals / 6894.757293168,
+    np.testing.assert_allclose(view['element_values']['shapes'], pascals / 6894.757293168,
                                rtol=1e-5)
+    assert view['element_values']['max'][0] == pytest.approx(top / 6894.757293168, rel=1e-5)
 
 
 def test_the_action_is_offered_only_on_modes_that_reach_a_model_of_solids():
@@ -172,8 +181,9 @@ def test_a_rigid_body_mode_is_drawn_at_zero_with_a_note():
     added = state.project.element_shapes('Cells Modes', modes=[0, 6])
     (view,) = _run(state, 'project.color_element_shapes',
                    {'object': added, 'quantity': 'stress', 'component': 'xx'})
-    values = view['element_values']['values']
+    values = view['element_values']['shapes']
     assert np.all(values[0] == 0.0) and np.abs(values[1]).max() > 0
+    assert view['element_values']['max'][0] == 0.0
     assert 'rigid-body mode at 0 Hz strains nothing' in view['note']
     assert np.abs(state.project[added].values('stress', 'xx', 0)).max() > 0, \
         'the round-off is kept in the set itself'
@@ -187,4 +197,4 @@ def test_with_its_shape_set_gone_the_set_is_drawn_still():
                    {'object': added, 'quantity': 'stress', 'component': 'xx'})
     assert all(np.abs(m['shape']).max() == 0 for m in view['modes'])
     assert 'was read from is gone, so its modes are drawn still' in view['note']
-    assert np.abs(view['element_values']['values']).max() > 0
+    assert np.abs(view['element_values']['shapes']).max() > 0

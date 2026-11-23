@@ -896,8 +896,11 @@ def _played(data: Any, picks: list[int]) -> tuple[list[int], str, list[str]]:
 def _three_played(project: Any, objects: list[str], records: dict[str, list[int]]
                   ) -> tuple[list[dict], list[str]] | None:
     """A geometry, a shape set and modal coordinates selected together: the coordinates
-    played through that set. None for any other three."""
+    played through that set, with the elements of an element shape set selected as well
+    colored by their von Mises stress (or their largest strain component when the set holds
+    no stress) summed each frame. None for any other three or four."""
     from hertzforge.core.data import TimeHistory
+    from hertzforge.core.element_shapes import ElementShapeSet
     from hertzforge.core.geometry import Geometry
     from hertzforge.core.shapes import ShapeSet
 
@@ -908,19 +911,48 @@ def _three_played(project: Any, objects: list[str], records: dict[str, list[int]
     geometry, shapes, history = only(Geometry), only(ShapeSet), only(TimeHistory)
     if not (geometry and shapes and history):
         return None
-    return _modal_motion(project, geometry, history, records.get(history, []), shapes)
+    coloring = None
+    if len(objects) == 4:
+        held = only(ElementShapeSet)
+        if held is None:
+            return None
+        coloring = element_coloring(held)
+    return modal_motion_of(project, geometry, history, records.get(history, []), shapes,
+                           coloring)
+
+
+def element_coloring(name: str, quantity: str = 'stress', component: str = 'von_mises',
+                     groups: str = '', color_max: float = 0.0) -> dict[str, Any]:
+    """How a modal motion colors the elements of the element shape set `name`: by
+    `component` of its `quantity` (`ops_element_shapes.color_scalar`), the elements of
+    the element groups `groups` (all for blank), on a scale up to `color_max` in SI (the
+    clip's largest value for 0)."""
+    return {'name': name, 'quantity': quantity, 'component': component, 'groups': groups,
+            'color_max': float(color_max)}
+
+
+def modal_motion_of(project: Any, geometry_name: str, data_name: str, picks: list[int],
+                    shapes_name: str | None = None, coloring: dict[str, Any] | None = None
+                    ) -> tuple[list[dict], list[str]] | None:
+    """`_modal_motion`, with the elements colored as `coloring` (`element_coloring`) says."""
+    return _modal_motion(project, geometry_name, data_name, picks, shapes_name, coloring)
 
 
 def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[int],
-                  shapes_name: str | None = None) -> tuple[list[dict], list[str]] | None:
+                  shapes_name: str | None = None, coloring: dict[str, Any] | None = None
+                  ) -> tuple[list[dict], list[str]] | None:
     """Modal coordinates played on a geometry through their shape set: the set selected
     with them, or the one they came from
     (`Project.modal_basis`). Each frame is the modes' shapes scaled by their values at that
     sample and summed, by the shell, so the physical response is never formed
-    (`deform.modal_deflection`). None when the records are not modal coordinates."""
+    (`deform.modal_deflection`). With `coloring` (`element_coloring`), an element shape
+    set's elements are colored the same way: each mode's tensor is sent once, and the shell
+    sums them and forms the scalar each frame (`element_values`). None when the records are
+    not modal coordinates."""
     from hertzforge.core.validate import modal_coordinate
     from hertzforge.deform import modal_deflection
 
+    from .ops_element_shapes import with_rows
     from .waterfalls import unit_text
 
     geometry, data = project[geometry_name], project[data_name]
@@ -937,16 +969,26 @@ def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[
         deflection = modal_deflection(geometry, project[basis], data, modal)
     except ValueError as error:
         return [], [f'{data_name}: {error}']
+    played = [i for i in modal if modal_coordinate(data.response_dof[i]) <= project[basis].num_shapes]
+    values = np.asarray(data.ordinate)[played].real
+    # the modal factors cancel: a mass-normalized shape times its coordinate is the motion
+    dim = data.known_dim(played[0]).removeprefix('modal_')
     drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
+    field = None
+    if coloring is not None:
+        try:
+            field = _element_field(project, geometry, basis, data_name, played, dim, values,
+                                   coloring)
+        except ValueError as error:
+            return [], [f'{coloring["name"]}: {error}']
+        drawn_rows, triangles, lines, drawn = with_rows(
+            drawn_rows, triangles, lines, field['triangles'], geometry.num_nodes)
+        field['triangles'] = np.ascontiguousarray(drawn[field['triangles']], np.uint32)
     shown = drawn[deflection.rows] >= 0
     if not shown.any():
         return [], [f'{basis} has no DOF on {geometry_name}']
-    played = [i for i in modal if modal_coordinate(data.response_dof[i]) <= project[basis].num_shapes]
     fields = deflection.fields.reshape(len(played), -1, 3)[:, shown, :]
-    values = np.asarray(data.ordinate)[played].real
     abscissa = np.asarray(data.abscissa, dtype=float)
-    # the modal factors cancel: a mass-normalized shape times its coordinate is the motion
-    dim = data.known_dim(played[0]).removeprefix('modal_')
     title = f'{data_name} on {geometry_name}'
     plot = v.spectrum(title, v.axis('Time', 's', 'linear'),
                       v.axis(f'Modal {quantity}', unit_text(data.known_dim(played[0])) or None,
@@ -966,7 +1008,35 @@ def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[
                 'values': np.ascontiguousarray(values, np.float32),
                 'peak': deflection.peak_magnitude})
     notes.append(f'{len(played)} mode shapes of {basis} scaled by the record and summed')
+    if field is not None:
+        stage['element_values'] = field
+        scale = 'stated' if field.get('stated') else "the clip's largest"
+        notes.append(f'{field["elements"]:,} elements of {coloring["name"]} colored by '
+                     f'{field["label"][0].lower()}{field["label"][1:]}, summed over the modes '
+                     f'at each instant, on {scale} value')
     return [stage, plot], notes
+
+
+def _element_field(project: Any, geometry: Any, basis: str, data_name: str, played: list[int],
+                   dim: str, values: Any, coloring: dict[str, Any]) -> dict:
+    """The `element_values` of a modal motion (`ops_element_shapes.element_field`): the
+    element shape set's tensors for the modes the records play, in their order, scaled by the
+    clip. ValueError saying why the set cannot color this clip."""
+    from hertzforge.core.validate import modal_coordinate
+
+    from .ops_element_shapes import colored_elements, element_field, played_rows
+
+    name = coloring['name']
+    held = project[name]
+    if dim not in ('length', 'displacement'):
+        raise ValueError(f'strain and stress follow modal displacement, and {data_name} holds '
+                         f'modal {dim or "values of no stated quantity"}')
+    data = project[data_name]
+    sources = [modal_coordinate(data.response_dof[i]) - 1 for i in played]
+    rows = played_rows(project, name, basis, sources)
+    mask = colored_elements(geometry, name, held, coloring.get('groups', ''))
+    return element_field(geometry, name, held, rows, coloring['quantity'],
+                         coloring['component'], mask, coloring.get('color_max', 0.0), values)
 
 
 def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
@@ -1534,7 +1604,7 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired
-        elif len(objects) == 3 and (played := _three_played(project, objects, records)):
+        elif len(objects) in (3, 4) and (played := _three_played(project, objects, records)):
             views, notes = played
         elif (driven := _driven(project, objects, records, prefs)) is not None:
             views, notes = driven

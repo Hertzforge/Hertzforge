@@ -308,10 +308,15 @@ def _shape(view: dict, system: Any) -> None:
             pick['to_si'] = [change[0], change[1]]
     held = view.get('element_values')
     if held is not None:
-        # each element's strain or stress: a stress in the system's pressure
+        # each element's stress tensors and the top of their color scale, in the system's
+        # pressure; strain has no unit
         values = _change(held.get('unit'), system)
         if values is not None:
-            held['values'] = np.asarray(_values(held['values'], values), dtype=np.float32)
+            held['shapes'] = np.asarray(_values(held['shapes'], values), dtype=np.float32)
+            if 'shapes_imag' in held:
+                held['shapes_imag'] = np.asarray(_values(held['shapes_imag'], values),
+                                                 dtype=np.float32)
+            held['max'] = [abs(float(_values(m, values))) for m in held['max']]
             held['unit'] = values[2]
     motion = view.get('motion')
     if motion is not None:
