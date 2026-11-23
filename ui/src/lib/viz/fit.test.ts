@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Box3, Vector3 } from 'three';
-import { FILL, fitDistance, homePose } from './fit';
+import { FILL, fitDistance, homeFit, homePose } from './fit';
 import { StageCamera } from './projection';
 
 /** The box's corners on screen, as fractions of the half-width and half-height. */
@@ -49,5 +49,34 @@ describe('framing a model', () => {
 		const plain = homePose();
 		expect(plain.up.z).toBeGreaterThan(0.9);
 		expect(plain.dir.y).toBeLessThan(0);
+	});
+});
+
+describe('framing part of a model', () => {
+	// a 10 in. plate with a 5 x 2 x 1 in. component bolted to its middle
+	const plate = new Box3(new Vector3(-5, -5, -0.25), new Vector3(5, 5, 1.25));
+	const part = { lo: [-2.5, -1, 0.25], hi: [2.5, 1, 1.25] };
+	const { dir, up } = homePose();
+
+	it('looks at the middle of the part and fits the part, not the whole model', () => {
+		const centre = plate.getCenter(new Vector3());
+		const framed = homeFit({ frame: part }, plate, centre, dir, up, 32, 16 / 9);
+		expect(framed.target.toArray()).toEqual([0, 0, 0.75]);
+		const box = new Box3(new Vector3().fromArray(part.lo), new Vector3().fromArray(part.hi));
+		expect(framed.distance).toBeCloseTo(fitDistance(box, framed.target, dir, up, 32, 16 / 9), 9);
+		const whole = homeFit(undefined, plate, centre, dir, up, 32, 16 / 9);
+		expect(whole.target.toArray()).toEqual(centre.toArray());
+		expect(whole.distance).toBeCloseTo(fitDistance(plate, centre, dir, up, 32, 16 / 9), 9);
+		// the part fills the frame: the camera stands well inside the whole model's distance
+		expect(framed.distance).toBeLessThan(0.6 * whole.distance);
+	});
+
+	it('opens from the front right when the frame comes with no eye, and from the eye when it does', () => {
+		const plain = homePose({ frame: part });
+		expect(plain.dir.toArray()).toEqual(homePose().dir.toArray());
+		expect(plain.up.toArray()).toEqual(homePose().up.toArray());
+		const top = homePose({ eye: [0, 0, 1], up: [0, 1, 0], frame: part });
+		expect(top.dir.toArray()).toEqual([0, 0, 1]);
+		expect(top.up.toArray()).toEqual([0, 1, 0]);
 	});
 });

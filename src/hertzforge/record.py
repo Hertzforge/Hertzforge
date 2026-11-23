@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .animation import AnimationError, opening_camera, staged
+from .animation import AnimationError, amplitude_unit, framed, opening_camera, staged
 from .animation import animation_view as _shown
 
 #: seconds a mode takes to swing once, as the app plays it (`Shape3DPane` CYCLE_S)
@@ -52,7 +52,12 @@ class Recording:
     video's length; a mode swings for `cycles` cycles unless `seconds` says otherwise. `scale`
     multiplies the app's own amplitude (the largest deflection drawn at 7.5 % of the model's
     size). `opacity` is how solid the surface is drawn, 1 solid. `view` names a camera from
-    `animation.VIEWS` ('iso' the geometry's own view), or `eye` and `up` give one.
+    `animation.VIEWS` ('iso' the geometry's own view), or `eye` and `up` give one. `frame` names
+    element groups of the geometry to fit the camera to, in place of the whole model: the rest
+    is still drawn, running out of the frame, and the amplitude is still a share of the whole
+    model's size, so framing closer does not change how far the motion is magnified.
+    `magnification`, in place of `scale`, states that directly for measured displacement: the
+    displacement drawn over the true one, so recordings of different models share one scale.
     """
 
     geometry: str
@@ -66,10 +71,12 @@ class Recording:
     seconds: float | None = None
     cycles: float = 3.0
     scale: float = 1.0
+    magnification: float | None = None
     opacity: float = 1.0
     view: str = 'iso'
     eye: Sequence[float] | None = None
     up: Sequence[float] | None = None
+    frame: Sequence[str] | None = None
     theme: str = 'dark'
     records: Sequence[int] = field(default_factory=tuple)
 
@@ -81,7 +88,8 @@ def animation_view(project: Any, recording: Recording) -> dict[str, Any]:
         view = _shown(project, recording.geometry, recording.data, recording.shapes,
                       recording.records)
         view = staged(view, recording.opacity,
-                      opening_camera(recording.view, recording.eye, recording.up))
+                      opening_camera(recording.view, recording.eye, recording.up),
+                      framed(project, recording.geometry, view, recording.frame))
     except RecordError:
         raise
     except AnimationError as error:
@@ -90,6 +98,35 @@ def animation_view(project: Any, recording: Recording) -> dict[str, Any]:
         raise RecordError(f'{recording.shapes or recording.data} has modes 1 to '
                           f'{len(view["modes"])}; not {recording.mode}')
     return view
+
+
+def drawn_scale(view: dict[str, Any], recording: Recording) -> float:
+    """The amplitude the view is drawn at, as a multiple of the app's own: the recording's
+    `scale`, or for a `magnification` the multiple that draws the motion's largest true
+    displacement (`motion.peak`, in meters as the nodes are) that many times over."""
+    if recording.magnification is None:
+        return float(recording.scale)
+    magnification = float(recording.magnification)
+    if recording.scale != 1.0:
+        raise RecordError('give the scale or the magnification, not both')
+    if not magnification > 0:
+        raise RecordError(f'the magnification is above 0, not {recording.magnification}')
+    motion = view.get('motion')
+    if motion is None:
+        raise RecordError("a magnification is of measured displacement, and a mode's size is "
+                          'arbitrary; set the scale instead')
+    # a displacement's dimension is length ('modal_length' for modal coordinates)
+    if str(motion.get('quantity', '')).lower() not in ('length', 'displacement'):
+        raise RecordError(f'a magnification is of displacement, and {recording.data} is '
+                          f'{str(motion.get("quantity") or "of no stated quantity").lower()}; '
+                          'set the scale instead')
+    if view.get('unit') == 'undefined':
+        raise RecordError(f'{recording.geometry} has no length unit to magnify against; '
+                          'set the scale instead')
+    peak = float(motion.get('peak') or 0.0)
+    if not peak > 0:
+        raise RecordError(f'{recording.data} never moves, so it has no magnification')
+    return magnification * peak / amplitude_unit(view)
 
 
 def record_page(project: Any, recording: Recording) -> str:
@@ -101,7 +138,7 @@ def record_page(project: Any, recording: Recording) -> str:
         raise RecordError(f'the theme is light or dark, not {recording.theme!r}')
     view = animation_view(project, recording)
     setup: dict[str, Any] = {'width': int(recording.width), 'height': int(recording.height),
-                             'scale': float(recording.scale)}
+                             'scale': drawn_scale(view, recording)}
     if view.get('motion') is None:
         setup['mode'] = recording.mode - 1
     frame = frames.pack({'type': 'response', 'id': 0,

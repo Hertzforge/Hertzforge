@@ -200,3 +200,45 @@ def test_a_specification_alone_is_drawn_on_the_grid_its_channels_are(
     k = int(np.argmin([abs(f - 1000.0) for f in drawn]))
     expected = np.log10(0.04 * (drawn[k] / 500.0) ** (np.log10(0.25) / np.log10(4.0)))
     assert channel['y'][k] == pytest.approx(expected, abs=2e-3)
+
+
+def _cornered():
+    """A 2 x 2 x 2 block of 0.5 bricks, the eight bricks within 1 of the
+    origin in an element group 'corner' and the rest in 'b'."""
+    from hertzforge import mesh
+
+    block = mesh.block((0, 0, 0), (2, 0, 0), (0, 2, 0), (0, 0, 2), 0.5, 'b', unit=None)
+    corner = block.add_group('corner')
+    xyz = dict(zip(block.node_id.tolist(), block.node_xyz))
+    inside = [all(max(xyz[n]) <= 1 for n in conn) for conn in block.elem_conn]
+    block.elem_group[np.asarray(inside)] = corner
+    return block
+
+
+def test_a_scene_opens_framed_on_element_groups_with_the_rest_drawn(tmp_path):
+    """The page fits its view to the box around the groups' drawn nodes
+    and still draws the whole model around them. The node at (1, 1, 1)
+    is inside the block and never drawn; the box still reaches it,
+    since the corner's skin does."""
+    from hertzforge.core.shapes import ShapeSet
+
+    block = _cornered()
+    dofs = [f'{int(n)}Z+' for n in block.node_id]
+    shapes = ShapeSet([10.0], [0.01], dofs, [block.node_xyz[:, 0] + 1.0])
+    _text, framed = _payload(hertzforge.export_html(
+        tmp_path / 'f.html', geometry=block, shapes=shapes, frame=['corner']))
+    _text, whole = _payload(hertzforge.export_html(
+        tmp_path / 'w.html', geometry=block, shapes=shapes))
+    [scene], [plain] = framed['blocks'], whole['blocks']
+    assert scene['frame'] == {'lo': [0.0, 0.0, 0.0], 'hi': [1.0, 1.0, 1.0]}
+    assert 'frame' not in plain
+    assert scene['points'] == plain['points'], 'the whole model is still drawn'
+    assert scene['modes'] == plain['modes'], 'and swings as it did'
+
+
+def test_a_frame_the_scene_cannot_have_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="no element group named 'wing'; it has 'b', 'corner'"):
+        hertzforge.export_html(tmp_path / 'x.html', geometry=_cornered(), frame=['wing'])
+    measured, _spec = _pair()
+    with pytest.raises(ValueError, match='a plot has none'):
+        hertzforge.export_html(tmp_path / 'x.html', measured, frame=['b'])

@@ -2460,6 +2460,13 @@ def _scene_block(block, geometry, shapes, us, objects):
              'node_colors': node_colors,
              'lines': lines, 'faces': faces, 'modes': [],
              'home': _scene_home(geometry)}
+    if block.get('frame') is not None:
+        from ..animation import frame_box
+
+        # the box the page fits its view to, in the points' own units;
+        # the shapes still swing by the whole model's extent
+        built['frame'] = frame_box(geometry, block['frame'], points,
+                                   np.asarray(geometry.node_id)[shown])
     quantity = block.get('dofs', '')
     if quantity:
         # a DOFs scene: labeled arrows where its one named data
@@ -3961,7 +3968,7 @@ COMPONENTS = ('magnitude', 'phase', 'real', 'imag')
 def _figure_payload(data, specification, channel, mode, geometry, shapes,
                     dofs, name, caption, theme, unit_system, fill,
                     channels, max_points,
-                    component='magnitude') -> dict[str, Any]:
+                    component='magnitude', frame=None) -> dict[str, Any]:
     """The payload of one figure, as `export_html` and `export_figure`
     both write it: built as a report of one block would be, then
     narrowed to `channels` and thinned to `max_points`."""
@@ -3975,6 +3982,9 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
         raise ValueError(f'max_points is {max_points}; a curve keeps at '
                          f'least {MIN_TRIM_POINTS} points')
     # a setting that would do nothing is refused, not ignored
+    if frame is not None and geometry is None:
+        raise ValueError('frame chooses the part of a scene it opens on, '
+                         'and a plot has none; give a geometry')
     if max_points is not None and geometry is not None:
         raise ValueError('max_points thins a plot\'s curves, and a scene has '
                          'none; choose its modes by passing fewer shapes')
@@ -4009,6 +4019,11 @@ def _figure_payload(data, specification, channel, mode, geometry, shapes,
         holder.add('Geometry', geometry)
         block = {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
                  'caption': caption}
+        if frame is not None:
+            # this figure's own block only: a report's scene blocks do
+            # not take a frame, since the app's report view draws them
+            # through another path
+            block['frame'] = frame
         if shapes is not None:
             holder.add('Shapes', shapes)
             holder.link('Geometry', 'Shapes')
@@ -4056,7 +4071,8 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
                 fill: bool = True,
                 channels: Sequence[str] | None = None,
                 max_points: int | None = None,
-                component: str = 'magnitude') -> str:
+                component: str = 'magnitude',
+                frame: Sequence[str] | None = None) -> str:
     """Write one interactive figure as a single self-contained HTML file.
 
         hertzforge.export_html('spec.html', psd, specification=spec,
@@ -4073,7 +4089,9 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     Given a `geometry`, the figure is a scene of it, with its `shapes`
     animating or, with `dofs`, the DOFs one object measures as a
     quantity, ``('acceleration', frf)``, drawn as labeled arrows.
-    Otherwise it is a plot of `data`, against `specification` and its
+    `frame` names element groups of the geometry the scene opens
+    framed on, the rest of it still drawn around them; the shapes
+    still swing by the whole model's size. Otherwise it is a plot of `data`, against `specification` and its
     zones when one is given, of one `channel` when named, in `mode`
     ('curves', 'stage', 'cmif', 'mac' or 'map').
 
@@ -4119,6 +4137,8 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
         How a plot of complex data reads, as the app's drop-down
         reads it.
+    frame : sequence of str, optional
+        Element groups of `geometry` the scene opens framed on.
 
     Returns
     -------
@@ -4130,8 +4150,9 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     ValueError
         When neither `data` nor `geometry` is given, when `channels`
         names a channel `data` does not hold, when nothing of the
-        figure can be drawn, when `max_points` is under 16, or when
-        `component` is not one of the four.
+        figure can be drawn, when `max_points` is under 16, when
+        `component` is not one of the four, or when `frame` is given
+        without a geometry or names a group it does not have.
     """
     # `fill` was added for an interactive slide deck made by the scripts
     # that draw a paper's printed figures (Brandon, 2026-09-27).
@@ -4140,7 +4161,7 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     payload = _figure_payload(data, specification, channel, mode, geometry,
                               shapes, dofs, name, caption, theme,
                               unit_system, fill, channels, max_points,
-                              component)
+                              component, frame)
     path = pathlib.Path(path)
     path.write_text(_page_html(payload), encoding='utf-8')
     return str(path)
@@ -4158,7 +4179,8 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
                   fill: bool = False,
                   channels: Sequence[str] | None = None,
                   max_points: int | None = None,
-                  component: str = 'magnitude') -> str:
+                  component: str = 'magnitude',
+                  frame: Sequence[str] | None = None) -> str:
     """Write one interactive figure as a JSON data file, and optionally
     the script that draws it, for a page that mounts the figure itself.
 
@@ -4225,6 +4247,8 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
     component : {'magnitude', 'phase', 'real', 'imag'}, default 'magnitude'
         How a plot of complex data reads, as the app's drop-down
         reads it.
+    frame : sequence of str, optional
+        Element groups of `geometry` the scene opens framed on.
 
     Returns
     -------
@@ -4244,7 +4268,7 @@ def export_figure(path: str | os.PathLike, data: Any = None, *,
     payload = _figure_payload(data, specification, channel, mode, geometry,
                               shapes, dofs, name, caption, theme,
                               unit_system, fill, channels, max_points,
-                              component)
+                              component, frame)
     payload['format'] = FIGURE_FORMAT
     path = pathlib.Path(path)
     path.write_text(json.dumps(payload, allow_nan=False, separators=(',', ':')),

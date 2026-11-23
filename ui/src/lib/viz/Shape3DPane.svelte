@@ -86,9 +86,9 @@
 	import { isAdding, setAdding } from './editMode.svelte';
 	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
-	import { linearColors, span as pointSpan } from './points';
+	import { amplitudeUnit, linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
-	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
+	import { homeFit, homePose as poseOf } from './fit';
 	import { StageCamera, lookAtFace } from './projection';
 
 	interface Props {
@@ -252,8 +252,6 @@
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
-	/** An amplitude of 1, as a fraction of the model's diagonal: the slider's default position, and its scale. */
-	const AMP_UNIT = 0.075;
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
@@ -419,7 +417,7 @@
 	 */
 	function setAmplitudeMax(text: string) {
 		const value = Number(text);
-		const perUnit = AMP_UNIT * diagonal * display.factor;
+		const perUnit = perAmplitude * display.factor;
 		if (!Number.isFinite(value) || !(perUnit > 0)) return;
 		amplitudeMax = Math.min(1000, Math.max(0.1, value / perUnit));
 		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
@@ -455,16 +453,10 @@
 		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz), ...(view.segments ?? []).map((layer) => layer.xyz)]);
 	}
 
-	/** Model diagonal, from the undeformed nodes and any point layers. */
-	const diagonal = $derived.by(() => {
-		const { lo, hi } = span();
-		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
-		// that puts every point nowhere
-		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
-		return Number.isFinite(across) && across > 0 ? across : 1;
-	});
+	/** The deflection an amplitude of 1 draws: a share of the whole model's diagonal (`amplitudeUnit`), whatever the view is framed on. */
+	const perAmplitude = $derived(amplitudeUnit(view));
 
-	const peak = $derived(amplitude * AMP_UNIT * diagonal);
+	const peak = $derived(amplitude * perAmplitude);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
 	const extents = $derived.by(() => span());
@@ -475,7 +467,7 @@
 		return { factor: 1, unit: view.unit };
 	});
 	/** The slider's top as the peak deflection there, in the display units. */
-	const topPeak = $derived(amplitudeMax * AMP_UNIT * diagonal * display.factor);
+	const topPeak = $derived(amplitudeMax * perAmplitude * display.factor);
 
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
@@ -591,11 +583,7 @@
 	let resizeObs: ResizeObserver | null = null;
 	/** The box the model is framed by: the drawn nodes with the bodies and frames around them. */
 	let fitBox = new Box3();
-	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
-	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
-	}
-	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
+	/** The way the view opens looking from, and which way is up: `view.home`'s (the geometry's own, or the one a recording asked for), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
 		return poseOf(view.home);
 	}
@@ -804,8 +792,9 @@
 	function resetView() {
 		if (!renderer) return;
 		const { dir, up } = homePose();
-		controls.target.set(centre.x, centre.y, centre.z);
-		camera.position.copy(centre).addScaledVector(dir, fitDistance(dir, up));
+		const { target, distance } = homeFit(view.home, fitBox, centre, dir, up, camera.fov, camera.aspect);
+		controls.target.copy(target);
+		camera.position.copy(target).addScaledVector(dir, distance);
 		camera.up.copy(up);
 		controls.update();
 		dirty = true;
@@ -1416,7 +1405,8 @@
 		camera.updateProjectionMatrix();
 		if (o.scale !== undefined) amplitude = o.scale;
 		if (o.modeAt !== undefined) mode = Math.min(Math.max(0, o.modeAt), view.modes.length - 1);
-		// the view's own opening camera (`home`), fitted to the video's frame
+		// the view's own opening camera (`home`), fitted to the video's frame: the whole model, or
+		// the part `home.frame` names
 		resetView();
 		renderer.setClearColor(plotBackground(renderer.domElement), 1);
 		dirty = true;

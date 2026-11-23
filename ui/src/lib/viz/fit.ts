@@ -30,10 +30,29 @@ export function fitDistance(box: Box3, centre: Vector3, dir: Vector3, up: Vector
 	return distance;
 }
 
-/** The direction a view opens looking from and the way up, `up` made square to it: `home` when given, else from the front right with Z up. */
-export function homePose(home?: { eye: number[]; up: number[] }): { dir: Vector3; up: Vector3 } {
-	const dir = home ? new Vector3().fromArray(home.eye).normalize() : new Vector3(0.55, -1.2, 0.58).normalize();
-	const up = home ? new Vector3().fromArray(home.up) : new Vector3(0, 0, 1);
+/** How a view opens (a `shape3d` view's `home`): looking from `eye` with `up` up, fitted to the box `frame` rather than the whole model. */
+export interface Home {
+	eye?: number[];
+	up?: number[];
+	frame?: { lo: number[]; hi: number[] };
+}
+
+/** The direction a view opens looking from and the way up, `up` made square to it: `home`'s when given, else from the front right with Z up. */
+export function homePose(home?: Home): { dir: Vector3; up: Vector3 } {
+	const dir = home?.eye ? new Vector3().fromArray(home.eye).normalize() : new Vector3(0.55, -1.2, 0.58).normalize();
+	const up = home?.eye && home.up ? new Vector3().fromArray(home.up) : new Vector3(0, 0, 1);
 	up.addScaledVector(dir, -up.dot(dir)).normalize();
 	return { dir, up };
+}
+
+/**
+ * Where a view opens and Reset View returns, looking from `dir` with `up` up: the point looked at
+ * and how far off the camera stands. A view framed on part of the model (`home.frame`) looks at
+ * the middle of that box and fits it; the rest of the model is still drawn, running out of the
+ * frame. Otherwise it looks at `centre` and fits `box`, the whole model.
+ */
+export function homeFit(home: Home | undefined, box: Box3, centre: Vector3, dir: Vector3, up: Vector3, fovDeg: number, aspect: number): { target: Vector3; distance: number } {
+	const framed = home?.frame ? new Box3(new Vector3().fromArray(home.frame.lo), new Vector3().fromArray(home.frame.hi)) : null;
+	const target = framed ? framed.getCenter(new Vector3()) : centre.clone();
+	return { target, distance: fitDistance(framed ?? box, target, dir, up, fovDeg, aspect) };
 }
