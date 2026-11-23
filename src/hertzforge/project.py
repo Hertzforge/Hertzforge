@@ -780,7 +780,8 @@ class Project(dict):
         name, type and active geometry. When a reader returns several
         objects, each is named by its type the way the tree shows it (a
         reader's key such as 'Modal_frf' becomes 'FRF'), and if one of
-        them is a channel table they are all linked into one group.
+        them is a channel table they are all linked into one group named
+        for the file ('run3.mat').
 
         A file that records what kind of test it was sets the project
         type. A controller's save records which environment ran, and
@@ -891,9 +892,12 @@ class Project(dict):
             # 2026-09-06 — linked, and otherwise two independent
             # objects: a coordinate corrected on one is not corrected on
             # the other)
+            # named for the file, so several files imported alike can be
+            # told apart in the tree; a received copy's name is the
+            # original's
             if len(added) > 1 and any(isinstance(obj, ChannelTable)
                                       for obj in result.values()):
-                self.link(*added)
+                self.link(*added, name=os.path.basename(str(path)))
         else:
             added = [self.add(display_name(type(result).__name__), result)]
             if large:

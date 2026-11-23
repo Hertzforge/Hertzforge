@@ -178,6 +178,27 @@ def test_channels_named_alike_in_one_unit_stay_apart_in_one_column(tmp_path):
     assert ('Drive Limit', 'Level Check') in pairs and len(pairs) == 16
 
 
+def test_each_file_imported_is_a_group_named_for_it(tmp_path):
+    """Several exports imported into one project are told apart in the
+    tree by their groups, each named for its file, as the service lists
+    them; a copy a browser sent is named as the person's file was."""
+    from hertzforge.service.projects import OpenProject, summary
+
+    project = hertzforge.Project()
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', ImportNote)
+        first = project.import_file(_export(tmp_path / 'run1.mat'))
+        second = project.import_file(_export(tmp_path / 'run2.mat'))
+        folder = tmp_path / 'hertzforge-received-1' / 'x'
+        folder.mkdir(parents=True)
+        third = project.import_file(_export(folder / 'shaker run.mat'), received=True)
+    assert [(group['name'], group['members']) for group in project.object_groups] == [
+        ('run1.mat', first), ('run2.mat', second), ('shaker run.mat', third)]
+    listed = {entry['name']: entry['groups'] for entry in summary(OpenProject(project))['objects']}
+    assert {name: listed[name] for name in first + second} == {
+        **{name: ['run1.mat'] for name in first}, **{name: ['run2.mat'] for name in second}}
+
+
 def test_inp_k_is_row_k_whatever_the_input_numbers(tmp_path):
     """The analyzer's input numbers follow its wiring: rows 1 to 30 of a
     real export were inputs 65 to 94. INP_k is still row k, and the

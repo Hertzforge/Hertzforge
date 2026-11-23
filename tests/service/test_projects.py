@@ -44,8 +44,9 @@ def test_importing_a_run_lists_its_objects_and_reports_progress(validate):
     history = next(o for o in summary['objects'] if o['kind'] == 'time_history')
     assert history['records'] == state.project[history['name']].num_records
     assert history['source'] == 'SIM' and history['units_defined']
-    # the reader's objects are linked into one group with its channel table
-    assert all(o['groups'] == ['Group 1'] for o in summary['objects'])
+    # the reader's objects are linked into one group with its channel table,
+    # named for the file
+    assert all(o['groups'] == ['modal.nc4'] for o in summary['objects'])
     assert seen and seen[-1][0] == seen[-1][1]
     # journaled as the call a script makes, with no progress callable in it
     assert state.project.journal[-1] == f"project.import_file({str(PLATE / 'modal.nc4')!r})"
