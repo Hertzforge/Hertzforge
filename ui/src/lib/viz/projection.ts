@@ -1,21 +1,30 @@
 /**
- * The camera of a 3-D view, drawn in perspective or in parallel projection, where lines that are
- * parallel on the model are parallel on screen and a length reads the same at any depth.
+ * The camera of a 3-D view, in parallel projection: lines that are parallel on the model are
+ * parallel on screen, and a length reads the same at any depth, so a mode's deflection at the
+ * back of a model, a far bar of a MAC chart or a far curve of a waterfall is drawn the size of
+ * the same one in front. Perspective was offered too, and removed: on these views it made equal
+ * values look unequal, and the report's scene was parallel only.
  *
- * One camera does both. In parallel projection the picture is as tall as the perspective one is
- * at `lookedAt`, the point the camera looks at, so the scene keeps its size on screen across the
- * switch, zooming by moving the camera works the same in either, and a camera kept by its
- * position, the point it looks at and its up direction comes back as it was in either projection.
+ * The picture is as tall as a perspective camera of the same field of view would show at
+ * `lookedAt`, the point the camera looks at, so zooming moves the camera toward that point and a
+ * camera kept by its position, that point and its up direction comes back as it was.
  */
 import { PerspectiveCamera, Vector3 } from 'three';
 
 export class StageCamera extends PerspectiveCamera {
-	/** Drawn in parallel projection. Set with `setParallel`. */
-	parallel = false;
 	/** The point the camera looks at: the controls' target. */
 	lookedAt = new Vector3();
 
-	/** Half the height of what a parallel view shows: the perspective view's at the point looked at. */
+	constructor(fov?: number, aspect?: number, near?: number, far?: number) {
+		super(fov, aspect, near, far);
+		// three asks a camera which kind it is, to aim a ray through a pixel and to light a surface
+		const kind = this as unknown as { isPerspectiveCamera: boolean; isOrthographicCamera: boolean };
+		kind.isPerspectiveCamera = false;
+		kind.isOrthographicCamera = true;
+		this.updateProjectionMatrix();
+	}
+
+	/** Half the height of what the view shows. */
 	get span(): number {
 		const distance = Math.max(this.position.distanceTo(this.lookedAt), 1e-9);
 		return (distance * Math.tan((this.fov * Math.PI) / 360)) / this.zoom;
@@ -29,17 +38,9 @@ export class StageCamera extends PerspectiveCamera {
 		return -this.span;
 	}
 
-	setParallel(parallel: boolean): void {
-		this.parallel = parallel;
-		// three asks a camera which kind it is, to aim a ray through a pixel and to light a surface
-		const kind = this as unknown as { isPerspectiveCamera: boolean; isOrthographicCamera: boolean };
-		kind.isPerspectiveCamera = !parallel;
-		kind.isOrthographicCamera = parallel;
-		this.updateProjectionMatrix();
-	}
-
 	override updateProjectionMatrix(): void {
-		if (!this.parallel) return super.updateProjectionMatrix();
+		// three's constructor calls this before `lookedAt` is set
+		if (!this.lookedAt) return super.updateProjectionMatrix();
 		const half = this.span;
 		const wide = half * this.aspect;
 		// a parallel view has no eye for the model to pass behind: what is behind the camera, as

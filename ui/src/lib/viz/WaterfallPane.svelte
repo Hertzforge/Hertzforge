@@ -1,8 +1,6 @@
 <script lang="ts" module>
-	/** Perspective or parallel projection, one choice for every waterfall, kept until the app closes. */
-	let lastPerspective = true;
 	/** How each result's stage was left: a drag or a choice in it replaces the view, and the view belongs to the person, so the new one opens as they left it. */
-	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front' }>();
+	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
 </script>
 
 <script lang="ts">
@@ -59,7 +57,9 @@
 		type Material
 	} from 'three';
 	import { TrackballControls } from './trackball';
-	import { StageCamera } from './projection';
+	import { SQUARE, StageCamera, lookAtFace } from './projection';
+	import { cubeFaceUnder, drawViewCube, placeCubeLetters, triadScene } from './arrows';
+	import { AXIS_HEX } from './pick';
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
@@ -131,7 +131,7 @@
 	} as const;
 	type MarkKind = keyof typeof MARKS;
 
-	type Facing = 'perspective' | 'top' | 'front';
+	type Facing = NonNullable<WaterfallView['facing']>;
 
 	let canvasHost: HTMLDivElement;
 	let overlay: HTMLDivElement;
@@ -145,7 +145,8 @@
 		else logZ = log;
 		chooseScale(scalesAt, axis, log);
 	}
-	let facing = $state<Facing>('perspective');
+	/** Looking straight down on the stage, where every level lands on one point: the level's ticks and title are not written. */
+	let fromAbove = $state(false);
 	let failure = $state<string | null>(null);
 	/** The point under the cursor and where it stands on screen, or null. */
 	let hover = $state<{ point: number; record: number; sx: number; sy: number } | null>(null);
@@ -206,6 +207,9 @@
 	let scene: Scene;
 	let camera: StageCamera;
 	let controls: TrackballControls;
+	/** The view cube: a click on a face looks straight at it, from the top a map of level over abscissa and record. */
+	let orientation: ReturnType<typeof triadScene> | null = null;
+	let triad: SVGSVGElement;
 	let geometry: BufferGeometry;
 	let curves: LineSegments | Mesh;
 	const marks = new Map<MarkKind, Mesh>();
@@ -469,6 +473,31 @@
 	 * A press on a draggable region takes it from the camera: the middle slides it, an edge (when
 	 * the span has two) moves that edge, and on release its new edges go to `onspan`.
 	 */
+	/** The view as it opened: from above for a coherence, else from the front right. */
+	function resetView() {
+		face(view.facing ?? 'perspective');
+	}
+
+	/**
+	 * A press on a face of the view cube looks straight at that face, and goes no further: the
+	 * camera does not start a drag on it and no region is grabbed.
+	 */
+	function pressCube(e: PointerEvent): boolean {
+		if (e.button !== 0 || !triad || !orientation || !renderer) return false;
+		const face = cubeFaceUnder(orientation, triad.getBoundingClientRect(), camera.quaternion, e.clientX, e.clientY);
+		if (!face) return false;
+		e.stopPropagation();
+		e.preventDefault();
+		lookAtFace(camera, controls.target, face.axis, face.sign);
+		controls.update();
+		dirty = true;
+		return true;
+	}
+
+	function onPress(e: PointerEvent) {
+		if (!pressCube(e)) onRegionPress(e);
+	}
+
 	function onRegionPress(e: PointerEvent) {
 		if (!renderer || !onspan || e.button !== 0 || !shownRegions.length) return;
 		const held = handleUnder(e);
@@ -623,16 +652,6 @@
 		dirty = true;
 	}
 
-	/** Drawn in perspective; off, in parallel projection, the stage the size it was at its centre. */
-	let perspective = $state(lastPerspective);
-	function togglePerspective() {
-		perspective = !perspective;
-		lastPerspective = perspective;
-		if (!renderer) return;
-		camera.setParallel(!perspective);
-		dirty = true;
-	}
-
 	/** The distance at which the whole stage fits the pane, in whichever direction is tighter. */
 	function fitDistance(): number {
 		const radius = 0.5 * Math.hypot(STAGE.x, STAGE.y, STAGE.z);
@@ -641,8 +660,8 @@
 		return (radius / Math.sin(Math.min(vertical, horizontal))) * 1.12;
 	}
 
+	/** Look from `which` side at the whole stage: the opening views, and where Reset returns to. */
 	function face(which: Facing) {
-		facing = which;
 		if (!renderer) return;
 		const d = fitDistance();
 		controls.target.copy(centre);
@@ -678,7 +697,6 @@
 
 		scene = new Scene();
 		camera = new StageCamera(30, 1, 0.01, 100);
-		camera.setParallel(!perspective);
 
 		geometry = new BufferGeometry();
 		geometry.setAttribute('ax', new BufferAttribute(view.x_values, 1));
@@ -729,7 +747,8 @@
 		resizeObs = new ResizeObserver(resize);
 		resizeObs.observe(canvasHost);
 		resize();
-		face(saved?.facing ?? view.facing ?? facing);
+		orientation = triadScene();
+		resetView();
 		if (saved) {
 			camera.position.fromArray(saved.position);
 			camera.up.fromArray(saved.up);
@@ -835,9 +854,15 @@
 		if (!dirty && !moved) return;
 		dirty = false;
 		renderer.render(scene, camera);
+		if (triad && orientation) {
+			drawViewCube(renderer, orientation, triad, camera.quaternion);
+			placeCubeLetters(triad, camera.quaternion);
+		}
+		const above = probe.copy(camera.position).sub(controls.target).normalize().z > SQUARE;
+		if (above !== fromAbove) fromAbove = above;
 		placeLabels();
 		// kept as it is drawn, not as the pane goes: the view that replaces it is made first
-		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing });
+		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
 	}
 
 	onMount(init);
@@ -878,6 +903,7 @@
 		resizeObs?.disconnect();
 		if (!renderer) return;
 		controls.dispose();
+		orientation?.dispose();
 		geometry.dispose();
 		frame?.geometry.dispose();
 		for (const grips of regionGrips) (grips.material as PointsMaterial).map?.dispose();
@@ -898,9 +924,7 @@
 	function onKey(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
 		const k = e.key.toLowerCase();
-		if (k === 'r') face('perspective');
-		else if (k === 't') face('top');
-		else if (k === 'f') face('front');
+		if (k === 'r') resetView();
 		else if (k === 'x') setLog('x', !logX);
 		else if (k === 'l') setLog('y', !logZ);
 		else return;
@@ -919,6 +943,8 @@
 
 	const xAt = (t: number) => `${fraction(t, xRange, logX) * STAGE.x},${-0.035},0`;
 	const zAt = (t: number) => levelAt(fraction(t, zRange, logZ)).join(',');
+	/** The level's title stands just above the top of its axis, as a fraction of the level span. */
+	const LEVEL_TITLE = 1.1;
 	// the records are named at the low end of the abscissa, as the earlier toolset named them
 	// (Brandon, 2026-11-14)
 	const recordAt = (r: number) => `${-0.03},${stationCount > 1 ? (r / (stationCount - 1)) * STAGE.y : 0},0`;
@@ -947,7 +973,7 @@
 	data-testid="view-waterfall"
 	tabindex="0"
 	role="group"
-	aria-label="{view.title}. {recordCount} records. R resets the view, T looks from the top, F from the front, X and L switch the abscissa and the level between linear and log."
+	aria-label="{view.title}. {recordCount} records. R resets the view, a click on a face of the cube looks straight at it, X and L switch the abscissa and the level between linear and log."
 	onkeydown={onKey}
 >
 	<!-- svelte-ignore a11y_no_static_element_interactions (hovering only reads; the keyboard has the view's own keys) -->
@@ -955,7 +981,7 @@
 		class="canvas"
 		data-testid="waterfall-canvas"
 		bind:this={canvasHost}
-		onpointerdowncapture={onRegionPress}
+		onpointerdowncapture={onPress}
 		onpointermove={onPointerMove}
 		onpointerleave={() => ((pendingPick = null), (hover = null))}
 	></div>
@@ -974,11 +1000,12 @@
 		{#each xTicks as t (t)}
 			<span class="tick x num" data-at={xAt(t)}>{tickText(t)}</span>
 		{/each}
-		{#if facing !== 'top'}
+		{#if !fromAbove}
 			<!-- seen from above, every level lands on one point -->
 			{#each zTicks as t (t)}
 				<span class="tick z num" data-at={zAt(t)}>{tickText(t)}</span>
 			{/each}
+			<span class="title level" data-testid="waterfall-level-title" data-at={levelAt(LEVEL_TITLE).join(',')}>{withUnit(view.z.label, view.z.unit)}</span>
 		{/if}
 		{#if pathed}
 			{#each yTicks as t (t)}
@@ -1012,12 +1039,9 @@
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Waterfall display">
 			<button class="btn ghost sm copyimg" data-testid="waterfall-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
-			<button class="btn sm toggle" data-testid="waterfall-projection" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
-			<div class="seg" role="radiogroup" aria-label="Viewpoint">
-				<button role="radio" data-testid="waterfall-perspective" aria-checked={facing === 'perspective'} class:on={facing === 'perspective'} onclick={() => face('perspective')} title="Perspective (R)">3-D</button>
-				<button role="radio" data-testid="waterfall-top" aria-checked={facing === 'top'} class:on={facing === 'top'} onclick={() => face('top')} title="From the top: a map of level over abscissa and record (T)">Top</button>
-				<button role="radio" data-testid="waterfall-front" aria-checked={facing === 'front'} class:on={facing === 'front'} onclick={() => face('front')} title="From the front: every record on one axis (F)">Front</button>
-			</div>
+			<button class="btn icon sm" data-testid="waterfall-reset" onclick={resetView} title="Reset view (R)" aria-label="Reset view">
+				<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8a5 5 0 105-5H5.5M5.5 1.2V5H9.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+			</button>
 			<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
 				<span class="lbl">{view.x.label}</span>
 				<button role="radio" data-testid="waterfall-x-linear" aria-checked={!logX} class:on={!logX} onclick={() => setLog('x', false)} title="Linear (X)">Lin</button>
@@ -1065,22 +1089,24 @@
 				{/each}
 			</ul>
 		{/if}
+		<div class="corner">
+			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="64" height="64" aria-hidden="true" data-testid="waterfall-triad">
+				<!-- the letters only: the cube and arrows are drawn into the canvas behind them (`drawViewCube`): X the abscissa, Y the records, Z the level -->
+				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
+				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
+				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
+			</svg>
 		<div class="stats num" aria-live="off">
 			{#if view.page}<span data-testid="waterfall-page">Page {view.page.number} of {view.page.count}, {formatCount(view.page.records)} records</span>{/if}
 			{#if view.stations && !view.surface}<span>{formatCount(stationCount)} stations</span>{/if}
 			<span>{formatCount(recordCount)} records</span>
 			<span>{formatCount(pointCount)} points</span>
 		</div>
+		</div>
 	</div>
 </div>
 
 <style>
-	.toggle.on {
-		color: var(--text-1);
-		background: var(--blue-weak);
-		border-color: var(--blue-line);
-	}
-
 	.copyimg {
 		flex: none;
 		font-size: var(--text-2xs, 11px);
@@ -1139,6 +1165,24 @@
 	/* at the low end of the abscissa, as the record names are: a level ends at its point */
 	.tick.z {
 		translate: calc(-100% - 4px) -50%;
+	}
+
+	.title.level {
+		translate: -50% -100%;
+	}
+
+	.corner {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+	}
+
+	.triad text {
+		font-family: var(--font-mono);
+		font-size: 6.5px;
+		font-weight: 600;
+		text-anchor: middle;
 	}
 
 	.tick.region {

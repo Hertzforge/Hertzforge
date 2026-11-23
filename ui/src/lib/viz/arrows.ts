@@ -22,6 +22,7 @@ import {
 	Vector3,
 	Mesh
 } from 'three';
+import type { WebGLRenderer } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { AXIS_COLORS } from './pick';
 
@@ -171,6 +172,66 @@ export function triadScene(): {
 			for (const side of sides) side.dispose();
 		}
 	};
+}
+
+type Triad = ReturnType<typeof triadScene>;
+type Box = { left: number; top: number; width: number; height: number };
+
+/**
+ * The face of the view cube under a point on screen (`x`, `y` in client pixels), with the cube
+ * drawn in `box` and turned as the view's camera `q`; null off the cube, which a press outside
+ * the box always is, since the cube sits well inside it.
+ */
+export function cubeFaceUnder(triad: Triad, box: Box, q: Quaternion, x: number, y: number): { axis: number; sign: number } | null {
+	if (!box.width || !box.height) return null;
+	triad.look(q);
+	return triad.faceAt(((x - box.left) / box.width) * 2 - 1, 1 - ((y - box.top) / box.height) * 2);
+}
+
+/** Draw the view cube into the canvas where `marker` (the element holding its letters) sits, after the scene. */
+export function drawViewCube(renderer: WebGLRenderer, triad: Triad, marker: Element, q: Quaternion): void {
+	const canvas = renderer.domElement.getBoundingClientRect();
+	const box = marker.getBoundingClientRect();
+	if (!canvas.width || !canvas.height || !box.width) return;
+	// the canvas may be drawn at another size than it shows at
+	const size = renderer.getSize(new Vector2());
+	const sx = size.x / canvas.width;
+	const sy = size.y / canvas.height;
+	const x = (box.left - canvas.left) * sx;
+	const y = (canvas.bottom - box.bottom) * sy;
+	triad.look(q);
+	const auto = renderer.autoClear;
+	renderer.autoClear = false;
+	renderer.setViewport(x, y, box.width * sx, box.height * sy);
+	renderer.setScissor(x, y, box.width * sx, box.height * sy);
+	renderer.setScissorTest(true);
+	renderer.clearDepth();
+	renderer.render(triad.scene, triad.camera);
+	renderer.setScissorTest(false);
+	renderer.setViewport(0, 0, size.x, size.y);
+	renderer.autoClear = auto;
+}
+
+/** How far along an axis its letter sits, in the marker's 48 units. */
+const LETTER = (24 / TRIAD_HALF) * 1.2;
+const AXES = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)];
+
+/** Where each axis letter of the view cube goes in its 48-unit marker, the view's camera turned as `q`. */
+export function cubeLetters(q: Quaternion): { x: number; y: number }[] {
+	const inv = q.clone().invert();
+	return AXES.map((v) => {
+		const t = v.clone().applyQuaternion(inv);
+		return { x: 24 + t.x * LETTER, y: 24 - t.y * LETTER + 3 };
+	});
+}
+
+/** Move the letters X, Y and Z (`text.x`, `text.y`, `text.z`) in `marker` to their axes' ends. */
+export function placeCubeLetters(marker: Element, q: Quaternion): void {
+	cubeLetters(q).forEach((at, k) => {
+		const label = marker.querySelector(`text.${'xyz'[k]}`);
+		label?.setAttribute('x', at.x.toFixed(1));
+		label?.setAttribute('y', at.y.toFixed(1));
+	});
 }
 
 /**
