@@ -428,6 +428,13 @@ hertzforge-station      src/lib.rs                             a_set_spanning_tw
 hertzforge-station      src/lock.rs                            a_second_holder_is_refused_and_the_refusal_names_the_first  arm-gate     a second holder of the station is refused
 hertzforge-hal-ni       src/config.rs                          a_row_asking_more_volts_than_its_module_measures_is_refused_by_name  arm-gate  a row asking more volts than its module has is refused
 hertzforge-hal-ni       src/timing.rs                          drive_on_a_different_family_than_the_inputs_is_refused    arm-gate       a drive on another clock than its inputs is refused
+hertzforge-hal-ni       src/iepe_settle.rs                     a_block_at_the_rail_is_not_quiet                          arm-gate  an IEPE input at its rail is never ready to run
+hertzforge-hal-ni       src/iepe_settle.rs                     a_ten_volt_bias_rails_then_settles_in_about_two_seconds   arm-gate  an IEPE input is ready only once its bias offset has decayed
+hertzforge-hal-ni       src/iepe_settle.rs                     a_channel_that_stays_railed_refuses_and_says_what_it_reads  arm-gate  an IEPE input that never settles refuses the arm and names the channel
+hertzforge-hal-ni       src/iepe_settle.rs                     a_disturbance_restarts_the_hold                           arm-gate  the settle hold restarts after any loud block
+hertzforge-hal-ni       src/backend.rs                         the_iepe_settle_watches_each_iepe_input_at_its_own_column  arm-gate  the settle watches every IEPE input at its own column
+hertzforge-hal-ni       src/backend.rs                         a_stop_between_shots_keeps_the_iepe_current_on_and_the_settle_standing  arm-gate  the IEPE current stays on across stops for the whole test
+hertzforge-hal-ni       src/backend.rs                         the_first_block_after_a_start_names_an_iepe_input_at_its_rail  overload  an IEPE input whose current went off is named at the next start
 hertzforge-backendd     src/core.rs                            every_drive_producing_module_precedes_the_recorder        arm-gate       every drive-producing module is stopped before the recorder
 sds-control             tests/random_protocol.rs               ni_selection_binding_and_arm_are_refused_by_name_and_never_simulated  arm-gate  a hardware selection never silently becomes the simulator
 sds-control             tests/random_protocol.rs               driver_simulated_ni_is_never_hardware                     arm-gate       a driver-simulated device is never reported as hardware

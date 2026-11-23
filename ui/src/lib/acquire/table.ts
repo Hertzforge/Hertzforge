@@ -104,7 +104,6 @@ const CELL: Partial<Record<ReportItem['reason'], RowCell>> = {
 	physical_channel_wrong_direction: 'physical',
 	physical_channel_shared: 'physical',
 	mixed_timing_families: 'physical',
-	iepe_without_bias: 'iepe_bias_v',
 	bias_on_single_ended: 'interface',
 	drive_channel_present: 'role',
 	control_group_gap: 'control_group'

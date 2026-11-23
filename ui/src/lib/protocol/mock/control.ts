@@ -422,9 +422,6 @@ export function validateTable(rows: ChannelRow[], selection: Selection, scan: Ni
 		if (hasAbort(r) && r.units !== 'g') {
 			warnings.push(item('abort_not_in_g', `channel ${r.index} has an abort limit and its unit is not g; the abort limits read it as g`, { channel: r.index }));
 		}
-		if (r.interface === 'iepe' && r.iepe_bias_v === null) {
-			warnings.push(item('iepe_without_bias', `channel ${r.index} is IEPE but has no bias voltage set`, { channel: r.index }));
-		}
 		if (r.interface === 'single_ended' && r.iepe_bias_v !== null) {
 			warnings.push(item('bias_on_single_ended', `channel ${r.index} is single-ended but has an IEPE bias set (ignored)`, { channel: r.index }));
 		}

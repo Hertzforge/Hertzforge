@@ -60,6 +60,7 @@ pub mod config;
 pub mod enumerate;
 pub mod error;
 pub mod ffi;
+pub mod iepe_settle;
 pub mod timing;
 // Windows only (and tests, which prove its pairing rule on every host): the 1 ms
 // system timer the backend holds while its tasks are armed or running.

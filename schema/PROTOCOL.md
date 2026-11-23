@@ -1497,7 +1497,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 
 | Where | Errors | Warnings |
 |---|---|---|
-| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `negative_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
+| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `negative_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
 | Profile | `profile_empty`, `first_row_not_anchor`, `row_level_ambiguous`, `frequency_not_positive`, `frequency_not_ascending`, `psd_negative` | `alarm_wider_than_abort` |
 | Acquisition | `n_pts_not_power_of_two`, `band_above_grid`, `too_few_lines` | |
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
@@ -1695,9 +1695,13 @@ cases that a test in each language reads:
   (`negative_sensitivity`, its words naming the row, the column and the value): a channel read
   inverted says so in its own `polarity` column, never in the sign of its sensitivity. A disabled
   row may hold any number, 0 and a negative included, and a drive row may hold 0.
-- **IEPE bias.** A number or null; 0 and a negative bias are numbers like any other, with no
-  finding. A bias on a `single_ended` row
-  (`bias_on_single_ended`) and none on an `iepe` row (`iepe_without_bias`) are warnings.
+- **IEPE bias.** A number or null, for the record only; 0 and a negative bias are numbers like
+  any other, with no finding. A bias on a `single_ended` row is a warning
+  (`bias_on_single_ended`). An `iepe` row needs none and gets no finding without one: the
+  operator is not asked for it, because an NI station settles every IEPE input at arm, with
+  nothing driving, before a run can start (`crates/hertzforge-hal-ni/src/iepe_settle.rs`). Each
+  input's settle is reported as a backend driver warning; an input that does not settle refuses
+  the arm and names the channel.
 - **Units.** Never empty. Every name in the unit vocabulary above is held by all three with no
   finding. A unit outside it is held by the control service with the warning `unit_unknown`; a
   table file holds it when the analysis side's unit reader reads it, and refuses it, naming the

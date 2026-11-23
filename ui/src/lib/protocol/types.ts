@@ -1039,7 +1039,6 @@ export type ItemReason =
 	| 'physical_channel_wrong_direction'
 	| 'physical_channel_shared'
 	| 'mixed_timing_families'
-	| 'iepe_without_bias'
 	| 'bias_on_single_ended'
 	| 'drive_channel_present'
 	| 'unit_unknown'
