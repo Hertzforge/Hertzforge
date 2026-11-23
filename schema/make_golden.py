@@ -6705,6 +6705,63 @@ MODAL_TEXT_GOLDENS = {
 }
 
 
+def _rotation(a: float, b: float, c: float) -> list[list[float]]:
+    """Rz(a) Ry(b) Rx(c), a rotation that puts no principal axis along a coordinate axis."""
+    ca, sa, cb, sb, cc, sc = math.cos(a), math.sin(a), math.cos(b), math.sin(b), math.cos(c), math.sin(c)
+    return [[ca * cb, ca * sb * sc - sa * cc, ca * sb * cc + sa * sc],
+            [sa * cb, sa * sb * sc + ca * cc, sa * sb * cc - ca * sc],
+            [-sb, cb * sc, cb * cc]]
+
+
+def _rotated(principal: list[float], r: list[list[float]]) -> list[float]:
+    """R diag(principal) R^T as xx yy zz xy yz xz: a tensor whose principal stresses are known."""
+    t = [[sum(r[i][k] * principal[k] * r[j][k] for k in range(3)) for j in range(3)] for i in range(3)]
+    return [t[0][0], t[1][1], t[2][2], t[0][1], t[1][2], t[2][0]]
+
+
+def _scalars_of(principal: list[float], tensor: list[float]) -> dict:
+    """Every scalar of a tensor, from principal stresses known by construction, not by solving
+    for them: what the shell's closed form and the Python reference are both held to."""
+    s1, s2, s3 = sorted(principal, reverse=True)
+    names = ['xx', 'yy', 'zz', 'xy', 'yz', 'xz']
+    return {'von_mises': math.sqrt(((s1 - s2) ** 2 + (s2 - s3) ** 2 + (s3 - s1) ** 2) / 2),
+            'tresca': s1 - s3, 'max_principal': s1, 'mid_principal': s2, 'min_principal': s3,
+            **dict(zip(names, tensor))}
+
+
+def _stress_scalars() -> dict:
+    """The stress scalars' golden cases (`viz/stress.ts`, `core.stress_scalars`): tensors with
+    known principal stresses, and a modal sum whose von Mises is formed from the summed tensor."""
+    cases = []
+    for name, principal, angles in [
+            ('uniaxial', [100.0, 0.0, 0.0], (0.0, 0.0, 0.0)),
+            ('pure shear', [50.0, 0.0, -50.0], (math.pi / 4, 0.0, 0.0)),
+            ('hydrostatic', [-30.0, -30.0, -30.0], (0.3, 0.2, 0.1)),
+            ('two equal', [80.0, 80.0, -20.0], (0.7, -0.4, 1.1)),
+            ('general', [120.0, -35.0, 10.0], (0.5, 0.9, -0.6))]:
+        tensor = _rotated(principal, _rotation(*angles))
+        cases.append({'name': name, 'tensor': tensor, 'expected': _scalars_of(principal, tensor)})
+    # two modes at two elements; each element's two shapes share principal axes, so the sum's
+    # principal stresses are the same sum of theirs and known without solving
+    q = [2.0, -1.0]
+    elements = [([30.0, -10.0, 5.0], [10.0, 20.0, -15.0], (0.4, 0.3, -0.8)),
+                ([-5.0, 60.0, 12.0], [25.0, -8.0, 4.0], (-1.2, 0.6, 0.25))]
+    shapes = [[], []]
+    summed = []
+    for first, second, angles in elements:
+        r = _rotation(*angles)
+        shapes[0].append(_rotated(first, r))
+        shapes[1].append(_rotated(second, r))
+        principal = [q[0] * a + q[1] * b for a, b in zip(first, second)]
+        summed.append(_scalars_of(principal, _rotated(principal, r)))
+    sample = {'modes': 2, 'elements': 2, 'samples': 3, 'k': 1,
+              'shapes': [v for mode in shapes for element in mode for v in element],
+              # modal coordinates [M, S]: sample 1 is q
+              'values': [0.5, q[0], -0.25, 1.5, q[1], 0.75],
+              'expected': summed}
+    return {'components': ['xx', 'yy', 'zz', 'xy', 'yz', 'xz'], 'cases': cases, 'modal_sum': sample}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -6909,6 +6966,9 @@ def main() -> None:
     # Modal Test: the live frame (its golden run folders, schema/golden/runs/modal_test/,
     # are written by the control service's own test)
     write('event_modal_test_live', *_modal_live_build())
+
+    (HERE / 'stress_scalars.json').write_text(
+        json.dumps(_stress_scalars(), indent=1) + '\n', encoding='utf-8')
 
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,

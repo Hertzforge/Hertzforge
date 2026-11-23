@@ -314,21 +314,31 @@
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "overlay_triangles": {"$ref": "#/$defs/arrayRef"},
         "overlay_lines": {"$ref": "#/$defs/arrayRef"},
+        "element_values": {
+          "type": "object",
+          "required": ["quantity", "label", "unit", "scalar", "elements", "triangles", "owner", "shapes", "max"],
+          "additionalProperties": false,
+          "properties": {
+            "quantity": {"enum": ["strain", "stress"]},
+            "label": {"type": "string"},
+            "unit": {"type": "string"},
+            "scalar": {"enum": ["von_mises", "tresca", "max_principal", "mid_principal", "min_principal",
+                                "xx", "yy", "zz", "xy", "yz", "xz"]},
+            "elements": {"type": "integer", "minimum": 0},
+            "triangles": {"$ref": "#/$defs/arrayRef"},
+            "owner": {"$ref": "#/$defs/arrayRef"},
+            "shapes": {"$ref": "#/$defs/arrayRef"},
+            "shapes_imag": {"$ref": "#/$defs/arrayRef"},
+            "max": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 1},
+            "stated": {"type": "boolean"}
+          }
+        },
         "element_colors": {
           "type": "object", "required": ["triangles", "triangle_colors", "lines", "line_colors"],
           "additionalProperties": false,
           "properties": {
             "triangles": {"$ref": "#/$defs/arrayRef"}, "triangle_colors": {"$ref": "#/$defs/arrayRef"},
             "lines": {"$ref": "#/$defs/arrayRef"}, "line_colors": {"$ref": "#/$defs/arrayRef"}
-          }
-        },
-        "element_values": {
-          "type": "object", "required": ["triangles", "owner", "values", "label", "unit"],
-          "additionalProperties": false,
-          "properties": {
-            "triangles": {"$ref": "#/$defs/arrayRef"}, "owner": {"$ref": "#/$defs/arrayRef"},
-            "values": {"$ref": "#/$defs/arrayRef"},
-            "label": {"type": "string"}, "unit": {"type": "string"}
           }
         },
         "paired": {"type": "boolean"},

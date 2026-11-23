@@ -78,11 +78,11 @@
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapBytes, colormapGradient } from './colormap';
-	import { cornerRows, paintElements } from './elementValues';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
+	import { COMPONENTS, legendValues, modeTensors, motionTensors, scalars, scaleAt, signed } from './stress';
 	import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedShapes, modelPlane, nearestEdge, nearestNode, numbered, pickClicks, placedPoint, setTriangles, toggledSurface } from './pick';
 	import { isAdding, setAdding } from './editMode.svelte';
 	import { mark, marked } from './marks.svelte';
@@ -317,6 +317,9 @@
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
+	/** Elements colored by strain or stress (`view.element_values`): with the colormap on, they color the elements named and the rest of the surface is gray. */
+	const stress = $derived(view.element_values);
+	const stressShown = $derived(colored && !!stress?.triangles.length && !colors);
 	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
 	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
@@ -554,16 +557,16 @@
 	/** The elements in their own colors (`element_colors`), over the gray surface. */
 	let elementColors: Mesh | null = null;
 	let coloredLines: LineSegments | null = null;
-	/**
-	 * An element shape set's elements (`element_values`), each triangle corner its own vertex so an
-	 * element keeps one flat color, riding the mode's deflection with the surface.
-	 */
-	let elementValues: Mesh | null = null;
-	let elementShape: BufferAttribute | null = null;
-	let elementShapeImag: BufferAttribute | null = null;
-	let elementColor: BufferAttribute | null = null;
-	/** The largest magnitude among the elements' values in the mode shown, the legend's ends. */
-	let elementPeak = $state(0);
+	/** The faces of the elements colored by stress, a corner per vertex so each face keeps its element's color, moving with their nodes. */
+	let stressMesh: Mesh | null = null;
+	let stressShape: BufferAttribute | null = null;
+	let stressShapeImag: BufferAttribute | null = null;
+	let stressColor: BufferAttribute | null = null;
+	/** Each element's summed tensor and its scalar at the instant drawn. */
+	let stressTensors = new Float32Array(0);
+	let stressValues = new Float32Array(0);
+	/** The mode and point of its cycle the stress colors were last formed at, so a still frame forms them once. */
+	let stressAt = '';
 	/** The selectable elements' faces, not drawn, that a click in Select mode is matched against, and each triangle's element. */
 	let elementPick: Mesh | null = null;
 	let elementOwner: number[] = [];
@@ -661,8 +664,7 @@
 
 	/** The color of a node at `t` of the scale, or the surface's one color when coloring is off. */
 	function paint(colors: Float32Array, n: number, t: number, rgb: [number, number, number]) {
-		// with an element shape set's colors over it, the surface is the gray they stand out on
-		if (colored && !view.element_values) colormap(t, rgb);
+		if (colored && !stressShown) colormap(t, rgb);
 		else {
 			rgb[0] = 0.62;
 			rgb[1] = 0.66;
@@ -696,28 +698,53 @@
 		const colors = colorAttr.array as Float32Array;
 		const rgb: [number, number, number] = [0, 0, 0];
 		for (let n = 0; n < travel.length; n++) paint(colors, n, travel[n] / maxMag, rgb);
-		loadElementValues(re, im);
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		followBodies(true);
+		followStress(true);
+		stressAt = '';
 		dirty = true;
 		paintColors();
 	}
 
-	/** The element shape set's faces moved and colored for the mode shown (`element_values`). */
-	function loadElementValues(re: Float32Array, im: Float32Array | undefined) {
-		const held = view.element_values;
-		if (!held || !elementShape || !elementShapeImag || !elementColor) return;
-		cornerRows(re, held.triangles, elementShape.array as Float32Array);
-		if (im) cornerRows(im, held.triangles, elementShapeImag.array as Float32Array);
-		else (elementShapeImag.array as Float32Array).fill(0);
-		const row = Math.min(Math.max(0, mode), view.modes.length - 1);
-		const perRow = Math.round(held.values.length / Math.max(1, view.modes.length));
-		elementPeak = paintElements(held.values, row, perRow, held.owner, elementColor.array as Float32Array);
-		elementShape.needsUpdate = true;
-		elementShapeImag.needsUpdate = true;
-		elementColor.needsUpdate = true;
+	/** Give the stress faces' corners their nodes' offsets: the real part, and the imaginary too when `both`. */
+	function followStress(both: boolean) {
+		if (!stress || !stressShape || !stressShapeImag) return;
+		followed(shapeAttr.array as Float32Array, stress.triangles, stressShape.array as Float32Array);
+		stressShape.needsUpdate = true;
+		if (both) {
+			followed(shapeImagAttr.array as Float32Array, stress.triangles, stressShapeImag.array as Float32Array);
+			stressShapeImag.needsUpdate = true;
+		}
+	}
+
+	/** The top of the color scale: the motion's, or the mode's shown. */
+	function stressMax(): number {
+		if (!stress) return 1;
+		return motion ? stress.max[0] : (stress.max[Math.min(Math.max(0, mode), stress.max.length - 1)] ?? stress.max[0]);
+	}
+
+	/** Color each stress face by its element's scalar now (`stressValues`), on the scale stated or found. */
+	function paintStress() {
+		if (!stress || !stressColor) return;
+		const out = stressColor.array as Float32Array;
+		const max = stressMax();
+		const isSigned = signed(stress.scalar);
+		const rgb: [number, number, number] = [0, 0, 0];
+		for (let f = 0; f < stress.owner.length; f++) {
+			colormap(scaleAt(stressValues[stress.owner[f]], max, isSigned), rgb);
+			const r = srgbToLinear(rgb[0]);
+			const g = srgbToLinear(rgb[1]);
+			const b = srgbToLinear(rgb[2]);
+			for (let c = 0; c < 3; c++) {
+				out[9 * f + 3 * c] = r;
+				out[9 * f + 3 * c + 1] = g;
+				out[9 * f + 3 * c + 2] = b;
+			}
+		}
+		stressColor.needsUpdate = true;
+		dirty = true;
 	}
 
 	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
@@ -787,6 +814,12 @@
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
 		followBodies(false);
+		if (stressMesh && stress && motion.modes) {
+			followStress(false);
+			motionTensors(stress, motion.values, samples, k, stressTensors);
+			scalars(stressTensors, stress.scalar, stressValues);
+			paintStress();
+		}
 		shownSample = k;
 		sample = k;
 		dirty = true;
@@ -816,7 +849,7 @@
 		// the colormap starts further in on the dark theme: the shader's copy is made again
 		uniforms.uMap.value.dispose();
 		uniforms.uMap.value = colormapTexture();
-		if (elementValues && current) loadElementValues(current.shape, current.shape_imag);
+		if (stressMesh) paintStress();
 		dirty = true;
 	}
 
@@ -1138,26 +1171,6 @@
 			elementColors.frustumCulled = false;
 			scene.add(elementColors);
 		}
-		if (view.element_values?.triangles.length) {
-			const corners = view.element_values.triangles.length;
-			const g = new BufferGeometry();
-			g.setAttribute('position', new BufferAttribute(cornerRows(view.nodes, view.element_values.triangles), 3));
-			elementShape = new BufferAttribute(new Float32Array(3 * corners), 3);
-			elementShapeImag = new BufferAttribute(new Float32Array(3 * corners), 3);
-			elementColor = new BufferAttribute(new Float32Array(3 * corners), 3);
-			g.setAttribute('shape', elementShape);
-			g.setAttribute('shapeImag', elementShapeImag);
-			g.setAttribute('color', elementColor);
-			// drawn just in front of the surface they lie on, so the two never fight over a pixel
-			elementValues = new Mesh(
-				g,
-				displaced(
-					new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
-				)
-			);
-			elementValues.frustumCulled = false;
-			scene.add(elementValues);
-		}
 		if (view.element_colors?.lines.length) {
 			const { lines, line_colors } = view.element_colors;
 			const xyz = new Float32Array(3 * lines.length);
@@ -1173,6 +1186,31 @@
 			coloredLines = new LineSegments(g, plain(new LineBasicMaterial({ vertexColors: true })));
 			coloredLines.frustumCulled = false;
 			scene.add(coloredLines);
+		}
+		if (stress?.triangles.length) {
+			// each face its element's color: every corner its own vertex, riding its node's offset
+			const { triangles } = stress;
+			const xyz = new Float32Array(3 * triangles.length);
+			for (let v = 0; v < triangles.length; v++) xyz.set(view.nodes.subarray(3 * triangles[v], 3 * triangles[v] + 3), 3 * v);
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(xyz, 3));
+			stressShape = new BufferAttribute(new Float32Array(xyz.length), 3);
+			stressShapeImag = new BufferAttribute(new Float32Array(xyz.length), 3);
+			stressColor = new BufferAttribute(new Float32Array(xyz.length).fill(srgbToLinear(REST_GRAY)), 3);
+			g.setAttribute('shape', stressShape);
+			g.setAttribute('shapeImag', stressShapeImag);
+			g.setAttribute('color', stressColor);
+			// drawn just in front of the surface they lie on, so the two never fight over a pixel
+			stressMesh = new Mesh(
+				g,
+				displaced(
+					new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+				)
+			);
+			stressMesh.frustumCulled = false;
+			scene.add(stressMesh);
+			stressTensors = new Float32Array(stress.elements * COMPONENTS);
+			stressValues = new Float32Array(stress.elements);
 		}
 		const selectable = view.mark_sets?.find((set) => set.clicks);
 		if (selectable?.faces) {
@@ -1424,6 +1462,16 @@
 			const theta = 2 * Math.PI * phase;
 			re = scale * Math.sin(theta);
 			im = scale * Math.cos(theta);
+			if (stressMesh && stress && current) {
+				// the stress is the mode's own, at this point of its cycle: the amplitude only magnifies the drawing
+				const at = `${mode}:${theta}`;
+				if (at !== stressAt) {
+					modeTensors(stress, Math.min(Math.max(0, mode), view.modes.length - 1), Math.sin(theta), Math.cos(theta), stressTensors);
+					scalars(stressTensors, stress.scalar, stressValues);
+					paintStress();
+					stressAt = at;
+				}
+			}
 		}
 		if (uniforms.uRe.value !== re || uniforms.uIm.value !== im) {
 			uniforms.uRe.value = re;
@@ -1431,7 +1479,7 @@
 			dirty = true;
 		}
 		// a node's color is its offset now over the farthest any node goes: `peak` at this scale
-		const byDeflection = colored && !colors && !view.element_values && (!!motion || !!current) ? 1 : 0;
+		const byDeflection = colored && !colors && !stressShown && (!!motion || !!current) ? 1 : 0;
 		if (uniforms.uScalar.value !== byDeflection || uniforms.uPeak.value !== (peak || 1)) {
 			uniforms.uScalar.value = byDeflection;
 			uniforms.uPeak.value = peak || 1;
@@ -1563,7 +1611,7 @@
 			elementColors.visible = !wireframe;
 		}
 		surface.visible = !(elementColors && !wireframe && opacity < 1);
-		if (elementValues) elementValues.visible = colored && !wireframe && opacity >= 1;
+		if (stressMesh) stressMesh.visible = stressShown && !wireframe && opacity >= 1;
 		dirty = true;
 	});
 	// every node shows as a dot only while clicks make elements of them (Add mode)
@@ -1615,7 +1663,7 @@
 		lit?.geometry.dispose();
 		litEdges?.geometry.dispose();
 		elementColors?.geometry.dispose();
-		elementValues?.geometry.dispose();
+		stressMesh?.geometry.dispose();
 		coloredLines?.geometry.dispose();
 		elementPick?.geometry.dispose();
 		overlayGeometry?.dispose();
@@ -1833,11 +1881,10 @@
 		e.preventDefault();
 	}
 
-	/** The element shape set's legend: minus the mode's largest magnitude, zero, plus it. */
-	const elementTicks = $derived([-1, 0, 1].map((t) => formatNumber(t * elementPeak, 3)));
-
 	const legendTicks = $derived(
-		[0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
+		stressShown && stress
+			? legendValues(stress.max[motion ? 0 : Math.min(Math.max(0, mode), stress.max.length - 1)] ?? stress.max[0], signed(stress.scalar)).map((v) => formatNumber(v, 3))
+			: [0, 0.5, 1].map((t) => formatNumber(motion ? t * motion.peak : t * peak * display.factor, 3))
 	);
 </script>
 
@@ -1953,7 +2000,7 @@
 			</button>
 			{/if}
 			{#if moves}
-			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
+			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title={stress ? `Color the elements by ${stress.quantity}` : 'Color by deflection'}>Color</button>
 			{/if}
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
@@ -2029,21 +2076,15 @@
 	<div class="bottom">
 		{#if colors && legend}
 			<div class="legend" aria-label="Color legend">{@render legend()}</div>
-		{:else if view.element_values && colored}
-			<div class="legend" aria-label="Color legend" data-testid="shape3d-element-legend">
-				<div class="ltitle">{view.element_values.label}{view.element_values.unit ? ` (${view.element_values.unit})` : ''}</div>
-				<div class="bar" style:background={colormapGradient()}></div>
-				<div class="ticks num">
-					{#each elementTicks as t, i (i)}<span>{t}</span>{/each}
-				</div>
-			</div>
-		{:else if moves && colored}
+		{:else if (moves || stressShown) && colored}
 		<div class="legend" aria-label="Color legend">
-			<div class="ltitle">
-				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
+			<div class="ltitle" data-testid="shape3d-legend-title">
+				{stressShown && stress
+					? `${stress.label}${stress.unit ? ` (${stress.unit})` : ''}${stress.stated ? ', stated scale' : ''}`
+					: motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
 			</div>
 			<div class="bar" style:background={colormapGradient()}></div>
-			<div class="ticks num">
+			<div class="ticks num" data-testid="shape3d-legend-ticks">
 				{#each legendTicks as t, i (i)}<span>{t}</span>{/each}
 			</div>
 		</div>

@@ -266,6 +266,41 @@ of every node keeps a large mesh with a few sensors as small as the sensors' dat
 DOF stay where they are. Several DOFs may move one node (X, Y and Z, say). The shell plays a
 record through in about 10 s at normal speed, from an eighth to eight times that, and colors each node by how far it is from rest at that sample.
 
+A `shape3d` that plays modal coordinates through `motion.modes`, or shows `modes`, may color
+elements by their strain or stress as the model moves (`element_values`):
+
+```
+"element_values":{"quantity":"stress","label":"Von Mises stress","unit":"MPa","scalar":"von_mises",
+          "elements":3,                            E, the elements colored
+          "triangles":{"$array":.. u32 [T,3]},     their outside faces, rows of `nodes`
+          "owner":{"$array":.. u32 [T]},           the element each face belongs to, 0 .. E-1
+          "shapes":{"$array":.. f32 [M,E,6]},      each mode's tensor at each element's centroid
+          "shapes_imag":{"$array":.. f32 [M,E,6]}, optional: a complex mode's imaginary part
+          "max":[180.0],                           the top of the color scale, in `unit`
+          "stated":true}                           optional: `max` was stated, not found
+```
+
+`quantity` is `stress` or `strain`. The six components are xx, yy, zz, xy, yz, xz per unit modal
+coordinate: for stress the tensor's own shears, in the display system's stress unit; for strain
+engineering shears, with no unit (`''`). At sample k an element's tensor is the sum over modes of
+`shapes[m, e] * values[m, k]`, formed in the shell as the offsets are; with `modes`, mode m's
+tensor at a point of its cycle is its shape scaled as its offsets are drawn, without the
+amplitude, which only magnifies the drawing. The color is `scalar` of the summed tensor, formed
+each frame: one component, or for stress also von Mises, Tresca, or the largest, middle or
+smallest principal stress. Von Mises and the principal stresses are not linear in the modal
+coordinates, so they are never summed mode by mode. `schema/golden/stress_scalars.json` holds the
+numbers the shell's formulas and the service's (`core.stress_scalars`) are both tested against.
+
+`max` holds one value for a motion and one per mode for `modes`. Von Mises and Tresca run from 0
+to `max`, a scalar that can be negative from −`max` to `max` with zero in the middle of the
+colormap, and a value past it is drawn at the end of the scale. It is the largest value over the
+whole clip, or over the mode's cycle, unless `stated`, so every frame of a clip, and every clip
+made with one stated scale, reads on the same colors; the legend names the scalar, its unit, and
+a stated scale. The faces in `triangles` are drawn flat in their element's color over the
+surface, which is gray while they are; elements not named keep the gray. Strain and stress jump
+from one element to the next, so each element keeps its own flat color rather than a value
+averaged at the nodes.
+
 `link` (optional) ties playback to a `spectrum` of the same result with the same `link`: the
 spectrum marks the time the mesh shows with a line, and dragging that line moves playback there.
 The tie holds within one result; the hover cursor `link` names is shared as for any spectrum.
@@ -471,15 +506,8 @@ colors at its opacity, in place of the gray surface, and a wireframe leaves them
 shape's view colors by deflection and carries none.
 
 An element shape set's view (`project.element_shapes`, `project.color_element_shapes`, the set
-picked) carries `element_values`: `{"triangles","owner","values","label","unit"}`, the outside of
-the elements read as u32 rows of `nodes` [T, 3], each triangle's element as its column of `values`
-(u32 [T]), and `values` f32 [modes, elements], one component of each element's strain or stress at
-its centroid for each mode of `modes`, in order. `label` names the quantity and component
-(`Stress xx`) and `unit` its unit in the display system (`''` for strain). The shell draws those
-triangles over the deflected model, each in the colormap by its element's value over the largest
-magnitude in the mode shown, from minus that to plus it, with a legend; the rest of the surface is
-drawn gray. Strain and stress jump from one element to the next, so each element keeps its own
-flat color.
+picked) is its modes, animated by the shape set it was read from, carrying `element_values` (see
+the motion's): the elements read, colored by the scalar chosen over each mode's cycle.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
