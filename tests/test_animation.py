@@ -128,3 +128,30 @@ def test_the_command_takes_the_opacity_and_the_camera(plate, tmp_path, capsys):
     assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
                  '--shapes', 'Shape Set', '--eye', 'up']) == 1
     assert 'three numbers' in capsys.readouterr().out
+
+
+def test_the_page_and_the_command_open_framed_on_element_groups(plate, tmp_path, capsys):
+    """Framed on a group, the page carries the box around its nodes; the scale is the one
+    asked for, a share of the whole model as before."""
+    geometry = plate['Geometry']
+    named = geometry.group_name[0]
+    geometry.group_name[0] = 'plate'
+    try:
+        held = read_viewer(animation_page(plate, 'Geometry', shapes='Shape Set', scale=2.0,
+                                          frame=['plate']))['animation']
+        assert held['view']['home']['frame'] == {'lo': pytest.approx([0, 0, 0]),
+                                                 'hi': pytest.approx([0.3048, 0.3048, 0])}
+        assert held['setup']['scale'] == 2.0
+        path = tmp_path / 'plate.hforge'
+        plate.save(path)
+        out = tmp_path / 'plate.html'
+        assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
+                     '--shapes', 'Shape Set', '--frame', 'plate']) == 0
+        view = read_viewer(out.read_text(encoding='utf-8'))['animation']['view']
+        assert view['home']['frame']['hi'] == pytest.approx([0.3048, 0.3048, 0])
+        capsys.readouterr()
+        assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
+                     '--shapes', 'Shape Set', '--frame', 'wing']) == 1
+        assert "no element group named 'wing'; it has 'plate'" in capsys.readouterr().out
+    finally:
+        geometry.group_name[0] = named

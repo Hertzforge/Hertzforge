@@ -69,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
     export.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera the "
                                       "page opens with, in place of --view")
     export.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
+    export.add_argument("--frame", nargs="+", metavar="GROUP",
+                        help="element groups of the geometry the page opens framed on, the "
+                             "rest still drawn (default: the whole model)")
     export.add_argument("--theme", choices=("dark", "light"),
                         help="the app's dark or light look (default: the reader's own)")
     export.add_argument("--title", help="the page's title (default: the view's)")
@@ -96,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="cycles a mode swings (default 3)")
     record.add_argument("--scale", type=float, default=1.0,
                         help="times the app's own amplitude (default 1)")
+    record.add_argument("--magnification", type=float,
+                        help="in place of --scale, for measured displacement: the displacement "
+                             "drawn over the true one")
     record.add_argument("--opacity", type=float, default=1.0,
                         help="how solid the surface is drawn, above 0 to 1 (default 1, solid)")
     record.add_argument("--view", default="iso",
@@ -104,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
     record.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera, in "
                                       "place of --view")
     record.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
+    record.add_argument("--frame", nargs="+", metavar="GROUP",
+                        help="element groups of the geometry to frame, the rest still drawn "
+                             "(default: the whole model)")
     record.add_argument("--theme", default="dark", choices=("dark", "light"),
                         help="the app's dark or light look (default dark)")
     args, rest = parser.parse_known_args(argv)
@@ -240,7 +249,7 @@ def _export_animation(args: argparse.Namespace) -> int:
         out = export_animation(project, args.output, args.geometry, args.data, args.shapes,
                                mode=args.mode, scale=args.scale, opacity=args.opacity,
                                view=args.view, eye=_xyz(args.eye), up=_xyz(args.up),
-                               theme=args.theme, title=args.title)
+                               frame=args.frame, theme=args.theme, title=args.title)
     except (AnimationError, OSError, ValueError) as error:
         print(f"hertzforge export-animation: {error}")
         return 1
@@ -269,8 +278,9 @@ def _record(args: argparse.Namespace) -> int:
     recording = Recording(
         geometry=args.geometry, data=args.data, shapes=args.shapes, mode=args.mode,
         width=width, height=height, fps=args.fps, speed=args.speed, seconds=args.seconds,
-        cycles=args.cycles, scale=args.scale, opacity=args.opacity, view=args.view,
-        eye=eye, up=up, theme=args.theme)
+        cycles=args.cycles, scale=args.scale, magnification=args.magnification,
+        opacity=args.opacity, view=args.view,
+        eye=eye, up=up, frame=args.frame, theme=args.theme)
     try:
         project = Project.open(args.project)
     except (OSError, ValueError) as error:

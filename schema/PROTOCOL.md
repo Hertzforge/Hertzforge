@@ -471,8 +471,15 @@ mode shape's view colors by deflection and carries none.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
-screen. The view opens looking from there, and Reset View returns there; without it the view
-opens from the front right with Z up. Every view is fitted to what the model projects.
+screen. The view opens looking from there, and Reset View returns there; without `eye` the view
+opens from the front right with Z up. Every view is fitted to what the model projects, unless
+`home` carries `frame`, `{"lo":[x,y,z],"hi":[x,y,z]}`: then it looks at the middle of that box
+and is fitted to it, the rest of the model still drawn and running out of the picture. An
+animation exported or recorded framed on element groups (`hertzforge export-animation` and
+`hertzforge record` with `--frame`) carries the box around those groups' drawn nodes, with or
+without `eye` and `up`. An amplitude of 1 draws a motion's or mode's largest deflection at 0.075
+of the diagonal across the view's `nodes`, `points` and `segments`, the whole model's whatever
+`frame` says, so framing closer does not change how far the motion is magnified.
 
 A table may carry `"edit":{"op","params","columns","choices"?}`: its cells are typed into in place. `columns`
 gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
