@@ -163,6 +163,7 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.synthesize_modal_frfs': 'frf',
 	'project.element_shapes': 'element_shape_set',
 	'project.color_element_shapes': 'element_shape_set',
+	'project.play_element_shapes': 'element_shape_set',
 	'project.compute_multiple_coherence': 'multiple_coherence',
 	'project.compute_octave': 'octave_psd',
 	'project.compute_psds': 'psd',

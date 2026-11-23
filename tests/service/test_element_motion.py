@@ -142,3 +142,33 @@ def test_four_objects_that_are_not_a_clip_and_an_element_shape_set_show_as_befor
     out = projects.show(state, {'objects': ['Cells', 'Cells Modes', 'Clip', 'Other'],
                                 'records': {}, 'prefs': {}})
     assert not any(v.get('element_values') for v in out['views'])
+
+
+def test_the_action_is_offered_with_the_set_and_its_clip_picked_and_drawn_live(tmp_path):
+    """Play Strain/Stress: picked with an element shape set and a clip, its form is filled with
+    both and drawn as it opens and after each change (a live reading, changing nothing)."""
+    import asyncio
+
+    from .test_element_shapes_op import _row
+    from .test_projects import _exchange
+
+    state = _state()
+    added = _clip(state)
+    row = _row(state, [added, 'Clip'], PLAY)
+    assert row is not None and row['ready'] and row['fill'] == {'object': added, 'data': 'Clip'}
+    assert row['live'] and row['shows']
+    color = _row(state, [added], 'project.color_element_shapes')
+    assert color['live'] and color['shows']
+    path = tmp_path / 'cells.hforge'
+    state.project.save(str(path))
+    params = {'object': added, 'data': 'Clip', 'quantity': 'stress', 'component': 'von_mises',
+              'color_groups': '', 'color_max': 0.0}
+    responses = asyncio.run(_exchange([
+        ('project.open', {'path': str(path)}),
+        ('op.run', {'op': PLAY, 'params': params}),
+    ]))
+    ran = responses[1][-1]['result']
+    stage = next(v for v in ran['views'] if v['view'] == 'shape3d')
+    assert stage['element_values']['scalar'] == 'von_mises' and 'motion' in stage
+    names = [o['name'] for o in ran.get('project', {}).get('objects', [])] or None
+    assert names is None or sorted(names) == sorted(state.project), 'it adds nothing'

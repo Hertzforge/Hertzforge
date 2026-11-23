@@ -373,7 +373,7 @@ OPERATIONS = (
                 'component of its strain, or by von Mises, Tresca, a principal stress or one '
                 'component of its stress, at its centroid through each mode\'s cycle.',
         params=(OBJECT, QUANTITY, COMPONENT, MODES, COLOR_GROUPS, COLOR_MAX), outputs=('shape3d',),
-        run=color_element_shapes, previews=True),
+        run=color_element_shapes),
     Operation(
         id='project.play_element_shapes', title='Play Strain and Stress', workspace='modal',
         summary='Modal coordinates played on the model through the shape set an element shape '
@@ -381,5 +381,5 @@ OPERATIONS = (
                 'summed over the modes at each instant, on the clip\'s largest value or a stated '
                 'scale.',
         params=(OBJECT, DATA, QUANTITY, COMPONENT, COLOR_GROUPS, COLOR_MAX),
-        outputs=('shape3d', 'spectrum'), run=play_element_shapes, previews=True),
+        outputs=('shape3d', 'spectrum'), run=play_element_shapes),
 )
