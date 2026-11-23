@@ -40,12 +40,14 @@ FRF made for any of them.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
 from ..units import UNKNOWN
+from .channel_table import record_quantity
 from .data import Frf, channel_quantities
 from .modal_response import POWERS, QUANTITIES
 from .shapes import ShapeSet, picked_modes
@@ -317,7 +319,8 @@ def driven_modes(modal: Frf, shapes: ShapeSet, drive: str,
 
 def frfs_at_channels(modal: Frf, shapes: ShapeSet, references: Sequence[str],
                      responses: Sequence[tuple[str, str]],
-                     records: Sequence[int] | None = None
+                     records: Sequence[int] | None = None,
+                     strains: Mapping[str, Any] | None = None
                      ) -> tuple[Frf, TransformReport]:
     """Physical FRFs between channels, from modal FRFs and the shapes at
     those channels:
@@ -339,11 +342,17 @@ def frfs_at_channels(modal: Frf, shapes: ShapeSet, references: Sequence[str],
         The force channels' DOFs, the columns.
     responses : sequence of tuple of (str, str)
         Each response channel's DOF and what it measures:
-        'acceleration', 'velocity' or 'length'. Each row is turned from
-        the modal FRFs' quantity into its own by (iw)^p; where that
-        divides by zero frequency, the line is nan.
+        'acceleration', 'velocity', 'length' or 'strain'. Each row is
+        turned from the modal FRFs' quantity into its own by (iw)^p, a
+        strain as a displacement is; where that divides by zero
+        frequency, the line is nan.
     records : sequence of int, optional
         Which modal records; all of them when omitted.
+    strains : mapping of str to array, optional
+        For each strain channel's DOF, the strain a gauge there reads in
+        each of the set's modes (`Project.gauge_strains`), which takes
+        the place of the shape's row. A strain channel with none is
+        dropped and reported.
 
     Returns
     -------
@@ -363,14 +372,30 @@ def frfs_at_channels(modal: Frf, shapes: ShapeSet, references: Sequence[str],
         raise ValueError(f'the set has {shapes.num_shapes} modes, and the '
                          f'modal FRFs reach M{modes[-1] + 1}')
     outside = [measured for _dof, measured in responses
-               if measured not in MOTION_POWERS]
+               if measured not in MOTION_POWERS and measured != 'strain']
     if outside:
-        raise ValueError(f'a response measures {outside[0]}, not a motion')
+        raise ValueError(f'a response measures {outside[0]}, not a motion or a strain')
     report = TransformReport()
     columns, phi_f = _columns(shapes, list(references), report)
-    kinds = dict(responses)
-    rows, phi_u = _columns(shapes, [dof for dof, _measured in responses],
-                           report)
+    # a strain channel reads its gauge's strain per mode, not a shape's DOF:
+    # a strain and an acceleration can share a node and direction
+    gauges = dict(strains or {})
+    rows, phi_rows = [], []
+    for dof, measured in responses:
+        if measured == 'strain':
+            held = gauges.get(dof)
+            if held is None:
+                if dof not in report.dropped:
+                    report.dropped.append(dof)
+                continue
+            rows.append((dof, measured))
+            phi_rows.append(np.real(np.asarray(held, dtype=complex)).reshape(-1))
+        else:
+            kept, phi = _columns(shapes, [dof], report)
+            if kept:
+                rows.append((dof, measured))
+                phi_rows.append(phi[0])
+    phi_u = np.asarray(phi_rows) if phi_rows else np.empty((0, shapes.num_shapes))
     if not columns:
         raise ValueError('no reference is on a DOF the set covers')
     if not rows:
@@ -380,14 +405,14 @@ def frfs_at_channels(modal: Frf, shapes: ShapeSet, references: Sequence[str],
     physical = phi_u @ matrix @ phi_f.T                    # lines × nu × nf
     omega = 2.0 * np.pi * modal.abscissa
     values, response_dof, reference_dof, dims, hints = [], [], [], [], []
-    for a, dof in enumerate(rows):
-        measured = kinds[dof]
-        step = MOTION_POWERS[measured] - MOTION_POWERS[quantity]
+    for a, (dof, measured) in enumerate(rows):
+        step = MOTION_POWERS.get(measured, 0) - MOTION_POWERS[quantity]
         with np.errstate(divide='ignore', invalid='ignore'):
             factor = (1j * omega) ** step
         if step < 0:
             factor[omega == 0.0] = np.nan
-        dim = f'{measured}/force'
+        # a record never says strain: a strain has no dimension
+        dim = f'{record_quantity(measured)}/force'
         for b, reference in enumerate(columns):
             values.append(physical[:, a, b] * factor)
             response_dof.append(dof)

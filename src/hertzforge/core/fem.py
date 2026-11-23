@@ -4897,7 +4897,8 @@ def _lame(material: Material) -> tuple[float, float]:
     return E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu)), material.shear_modulus
 
 
-def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
+def _solid_gradients(xyz: np.ndarray, centroid: bool = False,
+                     at: Sequence[float] | None = None):
     """The shape function gradients every solid's stiffness and strain
     are built from, for every element of one kind at once: `xyz` is
     (elements, nodes, 3).
@@ -4911,7 +4912,9 @@ def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
     zero, so it adds nothing to an integral. `bubbles` are the brick's
     three incompatible modes' gradients, through the centroid's
     Jacobian and scaled by its determinant over the point's (Taylor,
-    Beresford and Wilson, 1976); at the centroid they vanish.
+    Beresford and Wilson, 1976); at the centroid they vanish. With `at`,
+    a natural point (a corner, where a gauge sits), that point alone in
+    place of the rule, weighted zero.
     """
     count, nodes = xyz.shape[:2]
     if nodes == 4:
@@ -4920,6 +4923,11 @@ def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
         volume = np.abs(determinants) / 6.0
         gradients = np.concatenate([-inverse.sum(axis=2)[:, None, :],
                                     inverse.transpose(0, 2, 1)], axis=1)[:, None]
+        if at is not None:
+            # the strain is the same everywhere in the element
+            l2, l3, l4 = at
+            return (np.array([[1.0 - l2 - l3 - l4, l2, l3, l4]]), np.zeros((count, 1)),
+                    gradients, None)
         shapes = np.full((1, 4), 0.25)
         weights = volume[:, None]
         if centroid:
@@ -4928,7 +4936,10 @@ def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
             gradients = np.concatenate([gradients, gradients], axis=1)
         return shapes, weights, gradients, None
     shapes, derivatives, rule = _SOLID_RULES[nodes]
-    if centroid:
+    if at is not None:
+        n0, d0 = _SOLID_BASES[nodes](*at)
+        shapes, derivatives, rule = n0[None], d0[None], np.zeros(1)
+    elif centroid:
         n0, d0 = _SOLID_BASES[nodes](*_SOLID_CENTROIDS[nodes])
         shapes = np.vstack([n0[None], shapes])
         derivatives = np.concatenate([d0[None], derivatives])
@@ -4948,7 +4959,9 @@ def _solid_gradients(xyz: np.ndarray, centroid: bool = False):
         det_0 = np.abs(det_0)
         points = np.array([(xi, eta, zeta) for xi in _GAUSS_2
                            for eta in _GAUSS_2 for zeta in _GAUSS_2])
-        if centroid:
+        if at is not None:
+            points = np.asarray([at], dtype=np.float64)
+        elif centroid:
             points = np.vstack([np.zeros(3), points])
         bubble = -2.0 * points[:, :, None] * np.eye(3)[None]
         bubbles = (np.matmul(bubble[None], inverse_0.transpose(0, 2, 1)[:, None])
@@ -4997,7 +5010,8 @@ def _solid_matrices_many(material: Material, xyz: np.ndarray
     return stiffness, mass.reshape(count, 3 * nodes, 3 * nodes)
 
 
-def _solid_strains_many(material: Material, xyz: np.ndarray, motion: np.ndarray
+def _solid_strains_many(material: Material, xyz: np.ndarray, motion: np.ndarray,
+                        at: Sequence[float] | None = None
                         ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The strain and stress of every element of one kind and one
     material, for several motions at once.
@@ -5018,6 +5032,11 @@ def _solid_strains_many(material: Material, xyz: np.ndarray, motion: np.ndarray
     energy is that of the stiffer, uncondensed element. Their strains
     vanish at the centroid, so the centroid value is B_u u alone.
 
+    With `at`, a natural point, each element is read there alone (one
+    point, weighted zero): where a strain gauge on one of its corners
+    sits, the element's own field at that corner, its incompatible modes
+    included.
+
     Returns (strain, stress, positions, weights): strain and stress
     (elements, points, 6, motions), ordered xx yy zz xy yz xz with
     engineering shear strains; each point's position (elements, points,
@@ -5027,15 +5046,17 @@ def _solid_strains_many(material: Material, xyz: np.ndarray, motion: np.ndarray
     xyz = np.asarray(xyz, dtype=np.float64)
     count, nodes = xyz.shape[:2]
     lame, mu = _lame(material)
-    shapes, weights, gradients, bubbles = _solid_gradients(xyz, centroid=True)
+    shapes, weights, gradients, bubbles = _solid_gradients(xyz, centroid=at is None, at=at)
     motions = motion.shape[2]
     points = gradients.shape[1]
     # the displacement gradient du_i/dx_j at every point: (e, p, j, i, m)
     held = motion.reshape(count, nodes, 3 * motions)
     grad = np.matmul(gradients.transpose(0, 1, 3, 2), held[:, None])
     if bubbles is not None:
-        k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
-        k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
+        # condensed out over the rule, whatever point the strain is read at
+        _s, rule_weights, rule_gradients, rule_bubbles = _solid_gradients(xyz)
+        k_ua = _stiffness_from_gradients(lame, mu, rule_weights, rule_gradients, rule_bubbles)
+        k_aa = _stiffness_from_gradients(lame, mu, rule_weights, rule_bubbles, rule_bubbles)
         internal = -np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1) @ motion)
         grad = grad + np.matmul(bubbles.transpose(0, 1, 3, 2),
                                 internal.reshape(count, 3, 3 * motions)[:, None])
