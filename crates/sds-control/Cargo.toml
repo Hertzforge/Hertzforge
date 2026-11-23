@@ -119,4 +119,5 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 
 [dev-dependencies]
+hertzforge-engine = { path = "../hertzforge-engine" }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake", "connect"] }

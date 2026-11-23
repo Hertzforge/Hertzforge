@@ -215,6 +215,9 @@ pub struct ArmContext {
     pub bind: String,
     /// The run's law, resolved from the catalog; `Err` is why it could not be.
     pub law: Result<Arc<dyn MimoSineLawFactory>, MethodError>,
+    /// Every law call's deadline in place of the setup's
+    /// ([`crate::server::ServiceOptions::mimo_sine_law_budget`]).
+    pub law_budget: Option<std::time::Duration>,
     pub revision: u64,
     pub devices: Vec<hertzforge_hal::DiscoveredDevice>,
 }
@@ -737,6 +740,7 @@ impl Actor {
         let mut opts = EngineOptions::new(class);
         opts.seed = SYSID_SEED;
         opts.ratings = ratings.clone();
+        opts.law_budget = ctx.law_budget;
         let mut svc = MimoSineService::new(w.setup.clone(), table.clone(), backend, law, opts)
             .map_err(|e| match e {
                 ServiceError::Setup(s) => refuse(

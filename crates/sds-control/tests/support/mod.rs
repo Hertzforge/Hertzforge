@@ -86,6 +86,7 @@ pub fn options(
         twr_engine: Some(server::simulated_twr_engine()),
         record: Default::default(),
         keep_table: false,
+        mimo_sine_law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
     }
 }
 

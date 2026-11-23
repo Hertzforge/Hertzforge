@@ -66,6 +66,26 @@ async fn mimo_sine_a_dwell_on_the_linear_four_by_four_completes_under_matrix() {
     assert!(report["drives"][0]["vpk_max"].as_f64().unwrap() > 0.0);
 }
 
+/// The service's law deadline reaches the run: one no call can meet stops the
+/// run at its first call, the engage. Every other test here runs on the relaxed
+/// deadline the harness gives, which this shows is the one the run keeps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_the_service_law_deadline_is_the_one_a_simulated_run_keeps() {
+    let mut o = opts(Duration::from_secs(600));
+    o.mimo_sine_law_budget = Some(Duration::from_nanos(1));
+    let mut c = Client::connect(serve(Service::with_options(o)).await).await;
+    controller(&mut c, 4, 0, 4).await;
+    let end = msine::run_to_end(
+        &mut c,
+        config("sine-linear-4x4", 4, 0, 4, dwell(80.0, 1.0), "matrix"),
+    )
+    .await;
+    let trip = &end["end"]["trip"];
+    assert_eq!(end["end"]["outcome"], "law_fault", "{}", end["end"]);
+    assert_eq!(trip["reason"], "over_budget", "{trip}");
+    assert_eq!(trip["at_tick"], 0, "{trip}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mimo_sine_a_sweep_on_the_linear_four_by_four_completes_with_its_pass_frame() {
     let mut c = client().await;
