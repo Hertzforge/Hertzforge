@@ -34,6 +34,7 @@ from .core.data import (
     Specification,
     Spectrum,
     Srs,
+    TimeComparison,
     TimeHistory,
     TransientSpecification,
     _CoherenceBase,
@@ -84,7 +85,7 @@ ObjectGroup = dict[str, Any]
 # The three single-signal spectra come before the two-signal pair: a
 # spectrum, a density and a shock spectrum are each derived from one
 # record, where an FRF and a coherence need a reference as well.
-TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
+TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, TimeComparison, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, ElementShapeSet, MatchedModes, Predictions,
               RunLogExtract, RunRecord, TestSetup, Report)
@@ -126,6 +127,8 @@ def describe(obj: Any) -> str:
         return (f'{len(obj.tones)} tone{"s" * (len(obj.tones) != 1)}, '
                 f'{lo:.4g}-{hi:.4g} Hz, {len(obj.response_dof)} control '
                 f'channel{"s" * (len(obj.response_dof) != 1)}')
+    elif isinstance(obj, TimeComparison):
+        counts = [(len(obj.pairs), 'pair'), (len(obj.abscissa), 'sample')]
     elif isinstance(obj, DataArray):
         counts = [(obj.num_records, 'record'), (len(obj.abscissa), 'sample')]
     elif isinstance(obj, ChannelTable):
@@ -250,6 +253,7 @@ _PARAMS_NAMING: dict[str, tuple[str, ...]] = {
     'compute_modal_responses': ('shapes',),
     'extract_sine': ('specification',),
     'derive_specification': ('sources',),
+    'compare_time_histories': ('sources', 'pairs'),
     'plan_instrumentation': ('geometry',), 'transform_responses': ('table',),
     'element_shapes': ('geometry',)}
 
@@ -288,6 +292,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('time_history', 'time_histories', TimeHistory),
     ('transient_specification', 'transient_specifications',
      TransientSpecification),
+    ('time_comparison', 'time_comparisons', TimeComparison),
     ('spectrum', 'spectra', Spectrum),
     ('specification', 'specifications', Specification),
     ('psd', 'psds', Psd),
@@ -3913,6 +3918,100 @@ class Project(dict):
         return self._derive(source, made, f'{source} Rescaled',
                             recipe=('rescale', {'factor': float(factor),
                                                 'records': kept}))
+
+    def compare_time_histories(self, *sources: Any,
+                               pairs: Sequence[Sequence[Any]] | None = None,
+                               records: Mapping[str, Sequence[int]] | None = None,
+                               start: float | None = None, stop: float | None = None,
+                               name: str | None = None) -> str:
+        """Pair two sets of time responses station by station on one
+        clock, and add the result to be scored (TRAC / Overlay).
+
+        The records are paired by DOF and quantity, or by hand, and put
+        on the coarsest of their clocks with nothing fitted or filtered
+        (`core.time_compare.compare`). The result is a `TimeComparison`
+        derived from its sources: it is marked out of date when one of
+        them changes, refreshes from the same pairs, and follows a
+        source that is renamed.
+
+        Parameters
+        ----------
+        *sources : str or object
+            The time histories holding both sets, the test's first: its
+            records are the first of each pair.
+        pairs : sequence of [str, int, str, int], optional
+            Pairs made by hand, [first name, record, second name,
+            record], counting records from zero.
+        records : mapping of str to sequence of int, optional
+            The records of each source to pair, by source name, such as
+            the ones picked in the tree; each source's response records
+            when omitted.
+        start, stop : float, optional
+            The scoring window, in seconds; the whole shared clock when
+            omitted.
+        name : str, optional
+            What to call it; 'Time Response Comparison' when omitted.
+
+        Returns
+        -------
+        str
+            The name it was added under, unique within the project.
+
+        Raises
+        ------
+        ValueError
+            When the records cannot be paired one way, share no stretch
+            of time, or the window does not fit
+            (`core.time_compare.match_records`, `compare`).
+        """
+        from .core.time_compare import compare
+
+        names = list(dict.fromkeys(self.name_of(each) for each in sources))
+        histories = {each: self[each] for each in names}
+        made = compare(histories, pairs=pairs,
+                       records=None if records is None else
+                       {self.name_of(k): [int(i) for i in v] for k, v in records.items()},
+                       start=start, stop=stop)
+        params = {'sources': names, 'pairs': made.pairs,
+                  'start': made.start, 'stop': made.stop}
+        return self._derive(names[0], made, name or 'Time Response Comparison',
+                            recipe=('compare_time_histories', params))
+
+    def set_time_comparison_window(self, comparison: Any, start: float,
+                                   stop: float) -> None:
+        """Keep a new scoring window on a time comparison (Save TRAC
+        window), in seconds inside its shared clock. A refresh keeps it.
+
+        Parameters
+        ----------
+        comparison : str or object
+            The time comparison, by name or as the object itself.
+        start, stop : float
+            The window, in seconds.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the window ends before it starts, reaches outside the
+            shared clock or holds fewer than two samples.
+        TypeError
+            When the object is not a time comparison.
+        """
+        from .core.time_compare import window
+
+        name = self.name_of(comparison)
+        data = self[name]
+        if not isinstance(data, TimeComparison):
+            raise TypeError(f'{name!r} is not a time comparison')
+        window(data, start, stop)
+        data.start, data.stop = float(start), float(stop)
+        record = self.provenance.get(name)
+        if record is not None:
+            record.setdefault('params', {}).update(start=data.start, stop=data.stop)
 
     def truncate_data(self, source: Any, *, records: Sequence[int] | None = None) -> str:
         """Cut a time history to its truncation span (Apply Truncation in
@@ -10078,6 +10177,8 @@ class Project(dict):
         # the levels of the set; only the first source is fingerprinted,
         # which is the one the result is filed under
         'derive_specification': 'content',
+        # every source's values: a comparison reads two or more objects
+        'compare_time_histories': 'sources',
         # the filter reads the settings riding the source; integration
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
@@ -10163,6 +10264,16 @@ class Project(dict):
                                table.types()):
                     digest.update('|'.join(column).encode())
             return ('content', digest.hexdigest())
+        if reads == 'sources':
+            import hashlib
+
+            digest = hashlib.blake2b(digest_size=16)
+            for each in (params or {}).get('sources', [source]):
+                other = self.get(each)
+                if other is None:
+                    return None
+                digest.update(_values_digest(other).encode())
+            return ('sources', digest.hexdigest())
         if reads == 'elements':
             return ('elements', _elements_digest(obj, self.get((params or {}).get('geometry'))))
         if reads == 'model':
@@ -11385,7 +11496,18 @@ _RECOMPUTE = {
     'element_shapes': lambda p, s, k: _read_in_elements(p, s, k),
     'author_specification': lambda p, s, k: _authored(p, s, k),
     'derive_specification': lambda p, s, k: _derived_again(p, k),
+    'compare_time_histories': lambda p, s, k: _compared_again(p, k),
 }
+
+
+def _compared_again(project, params):
+    """A time comparison worked out again from its sources, with the
+    pairs and the window it was saved with."""
+    from .core.time_compare import compare
+
+    return compare({name: project[name] for name in params['sources']},
+                   pairs=params['pairs'], start=params.get('start'),
+                   stop=params.get('stop'))
 
 
 def _derived_again(project, params):
@@ -11809,6 +11931,8 @@ def _state_story(was, now):
     was, now = _state_tuple(was), _state_tuple(now)
     if was[0] == 'content':
         return 'its source was recomputed'
+    if was[0] == 'sources':
+        return "a source's values have changed"
     if was[0] == 'rigid':
         if was[1]['properties'] == now[1]['properties']:
             return 'computed on nodes that have since moved'
