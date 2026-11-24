@@ -32,6 +32,14 @@ being paired by guessing. Records in two different quantities, or with units not
 are never paired. Pick records under one of the two histories in the tree to compare only those
 stations; the other history gives their partners.
 
+Two sets whose nodes are numbered differently do not pair by DOF. Set Pair records to In record
+order: the k-th response record of the test, across its histories in order, is paired with the
+k-th of the model, and two sets with different numbers of response records are refused. Then put
+the pairs right on the saved comparison with Edit Pairs, a table of one row a station whose First
+and Second cells each pick a record of that side; picking a record another pair holds swaps the
+two, and Delete takes pairs out. The comparison is worked out again from its sources after each
+change, and keeps its scoring window when the window still fits the new shared clock.
+
 The pairs are put on the coarsest of the two clocks, inside the time both cover, and the other
 trace is interpolated linearly onto it. Nothing else is done to them: no lag is removed, no sign
 or gain is fitted, and no filter is applied. A source sampled much faster than the shared clock
@@ -71,10 +79,23 @@ whole shared clock to give the window as TRAC start and TRAC end, in seconds.
 
 Apply adds a Time Response Comparison to the project: the paired traces on their shared clock,
 with the pairs, the sources and the window kept with it. Pick it in the tree and the same reading
-comes up; pick records under it to draw those stations together. Scoring Window keeps a new
+comes up; pick records under it to draw those stations together. In 3D the stage draws every
+station at once, time across and stations receding, the test colored by level and the model in
+gray at the same depth, each station named with its TRAC; 2D is the overlay. Scoring Window keeps a new
 window, typed or dragged by its edges on the plot. The comparison is derived from its two
 sources, so it is marked out of date when either one changes and Recompute works it out again
 from the same pairs, keeping its window; it follows a source that is renamed.
+
+## Scores on the geometry
+
+Pick the comparison and the test's geometry together and the Score Map draws each station as a
+point at its node, colored by its TRAC from 0 to 1 on the app's color scale; a station with no
+score is gray, and the note gives the mean over the stations scored and how many stations are not
+on the geometry. Score sTRAC colors 0 to 2, so its ideal of 1 is the middle of the scale. To see
+the scores over a finite element model of the same structure, in the same frame, pick it as FE
+model and draw a contour: each of its nodes takes the score of the station nearest it, or, smoothed,
+an inverse-distance-squared mean of every station's score, which is a station's own score on top
+of it. The model is drawn see-through under the stations and the test geometry's lines.
 
 ## From a script
 
@@ -90,7 +111,10 @@ for row in scores(project[name]):
 ```
 
 `project.time_history_sets(*names)` splits histories picked together into the two sets, by
-their groups, as the action table does. `project.filter_histories(*names, filtering=...)` and
+their groups, as the action table does. `core.time_compare.pairs_in_order` makes pairs in record order,
+`project.set_time_comparison_pairs(name, pairs)` pairs a saved comparison anew, and
+`core.time_compare.spread_scores` carries station scores onto other points.
+`project.filter_histories(*names, filtering=...)` and
 `project.rescale_histories(*names, factor=..., records=...)` do what Filter and Rescale do with
 several histories picked, and return the copies' names:
 

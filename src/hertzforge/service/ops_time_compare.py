@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 
 from . import views as v
-from .descriptors import Operation, Param
+from .descriptors import Operation, Option, Param
 from .ops_project import picked_records, picks_param
 from .protocol import refused
 from .waterfalls import unit_text
@@ -53,12 +53,23 @@ KEEP = Param('keep', 'Save the comparison (else the preview)', 'boolean', defaul
 FIRST_MORE = Param('first_more', 'More test histories', 'string', default='')
 SECOND_MORE = Param('second_more', 'More model histories', 'string', default='')
 SWAP = Param('swap', 'Swap test and model', 'boolean', default=False)
+PAIRING = Param('pairing', 'Pair records', 'enum', default='dof',
+                options=(Option('dof', 'By DOF and quantity'),
+                         Option('order', 'In record order')))
+ROW = Param('row', 'Pair', 'integer', default=1, min=1, step=1)
+COLUMN = Param('column', 'Column', 'string', default='second')
+VALUE = Param('value', 'Value', 'string', default='')
+IDS = Param('ids', 'Pairs, as 1-3, 7', 'string', default='')
 STATIONS = Param('records', 'Records (blank: all)', 'string', default='')
+#: the bar's 2D: the picked stations overlaid; otherwise every station on the 3-D stage
+FLAT = Param('flat', 'Overlay (else the stage)', 'boolean', default=True, in_view=True)
 
 #: the stations a saved comparison overlays at once when several are picked
 DRAWN = 6
 #: points a trace is drawn with, its peaks kept
 TRACE_POINTS = 4000
+#: points the stage draws in all, its traces sharing them
+STAGE_POINTS = 240_000
 
 #: what the scores leave alone, said where they are read
 NOTHING_FITTED = ('Nothing is fitted: no lag is removed, no gain or sign is fitted and no '
@@ -96,14 +107,51 @@ def labels_of(project: Any, data: Any) -> tuple[str, str]:
     return side_label(project, firsts), side_label(project, seconds)
 
 
+def comparison_stage(data: Any, rows: list[dict], labels: tuple[str, str],
+                     stations: list[int]) -> dict:
+    """Every station of a comparison at once on the 3-D stage: time across,
+    stations receding, amplitude up, the test's trace colored by level and
+    the model's in the reference gray at the same depth, each station named
+    with its TRAC. The stations picked are the ones drawn when more than one
+    is picked; a quantity other than the first station's is left out, since
+    the stage has one amplitude axis."""
+    from hertzforge.decimate import peak_decimate
+
+    picked = stations if len(stations) > 1 else list(range(len(rows)))
+    dimension = str(data.ordinate_dim[2 * picked[0]])
+    drawn = [k for k in picked if str(data.ordinate_dim[2 * k]) == dimension]
+    budget = max(64, min(TRACE_POINTS, STAGE_POINTS // max(1, 2 * len(drawn))))
+    names, curves, records, depths, roles = [], [], [], [], []
+    for depth, k in enumerate(drawn):
+        row = rows[k]
+        score = f'TRAC {row["trac"]:.3f}' if row['trac'] is not None else 'not scored'
+        names.append(f'{row["dof"]}  {score}')
+        for offset, side, role in ((1, labels[1], 'reference'), (0, labels[0], 'measured')):
+            curves.append(peak_decimate(data.abscissa, data.ordinate[2 * k + offset],
+                                        budget))
+            records.append(f'{side}: {data.response_dof[2 * k + offset]}')
+            depths.append(depth)
+            roles.append(role)
+    view = v.waterfall(f'{labels[0]} and {labels[1]}, every station',
+                       v.axis('Time', 's', 'linear'),
+                       v.axis('Amplitude', unit_text(dimension), 'linear'), records, curves,
+                       (float(data.abscissa[0]), float(data.abscissa[-1])))
+    left = len(picked) - len(drawn)
+    if left:
+        view['note'] = (f'{left} station{"s" * (left != 1)} of another quantity left out; '
+                        f'pick them to draw them.')
+    return v.staged(view, names, depths, roles)
+
+
 def comparison_views(title: str, data: Any, stations: list[int], labels: tuple[str, str], *,
                      select: dict[str, Any] | None = None,
-                     drag: dict[str, Any] | None = None) -> list[dict]:
+                     drag: dict[str, Any] | None = None, flat: bool = True) -> list[dict]:
     """The reading of a comparison, saved or not: the picked stations'
     traces overlaid with the scoring window marked, the score table, and
     the summary. `labels` name the test's side and the model's,
     `select` is what picking a table row runs, `drag` what dragging the
-    window's edges runs."""
+    window's edges runs. Without `flat` the stage of every station
+    (`comparison_stage`) takes the overlay's place."""
     from hertzforge.core.time_compare import scores
 
     rows = scores(data)
@@ -153,7 +201,8 @@ def comparison_views(title: str, data: Any, stations: list[int], labels: tuple[s
     else:
         summary.append(v.row('Mean TRAC', 'not read: no station could be scored', None, 'warn'))
     summary.append(v.row('Note', NOTHING_FITTED, None, 'info'))
-    return [plot, table, v.reading(f'{title}: {first} against {second}', summary)]
+    shown = plot if flat else comparison_stage(data, rows, labels, stations)
+    return [shown, table, v.reading(f'{title}: {first} against {second}', summary)]
 
 
 def _names(text: str) -> list[str]:
@@ -161,11 +210,11 @@ def _names(text: str) -> list[str]:
 
 
 def _sets(project: Any, params: dict[str, Any]
-          ) -> tuple[dict[str, Any], dict[str, list[int]], tuple[str, str]]:
-    """The time histories compared by name, the test's set first, the
-    records picked under each, and the two sides' labels. Two histories,
-    or the histories of two groups (`first_more` and `second_more`), are
-    exchanged when `swap` says so."""
+          ) -> tuple[list[str], list[str], dict[str, list[int]], tuple[str, str]]:
+    """The test's histories and the model's by name, the records picked
+    under each, and the two sides' labels. Two histories, or the histories
+    of two groups (`first_more` and `second_more`), are exchanged when
+    `swap` says so."""
     tests = [params['first'], *_names(params.get('first_more', ''))]
     models = [params['second'], *_names(params.get('second_more', ''))]
     if set(tests) & set(models):
@@ -180,8 +229,7 @@ def _sets(project: Any, params: dict[str, Any]
             records[names[0]] = picked
     if params.get('swap'):
         tests, models = models, tests
-    histories = {name: project[name] for name in tests + models}
-    return histories, records, (side_label(project, tests), side_label(project, models))
+    return tests, models, records, (side_label(project, tests), side_label(project, models))
 
 
 def compare_time_histories(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -189,20 +237,28 @@ def compare_time_histories(project: Any, params: dict[str, Any]) -> list[dict]:
     records paired and scored (`core.time_compare.compare`), previewed;
     with `keep`, the comparison added (`Project.compare_time_histories`)
     and its reading drawn."""
-    from hertzforge.core.time_compare import compare
+    from hertzforge.core.time_compare import compare, pairs_in_order
 
-    histories, records, labels = _sets(project, params)
+    tests, models, records, labels = _sets(project, params)
+    histories = {name: project[name] for name in tests + models}
     window = {} if params['whole'] else {'start': params['start'], 'stop': params['stop']}
+    pairs = None
+    if params['pairing'] == 'order':
+        try:
+            pairs = pairs_in_order({n: project[n] for n in tests},
+                                   {n: project[n] for n in models}, records or None)
+        except (ValueError, TypeError) as error:
+            raise refused(str(error)) from None
     if params['keep']:
         try:
             name = project.compare_time_histories(*histories, records=records or None,
-                                                  **window)
+                                                  pairs=pairs, **window)
         except (ValueError, TypeError) as error:
             raise refused(str(error)) from None
         return time_comparison(project, {'comparison': name, 'station': params['station'],
-                                         'records': ''})
+                                         'records': '', 'flat': True})
     try:
-        made = compare(histories, records=records or None, **window)
+        made = compare(histories, records=records or None, pairs=pairs, **window)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     select = {'op': 'project.compare_time_histories',
@@ -226,12 +282,221 @@ def time_comparison(project: Any, params: dict[str, Any]) -> list[dict]:
                 else [params['station'] - 1])
     try:
         return comparison_views(
-            name, data, stations, labels_of(project, data),
-            select={'op': 'project.time_comparison', 'params': {'comparison': name}},
+            name, data, stations, labels_of(project, data), flat=params['flat'],
+            select={'op': 'project.time_comparison',
+                    'params': {'comparison': name, 'flat': params['flat']}},
             drag=v.dragging('project.set_time_comparison_window',
                             {'source': name, 'station': stations[0] + 1}, 'start', 'stop'))
     except ValueError as error:
         raise refused(str(error)) from None
+
+
+def _record_labels(project: Any, names: list[str]) -> dict[str, tuple[str, int]]:
+    """Each response record of `names` by the text a pair's cell shows: its
+    DOF and its history, and its record number where one history holds two
+    at a DOF."""
+    from hertzforge.core.time_compare import response_records
+
+    out: dict[str, tuple[str, int]] = {}
+    for name in names:
+        data = project[name]
+        held = response_records(data)
+        dofs = [data.response_dof[i] for i in held]
+        for i in held:
+            text = f'{data.response_dof[i]} · {name}'
+            if dofs.count(data.response_dof[i]) > 1:
+                text += f', record {i + 1}'
+            out[text] = (name, i)
+    return out
+
+
+def pairs_table(project: Any, name: str) -> dict:
+    """A comparison's pairs as a table to edit (Edit Pairs): one row a
+    station, its first record and its second, each chosen from the
+    response records of its side's histories; rows are removed with
+    Delete."""
+    data = project[name]
+    firsts = list(dict.fromkeys(a for a, _i, _b, _j in data.pairs))
+    seconds = list(dict.fromkeys(b for _a, _i, b, _j in data.pairs))
+    first_labels, second_labels = _record_labels(project, firsts), _record_labels(project, seconds)
+    shown = {value: text for text, value in {**first_labels, **second_labels}.items()}
+    rows = [[str(k + 1), shown.get((a, i), f'{a}, record {i + 1}'),
+             shown.get((b, j), f'{b}, record {j + 1}')]
+            for k, (a, i, b, j) in enumerate(data.pairs)]
+    labels = labels_of(project, data)
+    edit = v.editing('project.set_time_comparison_pair', {'source': name},
+                     [None, 'first', 'second'],
+                     choices={'first': list(first_labels), 'second': list(second_labels)},
+                     kinds={'first': 'choice', 'second': 'choice'})
+    edit['remove'] = {'op': 'project.remove_time_comparison_pairs', 'params': {'source': name},
+                      'column': 0}
+    return v.table(f'{name}: pairs', ['Station', f'First ({labels[0]})',
+                                      f'Second ({labels[1]})'], rows, edit)
+
+
+def edit_time_comparison_pairs(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.edit_time_comparison_pairs`: a saved comparison's pairs, a
+    table whose cells pick another record and whose rows are deleted."""
+    return [pairs_table(project, params['source'])]
+
+
+def set_time_comparison_pair(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_time_comparison_pair`: one record of one pair chosen
+    anew (`Project.set_time_comparison_pairs`); a record another pair
+    holds changes places with this pair's."""
+    name = params['source']
+    data = project[name]
+    k = params['row'] - 1
+    if not 0 <= k < len(data.pairs):
+        raise refused(f'{name} has no pair {params["row"]}')
+    if params['column'] not in ('first', 'second'):
+        raise refused(f'a pair has a first and a second record, not {params["column"]!r}')
+    side = [a if params['column'] == 'first' else b for a, _i, b, _j in data.pairs]
+    labels = _record_labels(project, list(dict.fromkeys(side)))
+    chosen = labels.get(params['value'].strip())
+    if chosen is None:
+        raise refused(f'{params["value"]!r} is not a response record of that side; pick one '
+                      f'from the list')
+    pairs = [list(pair) for pair in data.pairs]
+    at = slice(0, 2) if params['column'] == 'first' else slice(2, 4)
+    # a record another pair holds changes places with this pair's, so a pairing
+    # is put right one cell at a time
+    other = next((m for m, pair in enumerate(pairs) if m != k and tuple(pair[at]) == chosen),
+                 None)
+    if other is not None:
+        pairs[other][at] = pairs[k][at]
+    pairs[k][at] = list(chosen)
+    try:
+        project.set_time_comparison_pairs(name, pairs)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    return [pairs_table(project, name)]
+
+
+def remove_time_comparison_pairs(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.remove_time_comparison_pairs`: pairs taken out of a saved
+    comparison, by station number; one pair at least stays."""
+    from .parsing import parse_picks
+
+    name = params['source']
+    data = project[name]
+    try:
+        gone = set(parse_picks(params['ids'], len(data.pairs), 'pair'))
+    except ValueError as error:
+        raise refused(str(error)) from None
+    kept = [pair for k, pair in enumerate(data.pairs) if k not in gone]
+    if not kept:
+        raise refused('a comparison keeps one pair at least; delete the comparison instead')
+    try:
+        project.set_time_comparison_pairs(name, kept)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    return [pairs_table(project, name)]
+
+
+TEST_GEOMETRY = Param('geometry', 'Test geometry', 'enum', options_from='objects:geometry')
+SCORE = Param('score', 'Score', 'enum', default='trac',
+              options=(Option('trac', 'TRAC'), Option('strac', 'sTRAC')))
+DRAW = Param('draw', 'Draw', 'enum', default='points',
+             options=(Option('points', 'Points at the stations'),
+                      Option('nearest', 'Contour on the FE model, nearest station'),
+                      Option('smooth', 'Contour on the FE model, smoothed')))
+FEM = Param('fem', 'FE model', 'enum', options_from='objects:geometry', default='')
+#: the color scale of each score: TRAC is 0 to 1; sTRAC's ideal is 1, the middle of 0 to 2
+SCALES = {'trac': (0.0, 1.0), 'strac': (0.0, 2.0)}
+#: a station drawn without a score, and the test geometry's lines over a contour
+UNSCORED = (140, 140, 140)
+#: how see-through a contour's model is, so the stations over it show
+CONTOUR_OPACITY = 0.6
+
+
+def _viridis(values: np.ndarray, low: float, high: float) -> np.ndarray:
+    """`values` on the app's one color scale (`drawing.theme.VIRIDIS`), u8 RGB,
+    clipped to `low` to `high`."""
+    from hertzforge.drawing.theme import VIRIDIS
+
+    stops = np.asarray(VIRIDIS, dtype=float)
+    where = np.clip((np.asarray(values, dtype=float) - low) / (high - low), 0.0, 1.0)
+    at = where * (len(stops) - 1)
+    lower = np.minimum(at.astype(int), len(stops) - 2)
+    frac = (at - lower)[:, None]
+    return np.round(stops[lower] * (1 - frac) + stops[lower + 1] * frac).astype(np.uint8)
+
+
+def time_comparison_map(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.time_comparison_map`: a saved comparison's scores on the
+    test's geometry, each station a point at its node colored by its TRAC
+    or sTRAC, or carried onto a finite element model as a see-through
+    contour under the stations (`core.time_compare.spread_scores`, the
+    nearest station's score or an inverse-distance-squared mean), with the
+    mean over the stations drawn in the note."""
+    from hertzforge.core.data import TimeComparison
+    from hertzforge.core.time_compare import scores, spread_scores, station_positions
+
+    from .mesh import drawn_mesh
+    from .ops_geometry import _drawn
+    from .show import _home
+
+    name, geometry_name = params['comparison'], params['geometry']
+    data = project[name]
+    if not isinstance(data, TimeComparison):
+        raise refused(f'{name} is not a time comparison')
+    if params['draw'] == 'points' and params['fem']:
+        raise refused('points are drawn on the test geometry alone; leave FE model blank, or '
+                      'draw a contour')
+    if params['draw'] != 'points' and not params['fem']:
+        raise refused('pick the FE model the contour is drawn on')
+    rows = scores(data)
+    key, label = params['score'], 'TRAC' if params['score'] == 'trac' else 'sTRAC'
+    where, found = station_positions(data, project[geometry_name])
+    if not found:
+        raise refused(f'none of the stations\' nodes is in {geometry_name}: link the '
+                      f'comparison with the test\'s geometry')
+    values = np.array([np.nan if rows[k][key] is None else rows[k][key] for k in found])
+    scored = np.isfinite(values)
+    low, high = SCALES[key]
+    colors = np.tile(np.asarray(UNSCORED, np.uint8), (len(found), 1))
+    colors[scored] = _viridis(values[scored], low, high)
+    stations = {'xyz': np.ascontiguousarray(where, np.float32), 'colors': colors, 'size': 14}
+    if params['draw'] == 'points':
+        view = _drawn(f'{label} of {name} on {geometry_name}', project[geometry_name])
+        view.pop('element_colors', None)
+    else:
+        fem = project[params['fem']]
+        view = _drawn(f'{label} of {name} on {params["fem"]}', fem)
+        if not scored.any():
+            raise refused('no station has a score to draw a contour from')
+        held = spread_scores(where[scored], values[scored],
+                             np.asarray(fem.node_xyz, dtype=float).reshape(-1, 3),
+                             smooth=params['draw'] == 'smooth')
+        triangles = np.asarray(view.get('triangles', np.zeros((0, 3))), dtype=np.int64)
+        triangles = triangles[(triangles < len(held)).all(axis=1)]
+        if not len(triangles):
+            raise refused(f'{params["fem"]} has no faces to draw a contour on')
+        view['element_colors'] = {
+            'triangles': triangles.astype(np.uint32),
+            'triangle_colors': _viridis(held[triangles].mean(axis=1), low, high),
+            'lines': np.zeros((0, 2), np.uint32), 'line_colors': np.zeros((0, 3), np.uint8)}
+        view['opacity'] = CONTOUR_OPACITY
+        # the test geometry's lines over the contour, so the stations read on their structure
+        test = project[geometry_name]
+        used, _triangles, lines = drawn_mesh(test)
+        xyz = np.asarray(test.node_xyz, dtype=float).reshape(-1, 3)
+        if len(lines):
+            ends = xyz[used[lines].reshape(-1)]
+            view['segments'] = [{'xyz': np.ascontiguousarray(ends, np.float32),
+                                 'color': list(UNSCORED)}]
+    view['points'] = [*view.get('points', []), stations]
+    said = (f'Mean {label} {float(values[scored].mean()):.3f} over {int(scored.sum())} '
+            f'station{"s" * (int(scored.sum()) != 1)}' if scored.any() else
+            f'No station has a {label}')
+    said += f'; colored from {low:g} (purple) to {high:g} (yellow), unscored gray'
+    missing = len(rows) - len(found)
+    if missing:
+        said += f'; {missing} station{"s" * (missing != 1)} not on {geometry_name}'
+    view['note'] = said + '.'
+    _home(project, [view], [geometry_name])
+    return [view]
 
 
 def set_time_comparison_window(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -244,7 +509,7 @@ def set_time_comparison_window(project: Any, params: dict[str, Any]) -> list[dic
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     return time_comparison(project, {'comparison': name, 'station': params['station'],
-                                     'records': ''})
+                                     'records': '', 'flat': True})
 
 
 OPERATIONS = (
@@ -255,14 +520,15 @@ OPERATIONS = (
                 'and RMS ratio over a window. Two histories, or every history of two groups '
                 '(an imported file\'s each). Save adds the comparison.',
         params=(TEST, MODEL, picks_param('first'), picks_param('second'), FIRST_MORE,
-                SECOND_MORE, SWAP, WHOLE, START, STOP, STATION, KEEP),
+                SECOND_MORE, SWAP, PAIRING, WHOLE, START, STOP, STATION, KEEP),
         outputs=('spectrum', 'table', 'reading'), run=compare_time_histories, commits='keep',
         opens_previewed=True),
     Operation(
         id='project.time_comparison', title='Time Comparison', workspace='transient',
         summary='A saved time comparison: its scores, and the stations picked drawn over '
                 'each other.',
-        params=(COMPARISON, STATION, STATIONS), outputs=('spectrum', 'table', 'reading'),
+        params=(COMPARISON, STATION, STATIONS, FLAT),
+        outputs=('spectrum', 'waterfall', 'table', 'reading'),
         run=time_comparison),
     Operation(
         id='project.set_time_comparison_window', title='Scoring Window', workspace='transient',
@@ -270,4 +536,28 @@ OPERATIONS = (
                 'shared clock, typed or dragged on the plot.',
         params=(WINDOWED, WINDOW_START, WINDOW_STOP, STATION),
         outputs=('spectrum', 'table', 'reading'), run=set_time_comparison_window, edits=True),
+    Operation(
+        id='project.edit_time_comparison_pairs', title='Edit Pairs', workspace='transient',
+        summary='A saved time comparison\'s pairs as a table: each cell picks another record '
+                'of its side, and Delete takes pairs out; the comparison is worked out again.',
+        params=(WINDOWED,), outputs=('table',), run=edit_time_comparison_pairs),
+    Operation(
+        id='project.set_time_comparison_pair', title='Set Comparison Pair',
+        workspace='transient',
+        summary='One record of one pair of a saved time comparison chosen anew.',
+        params=(WINDOWED, ROW, COLUMN, VALUE), outputs=('table',),
+        run=set_time_comparison_pair, edits=True),
+    Operation(
+        id='project.remove_time_comparison_pairs', title='Remove Comparison Pairs',
+        workspace='transient',
+        summary='Pairs taken out of a saved time comparison, by station number.',
+        params=(WINDOWED, IDS), outputs=('table',), run=remove_time_comparison_pairs,
+        edits=True),
+    Operation(
+        id='project.time_comparison_map', title='Score Map', workspace='transient',
+        summary='A saved time comparison\'s TRAC or sTRAC drawn on the test\'s geometry, a '
+                'colored point at each station, or as a see-through contour on a finite '
+                'element model under them, with the mean over the stations.',
+        params=(COMPARISON, TEST_GEOMETRY, SCORE, DRAW, FEM), outputs=('shape3d',),
+        run=time_comparison_map),
 )

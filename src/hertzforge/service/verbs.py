@@ -29,6 +29,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'shape_values', 'time_comparison',
     # typed into a table
     'set_entity', 'set_entity_cell', 'set_channel_cell', 'set_sensor', 'set_scan_set', 'describe_mode',
+    'set_time_comparison_pair', 'remove_time_comparison_pairs',
     # dragged on the plot
     'drag_averaging',
     'set_band_edge',
@@ -60,6 +61,8 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'matrix_comparison': 'Matrix', 'srs_error': 'SRS Error', 'srs_points': 'Points Rule',
     'waveform_error': 'Waveform Error', 'replication_segments': 'Segments',
     'compare_time_histories': 'TRAC Overlay', 'set_time_comparison_window': 'Scoring Window',
+    'edit_time_comparison_pairs': 'Edit Pairs',
+    'time_comparison_map': 'Score Map',
     'save_as': 'Export', 'rattlesnake_preview': 'Preview Run',
     'import_rattlesnake_part': 'Import Part', 'truncate_rattlesnake_file': 'Trim Run',
     'text_preview': 'Preview Text', 'import_text': 'Import Text', 'generate_signal': 'Generate',
@@ -142,6 +145,10 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'compare_time_histories': ('signals', 'shock', 'transient', 'modal'),
     'time_comparison': ('signals', 'shock', 'transient', 'modal'),
     'set_time_comparison_window': ('signals', 'shock', 'transient', 'modal'),
+    'edit_time_comparison_pairs': ('signals', 'shock', 'transient', 'modal'),
+    'time_comparison_map': ('signals', 'shock', 'transient', 'modal'),
+    'set_time_comparison_pair': ('signals', 'shock', 'transient', 'modal'),
+    'remove_time_comparison_pairs': ('signals', 'shock', 'transient', 'modal'),
     'rattlesnake_preview': ('signals',),
     'import_rattlesnake_part': ('signals',),
     'truncate_rattlesnake_file': ('signals',),

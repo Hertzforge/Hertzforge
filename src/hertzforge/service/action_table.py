@@ -28,6 +28,7 @@ JOINT: dict[tuple[str, str], tuple[str, ...]] = {
     ('geometry', 'shape_set'): ('Animate',),
     ('channel_table', 'geometry'): ('Arrows',),
     ('geometry', 'time_history'): ('Animate',),
+    ('geometry', 'time_comparison'): ('Map',),
     ('geometry', 'psd'): ('Animate',),
     ('geometry', 'specification'): ('Animate',),
     ('frf', 'geometry'): ('Animate',),

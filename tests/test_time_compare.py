@@ -490,3 +490,127 @@ def test_two_groups_compare_station_by_station_across_their_histories():
                                           *models)
     assert [row['strac'] for row in scores(project[name])] == pytest.approx([-0.5] * 3)
     assert project[name].pairs[2] == ['Test 3X+', 0, 'Model 3X+', 0]
+
+
+# ---- pairs in record order, and pairs edited -------------------------------------
+
+def _renumbered():
+    """A test and a model whose nodes are numbered differently: 101X+ and
+    102X+ in the test, 7X+ and 8X+ in the model, a force beside the test's."""
+    t = np.arange(500) / 500.0
+    test = _history(t, [np.sin(2 * np.pi * 5 * t), np.sin(2 * np.pi * 9 * t), np.cos(t)],
+                    ['101X+', '102X+', '1Z+'], ['acceleration', 'acceleration', 'force'])
+    model = _history(t, [2.0 * np.sin(2 * np.pi * 5 * t), -np.sin(2 * np.pi * 9 * t)],
+                     ['7X+', '8X+'], ['acceleration', 'acceleration'])
+    return {'Test': test}, {'Model': model}
+
+
+def test_pairs_in_record_order_join_the_kth_responses_leaving_the_force_out():
+    from hertzforge.core.time_compare import pairs_in_order
+
+    first, second = _renumbered()
+    assert pairs_in_order(first, second) == [['Test', 0, 'Model', 0], ['Test', 1, 'Model', 1]]
+    assert pairs_in_order(first, second, {'Test': [1, 2], 'Model': [1]}) == [
+        ['Test', 1, 'Model', 1]]
+
+
+def test_pairs_in_record_order_refuse_unequal_counts_and_two_quantities():
+    from hertzforge.core.time_compare import pairs_in_order
+
+    first, second = _renumbered()
+    with pytest.raises(ValueError, match='the first set holds 2 response records and the '
+                                         'second 1'):
+        pairs_in_order(first, second, {'Model': [0]})
+    t = second['Model'].abscissa
+    second['Model'] = _history(t, second['Model'].ordinate, ['7X+', '8X+'],
+                               ['acceleration', 'velocity'])
+    with pytest.raises(ValueError, match='a pair is one quantity'):
+        pairs_in_order(first, second)
+    with pytest.raises(ValueError, match='no response records'):
+        pairs_in_order(first, second, {'Test': [2], 'Model': []})
+
+
+def test_pairs_edited_rework_the_comparison_keep_a_window_that_fits_and_survive_a_refresh():
+    first, second = _renumbered()
+    project = Project()
+    project.add('Test', first['Test'])
+    project.add('Model', second['Model'])
+    from hertzforge.core.time_compare import pairs_in_order
+
+    name = project.compare_time_histories('Test', 'Model', pairs=pairs_in_order(first, second))
+    project.set_time_comparison_window(name, 0.1, 0.5)
+    project.set_time_comparison_pairs(name, [['Test', 0, 'Model', 1], ['Test', 1, 'Model', 0]])
+    held = project[name]
+    assert held.pairs == [['Test', 0, 'Model', 1], ['Test', 1, 'Model', 0]]
+    assert (held.start, held.stop) == (0.1, 0.5)
+    assert project.provenance[name]['params']['pairs'] == held.pairs
+    project['Model'] = project['Model'].rescale(3.0)
+    project.refresh(name)
+    assert project[name].pairs == held.pairs
+    assert (project[name].start, project[name].stop) == (0.1, 0.5)
+    with pytest.raises(TypeError, match="'Test' is not a time comparison"):
+        project.set_time_comparison_pairs('Test', held.pairs)
+    with pytest.raises(ValueError, match='a pair names Other'):
+        project.set_time_comparison_pairs(name, [['Test', 0, 'Other', 0]])
+
+
+def test_a_window_that_no_longer_fits_the_new_pairs_clock_becomes_the_whole_clock():
+    t = np.arange(1000) / 1000.0
+    project = Project()
+    project.add('Test', _history(t, [np.sin(t * 9), np.sin(t * 5)], ['1X+', '2X+'],
+                                 ['acceleration'] * 2))
+    project.add('Model', _history(t, [np.sin(t * 9), np.sin(t * 5)], ['1X+', '2X+'],
+                                  ['acceleration'] * 2))
+    short = t[:300]
+    project.add('Short', _history(short, [np.sin(short * 9)], ['1X+'], ['acceleration']))
+    name = project.compare_time_histories('Test', 'Model', 'Short',
+                                          pairs=[['Test', 0, 'Model', 0]])
+    project.set_time_comparison_window(name, 0.5, 0.9)
+    project.set_time_comparison_pairs(name, [['Test', 0, 'Short', 0]])
+    held = project[name]
+    assert (held.start, held.stop) == (0.0, pytest.approx(0.299))
+
+
+# ---- scores on the geometry --------------------------------------------------
+
+def test_stations_are_placed_at_their_nodes_and_one_off_the_geometry_left_out():
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.time_compare import station_positions
+
+    made = compare(_sets())
+    rig = Geometry(node_id=[102, 7], node_xyz=[[1.0, 2.0, 3.0], [9.0, 9.0, 9.0]])
+    where, found = station_positions(made, rig)
+    assert found == [1]
+    np.testing.assert_array_equal(where, [[1.0, 2.0, 3.0]])
+
+
+def test_scores_spread_to_the_nearest_station_or_by_inverse_distance_squared():
+    from hertzforge.core.time_compare import spread_scores
+
+    stations = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
+    values = np.array([1.0, 0.0])
+    points = np.array([[0.5, 0.0, 0.0], [2.0, 0.0, 0.0], [1.0, 1.0, 0.0]])
+    assert spread_scores(stations, values, points).tolist() == [1.0, 0.0, 1.0]
+    smooth = spread_scores(stations, values, points, smooth=True)
+    # (1/0.25) / (1/0.25 + 1/2.25) at the first; on a station, its own; equidistant, the mean
+    assert smooth[0] == pytest.approx(4.0 / (4.0 + 1 / 2.25))
+    assert smooth[1] == 0.0
+    assert smooth[2] == pytest.approx(0.5)
+    with pytest.raises(ValueError, match='no station with a score'):
+        spread_scores(np.zeros((0, 3)), np.zeros(0), points)
+
+
+def test_a_comparison_is_judged_against_its_geometry_by_the_tests_stations_alone():
+    from hertzforge.compatibility import check_compatibility
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.time_compare import pairs_in_order
+
+    first, second = _renumbered()
+    project = Project()
+    project.add('Test', first['Test'])
+    project.add('Model', second['Model'])
+    project.add('Rig', Geometry(node_id=[101, 102, 1], node_xyz=np.zeros((3, 3))))
+    name = project.compare_time_histories('Test', 'Model', pairs=pairs_in_order(first, second))
+    issues = check_compatibility(dict(project.items()), 'Rig', project.object_groups).issues
+    assert name not in issues
+    assert 'Model' in issues  # the model's own history is still judged

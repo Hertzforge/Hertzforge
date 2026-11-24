@@ -4211,6 +4211,53 @@ class Project(dict):
         return self._derive(names[0], made, name or 'Time Response Comparison',
                             recipe=('compare_time_histories', params))
 
+    def set_time_comparison_pairs(self, comparison: Any,
+                                  pairs: Sequence[Sequence[Any]]) -> None:
+        """Pair a time comparison's records anew (Edit Pairs), from the same
+        sources, as [first name, record, second name, record] with records
+        counted from zero. The scoring window is kept when it still lies
+        inside the new shared clock, and is the whole clock otherwise. A
+        refresh keeps the new pairs.
+
+        Parameters
+        ----------
+        comparison : str or object
+            The time comparison, by name or as the object itself.
+        pairs : sequence of [str, int, str, int]
+            The pairs, each naming two of its sources' records.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When a pair names a source the comparison does not have, or
+            cannot be read one way (`core.time_compare.match_records`).
+        TypeError
+            When the object is not a time comparison.
+        """
+        from .core.time_compare import compare, window
+
+        name = self.name_of(comparison)
+        data = self[name]
+        if not isinstance(data, TimeComparison):
+            raise TypeError(f'{name!r} is not a time comparison')
+        histories = {each: self[each] for each in data.sources}
+        made = compare(histories, pairs=pairs)
+        try:
+            window(made, data.start, data.stop)
+            made.start, made.stop = data.start, data.stop
+        except ValueError:
+            pass  # the old window does not fit the new clock: the whole clock is scored
+        made.source = data.source
+        self[name] = made
+        record = self.provenance.get(name)
+        if record is not None:
+            record.setdefault('params', {}).update(pairs=made.pairs, start=made.start,
+                                                   stop=made.stop)
+
     def set_time_comparison_window(self, comparison: Any, start: float,
                                    stop: float) -> None:
         """Keep a new scoring window on a time comparison (Save TRAC
