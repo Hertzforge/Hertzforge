@@ -93,7 +93,8 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 #: the operations on the project row that run at once, asking nothing (Brandon, 2026-11-10)
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 #: forms with no Apply: each change is stored as it is made, and drawn where it is seen
-LIVE = frozenset({'project.set_averaging', 'project.set_projection'})
+LIVE = frozenset({'project.set_averaging', 'project.set_projection',
+                  'project.set_time_comparison_window'})
 #: readings whose form has no Apply either: drawn as the form opens and again after each change,
 #: since running them changes nothing. Live rows that carry `shows`
 SHOWN_LIVE = frozenset({'project.wavelet', 'project.color_element_shapes',
@@ -386,6 +387,8 @@ def defaults(project: Any, kinds: list[str], names: list[str],
             return ['Animate'] if names and _on_geometry(project, names[0]) else []
         if kind in ('channel_table', 'matched_modes'):
             return ['Table']
+        if kind == 'time_comparison':
+            return ['Scores']
         return [] if kind in NO_VIEW else ['Plot']
     if len(kinds) == 2:
         joint = JOINT.get(tuple(sorted(kinds)))  # type: ignore[arg-type]
@@ -575,7 +578,9 @@ def _own_rows(project: Any, objects: list[str]) -> list[dict[str, Any]]:
         active = project.active_geometry == one
         rows.append(_row('self.activate', 'Make Active', 'self',
                          'It is the active geometry' if active else ''))
-    units = [getattr(project[n], 'units_defined', None) for n in objects]
+    # a time comparison's units are its sources', declared before it could be made
+    units = [getattr(project[n], 'units_defined', None) for n in objects
+             if projects.kind_of(project[n]) != 'time_comparison']
     if any(u is not None for u in units):
         rows.append(_row('self.units', 'Units', 'self', '' if one else 'Select one object'))
     rows.append(_row('self.recompute', 'Recompute', 'self',

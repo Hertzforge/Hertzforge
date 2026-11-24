@@ -75,6 +75,12 @@ def test_records_limit_the_automatic_pairing():
     assert match_records(sets, records={'Test': [1], 'Model': [1]}) == [['Test', 1, 'Model', 1]]
 
 
+def test_records_picked_under_one_set_take_only_their_partners_from_the_other():
+    sets = _sets()
+    assert match_records(sets, records={'Test': [1]}) == [['Test', 1, 'Model', 1]]
+    assert match_records(sets, records={'Model': [0]}) == [['Test', 0, 'Model', 0]]
+
+
 def test_nothing_to_pair_says_so():
     sets = _sets()
     with pytest.raises(ValueError, match='no response records to compare'):
@@ -237,6 +243,18 @@ def test_two_tones_that_only_agree_inside_the_window_score_one_there():
     assert inside['trac'] == pytest.approx(1.0) and inside['samples'] == 500
 
 
+def test_a_lag_of_a_few_milliseconds_is_not_removed_and_scores_low():
+    """A decaying 37 Hz response and the same response 4 ms late: nothing
+    aligns them, so the pair scores well below one."""
+    t = np.arange(4096) / 4096.0
+    a = np.exp(-3 * t) * np.sin(2 * np.pi * 37 * t)
+    b = np.exp(-3 * (t - 0.004)) * np.sin(2 * np.pi * 37 * (t - 0.004))
+    row, = scores(compare({'Test': _history(t, [a], ['1X+'], ['acceleration']),
+                           'Model': _history(t, [b], ['1X+'], ['acceleration'])}))
+    assert row['trac'] < 0.5
+    assert row['trac'] == pytest.approx(np.cos(2 * np.pi * 37 * 0.004) ** 2, abs=0.02)
+
+
 @pytest.mark.parametrize(('trace', 'reason'), [
     (np.zeros(1000), 'a trace is zero in the window'),
     (np.full(1000, 3.0), 'a trace is constant in the window'),
@@ -258,7 +276,7 @@ def test_a_dead_trace_has_no_score_and_says_why(trace, reason):
     (0.6, 0.2, 'ends after it starts'),
     (-0.1, 0.5, r'must lie inside the shared clock, 0 s to 0\.999 s'),
     (0.2, 1.5, 'must lie inside the shared clock'),
-    (0.2001, 0.2009, 'holds fewer than two samples'),
+    (0.1995, 0.2005, 'holds fewer than two samples'),  # one sample, at 0.2 s
     (0.0, np.inf, 'ends after it starts'),
 ])
 def test_a_window_that_does_not_fit_is_refused(start, stop, message):
@@ -336,7 +354,7 @@ def test_a_changed_source_marks_the_comparison_stale_and_a_refresh_keeps_the_win
 def test_the_second_source_is_watched_as_well_as_the_first():
     project = _project()
     name = project.compare_time_histories('Test', 'Model')
-    project['Test'] = project['Test'].rescale(3.0)
+    project['Model'] = project['Model'].rescale(3.0)
     assert name in project.stale()
 
 
@@ -389,3 +407,29 @@ def test_the_tree_lists_it_by_its_pairs_under_the_time_histories():
     assert describe(project[name]) == '2 pairs, 1000 samples'
     assert type_rank(project['Test']) < type_rank(project[name]) < type_rank(
         project['Test'].compute_spectra())
+
+
+def test_a_comparison_written_as_a_time_history_with_its_pairs_opens_as_a_comparison(tmp_path):
+    """An older file stored its comparison as a time history carrying the
+    same `time_comparison` JSON beside its records."""
+    import json
+
+    project = _project()
+    name = project.compare_time_histories('Test', 'Model')
+    path = tmp_path / 'older.hforge'
+    project.save(path)
+    with h5py.File(path, 'r+') as f:
+        group = next(g for g in f['objects'].values() if g.attrs.get('name') == name)
+        group.attrs['kind'] = 'data'
+        group.attrs['data_class'] = 'TimeHistory'
+        group.attrs['time_comparison'] = json.dumps({
+            'pairs': [['Test', 0, 'Model', 0], ['Test', 1, 'Model', 1]],
+            'sources': ['Test', 'Model'], 'start': 0.1, 'stop': 0.8})
+    reopened = Project.open(path)
+    reopened.provenance[name]['state'] = ['content', 'what the other program recorded']
+    assert reopened.stale() == {name: 'it was made by another program; refresh it to check '
+                                      'it against its sources'}
+    opened = reopened[name]
+    assert isinstance(opened, TimeComparison)
+    assert (opened.start, opened.stop) == (0.1, 0.8)
+    assert scores(opened)[1]['strac'] == pytest.approx(2.0)

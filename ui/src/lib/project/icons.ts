@@ -17,6 +17,7 @@ export const KIND_COLORS: Record<string, string> = {
 	srs: '#00a878',
 	shock_specification: '#d62728',
 	transient_specification: '#d62728',
+	time_comparison: '#2ca02c',
 	sine_sweep_specification: '#d62728',
 	sine_level: '#17becf',
 	sine_level_set: '#17becf',
@@ -69,6 +70,7 @@ export const KIND_ORDER = [
 	'channel_table',
 	'time_history',
 	'transient_specification',
+	'time_comparison',
 	'spectrum',
 	'sine_target',
 	'sine_level',
@@ -226,6 +228,11 @@ export const OBJECT_DRAW: Record<string, (color: string) => string> = {
 	sine_level_set: (c) => OBJECT_DRAW.sine_sweep_specification(c),
 	sine_target: (c) => OBJECT_DRAW.sine_sweep_specification(c),
 	transient_specification: (c) => tolerance(RINGDOWN, c) + line([8, 32], [56, 32], c, 3) + polyline(RINGDOWN, c, 6),
+	// a test's ringdown and a model's beside it, dashed, as the overlay draws them
+	time_comparison: (c) =>
+		line([8, 32], [56, 32], c, 3) +
+		polyline(RINGDOWN.map(([x, y]) => [x, 32 + (y - 32) * 0.7] as Point), c, 4, 150 / 255, true) +
+		polyline(RINGDOWN, c, 6),
 	coherence: (c) =>
 		line([8, 15], [56, 15], c, 4, 130 / 255) +
 		polyline([[8, 24], [16, 23], [22, 25], [27, 38], [32, 50], [37, 38], [42, 25], [48, 23], [56, 24]], c, 6),

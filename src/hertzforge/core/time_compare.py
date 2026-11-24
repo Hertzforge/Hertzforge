@@ -75,7 +75,9 @@ def match_records(histories: Mapping[str, TimeHistory],
     records : mapping of str to sequence of int, optional
         The records of each history to pair automatically, by name, such
         as the ones picked; all of its records when not given. Only the
-        response records among them (`response_records`) are paired.
+        response records among them (`response_records`) are paired. A
+        history not named here, beside one that is, gives only the
+        partners of the records named.
 
     Returns
     -------
@@ -98,17 +100,27 @@ def match_records(histories: Mapping[str, TimeHistory],
         if not isinstance(histories[name], TimeHistory):
             raise TypeError(f'{name} is not a time history')
     if pairs is None:
-        grouped: dict[tuple[str, str, str | None], list[tuple[str, int]]] = {}
+        chosen: dict[str, list[int]] = {}
         for name in names:
             data = histories[name]
             responses = response_records(data)
-            chosen = (responses if records is None or name not in records
+            picked = (responses if records is None or name not in records
                       else [int(i) for i in records[name]])
-            for i in chosen:
+            for i in picked:
                 if not 0 <= i < data.num_records:
                     raise ValueError(f'{name} has no record {i + 1}')
-                if i in responses:
-                    grouped.setdefault(data.channel_key(i), []).append((name, i))
+            chosen[name] = [i for i in picked if i in responses]
+        # records picked under some sets and not the others: the others give
+        # only the partners of what was picked
+        wanted = ({histories[name].channel_key(i) for name in records if name in chosen
+                   for i in chosen[name]} if records else None)
+        grouped: dict[tuple[str, str, str | None], list[tuple[str, int]]] = {}
+        for name in names:
+            data = histories[name]
+            for i in chosen[name]:
+                key = data.channel_key(i)
+                if wanted is None or name in records or key in wanted:
+                    grouped.setdefault(key, []).append((name, i))
         if not grouped:
             raise ValueError('no response records to compare: forces, references and '
                              'monitors are left out')

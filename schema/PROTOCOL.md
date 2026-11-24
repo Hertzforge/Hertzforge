@@ -550,7 +550,9 @@ A table with `select` (`{"op","params","param","column"}`) says what picking one
 the shell runs `op` with `params` and that row's cell in `column` as `param`, and the views answered
 that are not tables take the places of the ones beside the table. The coordinate systems' table has
 it: `project.view_entities` with `cs`, which puts the arrows and rings (`gizmo`) on the system of
-the row picked. Typing in the row's origin or rotation cells and dragging the arrows and rings do
+the row picked. A time comparison's score table has it too, with no `edit`: its rows are picked
+though nothing in them is typed, and `station` draws that station's two traces over each other
+(`project.compare_time_histories` for the preview, `project.time_comparison` for a saved one). Typing in the row's origin or rotation cells and dragging the arrows and rings do
 the same thing, and each answers with the table and the gizmo where the system now is. A click in
 the view places a node or a coordinate system only in the views of `project.add_node` and
 `project.add_coordinate_system`, which preview; the table's views carry no `pick` for them. A

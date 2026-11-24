@@ -26,7 +26,7 @@
 	import Self from './TablePane.svelte';
 	import { mark, marked, markedRow } from './marks.svelte';
 	import { markedBy } from './pick';
-	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, removedIds, spanned, tableHtml, tableText, toggled, type Block } from './table';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pickable, pasteTargets, removedIds, spanned, tableHtml, tableText, toggled, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -155,6 +155,7 @@
 		await apply([{ row, key: keys[col] as string, value: flagOn(known[row]?.[col] ?? '') ? 'False' : 'True' }]);
 	}
 	const editable = (col: number) => !!keys[col];
+	const picks = $derived(pickable(view, !!onedit, !!onrowpick));
 	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
 	// one row picked in a table that says what a row picked does (`view.select`): said once a row
 	let rowPicked: string | null = null;
@@ -461,8 +462,8 @@
 								</td>
 							{:else}
 								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
-									class:picked={onedit && view.edit && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
-									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
+									class:picked={picks && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
+									onpointerdown={(e) => picks && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
 									{#if opens}
 										<button type="button" class="opener" class:on={opened.has(r)} aria-expanded={opened.has(r)} aria-label="{opened.has(r) ? 'Close' : 'Open'} {cell}" title={opened.has(r) ? 'Close' : 'Open what this row holds'}
 											onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()} onclick={(e) => { e.stopPropagation(); opened = toggled(opened, r); }} data-testid="table-row-opener">▸</button>

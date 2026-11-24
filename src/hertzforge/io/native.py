@@ -885,6 +885,11 @@ def load_data(group: h5py.Group) -> DataArray:
     if 'time_comparison' in group.attrs:
         import json
 
+        from ..core.data import TimeComparison
+
+        # a .vdyn wrote its comparison as a time history with the pairs beside it,
+        # in the same JSON: it opens as the comparison it is
+        cls = TimeComparison
         stored = group.attrs['time_comparison']
         limits.update(json.loads(stored.decode('utf-8') if isinstance(stored, bytes)
                                  else stored))

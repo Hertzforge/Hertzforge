@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DRAWN_FROM, drawnRows, flagOn, scrollFor, tableHtml, TALLEST } from './table';
-import { blockText, fillTargets, numeric, openedAtFirst, parseTsv, pasteTargets, removedIds, spanned, tableText, toggled } from './table';
+import { blockText, fillTargets, numeric, openedAtFirst, parseTsv, pasteTargets, pickable, removedIds, spanned, tableText, toggled } from './table';
 
 describe('table', () => {
 	it('reads numbers as numbers and words as words', () => {
@@ -136,5 +136,19 @@ describe('removedIds', () => {
 		expect(removedIds(known, 0, block, [], 0)).toEqual(['9', '12']);
 		expect(removedIds(known, 0, block, [7], 1)).toEqual(['9', '12']);
 		expect(removedIds(known, 0, null, null, 0)).toEqual([]);
+	});
+});
+
+describe('pickable', () => {
+	const edit = { op: 'project.set_entity_cell', params: {}, columns: ['id'] };
+	const select = { op: 'project.time_comparison', params: {}, param: 'station', column: 0 };
+	it('takes a press on an editable table, and on a read-only one that picks rows', () => {
+		expect(pickable({ edit }, true, false)).toBe(true);
+		expect(pickable({ select }, false, true)).toBe(true);
+	});
+	it('takes none where the pane has no handler for what the table offers, or it offers neither', () => {
+		expect(pickable({ select }, true, false)).toBe(false);
+		expect(pickable({ edit }, false, true)).toBe(false);
+		expect(pickable({}, true, true)).toBe(false);
 	});
 });

@@ -11929,10 +11929,13 @@ def _summarize_state(state):
 
 def _state_story(was, now):
     was, now = _state_tuple(was), _state_tuple(now)
+    if now[0] == 'sources':
+        # a comparison another program made recorded its first source alone,
+        # so nothing says whether the others are as they were
+        return ("a source's values have changed" if was[0] == 'sources' else
+                'it was made by another program; refresh it to check it against its sources')
     if was[0] == 'content':
         return 'its source was recomputed'
-    if was[0] == 'sources':
-        return "a source's values have changed"
     if was[0] == 'rigid':
         if was[1]['properties'] == now[1]['properties']:
             return 'computed on nodes that have since moved'

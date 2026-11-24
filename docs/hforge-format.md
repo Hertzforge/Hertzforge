@@ -21,7 +21,7 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1, 2, 3, 4, 5 or 6   (integer)
+    hertzforge_schema = 1, 2, 3, 4, 5, 6 or 7   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
@@ -35,7 +35,8 @@ where it would otherwise stop at an element type it does not know. For a
 few days in November 2026 schema 5 held measured points as a group of their
 own (`scan/`, below). It is read and no longer written. Schema 6 adds the
 element shape set (`element_shapes/`, below), and only a file holding one
-is stamped 6.
+is stamped 6. Schema 7 adds the time comparison (`time_comparison/`, below),
+and only a file holding one is stamped 7.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -332,6 +333,24 @@ Present only where they mean something:
             filtering_low, _high (each when set), _order   the filter
                                      reading
             truncation_start, _stop  the truncate reading, when set
+
+## `time_comparison/`
+
+Two sets of time responses paired station by station on one clock
+(`core.time_compare`). The group is laid out as `data/` is, with
+`data_class` 'TimeComparison', and its kind is its own so a reader that
+knows only schema 6 refuses the file by name instead of opening it as a
+time history. Records 2k and 2k + 1 are pair k's first trace (the test)
+and its second (the model), on the shared clock; `block` names the source
+each record came from. One more attribute:
+
+    attrs   time_comparison   JSON: "pairs" ([first name, record, second
+                              name, record], records from 0), "sources"
+                              (the time histories compared) and "start"
+                              and "stop" (the scoring window, seconds)
+
+A `.vdyn` stored a comparison as a `data/` group of class TimeHistory with
+this same attribute, and it is read as a time comparison.
 
 ## `shapes/`
 

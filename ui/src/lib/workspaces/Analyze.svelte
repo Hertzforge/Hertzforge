@@ -232,12 +232,12 @@
 					<!-- the auto-MAC's stage waits for a square to be picked -->
 					{@const views = a.shown.views.filter((v) => !(shapes && a.shapeView === 'mac' && v.view === 'shape3d' && !a.pair))}
 					{@const beside = views.filter((v) => v.view !== 'shape3d')}
-					<!-- every view is a pane that fills the frame, unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
+					<!-- every view is a pane that fills the frame, unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls. A stacked table's row is its content's height: an auto row was left what the panes above and below did not take, which beside two plots was nothing -->
 					{@const isFolded = (v: View) => v.view === 'table' && views.length > 1 && a.folded.includes(foldKey(v.title))}
 					<div class="svviews panes" class:several={views.length > 1} class:folded={beside.length > 0 && views.some((v) => v.view === 'shape3d') && beside.every(isFolded)}
 						style:--rows={Math.max(1, beside.length)}
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
-						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
+						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'max-content' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
 							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors || (offers?.arrow_roles.length ?? 0) > 1 || (offers?.drives.length ?? 0) > 1))}
 							<div class="view pane {v.view}" data-testid="pane-{v.view}">
@@ -310,6 +310,7 @@
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
+										onrowpick={v.view === 'table' && v.select ? (id) => a.pickShownRow(v.select!, id) : undefined}
 										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
 										onparams={v.view === 'waterfall' && v.quantities ? (patch) => { if (typeof patch.quantity === 'string') a.setPref('quantity', patch.quantity); } : undefined}
 										regions={v.view === 'spectrum' || v.view === 'waterfall' ? a.averagingRegions : null}

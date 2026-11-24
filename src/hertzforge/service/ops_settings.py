@@ -69,7 +69,8 @@ CUT_STOP = Param('stop', 'Stop', 'number', default=1.0, unit='s', step=0.1,
 def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
     """The settings an object carries, as the project summary lists them: a
     time history's {'averaging': {...}, 'filtering': {...}, 'truncation':
-    {...}}, each present only when set, a geometry's {'rigid': {...}}, and a
+    {...}}, each present only when set, a time comparison's
+    {'time_comparison': {start, stop}}, a geometry's {'rigid': {...}}, and a
     report's {'features': {key:
     on}} for every report feature and its identification fields
     {'identity': {key: text}}. What a `setting` param opens on."""
@@ -96,6 +97,10 @@ def settings_of(obj: Any) -> dict[str, dict[str, Any]]:
         out['filtering'] = {'kind': filtering.kind, 'order': filtering.order,
                             **{edge: getattr(filtering, edge) for edge in ('low', 'high')
                                if getattr(filtering, edge) is not None}}
+    from hertzforge.core.data import TimeComparison
+
+    if isinstance(obj, TimeComparison):
+        out['time_comparison'] = {'start': obj.start, 'stop': obj.stop}
     truncation = getattr(obj, 'truncation', None)
     if truncation is not None:
         out['truncation'] = {'start': truncation.start, 'stop': truncation.stop}
