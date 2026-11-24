@@ -61,15 +61,18 @@ The copies go into a new group of their own, named after the sources' group: the
 `test.unv` filtered go into `test.unv Filtered`. Histories that share no named group go into
 `Filtered 1`, or `Rescaled 1`, and the next free number after that. So to filter a test file and a
 model file the same way and compare them, pick the test file's histories and apply Filter, do the
-same for the model file's with the same settings, then pick every history of the two new groups
-and use TRAC Overlay.
+same for the model file's with the same settings, then pick the rows of the two new groups and use
+TRAC Overlay.
 
 ## In the app
 
 Pick the test's time history, then TRAC Overlay in the column beside the model's. A test and a
 model exported one channel to a history, as some programs write a Universal file, are compared by
-their groups: an imported file's histories share a group named for the file, so pick every history
-of the two files together and TRAC Overlay pairs them across both sets. The group listed first in
+their groups: an imported file's histories share a group named for the file. A group of time
+histories and nothing else is listed under a row of its own in the tree, with the group's name and
+how many histories it holds. Click the test file's row, Cmd-click (Ctrl-click elsewhere) the model
+file's, and TRAC Overlay pairs them across both sets. The row opens and closes on its histories,
+and a double-click names the group. The group listed first in
 the tree is the test; Swap test and model makes the other one the test, which changes sTRAC and the
 RMS ratio and leaves TRAC alone. The form opens
 on its preview: the score table, one row a station with its TRAC, sTRAC, correlation and RMS

@@ -8,7 +8,7 @@ import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
 import { setSpanAsker } from '$lib/viz/spanSource';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, sendFile, startDragOut } from '$lib/project/files';
-import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
+import { EMPTY, clickGroup, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { RunOpen } from '$lib/acquire/runOpen.svelte';
 import { RunFiles } from './runFiles.svelte';
@@ -1806,6 +1806,11 @@ export class ProjectState {
 	/** An object's row clicked, with the modifiers held; `order` is the tree's rows. */
 	clickObject(name: string, order: string[], mods: Modifiers = {}): void {
 		this.selected(clickObject(this.selection, name, order, mods));
+	}
+
+	/** A group's row clicked in the tree: its members, with the modifiers held. */
+	clickGroup(members: string[], mods: Modifiers = {}): void {
+		this.selected(clickGroup(this.selection, members, mods));
 	}
 
 	/** A cell of `name`'s grid clicked: its record; Shift takes the block from the last cell clicked. */

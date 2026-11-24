@@ -8,6 +8,9 @@
 	 * is what the rest of the window works on: a click selects one row, Cmd (Ctrl elsewhere) adds or
 	 * removes, Shift extends; a cell picks a record and stands for its object. No buttons live on
 	 * the rows: the acts on a selection are offered beside the tree. A double-click renames.
+	 * A group of time histories and nothing else is listed under a row of its own (`folders.ts`),
+	 * which opens and closes on them, picks them all with a click (Cmd or Shift adds them, so two
+	 * groups are two sets) and names the group by a double-click; it wears no bracket.
 	 */
 	import type { AppState, SubName } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
@@ -16,9 +19,10 @@
 	import { spans, ticks } from './brackets';
 	import { draggedElements, movesInto } from './elementDrag';
 	import { landsBefore, reordered, treeOrder } from './order';
+	import { folderLabel, historyFolders, type Folder } from './folders';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
-	import { partIsPicked } from './selection';
+	import { groupIsPicked, partIsPicked } from './selection';
 	import { mark, marked } from '$lib/viz/marks.svelte';
 	import { markedBy, markedRun } from '$lib/viz/pick';
 	import { canDragOut } from './files';
@@ -32,6 +36,42 @@
 	/** The objects in the tree's order: each group together, the Basis first, then the rest by kind. */
 	const objects = $derived(treeOrder(p.summary?.objects ?? [], p.summary?.links));
 	const order = $derived(objects.map((o) => o.name));
+	/** The groups listed under a row of their own, by the member the row stands above and by each member. */
+	const folders = $derived(historyFolders(p.summary?.objects ?? [], p.summary?.links, order));
+	const folderAt = $derived(new Map(folders.map((f) => [f.members[0], f])));
+	const folderOf = $derived(new Map(folders.flatMap((f) => f.members.map((m) => [m, f] as const))));
+	/** The group rows closed, by their key; a group's row is open until it is closed. */
+	let closedFolders = $state<Set<string>>(new Set());
+	function toggleFolder(f: Folder) {
+		const next = new Set(closedFolders);
+		if (next.has(f.key)) next.delete(f.key);
+		else next.add(f.key);
+		closedFolders = next;
+	}
+	/** The group row being named, by its key, and the text typed. */
+	let namingFolder = $state<string | null>(null);
+	let folderText = $state('');
+	function startFolderName(f: Folder) {
+		namingFolder = f.key;
+		folderText = f.name;
+	}
+	async function commitFolderName(f: Folder) {
+		const text = folderText.trim();
+		namingFolder = null;
+		if (text !== f.name) await p.nameGroup(f.members[0], text);
+	}
+	function folderClick(e: MouseEvent, f: Folder) {
+		if (namingFolder === f.key || justDragged || picking) return;
+		p.clickGroup(f.members, mods(e));
+	}
+	function folderKey(e: KeyboardEvent, f: Folder) {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			if (!picking) p.clickGroup(f.members, { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey });
+		} else if (e.key === 'ArrowRight' && closedFolders.has(f.key)) toggleFolder(f);
+		else if (e.key === 'ArrowLeft' && !closedFolders.has(f.key)) toggleFolder(f);
+		else if (e.key === 'F2') startFolderName(f);
+	}
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	const ROLE_WORD = { reference: 'ref', response: 'resp', monitor: 'mon' } as const;
@@ -259,8 +299,10 @@
 			void p.dragOut({ names }, () => outHeld).finally(() => (outHeld = false));
 			return;
 		}
-		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
-		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
+		const over = document.elementFromPoint(e.clientX, e.clientY);
+		const row = over?.closest<HTMLElement>('[data-testid^="object-"]');
+		// a group's row stands for the group: letting go on it moves the dragged objects into it
+		const name = row?.dataset.testid?.slice('object-'.length) ?? over?.closest<HTMLElement>('[data-folder-of]')?.dataset.folderOf ?? null;
 		dropOn = name && !dragging.includes(name) ? name : null;
 		dropOut = !name && overBlank(e);
 	}
@@ -354,7 +396,7 @@
 	}
 
 	/** The link brackets: each group's members as rows, and where those rows sit, measured after each render. */
-	const painted = $derived(spans(p.summary?.links, order));
+	const painted = $derived(spans(p.summary?.links, order, new Set(folders.map((f) => f.group))));
 	/** The striped brackets on Matched Modes rows, in the colors of both sets' groups. */
 	const striped = $derived(ticks(p.summary?.links, p.summary?.objects ?? []));
 	let treeBox = $state<HTMLDivElement | null>(null);
@@ -508,7 +550,41 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={o.opens ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+		{@const folder = folderAt.get(o.name)}
+		{@const inFolder = folderOf.get(o.name)}
+		{#if folder}
+			{@const shut = closedFolders.has(folder.key)}
+			{@const all = groupIsPicked(p.selection, folder.members)}
+			<div class="row folder" class:on={all} class:drop={dropOn === folder.members[0]} role="treeitem" aria-selected={all} aria-expanded={!shut} aria-label="{folderLabel(folder)}, {folder.members.length} time histories" tabindex="0" data-testid="folder-{folder.key}" data-folder-of={folder.members[0]} title="{folder.members.length} time histories. Click to pick them all, Cmd-click another group to compare the two sets, double-click to name the group." onclick={(e) => folderClick(e, folder)} onkeydown={(e) => folderKey(e, folder)} ondblclick={() => startFolderName(folder)}>
+				<button class="twist" class:open={!shut} aria-label={shut ? `Open ${folderLabel(folder)}` : `Close ${folderLabel(folder)}`} tabindex="-1" data-testid="expand-folder-{folder.key}" onclick={(e) => { e.stopPropagation(); toggleFolder(folder); }}>
+					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+				<Glyph name="history_group" />
+				{#if namingFolder === folder.key}
+					<input
+						class="field mono rename"
+						aria-label="New name for the group {folderLabel(folder)}"
+						placeholder="No name"
+						data-testid="folder-name-field"
+						bind:value={folderText}
+						use:focusAndSelect
+						onclick={(e) => e.stopPropagation()}
+						ondblclick={(e) => e.stopPropagation()}
+						onkeydown={(e) => {
+							e.stopPropagation();
+							if (e.key === 'Enter') void commitFolderName(folder);
+							if (e.key === 'Escape') namingFolder = null;
+						}}
+						onblur={() => (namingFolder = null)}
+					/>
+				{:else}
+					<span class="name" class:unnamed={!folder.name}>{folderLabel(folder)}</span>
+					<span class="holds">{folder.members.length} time histories</span>
+				{/if}
+			</div>
+		{/if}
+		{#if !(inFolder && closedFolders.has(inFolder.key))}
+		<div class="row" class:in-folder={!!inFolder} class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={o.opens ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
 			{#if o.opens}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -542,7 +618,7 @@
 		{#if open}
 			{@const kids = held(o.name)}
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<div class="kids" role="group" data-testid="children-{o.name}" onkeydown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length && !(e.target as HTMLElement).closest('input')) { e.preventDefault(); if (p.partDeletion) void p.removeSelected(); else if (!p.selection.part) p.confirming = true; } }}>
+			<div class="kids" class:in-folder={!!inFolder} role="group" data-testid="children-{o.name}" onkeydown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length && !(e.target as HTMLElement).closest('input')) { e.preventDefault(); if (p.partDeletion) void p.removeSelected(); else if (!p.selection.part) p.confirming = true; } }}>
 				{#if !kids}
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
@@ -719,6 +795,7 @@
 					<p class="note">Nothing to open.</p>
 				{/if}
 			</div>
+		{/if}
 		{/if}
 	{/each}
 </div>
@@ -901,6 +978,20 @@
 		flex: 1;
 		min-width: 0;
 		font-size: var(--text-xs);
+	}
+
+	/* a group's members sit under its row */
+	.row.in-folder {
+		padding-left: 16px;
+	}
+
+	.kids.in-folder {
+		margin-left: 28px;
+	}
+
+	.row.folder .name.unnamed {
+		color: var(--text-2);
+		font-style: italic;
 	}
 
 	.kids {
