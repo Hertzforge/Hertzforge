@@ -427,8 +427,15 @@ class Connection:
             self.fit = None
             return {'project': projects.summary(self.project)}
         if method == 'project.import':
-            _only(params, ('path', 'upload', 'units'), method)
+            _only(params, ('path', 'upload', 'units', 'reference_node'), method)
             params, received = self._received(params, method)
+            # a question the file raises is answered before it is read: the
+            # shell asks it and sends the import again with the answer
+            ask = await call(projects.import_question, params)
+            if ask is not None:
+                if self.project is None:
+                    self.project = await call(projects.new, {})
+                return {'added': [], 'ask': ask, 'project': projects.summary(self.project)}
             path = params.get('path')
             report = self.progress(path) if isinstance(path, str) else None
             self.project, added = await call(projects.import_file, self.project,

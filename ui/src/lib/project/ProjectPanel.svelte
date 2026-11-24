@@ -6,6 +6,7 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProjectTree from './ProjectTree.svelte';
+	import ImportQuestion from './ImportQuestion.svelte';
 	import RunFolderActions from '$lib/acquire/RunFolderActions.svelte';
 	import { runRecordFolder } from './files';
 	import { canDragOut } from './files';
@@ -107,6 +108,7 @@
 		</div>
 	{/if}
 	{#if p.error}<p class="error" role="alert" data-testid="project-error">{p.error}</p>{/if}
+	<ImportQuestion project={p} />
 
 	{#if p.summary}
 		<!-- the project itself, picked: nothing in the tree, and the action table offers the project's acts (Save, Open, Import) -->

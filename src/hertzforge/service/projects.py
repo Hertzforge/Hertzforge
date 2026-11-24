@@ -258,6 +258,7 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
     named = os.path.basename(path) if received else path
     if os.path.splitext(path)[1].lower() in PHOTO_FORMATS:
         return _import_photo(state, path, named)
+    options = _import_options(params, path)
     units = params.get('units', {})
     if not isinstance(units, Mapping) or not all(
             isinstance(key, str) and isinstance(value, str)
@@ -267,18 +268,77 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
     if state is None:
         state = OpenProject(hz.Project())
     project = state.project
+    options.update(units)
     call = ', '.join([repr(named)] + [f'{key}={value!r}'
-                                      for key, value in units.items()])
+                                      for key, value in options.items()])
     try:
         # journaled as the one call a script makes, without the progress
         # callable the service passes
         with project.journal_as(f'project.import_file({call})'):
             added = project.import_file(path, progress=progress, received=received,
-                                        **units)
+                                        **options)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
     state.modified = True
     return state, added
+
+
+def _import_options(params: Mapping[str, Any], path: str) -> dict[str, Any]:
+    """The reader options `project.import` takes besides `units`: the
+    `reference_node` the answer to its question gives, which only a UNV
+    file takes."""
+    from hertzforge.io import unv
+
+    if 'reference_node' not in params:
+        return {}
+    node = params['reference_node']
+    if isinstance(node, bool) or not isinstance(node, int) or node <= 0:
+        raise bad_request('project.import "reference_node" is the node the reference '
+                          'was measured at, a positive whole number')
+    if not path.lower().endswith(unv.EXTENSIONS):
+        raise refused(f'{os.path.basename(path)} is not a UNV file, and only a UNV '
+                      "file's time-trace pairs take a reference_node")
+    return {'reference_node': node}
+
+
+def import_question(params: Mapping[str, Any]) -> dict[str, Any] | None:
+    """What `project.import` asks before it reads the file, or None when it
+    asks nothing: the question, the param its answer goes back in, and the
+    value that keeps the file as it is.
+
+    A UNV file's labeled time-trace pairs name the node their reference was
+    measured at, and some exporters write a channel number there instead.
+    The person is shown the reference the file names and asked for the
+    node; the direction stays the file's. A file with no labeled pairs, or
+    one whose pairs name references at more than one node, asks nothing,
+    and neither does an import that already gives `reference_node`."""
+    from hertzforge.core.data import parse_dof
+    from hertzforge.io import unv
+
+    path = _path(params, 'project.import')
+    if 'reference_node' in params or not path.lower().endswith(unv.EXTENSIONS):
+        return None
+    try:
+        references = unv.trace_pair_references(path)
+    except OSError:
+        # the import itself says what is wrong with the file
+        return None
+    nodes = list(dict.fromkeys(parse_dof(dof)[0] for dof in references))
+    if len(nodes) != 1:
+        return None
+    name = os.path.basename(path)
+    named = references[0] if len(references) == 1 else ', '.join(references)
+    return {
+        'param': 'reference_node',
+        'title': 'Reference node',
+        'question': (f'{name} pairs each response with a reference trace at {named}. '
+                     'Some exporters write a channel number in place of the reference '
+                     'node. Which node was the reference measured at? The direction '
+                     'stays as the file gives it.'),
+        'label': 'Reference node',
+        'value': nodes[0],
+        'answer': 'Import',
+    }
 
 
 def _import_photo(state: OpenProject | None, path: str,

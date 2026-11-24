@@ -79,3 +79,28 @@ their groups, as the action table does.
 `[first name, record, second name, record]` for pairs made by hand (they may join two DOFs, never
 two quantities), and `records=` to limit the automatic pairing to some records of each source.
 `scores` reads a comparison over its own window, or over `start` and `stop` when they are given.
+
+## Traces exported in pairs
+
+Some test programs export each measurement to a UNV file as two time traces (dataset 58), one
+whose ID line reads Response Time Trace and one that reads Reference Time Trace. Both headers
+carry the measurement's DOF as the response and the reference DOF in the reference field.
+Hertzforge reads each such pair as a time history of its own, named for both DOFs
+(`Time History - 730Z- - ref 1013Z+`): the response channel at the response DOF and the reference
+channel at the reference DOF, with their roles set. The histories of one file go in one group
+named for the file, so importing the test's file and the model's gives two groups whose
+histories are compared with each other.
+
+Some exporters write a channel number in the reference node field instead of the node. When a
+file's pairs name their reference at one node, the import shows the reference the file gives and
+asks which node it was measured at; the direction stays as the file has it, and the number it
+opens with keeps the file's node. Cancel leaves that file out and goes on with the next. A file
+with no labeled pairs asks nothing, and neither does one whose pairs name references at several
+nodes. A trace without its partner, or without a reference DOF, refuses the file, naming the
+trace and its place among the file's function records.
+
+From a script the answer is an argument, and without it the file's own node stands:
+
+```python
+project.import_file('test.unv', reference_node=1013)
+```
