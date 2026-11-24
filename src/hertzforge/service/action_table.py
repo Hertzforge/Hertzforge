@@ -632,6 +632,28 @@ def _fit_rows(kinds: list[str], reason: str = '') -> list[dict[str, Any]]:
     return []
 
 
+#: operations that take every history of two groups picked together, each group a set
+#: (`Project.time_history_sets`), beside the two histories their object params take
+SETS_OF_HISTORIES = frozenset({'project.compare_time_histories'})
+
+
+def _sets_row(project: Any, op: Operation, names: list[str],
+              records: dict[str, list[int]]) -> dict[str, Any]:
+    """The row of an operation in `SETS_OF_HISTORIES` for more than two objects picked:
+    ready when they are every history of two groups, each group a set, and otherwise off
+    with the core's reason."""
+    if any(records.get(name) for name in names):
+        return _op_row(op, 'Pick whole histories to compare two groups')
+    try:
+        tests, models = project.time_history_sets(*names)
+    except ValueError as error:
+        said = str(error)
+        return _op_row(op, said[0].upper() + said[1:])
+    fill = {'first': tests[0], 'second': models[0], 'first_more': '\n'.join(tests[1:]),
+            'second_more': '\n'.join(models[1:]), 'first_records': '', 'second_records': ''}
+    return _op_row(op, fill=fill, omit=list(fill))
+
+
 def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
              part: dict[str, Any] | None) -> dict[str, Any]:
     from .ops_files import export_formats
@@ -660,6 +682,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append(_op_row(op, fill={}, **more))
             continue
         fill = _fill(op, chosen)
+        if fill is None and op.id in SETS_OF_HISTORIES and len(chosen) > 2:
+            rows.append(_sets_row(project, op, names, records))
+            continue
         if fill is None:
             if _kinds_fit(op, kinds):
                 rows.append(_op_row(op, _why_not(op, kinds) or 'It cannot take this selection'))
@@ -698,6 +723,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 continue
             if param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
+                unasked.append(param.name)
+            elif op.id in SETS_OF_HISTORIES and param.name in ('first_more', 'second_more'):
+                # two histories picked: no set has more than its one
+                fill[param.name] = ''
                 unasked.append(param.name)
             elif param.name in PICKED_ONE and param.type == 'integer':
                 # Create Spec draws a channel of the sheet it makes, numbered among the

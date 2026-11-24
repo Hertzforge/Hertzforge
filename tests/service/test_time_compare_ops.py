@@ -195,3 +195,70 @@ def test_the_bar_offers_no_stage_or_component_for_a_comparison(project):
     offers = _offers(project, [name], PREFS)
     assert offers['flat'] is False
     assert _offers(project, ['Test'], PREFS)['flat'] is True
+
+
+def _files():
+    t = np.arange(500) / 500.0
+    made = hertzforge.Project()
+    names = []
+    for side, gain in (('Test', 1.0), ('Model', -2.0)):
+        for k, dof in enumerate(['1X+', '2X+', '3X+']):
+            name = f'{side} {dof}'
+            made.add(name, TimeHistory(t, [gain * np.sin(2 * np.pi * (5 + k) * t)],
+                                       response_dof=[dof], ordinate_dim=['acceleration']))
+            names.append(name)
+    made.object_groups.append({'members': names[:3], 'role': None, 'name': 'test.unv'})
+    made.object_groups.append({'members': names[3:], 'role': None, 'name': 'model.unv'})
+    return made, names
+
+
+def _trac_row(project, objects, records=None):
+    rows = action_table(project, objects, records or {})['columns'][0]['rows']
+    return next(row for row in rows if row['id'] == 'project.compare_time_histories')
+
+
+def test_every_history_of_two_groups_picked_offers_trac_with_each_group_a_set():
+    project, names = _files()
+    row = _trac_row(project, names)
+    assert row['ready']
+    assert row['fill'] == {'first': 'Test 1X+', 'second': 'Model 1X+',
+                           'first_more': 'Test 2X+\nTest 3X+',
+                           'second_more': 'Model 2X+\nModel 3X+',
+                           'first_records': '', 'second_records': ''}
+    assert set(row['omit']) == set(row['fill'])
+    plot, table, reading = run(project, 'project.compare_time_histories', **row['fill'])
+    assert plot['title'].endswith('test.unv solid and model.unv dashed')
+    assert [cells[1] for cells in table['rows']] == ['1X+', '2X+', '3X+']
+    assert reading['title'] == 'Preview: test.unv against model.unv'
+
+
+def test_swap_makes_the_second_group_the_test():
+    project, names = _files()
+    fill = _trac_row(project, names)['fill']
+    _plot, before, _reading = run(project, 'project.compare_time_histories', **fill)
+    plot, table, _reading = run(project, 'project.compare_time_histories', **fill, swap=True)
+    assert plot['title'].endswith('model.unv solid and test.unv dashed')
+    # TRAC, the correlation's square, is the same either way; sTRAC and the RMS ratio are not
+    assert [row[3] for row in table['rows']] == [row[3] for row in before['rows']]
+    assert (before['rows'][0][4], table['rows'][0][4]) == ('-0.500', '-2.000')
+    assert (before['rows'][0][6], table['rows'][0][6]) == ('2.000', '0.500')
+    run(project, 'project.compare_time_histories', **fill, swap=True, keep=True)
+    saved = project['Time Response Comparison']
+    assert saved.pairs[0] == ['Model 1X+', 0, 'Test 1X+', 0]
+    views, _notes = show._alone(project, 'Time Response Comparison', [])
+    assert views[2]['title'] == 'Time Response Comparison: model.unv against test.unv'
+
+
+def test_part_of_a_group_or_records_picked_under_one_turn_the_row_off_with_the_reason():
+    project, names = _files()
+    assert _trac_row(project, names[:4])['reason'] == ('Model 2X+ of model.unv is not picked: '
+                                                      'pick every history of the two groups')
+    assert _trac_row(project, names, {'Test 1X+': [0]})['reason'] == ('Pick whole histories to '
+                                                                     'compare two groups')
+
+
+def test_two_histories_picked_leave_the_more_fields_off_the_form():
+    project, _names = _files()
+    row = _trac_row(project, ['Test 1X+', 'Model 1X+'])
+    assert {'first_more', 'second_more'} <= set(row['omit'])
+    assert (row['fill']['first_more'], row['fill']['second_more']) == ('', '')

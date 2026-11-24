@@ -3919,6 +3919,66 @@ class Project(dict):
                             recipe=('rescale', {'factor': float(factor),
                                                 'records': kept}))
 
+    def time_history_sets(self, *names: Any) -> tuple[list[str], list[str]]:
+        """Time histories picked together, split into the two sets a time
+        comparison compares: the histories of one object group against
+        those of another, in the order of the groups' first members in
+        the project, or two histories one against the other.
+
+        An imported file's histories share a group named for the file, so
+        the histories of two files picked together are two sets.
+
+        Parameters
+        ----------
+        *names : str or object
+            The histories picked: two, or every history of two groups.
+
+        Returns
+        -------
+        (list of str, list of str)
+            The first set's names and the second's, each in project order.
+
+        Raises
+        ------
+        ValueError
+            When fewer than two are given, one is not a time history, or
+            more than two are given and they are not every one of two
+            groups' histories.
+        """
+        picked = list(dict.fromkeys(self.name_of(each) for each in names))
+        others = [name for name in picked if not isinstance(self[name], TimeHistory)]
+        if others:
+            raise ValueError(f'{others[0]} is not a time history')
+        if len(picked) < 2:
+            raise ValueError('pick two time histories, or the histories of two groups')
+        if len(picked) == 2:
+            return [picked[0]], [picked[1]]
+        groups: dict[int, list[str]] = {}
+        for name in picked:
+            group = self._group(name)
+            if group is None:
+                raise ValueError(f'{name} is in no group: pick two time histories, or every '
+                                 f'history of two groups')
+            groups.setdefault(id(group), []).append(name)
+        if len(groups) != 2:
+            where = 'all in one group' if len(groups) == 1 else f'in {len(groups)} groups'
+            raise ValueError(f'the histories picked are {where}: pick every history of two '
+                             f'groups, the test\'s and the model\'s')
+        order = list(self)
+        sets = []
+        for members in groups.values():
+            group = self._group(members[0])
+            held = [name for name in group['members']
+                    if name in self and isinstance(self[name], TimeHistory)]
+            missing = [name for name in held if name not in members]
+            if missing:
+                label = group.get('name') or members[0]
+                raise ValueError(f'{missing[0]} of {label} is not picked: pick every history '
+                                 f'of the two groups')
+            sets.append(sorted(members, key=order.index))
+        sets.sort(key=lambda each: order.index(each[0]))
+        return sets[0], sets[1]
+
     def compare_time_histories(self, *sources: Any,
                                pairs: Sequence[Sequence[Any]] | None = None,
                                records: Mapping[str, Sequence[int]] | None = None,
