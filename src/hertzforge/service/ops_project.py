@@ -157,6 +157,36 @@ def _derived(project: Any, call: Any) -> list[dict]:
     return [view]
 
 
+#: the time histories after the first a filter or a rescale runs on, one name a line, with the
+#: records picked under each, a line apiece: filled from the tree when several are picked and
+#: left off the form, blank for one
+MORE = Param('more', 'More time histories', 'string', default='')
+MORE_RECORDS = Param('more_records', 'Records of the more', 'string', default='')
+
+
+def more_histories(params: dict[str, Any]) -> list[str]:
+    """The histories named in `more`, one a line."""
+    return [line.strip() for line in params.get('more', '').splitlines() if line.strip()]
+
+
+def derived_set(project: Any, call: Any) -> list[dict]:
+    """Run a verb that adds a copy of each of several histories into a group of their own,
+    refusing in the core's words, and draw the first copy as a waterfall with a reading of
+    the group and every copy in it."""
+    try:
+        added = call()
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    view = waterfall_view(added[0], project[added[0]])
+    view.pop('quantities', None)
+    view.pop('quantity', None)
+    group = project.object_group_of(added[0]) or []
+    named = next((g.get('name') for g in project.object_groups if g['members'] == group), '')
+    rows = [v.row(name, f'from {project.provenance[name]["source"]}', None, 'info')
+            for name in added]
+    return [view, v.reading(f'{len(added)} added to {named}', rows)]
+
+
 def compute_psds(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.compute_psds`: PSDs from a time history's averages, added
     to the project (`Project.compute_psds`)."""
@@ -960,7 +990,10 @@ def rescale(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.rescale`). Without `keep`, the picked records drawn as
     recorded and rescaled, the rescaled dashed in each one's colour, and
     the factor, how many records it applies to and the largest value
-    before and after; with it, `<name> Rescaled` added."""
+    before and after; with it, `<name> Rescaled` added. With several
+    histories picked (`more`) the first is previewed, and Apply adds a
+    rescaled copy of each into a group of their own
+    (`Project.rescale_histories`)."""
     from hertzforge.core.rescale import sensitivity_factor
     from hertzforge.decimate import peak_decimate
 
@@ -968,9 +1001,14 @@ def rescale(project: Any, params: dict[str, Any]) -> list[dict]:
     history = project[name]
     text = params['records'].strip()
     records = parse_picks(text, history.num_records, 'record') if text else None
+    more = more_histories(params)
     try:
         factor = (sensitivity_factor(params['recorded'], params['correct'])
                   if params['by'] == 'sensitivities' else float(params['factor']))
+        if params['keep'] and more:
+            picks = _more_picks(project, name, records, more, params.get('more_records', ''))
+            return derived_set(project, lambda: project.rescale_histories(
+                name, *more, factor=factor, records=picks or None))
         if params['keep']:
             return _derived(project, lambda: project.rescale(name, factor, records=records))
         made = history.rescale(factor, records)
@@ -997,9 +1035,25 @@ def rescale(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Records', f'{len(picked)} of {history.num_records}', None, 'info'),
             v.row('Largest, as recorded', before, unit, 'info'),
             v.row('Largest, rescaled', after, unit, 'info')]
+    if more:
+        rows.append(v.row('Histories', f'{name} and {len(more)} more, each rescaled by Apply',
+                          None, 'info'))
     return [v.spectrum(title, v.axis('Time', 's', 'linear'), v.axis('Amplitude', unit, 'linear'),
                        lines, link='time'),
             v.reading(f'Rescale of {name}', rows)]
+
+
+def _more_picks(project: Any, first: str, records: list[int] | None, more: list[str],
+                text: str) -> dict[str, list[int]]:
+    """The records picked under each history of a batch, by name, those with none left out:
+    the first's from `records`, the others' from `more_records`, a line apiece."""
+    lines = text.split('\n') if text else []
+    picks = {first: records} if records is not None else {}
+    for i, name in enumerate(more):
+        line = lines[i].strip() if i < len(lines) else ''
+        if line and name in project:
+            picks[name] = parse_picks(line, project[name].num_records, 'record')
+    return picks
 
 
 VERB_OPERATIONS = (
@@ -1024,9 +1078,11 @@ VERB_OPERATIONS = (
         id='project.rescale', title='Rescale', workspace='signals',
         summary='The picked records of a time history, or all of them, times a factor, typed '
                 '(negative flips the sign) or the sensitivity recorded with over the correct '
-                'one, previewed as recorded and rescaled. The channel table is not changed.',
+                'one, previewed as recorded and rescaled. The channel table is not changed. '
+                'With several histories picked, the first is previewed and each is rescaled '
+                'into a group of their own.',
         params=(_source('rescale'), RESCALE_BY, RESCALE_FACTOR, RECORDED, CORRECT, RECORDS,
-                RESCALE_KEEP),
+                MORE, MORE_RECORDS, RESCALE_KEEP),
         outputs=('spectrum', 'reading', 'waterfall'), run=rescale, commits='keep'),
     Operation(
         id='project.compute_spectra', title='Compute Spectra', workspace='signals',

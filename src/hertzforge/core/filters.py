@@ -260,16 +260,23 @@ def filtered(data: TimeHistory, filtering: Filtering) -> TimeHistory:
     the waveform, not the quantity, and the drive force belongs at the
     same bandwidth as the responses it drove. The averaging and shock
     windows are carried over (`carrying_marks`). A record with uneven
-    sampling, or an edge at or above Nyquist, is refused.
+    sampling, an edge at or above Nyquist, or a sample that is not a
+    finite number is refused: the filter runs forward and back over the
+    whole channel, so one NaN would make every sample of it NaN.
     """
 
     from .data import TimeHistory
 
     rate = data.sample_rate       # raises on uneven sampling, correctly
     sos = design(filtering, rate)
+    rows = np.real(data.ordinate)
+    bad = np.flatnonzero(~np.isfinite(rows).all(axis=-1))
+    if len(bad):
+        raise ValueError(f'record {bad[0] + 1} ({data.record_label(int(bad[0]))}) has a sample '
+                         f'that is not a number, which the filter would spread over the '
+                         f'whole channel')
     result = TimeHistory(
-        data.abscissa, threaded_sosfiltfilt(sos, np.real(data.ordinate)),
-        **data.record_fields())
+        data.abscissa, threaded_sosfiltfilt(sos, rows), **data.record_fields())
     return carrying_marks(data, result)
 
 

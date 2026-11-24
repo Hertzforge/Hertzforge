@@ -15,6 +15,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .ops_project import MORE, derived_set, more_histories
 from .protocol import refused
 from .waterfalls import axes
 
@@ -364,7 +365,9 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
     low edge and a band-pass both. The settings are stored on the history
     either way. Without `keep` the picked record is drawn as recorded and
     as the filter would leave it; with it the filtered history is added
-    (`Project.filter_data`), every channel at zero phase."""
+    (`Project.filter_data`), every channel at zero phase. With several
+    histories picked (`more`) the first is previewed, and Apply filters each
+    the same way into a group of their own (`Project.filter_histories`)."""
     from hertzforge.core.filters import Filtering
 
     name, kind = params['source'], params['kind']
@@ -384,6 +387,10 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     history.filtering = filtering
     project.record_setting(name, 'filtering', filtering)
+    more = more_histories(params)
+    if params.get('keep') and more:
+        return derived_set(project, lambda: project.filter_histories(name, *more,
+                                                                     filtering=filtering))
     if params.get('keep'):
         from .ops_project import _derived
 
@@ -395,10 +402,13 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
 
     preview = sosfiltfilt(design(filtering, _rate(history)),
                           np.real(np.asarray(history.ordinate[record])))
+    rows = [v.row('Filter', history.filtering.describe(), None, 'info'),
+            v.row('Order', float(history.filtering.order), '', 'info')]
+    if more:
+        rows.append(v.row('Histories', f'{name} and {len(more)} more, each filtered by Apply',
+                          None, 'info'))
     return [_trace(history, name, record, [], filtered=preview),
-            v.reading(f'Filter of {name}', [
-        v.row('Filter', history.filtering.describe(), None, 'info'),
-        v.row('Order', float(history.filtering.order), '', 'info')])]
+            v.reading(f'Filter of {name}', rows)]
 
 
 def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -454,8 +464,10 @@ OPERATIONS = (
     Operation(
         id='project.set_filter', title='Filter', workspace='signals', everywhere=True,
         summary='A time history filtered to a pass band at zero phase: Preview draws a '
-                'record as the filter would leave it, and Apply adds the filtered history.',
-        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN, FILTER_KEEP),
+                'record as the filter would leave it, and Apply adds the filtered history. '
+                'With several histories picked, the first is previewed and each is filtered '
+                'into a group of their own.',
+        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN, MORE, FILTER_KEEP),
         outputs=('spectrum', 'reading', 'waterfall'), run=set_filter, edits=True,
         commits='keep'),
     Operation(

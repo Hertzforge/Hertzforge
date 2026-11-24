@@ -40,9 +40,10 @@ def test_the_descriptors_validate_and_open_on_settings(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
         assert op.edits
-        # a drag's span is where the pointer let go, not a setting to open on
+        # a drag's span is where the pointer let go, not a setting to open on; `more` is the
+        # other histories picked beside the source, which is not a setting either
         assert all('setting' in p.to_json() for p in op.params
-                   if p.name not in ('source', 'record', 'keep')
+                   if p.name not in ('source', 'record', 'keep', 'more')
                    and not (op.id == 'project.drag_averaging'
                             and p.name in ('start', 'stop', 'was_stop')))
 
