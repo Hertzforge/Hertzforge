@@ -28,7 +28,16 @@ Datasets read:
   `ordinate_unit` is given, and keeps the quantity's name as a hint.
   Records are grouped by function type into one data object per type,
   and records of one type with different abscissas go into separate
-  objects. Other function types are skipped.
+  objects. Other function types are skipped. Time histories whose ID
+  line says 'Response Time Trace' or 'Reference Time Trace' are one
+  measurement's two channels, exported as two records that both carry
+  the measurement's DOF as their response and the reference DOF in the
+  reference field. Each such pair becomes a time history of its own,
+  keyed 'time - <response> - ref <reference>', whose two records are the
+  response channel at the response DOF and the reference channel at the
+  reference DOF, with those roles stated (`TimeHistory.roles`). A
+  labeled trace with no partner, or with no reference DOF, refuses the
+  file with the trace named.
 - 58b, the binary form of 58: the same eleven ASCII header records,
   followed by the values as raw floats. Read in either byte order at
   single or double precision. Only IEEE 754 floats are read; DEC VMS
@@ -640,6 +649,7 @@ def _parse_58(records, functions, payload=None):
         'lexp': lexp,
         'fexp': fexp,
         'comment': records[0].strip() if records else '',
+        'number': len(functions) + 1,
     })
 
 
@@ -652,6 +662,8 @@ def _build_data_objects(functions, factors, ordinate_unit, path,
     import unit-less unless `ordinate_unit` was declared.
     """
     out = {}
+    pairs = _trace_pairs(functions)
+    functions = [f for f in functions if not _is_trace(f)]
     for code, name in _58_NAMES.items():
         typed = [f for f in functions if f['function_type'] == code]
         if not typed:
@@ -675,7 +687,104 @@ def _build_data_objects(functions, factors, ordinate_unit, path,
         for which, entries in enumerate(grouped):
             _build_one(out, name if which == 0 else f'{name} ({which + 1})',
                        code, entries, factors, ordinate_unit, temperature)
+    for response, reference in pairs:
+        key = f"time - {response['response']} - ref {response['reference']}"
+        if key in out:
+            index = 2
+            while f'{key} ({index})' in out:
+                index += 1
+            key = f'{key} ({index})'
+        # the reference trace's own channel is at the reference DOF; the
+        # response DOF its header repeats is the measurement's, not its own
+        records = [{**response, 'reference': ''},
+                   {**reference, 'response': reference['reference'], 'reference': ''}]
+        _build_one(out, key, 1, records, factors, ordinate_unit, temperature)
+        data = out[key]
+        data.roles = {(data.response_dof[0], data.ordinate_dim[0]): 'response',
+                      (data.response_dof[1], data.ordinate_dim[1]): 'reference'}
     return out
+
+
+#: the ID lines that mark a time history as one side of a measurement's pair
+RESPONSE_TRACE = 'Response Time Trace'
+REFERENCE_TRACE = 'Reference Time Trace'
+TRACE_LABELS = (RESPONSE_TRACE, REFERENCE_TRACE)
+
+
+def _is_trace(entry: dict) -> bool:
+    return entry['function_type'] == 1 and entry['comment'] in TRACE_LABELS
+
+
+def _trace_pairs(functions: list[dict]) -> list[tuple[dict, dict]]:
+    """The labeled time traces paired, (response, reference) in the order
+    the responses come in the file. A response is paired with the first
+    reference trace after or before it that names the same response and
+    reference DOFs, so a measurement exported twice gives two pairs. A
+    trace with no reference DOF, a trace left without a partner, or a
+    pair whose two traces are sampled differently is refused by the
+    trace's place among the file's function records."""
+    traces = [f for f in functions if _is_trace(f)]
+    for entry in traces:
+        if not entry['reference']:
+            raise ValueError(f"{_trace_said(entry)} names no reference DOF, so the "
+                             'measurement it belongs to cannot be told')
+    waiting: dict[tuple[str, str], list[dict]] = {}
+    for entry in traces:
+        if entry['comment'] == REFERENCE_TRACE:
+            waiting.setdefault((entry['response'], entry['reference']), []).append(entry)
+    pairs = []
+    for entry in traces:
+        if entry['comment'] != RESPONSE_TRACE:
+            continue
+        partners = waiting.get((entry['response'], entry['reference']))
+        if not partners:
+            raise ValueError(f'{_trace_said(entry)} has no {REFERENCE_TRACE} for '
+                             f"{entry['response']} against {entry['reference']}")
+        partner = partners.pop(0)
+        if (len(partner['abscissa']) != len(entry['abscissa'])
+                or not np.allclose(partner['abscissa'], entry['abscissa'])):
+            raise ValueError(f'{_trace_said(entry)} and {_trace_said(partner)} are '
+                             'sampled at different times, so they are not one measurement')
+        pairs.append((entry, partner))
+    left = [entry for partners in waiting.values() for entry in partners]
+    if left:
+        entry = min(left, key=lambda e: e['number'])
+        raise ValueError(f'{_trace_said(entry)} has no {RESPONSE_TRACE} for '
+                         f"{entry['response']} against {entry['reference']}")
+    return pairs
+
+
+def _trace_said(entry: dict) -> str:
+    """A labeled trace as a refusal names it: its ID line, the DOF its
+    header gives and its place among the file's function records."""
+    return (f"the {entry['comment']} at {entry['response']} "
+            f"(function record {entry['number']})")
+
+
+def trace_pair_references(path: str | os.PathLike) -> list[str]:
+    """The reference DOFs a file's labeled time-trace pairs name, in the
+    order they first come, or [] for a file with none.
+
+    Some exporters write a channel number in the reference node field of
+    these traces rather than the node the reference was measured at.
+    `load` takes `reference_node` to put it right, and these are what to
+    show beside the question. Only the header records are read.
+    """
+    from ..core.data import dof_string
+
+    with open(path, 'rb') as f:
+        text = f.read()
+    found: dict[str, None] = {}
+    for number, records, _payload in iter_datasets(text):
+        if number != 58 or len(records) < 6 or records[0].strip() not in TRACE_LABELS:
+            continue
+        dof_line = records[5]
+        if _int_slice(dof_line, 0, 5) != 1:
+            continue
+        node = _int_slice(dof_line, 66, 76)
+        if node:
+            found[dof_string(node, _int_slice(dof_line, 76, 80))] = None
+    return list(found)
 
 
 def _build_one(out, name, code, entries, factors, ordinate_unit,
@@ -746,7 +855,8 @@ def _build_one(out, name, code, entries, factors, ordinate_unit,
 
 
 def load(path: str | os.PathLike, length_unit: str | None = None,
-         ordinate_unit: str | None = None) -> Any:
+         ordinate_unit: str | None = None,
+         reference_node: int | None = None) -> Any:
     """Read the supported datasets of a universal file (see the module
     docstring).
 
@@ -754,8 +864,14 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
     'shapes' and the function names when it holds several. With a dataset
     164 the values are converted to SI by its factors; without one,
     `length_unit` declares the unit of the positions and `ordinate_unit`
-    that of the functions, and without those they import unit-less. Raises
-    ValueError when no supported dataset is found.
+    that of the functions, and without those they import unit-less.
+    `reference_node` is the node the reference of every labeled time-trace
+    pair was measured at, for a file whose exporter wrote a channel number
+    in its place; each trace keeps the direction its header gives, and
+    without it the file's node stands (`trace_pair_references` lists what
+    the file names). Raises ValueError when no supported dataset is found,
+    for a `reference_node` that is not a positive whole number, and for a
+    labeled trace that cannot be paired.
     """
     from ..units import si_factor
 
@@ -789,6 +905,8 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
         elif number == 2420:
             _parse_2420(records, systems)
 
+    if reference_node is not None:
+        _move_trace_references(functions, reference_node, path)
     out = _build_data_objects(functions, factors, ordinate_unit, path,
                               temperature)
     if mode_shapes:
@@ -808,6 +926,33 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
                          + _what_was_skipped(functions, unread))
 
     return next(iter(out.values())) if len(out) == 1 else out
+
+
+def _move_trace_references(functions: list[dict], node: Any, path: Any) -> None:
+    """Every labeled trace's reference DOF moved to `node`, its direction
+    kept. Refused for a file with no labeled traces, where it would do
+    nothing, and for one whose traces name references at several nodes,
+    which one node would merge into one."""
+    from ..core.data import parse_dof
+
+    if (isinstance(node, bool) or not isinstance(node, (int, np.integer))
+            or node <= 0):
+        raise ValueError(f'reference_node is the node the reference was measured at, '
+                         f'a positive whole number, not {node!r}')
+    name = os.path.basename(str(path))
+    named = list(dict.fromkeys(parse_dof(entry['reference'])[0] for entry in functions
+                               if _is_trace(entry) and entry['reference']))
+    if not named:
+        raise ValueError(f'{name} has no labeled time-trace pairs, so a reference_node '
+                         'has no reference to move')
+    if len(named) > 1:
+        raise ValueError(f"{name}'s time-trace pairs name references at nodes "
+                         f"{', '.join(str(n) for n in named)}, and one reference_node "
+                         'would make them one')
+    for entry in functions:
+        if _is_trace(entry) and entry['reference']:
+            _old, direction = parse_dof(entry['reference'])
+            entry['reference'] = f'{int(node)}{direction}'
 
 
 def _what_was_skipped(functions, unread):

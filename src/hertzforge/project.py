@@ -182,6 +182,17 @@ def holds(objects: Mapping[str, Any]) -> str:
     return '; '.join(parts)
 
 
+def _imported_name(key: str, obj: Any) -> str:
+    """The name an object a reader returned under `key` takes: what it is,
+    the way the tree shows it ('frf' and 'Modal_frf' both read 'FRF'),
+    and, for a key that says which one it is after a ' - ' (a UNV file's
+    trace pair, 'time - 730Z- - ref 1013Z+'), that part kept, so a file's
+    measurements are told apart by name rather than by a count."""
+    kind = display_name(type(obj).__name__)
+    _, dash, which = key.partition(' - ')
+    return f'{kind} - {which}' if dash and which else kind
+
+
 def holds_of_names(project: Mapping[str, Any], names: Sequence[str]) -> str:
     """`holds` for the objects of `project` called `names`; refuses an
     empty selection, since an index entry has to say what it holds."""
@@ -900,8 +911,8 @@ class Project(dict):
         if isinstance(result, dict):
             # a reader's keys are for code; the name is what the object
             # *is*, and the key stays available on the result
-            added = [self.add(display_name(type(obj).__name__), obj)
-                     for obj in result.values()]
+            added = [self.add(_imported_name(key, obj), obj)
+                     for key, obj in result.items()]
             # a controller's run arrives as a channel table beside the
             # data it describes: one file, so one group (Brandon,
             # 2026-09-06 — linked, and otherwise two independent
@@ -910,8 +921,12 @@ class Project(dict):
             # named for the file, so several files imported alike can be
             # told apart in the tree; a received copy's name is the
             # original's
-            if len(added) > 1 and any(isinstance(obj, ChannelTable)
-                                      for obj in result.values()):
+            # A file of several measurements, each its own time history
+            # (a UNV file's trace pairs), is one set of them too: the group
+            # is what a time comparison takes the file's histories by
+            histories = sum(isinstance(obj, TimeHistory) for obj in result.values())
+            if len(added) > 1 and (histories > 1 or any(
+                    isinstance(obj, ChannelTable) for obj in result.values())):
                 self.link(*added, name=os.path.basename(str(path)))
         else:
             added = [self.add(display_name(type(result).__name__), result)]

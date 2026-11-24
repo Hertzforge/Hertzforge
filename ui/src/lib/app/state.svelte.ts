@@ -55,6 +55,8 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	ProjectProgress,
 	UnitsTables,
 	ProjectSummary,
+	ImportAnswer,
+	ImportQuestion,
 	ReportEditor,
 	ReportPageData,
 	RunState,
@@ -1732,6 +1734,9 @@ export class ProjectState {
 	namingGroup = $state<string | null>(null);
 	/** The path a browser is asking for in the top bar, and what it is for. */
 	asking = $state<'open' | 'import' | 'save' | null>(null);
+	/** What an import asks before it reads a file (`project.import`'s `ask`), and the file it is about; the project panel shows it. */
+	question = $state.raw<{ ask: ImportQuestion; file: string } | null>(null);
+	private answered: ((value: number | null) => void) | null = null;
 	/** The analysis service said it shows no file dialogs (`files.choose`): the top bar asks for a path. */
 	private noDialogs = false;
 	/** The last record clicked in each object's grid, where a Shift extension starts. */
@@ -1869,7 +1874,8 @@ export class ProjectState {
 			this.progress = null;
 			return false;
 		}
-		return this.call(`${doing} ${file.name}`, method, { upload });
+		const what = `${doing} ${file.name}`;
+		return method === 'project.import' ? this.imported(what, file.name, { upload }) : this.call(what, method, { upload });
 	}
 
 	/** Import each path into the open project, a project file's objects among them. */
@@ -1917,7 +1923,41 @@ export class ProjectState {
 	}
 
 	importFile(path: string, units?: Record<string, string>): Promise<boolean> {
-		return this.call(`Importing ${baseName(path)}`, 'project.import', units ? { path, units } : { path });
+		return this.imported(`Importing ${baseName(path)}`, baseName(path), units ? { path, units } : { path });
+	}
+
+	/**
+	 * `project.import`, answering what it asks first: the question is shown, and the import sent again
+	 * with the number typed. Cancelled, the file is skipped and true is returned, so the files after it
+	 * still come in; false only for a refusal, which is shown.
+	 */
+	private async imported(doing: string, file: string, params: Record<string, unknown>): Promise<boolean> {
+		let res = await this.send<ImportAnswer>(doing, 'project.import', params);
+		while (res?.ask) {
+			const answer = await this.ask(res.ask, file);
+			if (answer === null) return true;
+			params = { ...params, [res.ask.param]: answer };
+			res = await this.send<ImportAnswer>(doing, 'project.import', params);
+		}
+		return res !== null;
+	}
+
+	/** Show an import's question in the project panel; the number given, or null when cancelled. */
+	private ask(ask: ImportQuestion, file: string): Promise<number | null> {
+		this.answered?.(null);
+		if (!STUDIES.has(this.app.workspace)) this.app.workspace = ANALYSIS;
+		// the path typed has been taken; its box would cover the question
+		this.asking = null;
+		this.question = { ask, file };
+		return new Promise((resolve) => (this.answered = resolve));
+	}
+
+	/** The import's question answered: the number typed, or null for Cancel. */
+	answer(value: number | null): void {
+		const resolve = this.answered;
+		this.answered = null;
+		this.question = null;
+		resolve?.(value);
 	}
 
 	save(path?: string): Promise<boolean> {
@@ -2330,21 +2370,26 @@ export class ProjectState {
 	}
 
 	private async call(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<boolean> {
+		return (await this.send(doing, method, params, show)) !== null;
+	}
+
+	/** `call`, with the answer: null when it was refused, the refusal shown. */
+	private async send<T extends { project: ProjectSummary }>(doing: string, method: string, params: Record<string, unknown>, show = true): Promise<T | null> {
 		this.busy = doing;
 		this.progress = null;
 		this.error = null;
 		try {
-			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
+			const res = await this.app.analysis.request<T>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
 				// any other workspace goes to the analysis
 				if (!STUDIES.has(this.app.workspace)) this.app.workspace = ANALYSIS;
 				this.app.analyze.selectProject();
 			}
-			return true;
+			return res;
 		} catch (err) {
 			this.error = message(err);
-			return false;
+			return null;
 		} finally {
 			this.busy = null;
 			this.progress = null;

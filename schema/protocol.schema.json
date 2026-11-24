@@ -860,7 +860,8 @@
       "type": "object", "required": ["path"], "additionalProperties": false,
       "properties": {
         "path": {"type": "string", "minLength": 1},
-        "units": {"type": "object", "additionalProperties": {"type": "string"}}
+        "units": {"type": "object", "additionalProperties": {"type": "string"}},
+        "reference_node": {"type": "integer", "minimum": 1}
       }
     },
     "projectSaveParams": {
@@ -1074,7 +1075,19 @@
       "type": "object", "required": ["added", "project"],
       "properties": {
         "added": {"type": "array", "items": {"type": "string"}},
-        "project": {"$ref": "#/$defs/project"}
+        "project": {"$ref": "#/$defs/project"},
+        "ask": {
+          "type": "object", "required": ["param", "title", "question", "label", "value", "answer"],
+          "additionalProperties": false,
+          "properties": {
+            "param": {"type": "string", "enum": ["reference_node"]},
+            "title": {"type": "string"},
+            "question": {"type": "string"},
+            "label": {"type": "string"},
+            "value": {"type": "integer", "minimum": 1},
+            "answer": {"type": "string"}
+          }
+        }
       }
     },
     "projectDragOutParams": {

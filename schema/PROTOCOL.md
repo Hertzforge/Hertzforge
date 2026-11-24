@@ -652,7 +652,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `op.run` | `{"op","params":{...},"preview"?,"span"?}` | `{"views":[view...],"project"}` |
 | `project.new` | `{"title"?}` | `{"project"}` |
 | `project.open` | `{"path"}` or `{"upload"}` | `{"project"}` |
-| `project.import` | `{"path"}` or `{"upload"}`, `"units"?` | `{"added":[name...],"project"}` |
+| `project.import` | `{"path"}` or `{"upload"}`, `"units"?`, `"reference_node"?` | `{"added":[name...],"project","ask"?}` |
 | `project.upload` | `{"name","size","offset","data","upload"?}`, `data` a u8 array | `{"upload","received"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
 | `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
@@ -1050,7 +1050,16 @@ import of an upload not all received.
 
 `project.import` adds a file's
 objects to the project, a run folder's as its converted file's. `units` declares what the file does not state, as the core's `import_file` options
-(`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
+(`length_unit`, `ordinate_unit` and the rest). A file can raise a question the import asks before
+it reads the file: the answer then adds nothing (`added` empty) and carries `ask`, with the
+`question` to show under its `title`, the `label` of the one whole number it asks for, the `value`
+that leaves the file as it is, and the word (`answer`) for the button that imports. The client
+shows it and sends the import again with the number typed as the param `param` names; cancelled,
+the file is not imported. A UNV file whose labeled time-trace pairs name their reference at one
+node asks for that node (`reference_node`), since some exporters write a channel number there;
+each trace keeps its direction. A file with no such pairs, or with pairs at several reference
+nodes, asks nothing, and `reference_node` on a file that is not a UNV file is refused.
+`project.save` writes to `path`, or to the file the
 project came from; a `.vdyn` is opened but never written. `project.drag_out` writes the whole project (`"project": true`) or the objects `names` to files in a new temporary folder, for the desktop shell to drag out of the window, and answers their paths: the project as one `.hforge` named for its title, each object as a `.hforge` object named for itself. It is a copy: the project's `file` and `modified` are unchanged. `project.new` replaces the project with an
 empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.

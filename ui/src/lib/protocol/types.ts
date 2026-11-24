@@ -740,6 +740,28 @@ export interface ProjectSummary {
 	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
 }
 
+/**
+ * What `project.import` asks before it reads a file (`ask` on its answer, nothing added): the shell
+ * shows `question` under `title` with one whole-number field labeled `label`, filled with `value`
+ * (what leaves the file as it is), and sends the import again with the number as `param`.
+ */
+export interface ImportQuestion {
+	param: 'reference_node';
+	title: string;
+	question: string;
+	label: string;
+	value: number;
+	/** The word on the button that imports with the answer. */
+	answer: string;
+}
+
+/** `project.import`'s answer: the objects added, or the question asked first. */
+export interface ImportAnswer {
+	added: string[];
+	project: ProjectSummary;
+	ask?: ImportQuestion;
+}
+
 /** `project.actions`: the action table for a selection. */
 export interface Actions {
 	table: ActionTable;
