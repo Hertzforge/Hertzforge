@@ -88,5 +88,7 @@ def test_a_time_history_offers_it_with_its_picked_records(project):
     rows = {row['id']: row for column in action_table(project, ['Run'], {'Run': [0, 1]})['columns']
             for row in column['rows']}
     assert rows['project.rescale']['ready']
-    assert rows['project.rescale']['fill'] == {'source': 'Run', 'records': '1-2'}
+    assert rows['project.rescale']['fill'] == {'source': 'Run', 'records': '1-2', 'more': '',
+                                               'more_records': ''}
+    assert {'records', 'more', 'more_records'} <= set(rows['project.rescale']['omit'])
     assert 'rescale' in projects.verbs_of(project, 'Run')

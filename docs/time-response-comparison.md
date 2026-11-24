@@ -39,6 +39,23 @@ is interpolated without an anti-alias filter, so filter it first (Filter, then A
 it holds content above the coarser clock's Nyquist frequency. A model whose response lags the
 test's by a few milliseconds scores low, and the overlay shows the lag.
 
+## Filtering or rescaling both sets first
+
+Filter and Rescale take several time histories picked together. The form previews the first one,
+and Apply makes a filtered or rescaled copy of each with the same settings. Every history is
+checked before any copy is added, so if one cannot be filtered (an edge above its Nyquist
+frequency, a sample that is not a number) or rescaled, nothing is added and the message names the
+history. The sources keep their values. The filter is stored on each source as its own setting,
+and each copy refreshes from its own source. Rescale takes the records picked under each history,
+or all of them when none are picked; Filter always takes every record.
+
+The copies go into a new group of their own, named after the sources' group: the histories of
+`test.unv` filtered go into `test.unv Filtered`. Histories that share no named group go into
+`Filtered 1`, or `Rescaled 1`, and the next free number after that. So to filter a test file and a
+model file the same way and compare them, pick the test file's histories and apply Filter, do the
+same for the model file's with the same settings, then pick every history of the two new groups
+and use TRAC Overlay.
+
 ## In the app
 
 Pick the test's time history, then TRAC Overlay in the column beside the model's. A test and a
@@ -73,7 +90,18 @@ for row in scores(project[name]):
 ```
 
 `project.time_history_sets(*names)` splits histories picked together into the two sets, by
-their groups, as the action table does.
+their groups, as the action table does. `project.filter_histories(*names, filtering=...)` and
+`project.rescale_histories(*names, factor=..., records=...)` do what Filter and Rescale do with
+several histories picked, and return the copies' names:
+
+```python
+from hertzforge.core.filters import Filtering
+
+low_pass = Filtering(order=4, high=500.0)
+tests = project.filter_histories(*project.object_group_of('Test 1X+'), filtering=low_pass)
+models = project.filter_histories(*project.object_group_of('Model 1X+'), filtering=low_pass)
+name = project.compare_time_histories(*tests, *models)
+```
 
 `compare_time_histories` takes the sources with the test's first, `pairs=` as a list of
 `[first name, record, second name, record]` for pairs made by hand (they may join two DOFs, never

@@ -654,6 +654,28 @@ def _sets_row(project: Any, op: Operation, names: list[str],
     return _op_row(op, fill=fill, omit=list(fill))
 
 
+#: operations on one time history that also take several picked together: the first is
+#: previewed, and Apply makes a copy of each with the same settings, into a group of their own
+#: (`Project.filter_histories`, `Project.rescale_histories`)
+SEVERAL_HISTORIES = frozenset({'project.set_filter', 'project.rescale'})
+
+
+def _several_row(op: Operation, names: list[str], kinds: list[str],
+                 records: dict[str, list[int]]) -> dict[str, Any] | None:
+    """The row of an operation in `SEVERAL_HISTORIES` for several objects picked: the first
+    history its source and the rest in `more`, the records picked under each in `records`
+    and `more_records` where it reads them; no row unless every object is a time history."""
+    if any(kind != 'time_history' for kind in kinds):
+        return None
+    fill = {'source': names[0], 'more': '\n'.join(names[1:])}
+    params = {p.name for p in op.params}
+    if 'more_records' in params:
+        fill['records'] = _runs(records.get(names[0], []))
+        fill['more_records'] = '\n'.join(_runs(records.get(name, [])) for name in names[1:])
+    # the preview draws the first history's first record, as it does for one picked whole
+    return _op_row(op, fill=fill, omit=[*fill, *({'record'} & params)])
+
+
 def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
              part: dict[str, Any] | None) -> dict[str, Any]:
     from .ops_files import export_formats
@@ -684,6 +706,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         fill = _fill(op, chosen)
         if fill is None and op.id in SETS_OF_HISTORIES and len(chosen) > 2:
             rows.append(_sets_row(project, op, names, records))
+            continue
+        if fill is None and op.id in SEVERAL_HISTORIES and len(chosen) > 1:
+            several = _several_row(op, names, kinds, records)
+            if several is not None:
+                rows.append(several)
             continue
         if fill is None:
             if _kinds_fit(op, kinds):
@@ -726,6 +753,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 unasked.append(param.name)
             elif op.id in SETS_OF_HISTORIES and param.name in ('first_more', 'second_more'):
                 # two histories picked: no set has more than its one
+                fill[param.name] = ''
+                unasked.append(param.name)
+            elif op.id in SEVERAL_HISTORIES and param.name in ('more', 'more_records'):
+                # one history picked: there are no more
                 fill[param.name] = ''
                 unasked.append(param.name)
             elif param.name in PICKED_ONE and param.type == 'integer':

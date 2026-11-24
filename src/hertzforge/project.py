@@ -3894,30 +3894,189 @@ class Project(dict):
         TypeError
             When the source is not a time history.
         """
-        from .core.rescale import chosen_records, sensitivity_factor
+        from .core.rescale import chosen_records
 
         # Brandon, 2026-11-12: data recorded with the wrong sensitivity
         # had no way to be corrected. A verb rather than a rescale on
         # editing the table's sensitivity, which can mean "recorded with
         # this" or "the next test uses this", and only the first should
         # touch the data.
-        pair = (recorded_sensitivity, correct_sensitivity)
-        if not ((factor is not None and pair == (None, None))
-                or (factor is None and None not in pair)):
-            raise ValueError('give a factor or two sensitivities, the one '
-                             'recorded with and the correct one')
-        if factor is None:
-            factor = sensitivity_factor(float(recorded_sensitivity),
-                                        float(correct_sensitivity))
+        factor = _rescale_factor(factor, recorded_sensitivity, correct_sensitivity)
         source = self.name_of(source)
         history = self[source]
         if not isinstance(history, TimeHistory):
             raise TypeError(f'{source!r} is not a time history')
-        made = history.rescale(float(factor), records)
+        made = history.rescale(factor, records)
         kept = None if records is None else chosen_records(history, records)
         return self._derive(source, made, f'{source} Rescaled',
-                            recipe=('rescale', {'factor': float(factor),
-                                                'records': kept}))
+                            recipe=('rescale', {'factor': factor, 'records': kept}))
+
+    def filter_histories(self, *sources: Any, filtering: Any = None) -> list[str]:
+        """Filter several time histories the same way (Apply Filter with
+        several picked), each copy added as `filter_data` adds one, and
+        the copies put in an object group of their own.
+
+        Every history is filtered before any copy is added, so one that
+        cannot be filtered (an edge above its Nyquist frequency, a sample
+        that is not a number) adds nothing, and names the history. The
+        sources' values are left as they were; the filter is stored on
+        each as its `filtering`, which is what its copy refreshes from.
+
+        The group is named for the sources' group with " Filtered" added
+        (an imported file's histories share a group named for the file),
+        or "Filtered" and a number when they share no named group. A
+        filtered test set and a filtered model set are then two groups,
+        which `time_history_sets` splits for a time comparison.
+
+        Parameters
+        ----------
+        *sources : str or object
+            Two or more time histories. Every record of each is filtered.
+        filtering : Filtering, optional
+            The filter, as `TimeHistory.filtering` holds it. The first
+            history's own when omitted, or the suggested low-pass when it
+            has none.
+
+        Returns
+        -------
+        list of str
+            The copies' names, in the order of the sources.
+
+        Raises
+        ------
+        ValueError
+            When fewer than two histories are given, one is not a time
+            history, or one cannot be filtered.
+        """
+        names = self._batch_sources(sources)
+        if filtering is None:
+            first = self[names[0]]
+            filtering = first.filtering or first.suggest_filtering()
+        made = []
+        for name in names:
+            try:
+                made.append(self[name].filter(filtering))
+            except ValueError as error:
+                raise ValueError(f'{name}: {error}') from None
+        for name in names:
+            self[name].filtering = filtering
+        return self._add_batch(names, made, 'Filtered',
+                               [('filter_data', {}) for _ in names])
+
+    def rescale_histories(self, *sources: Any, factor: float | None = None,
+                          recorded_sensitivity: float | None = None,
+                          correct_sensitivity: float | None = None,
+                          records: Mapping[str, Sequence[int]] | None = None) -> list[str]:
+        """Rescale several time histories by one factor (Apply in Rescale
+        with several picked), each copy added as `rescale` adds one, and
+        the copies put in an object group of their own.
+
+        Every history is rescaled before any copy is added, so one that
+        cannot be (a record it does not have) adds nothing, and names the
+        history. The sources are left as they were. The group is named as
+        `filter_histories` names its own, with " Rescaled".
+
+        Parameters
+        ----------
+        *sources : str or object
+            Two or more time histories.
+        factor : float, optional
+            What the records are multiplied by; negative flips their sign.
+        recorded_sensitivity, correct_sensitivity : float, optional
+            The sensitivity the data was recorded with and the correct
+            one, given together in place of `factor`.
+        records : mapping of str to sequence of int, optional
+            The records of each history to rescale, by name, counting
+            from zero, such as the ones picked in the tree. A history not
+            named, or every history when omitted, has all its records
+            rescaled.
+
+        Returns
+        -------
+        list of str
+            The copies' names, in the order of the sources.
+
+        Raises
+        ------
+        ValueError
+            When fewer than two histories are given, one is not a time
+            history, records are given for a history not among them, or
+            the factor or a record is refused as `rescale` refuses it.
+        """
+        from .core.rescale import chosen_records
+
+        factor = _rescale_factor(factor, recorded_sensitivity, correct_sensitivity)
+        names = self._batch_sources(sources)
+        picks = {self.name_of(name): list(each) for name, each in (records or {}).items()}
+        strays = [name for name in picks if name not in names]
+        if strays:
+            raise ValueError(f'records are given for {strays[0]}, which is not being rescaled')
+        made, recipes = [], []
+        for name in names:
+            history, chosen = self[name], picks.get(name)
+            try:
+                made.append(history.rescale(factor, chosen))
+                kept = None if chosen is None else chosen_records(history, chosen)
+            except ValueError as error:
+                raise ValueError(f'{name}: {error}') from None
+            recipes.append(('rescale', {'factor': factor, 'records': kept}))
+        return self._add_batch(names, made, 'Rescaled', recipes)
+
+    def _batch_sources(self, sources: Sequence[Any]) -> list[str]:
+        """The names of the histories a batch runs on, each once, refused
+        unless there are two or more and every one is a time history."""
+        names = list(dict.fromkeys(self.name_of(each) for each in sources))
+        if len(names) < 2:
+            raise ValueError('pick two or more time histories; one is filtered or rescaled '
+                             'on its own')
+        others = [name for name in names if not isinstance(self[name], TimeHistory)]
+        if others:
+            raise ValueError(f'{others[0]} is not a time history')
+        return names
+
+    def _add_batch(self, names: list[str], made: list[Any], word: str,
+                   recipes: list[tuple[str, dict[str, Any]]]) -> list[str]:
+        """Each copy added under `<source> <word>` with its own recipe,
+        so it refreshes from its own source, and the copies linked into a
+        new group rather than their sources' (`_batch_group_name`)."""
+        group = self._batch_group_name(names, word)
+        added = [self._derive(name, obj, f'{name} {word}', recipe=recipe, link=False)
+                 for name, obj, recipe in zip(names, made, recipes, strict=True)]
+        self.link(*added, name=group)
+        return added
+
+    def _batch_group_name(self, sources: Sequence[Any], word: str) -> str:
+        """The name of the group a batch's copies go into: the sources'
+        group's name and `word` ("run_3.unv Filtered") when they all share
+        one named group, otherwise `word` and the first number no group
+        has taken ("Filtered 1"). A name already taken gets a numbered
+        suffix, as an object's does ("run_3.unv Filtered (2)").
+
+        Parameters
+        ----------
+        sources : sequence of str or object
+            The histories the batch runs on.
+        word : str
+            What the batch did, "Filtered" or "Rescaled".
+
+        Returns
+        -------
+        str
+        """
+        groups = [self._group(self.name_of(each)) for each in sources]
+        shared = groups[0] if groups and all(g is groups[0] for g in groups) else None
+        taken = {group.get('name') for group in self.object_groups}
+        if shared and shared.get('name'):
+            stem, number = f"{shared['name']} {word}", 1
+            unique = stem
+            while unique in taken:
+                number += 1
+                unique = f'{stem} ({number})'
+            return unique
+        number = 1
+        while f'{word} {number}' in taken:
+            number += 1
+        return f'{word} {number}'
 
     def time_history_sets(self, *names: Any) -> tuple[list[str], list[str]]:
         """Time histories picked together, split into the two sets a time
@@ -11439,7 +11598,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'reprocess_modal_test',
     'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'rescale',
-    'integrate',
+    'filter_histories', 'rescale_histories', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
     'element_shapes', 'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
@@ -11512,6 +11671,21 @@ def _extract_again(project, source, params):
 #: how each verb rebuilds its object from the source, for `refresh` —
 #: the same core calls the verbs make, minus the add
 #: what a refresh carries from the object it replaces to the one it makes:
+def _rescale_factor(factor: float | None, recorded: float | None,
+                    correct: float | None) -> float:
+    """The factor a rescale multiplies by: given outright, or the
+    sensitivity recorded with over the correct one, never both."""
+    from .core.rescale import sensitivity_factor
+
+    if not ((factor is not None and (recorded, correct) == (None, None))
+            or (factor is None and None not in (recorded, correct))):
+        raise ValueError('give a factor or two sensitivities, the one '
+                         'recorded with and the correct one')
+    if factor is None:
+        return sensitivity_factor(float(recorded), float(correct))
+    return float(factor)
+
+
 #: settings made on the object itself, which its recipe does not hold
 _HELD_ON_REFRESH = ('scale_db', 'run_identity')
 

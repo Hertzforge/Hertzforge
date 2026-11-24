@@ -94,6 +94,15 @@ def test_a_corner_at_or_above_nyquist_is_refused():
         filtered(_history([_sine(50.0)]), Filtering(high=RATE / 2))
 
 
+@pytest.mark.parametrize('bad', [np.nan, np.inf])
+def test_a_sample_that_is_not_a_number_is_refused_with_its_channel_named(bad):
+    rows = np.vstack([_sine(50.0), _sine(60.0)])
+    rows[1, 100] = bad
+    with pytest.raises(ValueError, match=r'^record 2 \(102Z\+\) has a sample that is not a '
+                                         r'number'):
+        filtered(_history(rows), Filtering(high=400.0))
+
+
 def test_the_settings_validate_at_entry():
     with pytest.raises(ValueError, match='the high edge must be above zero'):
         Filtering(high=0.0)
