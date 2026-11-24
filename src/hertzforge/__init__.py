@@ -61,7 +61,7 @@ from .units import (
     si_factor,
 )
 
-__version__ = "0.1.25"
+__version__ = "0.1.26"
 
 __all__ = [
     'ASK',
