@@ -16,7 +16,9 @@ file also holds two `scan/` groups, measured points as they were stored
 for a few days in November 2026; nothing writes that group now, so this
 script cannot write that file again. From schema 6 it also holds measured
 points (a geometry of type 203 elements) and an element shape set: a
-free brick's two lowest elastic modes read as strain and stress. The run
+free brick's two lowest elastic modes read as strain and stress. From
+schema 7 it also holds a time comparison of two small sets of time
+responses, with its pairs and scoring window. The run
 log extract is
 taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
@@ -56,6 +58,7 @@ from hertzforge.io.native import (
     SCHEMA_VERSION,
     SUFFIX,
     TEST_SETUP_SCHEMA,
+    TIME_COMPARISON_SCHEMA,
 )
 
 #: the smallest legal PNG: 1x1, opaque. The corpus needs image *bytes*
@@ -199,7 +202,27 @@ def build_project() -> hertzforge.Project:
         add_test_setups(project)
     if SCHEMA_VERSION >= ELEMENT_SHAPES_SCHEMA:
         add_element_shapes(project)
+    if SCHEMA_VERSION >= TIME_COMPARISON_SCHEMA:
+        add_time_comparison(project)
     return project
+
+
+def add_time_comparison(project: hertzforge.Project) -> None:
+    """Schema 7 is the time comparison. A test of two accelerations and
+    a force at 1 kHz, a model of the two accelerations at 2 kHz, half the
+    size and one of them reversed, paired by DOF on the test's clock and
+    scored over a window that is not the whole clock."""
+    t = np.arange(500) / 1000.0
+    fine = np.arange(1000) / 2000.0
+    project.add('Test Responses', TimeHistory(
+        t, [np.sin(2 * np.pi * 20 * t), np.cos(2 * np.pi * 35 * t), np.sin(2 * np.pi * 5 * t)],
+        response_dof=['1X+', '2Y+', '1X+'],
+        ordinate_dim=['acceleration', 'acceleration', 'force']))
+    project.add('Model Responses', TimeHistory(
+        fine, [0.5 * np.sin(2 * np.pi * 20 * fine), -0.5 * np.cos(2 * np.pi * 35 * fine)],
+        response_dof=['1X+', '2Y+'], ordinate_dim=['acceleration', 'acceleration']))
+    name = project.compare_time_histories('Test Responses', 'Model Responses')
+    project.set_time_comparison_window(name, 0.1, 0.4)
 
 
 def add_element_shapes(project: hertzforge.Project) -> None:

@@ -26,7 +26,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     # `channel_table_view` are drawn another way by `show`, and stay for the palette and scripts
     'plot', 'waterfall', 'view_geometry', 'mode_shapes', 'mac', 'dof_arrows', 'spec_spectra',
     'psd_overlay', 'srs_spectra', 'replication_waveforms', 'table', 'channel_table_view',
-    'shape_values',
+    'shape_values', 'time_comparison',
     # typed into a table
     'set_entity', 'set_entity_cell', 'set_channel_cell', 'set_sensor', 'set_scan_set', 'describe_mode',
     # dragged on the plot
@@ -59,6 +59,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'signal_to_noise': 'SNR', 'rms_signal_to_noise': 'RMS SNR', 'signature': 'Signature',
     'matrix_comparison': 'Matrix', 'srs_error': 'SRS Error', 'srs_points': 'Points Rule',
     'waveform_error': 'Waveform Error', 'replication_segments': 'Segments',
+    'compare_time_histories': 'TRAC Overlay', 'set_time_comparison_window': 'Scoring Window',
     'save_as': 'Export', 'rattlesnake_preview': 'Preview Run',
     'import_rattlesnake_part': 'Import Part', 'truncate_rattlesnake_file': 'Trim Run',
     'text_preview': 'Preview Text', 'import_text': 'Import Text', 'generate_signal': 'Generate',
@@ -138,6 +139,9 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'compute_multiple_coherence': ('sysid', 'random'),
     'conditioning': ('sysid', 'modal'),
     'wavelet': ('shock', 'transient'),
+    'compare_time_histories': ('signals', 'shock', 'transient', 'modal'),
+    'time_comparison': ('signals', 'shock', 'transient', 'modal'),
+    'set_time_comparison_window': ('signals', 'shock', 'transient', 'modal'),
     'rattlesnake_preview': ('signals',),
     'import_rattlesnake_part': ('signals',),
     'truncate_rattlesnake_file': ('signals',),

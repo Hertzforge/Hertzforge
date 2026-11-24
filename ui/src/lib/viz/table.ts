@@ -182,3 +182,12 @@ export function removedIds(known: readonly (readonly string[] | undefined)[], co
 		}
 	return ids;
 }
+
+/**
+ * Whether a table's cells are picked by pressing on them: an editable table's, and a read-only one's
+ * that says what a row picked does (`select`, a time comparison's scores), when its pane is given the
+ * handler for each.
+ */
+export function pickable(view: Pick<TableView, 'edit' | 'select'>, canEdit: boolean, canPickRows: boolean): boolean {
+	return (canEdit && !!view.edit) || (canPickRows && !!view.select);
+}

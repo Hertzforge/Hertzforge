@@ -957,3 +957,22 @@ describe('the quantity a picked object draws', () => {
 		expect(make().a.prefs.quantity).toBeNull();
 	});
 });
+
+describe('a row picked in a table the selection shows', () => {
+	it('runs its select and puts the views answered beside the table, the table kept', async () => {
+		const made = make();
+		const plot = (title: string) => ({ view: 'spectrum', title, x: {}, y: {}, series: [] });
+		const table = { view: 'table', title: 'scores', columns: ['Station'], rows: [['1'], ['2']], select: { op: 'project.time_comparison', params: { comparison: 'C' }, param: 'station', column: 0 } };
+		const sent: unknown[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: unknown) => {
+			sent.push([method, params]);
+			return { views: [plot('station 2'), { ...table, rows: [['other']] }, { view: 'reading', title: 'summary 2', rows: [] }] };
+		});
+		made.a.shown = { title: 'C', note: '', views: [plot('station 1'), table, { view: 'reading', title: 'summary 1', rows: [] }] } as never;
+		await made.a.pickShownRow(table.select, '2');
+		expect(sent).toEqual([['op.run', { op: 'project.time_comparison', params: { comparison: 'C', station: 2 } }]]);
+		const views = (made.a.shown as unknown as { views: { title: string; rows?: unknown }[] }).views;
+		expect(views.map((v) => v.title)).toEqual(['station 2', 'scores', 'summary 2']);
+		expect(views[1].rows).toEqual([['1'], ['2']]);
+	});
+});

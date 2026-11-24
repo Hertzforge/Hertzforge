@@ -489,6 +489,12 @@ def _alone(project: Any, name: str, picks: list[int],
         return _sine(project, name, None, {name: picks}, {**PREFS, **(prefs or {})})
     if isinstance(obj, SineLevelSet):
         return _sine(project, None, name, {name: picks}, {**PREFS, **(prefs or {})})
+    from hertzforge.core.data import TimeComparison
+
+    if isinstance(obj, TimeComparison):
+        # its scores, and the stations picked under it in the tree drawn over each other
+        return _run(project, 'project.time_comparison', comparison=name,
+                    records=_runs(sorted(set(picks))) if picks else ''), []
     if _is_data(obj):
         prefs = {**PREFS, **(prefs or {})}
         component = prefs['component']
@@ -1527,9 +1533,12 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
     """Which of the bar's choices the selection can take: the stage or the
     flat plot for a data object, a component for complex frequency data.
     A frequency axis is made linear or log on the plot itself."""
+    from hertzforge.core.data import TimeComparison
     from hertzforge.core.shapes import ShapeSet
 
-    data = [project[name] for name in objects if _is_data(project[name])]
+    # a time comparison draws its scores and overlay whatever the bar says
+    data = [project[name] for name in objects if _is_data(project[name])
+            and not isinstance(project[name], TimeComparison)]
     sets = [name for name in objects if isinstance(project[name], ShapeSet)]
     homes = [project.geometry_for(name) for name in sets]
     apart = (len(sets) == 2 and all(home is not None for home in homes)

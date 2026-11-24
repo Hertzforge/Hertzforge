@@ -362,3 +362,27 @@ def test_schema6_holds_an_element_shape_set_and_measured_points():
     np.testing.assert_allclose(read.frequency, [85382.26462276, 135195.50996603], rtol=1e-9)
     np.testing.assert_allclose(read.strain_energy(), (2 * np.pi * read.frequency) ** 2 / 2,
                                rtol=1e-9)
+
+
+def test_schema7_holds_a_time_comparison():
+    """The schema 7 file is the schema 6 project plus a time comparison:
+    a model half the test's size, one station reversed, scored over 0.1
+    to 0.4 s on the test's 1 kHz clock."""
+    from hertzforge.core.data import TimeComparison
+    from hertzforge.core.time_compare import scores
+
+    held = native.load(os.path.join(CORPUS, 'schema7.hforge'))
+    older = native.load(os.path.join(CORPUS, 'schema6.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema7.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.TIME_COMPARISON_SCHEMA
+    assert list(held)[:len(older)] == list(older)
+    read = held['Time Response Comparison']
+    assert isinstance(read, TimeComparison)
+    assert read.pairs == [['Test Responses', 0, 'Model Responses', 0],
+                          ['Test Responses', 1, 'Model Responses', 1]]
+    assert read.sources == ['Test Responses', 'Model Responses']
+    assert (read.start, read.stop) == (0.1, 0.4)
+    assert len(read.abscissa) == 500
+    first, second = scores(read)
+    assert first['strac'] == pytest.approx(2.0) and second['strac'] == pytest.approx(-2.0)
+    assert first['samples'] == 301

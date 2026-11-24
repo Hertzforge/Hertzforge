@@ -5424,6 +5424,51 @@ class TransientSpecification(TimeHistory):
         return ShockSpecification
 
 
+class TimeComparison(DataArray):
+    """Two sets of time responses put on one clock, station by station,
+    to be scored against each other (`core.time_compare`).
+
+    The records come in pairs: record 2k is pair k's first trace (the
+    test, by convention) and record 2k + 1 its second (the model), both
+    on the shared clock `core.time_compare.compare` chose. `pairs` says
+    where each came from, as [first name, record, second name, record];
+    `sources` names the time histories compared; `start` and `stop` are
+    the scoring window, in seconds, inside the clock.
+
+    It is not a `TimeHistory`, on purpose. A time history's records at
+    one DOF and quantity are repeats of one channel, and its spectra
+    average them; here the two records at a DOF are two different
+    signals, and averaging a test with its model would give a number
+    that means nothing. The comparison is read by its scores.
+    """
+
+    function_type = 1
+    abscissa_dim = 'time'
+    complex_ordinate = False
+
+    def __init__(self, abscissa: ArrayLike, ordinate: ArrayLike,
+                 response_dof: str | Sequence[str], *,
+                 pairs: Sequence[Sequence[Any]],
+                 sources: Sequence[str],
+                 start: float, stop: float, **kwargs: Any) -> None:
+        super().__init__(abscissa, ordinate, response_dof, **kwargs)
+        self.pairs: list[list[Any]] = [
+            [str(a), int(i), str(b), int(j)] for a, i, b, j in pairs]
+        if 2 * len(self.pairs) != self.num_records:
+            raise ValueError(f'{len(self.pairs)} pairs need '
+                             f'{2 * len(self.pairs)} records, not '
+                             f'{self.num_records}')
+        self.sources: list[str] = [str(name) for name in sources]
+        self.start: float = float(start)
+        self.stop: float = float(stop)
+
+    def rename_source(self, old: str, new: str) -> None:
+        """Follow a source that was renamed, in `sources` and `pairs`."""
+        self.sources = [new if name == old else name for name in self.sources]
+        self.pairs = [[new if a == old else a, i, new if b == old else b, j]
+                      for a, i, b, j in self.pairs]
+
+
 DATA_CLASSES = {cls.function_type: cls
                 for cls in (TimeHistory, Spectrum, Frf, Psd, Srs,
                             Coherence, MultipleCoherence)}
@@ -5436,7 +5481,7 @@ NAMED_CLASSES = {cls.__name__: cls
                  for cls in (TimeHistory, Spectrum, Frf, Psd, Srs,
                              Coherence, MultipleCoherence,
                              Specification, ShockSpecification,
-                             TransientSpecification)}
+                             TransientSpecification, TimeComparison)}
 
 
 def class_for_function_type(code: int) -> type[DataArray]:

@@ -1072,6 +1072,22 @@ class AnalyzeState {
 		}
 	}
 
+	/** A row picked in a table the selection shows (a time comparison's scores): its `select` runs, and the views answered that are not tables take the places of the ones beside the table. */
+	async pickShownRow(select: NonNullable<TableView['select']>, id: string): Promise<void> {
+		const was = this.shown;
+		if (!was) return;
+		const number = Number(id);
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (this.shown !== was) return;
+			const others = res.views.filter((v) => v.view !== 'table');
+			let k = 0;
+			this.shown = { ...was, views: was.views.map((v) => (v.view === 'table' ? v : (others[k++] ?? v))) };
+		} catch (err) {
+			this.runError = message(err);
+		}
+	}
+
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {

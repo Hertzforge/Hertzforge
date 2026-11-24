@@ -70,10 +70,11 @@ STAMP = 'hertzforge_schema'
 #: another file; schema 3 adds the run record; schema 4 adds the test
 #: setup; schema 5 adds measured points: elements of a geometry
 #: (`MEASURED_POINT`), and for a few days a `scan/` group, which is
-#: still read (as a geometry) and no longer written. The schema grows by addition, and a file is stamped
+#: still read (as a geometry) and no longer written; schema 6 adds the
+#: element shape set; schema 7 adds the time comparison. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: the stamp of a file with no object held by reference
 BASE_SCHEMA = 1
@@ -100,6 +101,13 @@ MEASURED_POINT_SCHEMA = 5
 #: the stamp of a file holding an element shape set
 #: (`core.element_shapes`), strain and stress per mode element by element
 ELEMENT_SHAPES_SCHEMA = 6
+
+#: the stamp of a file holding a time comparison (`core.time_compare`),
+#: two sets of time responses paired on one clock. Its records are saved
+#: as any data object's, under a kind of its own, so a build that reads
+#: only up to schema 6 refuses it by name rather than opening it as a time
+#: history and losing its pairs
+TIME_COMPARISON_SCHEMA = 7
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -647,6 +655,14 @@ def _save_data_fields(data: DataArray, group: h5py.Group) -> None:
     # the concrete class: a Specification shares the PSD function type, so
     # the code alone cannot say which to rebuild
     group.attrs['data_class'] = type(data).__name__
+    # a time comparison's pairs, sources and scoring window: JSON, since a
+    # pair is two names and two record numbers
+    if getattr(data, 'pairs', None) is not None:
+        import json
+
+        group.attrs['time_comparison'] = json.dumps({
+            'pairs': data.pairs, 'sources': data.sources,
+            'start': data.start, 'stop': data.stop})
     # what an SRS was worked out at. Two numbers that change what the
     # curve means, so they travel with it rather than being assumed
     if getattr(data, 'q', None) is not None:
@@ -866,6 +882,17 @@ def load_data(group: h5py.Group) -> DataArray:
             limits['floor'] = group['sine_floor'][()]
         if 'sine_below_floor' in group:
             limits['below_floor'] = group['sine_below_floor'][()].astype(bool)
+    if 'time_comparison' in group.attrs:
+        import json
+
+        from ..core.data import TimeComparison
+
+        # a .vdyn wrote its comparison as a time history with the pairs beside it,
+        # in the same JSON: it opens as the comparison it is
+        cls = TimeComparison
+        stored = group.attrs['time_comparison']
+        limits.update(json.loads(stored.decode('utf-8') if isinstance(stored, bytes)
+                                 else stored))
     data = cls(
         **limits,
         abscissa=_read_array(group['abscissa']),
@@ -1579,7 +1606,7 @@ def load_scan(group: h5py.Group) -> Geometry:
 
 def _savers():
     from ..core.channel_table import ChannelTable
-    from ..core.data import DataArray
+    from ..core.data import DataArray, TimeComparison
     from ..core.element_shapes import ElementShapeSet
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
@@ -1599,6 +1626,7 @@ def _savers():
             (SineSweepSpecification, 'sine_specification',
              save_sine_specification),
             (SineLevelSet, 'sine_levels', save_sine_levels),
+            (TimeComparison, 'time_comparison', save_data),
             (DataArray, 'data', save_data),
             (ShapeSet, 'shapes', save_shapes),
             (ElementShapeSet, 'element_shapes', save_element_shapes),
@@ -1614,6 +1642,7 @@ _LOADERS = {'geometry': load_geometry,
             'sine_specification': load_sine_specification,
             'sine_levels': load_sine_levels,
             'data': load_data,
+            'time_comparison': load_data,
             'shapes': load_shapes,
             'element_shapes': load_element_shapes,
             'report': load_report,
@@ -1663,6 +1692,7 @@ def schema_for(kinds: Iterable[str], references: bool = False,
     Returns
     -------
     int
+        `TIME_COMPARISON_SCHEMA` when any is a time comparison, otherwise
         `ELEMENT_SHAPES_SCHEMA` when any is an element shape set,
         otherwise `MEASURED_POINT_SCHEMA` when a geometry holds measured points,
         otherwise `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
@@ -1671,6 +1701,8 @@ def schema_for(kinds: Iterable[str], references: bool = False,
         `BASE_SCHEMA`.
     """
     kinds = set(kinds)
+    if 'time_comparison' in kinds:
+        return TIME_COMPARISON_SCHEMA
     if 'element_shapes' in kinds:
         return ELEMENT_SHAPES_SCHEMA
     if measured_points:
