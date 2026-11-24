@@ -7,6 +7,11 @@ with its TRAC, sTRAC, correlation and RMS ratio, the picked station's two
 traces drawn over each other with the window marked, and a summary. A
 row picked in the table draws that station.
 
+The two sets are two time histories, or every history of two object groups
+picked together (`Project.time_history_sets`), as when each channel of a
+file is a history of its own and each file's histories are a group. Swap
+makes the second set the test.
+
 Save adds the comparison to the project (`Project.compare_time_histories`).
 A saved comparison picked in the tree draws the same reading, the stations
 picked under it overlaid, and Scoring Window keeps a new window on it,
@@ -43,6 +48,11 @@ WINDOW_STOP = Param('stop', 'TRAC end', 'number', default=0.0, unit='s', step=0.
 #: the station drawn, from 1: set by picking its row in the score table
 STATION = Param('station', 'Station', 'integer', default=1, min=1, step=1, in_view=True)
 KEEP = Param('keep', 'Save the comparison (else the preview)', 'boolean', default=False)
+#: the rest of each set when the histories of two groups are compared, one name a line: filled
+#: from the tree (`Project.time_history_sets`) and left off the form
+FIRST_MORE = Param('first_more', 'More test histories', 'string', default='')
+SECOND_MORE = Param('second_more', 'More model histories', 'string', default='')
+SWAP = Param('swap', 'Swap test and model', 'boolean', default=False)
 STATIONS = Param('records', 'Records (blank: all)', 'string', default='')
 
 #: the stations a saved comparison overlays at once when several are picked
@@ -66,19 +76,40 @@ def _trace(name: str, x: np.ndarray, y: np.ndarray, follows: int | None = None) 
     return v.series(name, 'measured', *peak_decimate(x, y, TRACE_POINTS), follows=follows)
 
 
-def comparison_views(title: str, data: Any, stations: list[int], *,
+def side_label(project: Any, names: list[str]) -> str:
+    """What one side of a comparison is called: its one history's name,
+    or the name of the group its histories share (an imported file's), or
+    how many histories it is."""
+    if len(names) == 1:
+        return names[0]
+    groups = [next((g for g in project.object_groups if name in g['members']), None)
+              for name in names]
+    if groups[0] is not None and all(g is groups[0] for g in groups):
+        return str(groups[0].get('name') or groups[0].get('role') or f'{len(names)} histories')
+    return f'{len(names)} histories'
+
+
+def labels_of(project: Any, data: Any) -> tuple[str, str]:
+    """The two sides of a comparison as `side_label` names them, from its pairs."""
+    firsts = list(dict.fromkeys(a for a, _i, _b, _j in data.pairs))
+    seconds = list(dict.fromkeys(b for _a, _i, b, _j in data.pairs))
+    return side_label(project, firsts), side_label(project, seconds)
+
+
+def comparison_views(title: str, data: Any, stations: list[int], labels: tuple[str, str], *,
                      select: dict[str, Any] | None = None,
                      drag: dict[str, Any] | None = None) -> list[dict]:
     """The reading of a comparison, saved or not: the picked stations'
     traces overlaid with the scoring window marked, the score table, and
-    the summary. `select` is what picking a table row runs, `drag` what
-    dragging the window's edges runs."""
+    the summary. `labels` name the test's side and the model's,
+    `select` is what picking a table row runs, `drag` what dragging the
+    window's edges runs."""
     from hertzforge.core.time_compare import scores
 
     rows = scores(data)
     count = len(rows)
     stations = [k for k in stations if 0 <= k < count] or [0]
-    first, second = data.sources[0], data.sources[-1]
+    first, second = labels
     lines: list[dict] = []
     for k in stations[:DRAWN]:
         a, _i, b, _j = data.pairs[k]
@@ -125,18 +156,32 @@ def comparison_views(title: str, data: Any, stations: list[int], *,
     return [plot, table, v.reading(f'{title}: {first} against {second}', summary)]
 
 
-def _sets(project: Any, params: dict[str, Any]) -> tuple[dict[str, Any], dict[str, list[int]]]:
-    """The two time histories by name, and the records picked under each."""
-    first, second = params['first'], params['second']
-    if first == second:
+def _names(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _sets(project: Any, params: dict[str, Any]
+          ) -> tuple[dict[str, Any], dict[str, list[int]], tuple[str, str]]:
+    """The time histories compared by name, the test's set first, the
+    records picked under each, and the two sides' labels. Two histories,
+    or the histories of two groups (`first_more` and `second_more`), are
+    exchanged when `swap` says so."""
+    tests = [params['first'], *_names(params.get('first_more', ''))]
+    models = [params['second'], *_names(params.get('second_more', ''))]
+    if set(tests) & set(models):
         raise refused('pick two time histories, the test and the model')
+    missing = [name for name in tests + models if name not in project]
+    if missing:
+        raise refused(f'the project has no object named {missing[0]!r}')
     records = {}
-    for key in ('first', 'second'):
-        name = params[key]
-        picked = picked_records(project, name, params.get(f'{key}_records', ''))
+    for key, names in (('first', tests), ('second', models)):
+        picked = picked_records(project, names[0], params.get(f'{key}_records', ''))
         if picked is not None:
-            records[name] = picked
-    return {first: project[first], second: project[second]}, records
+            records[names[0]] = picked
+    if params.get('swap'):
+        tests, models = models, tests
+    histories = {name: project[name] for name in tests + models}
+    return histories, records, (side_label(project, tests), side_label(project, models))
 
 
 def compare_time_histories(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -146,7 +191,7 @@ def compare_time_histories(project: Any, params: dict[str, Any]) -> list[dict]:
     and its reading drawn."""
     from hertzforge.core.time_compare import compare
 
-    histories, records = _sets(project, params)
+    histories, records, labels = _sets(project, params)
     window = {} if params['whole'] else {'start': params['start'], 'stop': params['stop']}
     if params['keep']:
         try:
@@ -162,7 +207,7 @@ def compare_time_histories(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     select = {'op': 'project.compare_time_histories',
               'params': {key: value for key, value in params.items() if key != 'station'}}
-    return comparison_views('Preview', made, [params['station'] - 1], select=select)
+    return comparison_views('Preview', made, [params['station'] - 1], labels, select=select)
 
 
 def time_comparison(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -181,7 +226,7 @@ def time_comparison(project: Any, params: dict[str, Any]) -> list[dict]:
                 else [params['station'] - 1])
     try:
         return comparison_views(
-            name, data, stations,
+            name, data, stations, labels_of(project, data),
             select={'op': 'project.time_comparison', 'params': {'comparison': name}},
             drag=v.dragging('project.set_time_comparison_window',
                             {'source': name, 'station': stations[0] + 1}, 'start', 'stop'))
@@ -207,9 +252,10 @@ OPERATIONS = (
         id='project.compare_time_histories', title='TRAC / Overlay', workspace='transient',
         summary='A test\'s time responses against a model\'s, station by station: each pair '
                 'on one clock, drawn over each other and scored by TRAC, sTRAC, correlation '
-                'and RMS ratio over a window. Save adds the comparison.',
-        params=(TEST, MODEL, picks_param('first'), picks_param('second'), WHOLE, START, STOP,
-                STATION, KEEP),
+                'and RMS ratio over a window. Two histories, or every history of two groups '
+                '(an imported file\'s each). Save adds the comparison.',
+        params=(TEST, MODEL, picks_param('first'), picks_param('second'), FIRST_MORE,
+                SECOND_MORE, SWAP, WHOLE, START, STOP, STATION, KEEP),
         outputs=('spectrum', 'table', 'reading'), run=compare_time_histories, commits='keep',
         opens_previewed=True),
     Operation(

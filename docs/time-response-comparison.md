@@ -41,7 +41,12 @@ test's by a few milliseconds scores low, and the overlay shows the lag.
 
 ## In the app
 
-Pick the test's time history, then TRAC Overlay in the column beside the model's. The form opens
+Pick the test's time history, then TRAC Overlay in the column beside the model's. A test and a
+model exported one channel to a history, as some programs write a Universal file, are compared by
+their groups: an imported file's histories share a group named for the file, so pick every history
+of the two files together and TRAC Overlay pairs them across both sets. The group listed first in
+the tree is the test; Swap test and model makes the other one the test, which changes sTRAC and the
+RMS ratio and leaves TRAC alone. The form opens
 on its preview: the score table, one row a station with its TRAC, sTRAC, correlation and RMS
 ratio; the first station's two traces, the test solid and the model dashed, with the scoring
 window marked; and the summary. Pick a row in the table to draw that station. Turn off Score the
@@ -66,6 +71,9 @@ project.set_time_comparison_window(name, 0.2, 0.6)
 for row in scores(project[name]):
     print(row['dof'], row['trac'], row['strac'], row['reason'])
 ```
+
+`project.time_history_sets(*names)` splits histories picked together into the two sets, by
+their groups, as the action table does.
 
 `compare_time_histories` takes the sources with the test's first, `pairs=` as a list of
 `[first name, record, second name, record]` for pairs made by hand (they may join two DOFs, never

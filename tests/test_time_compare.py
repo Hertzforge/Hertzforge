@@ -433,3 +433,60 @@ def test_a_comparison_written_as_a_time_history_with_its_pairs_opens_as_a_compar
     assert isinstance(opened, TimeComparison)
     assert (opened.start, opened.stop) == (0.1, 0.8)
     assert scores(opened)[1]['strac'] == pytest.approx(2.0)
+
+
+# ---- two groups picked together -----------------------------------------------
+
+def _files():
+    """Two imported files' histories, one record each at three DOFs, each
+    file's histories in a group named for it, and a geometry in the test's
+    group."""
+    from hertzforge.core.geometry import Geometry
+
+    t = np.arange(500) / 500.0
+    project = Project()
+    tests, models = [], []
+    for side, gain, held in (('Test', 1.0, tests), ('Model', -2.0, models)):
+        for k, dof in enumerate(['1X+', '2X+', '3X+']):
+            name = f'{side} {dof}'
+            project.add(name, _history(t, [gain * np.sin(2 * np.pi * (5 + k) * t)], [dof],
+                                       ['acceleration']))
+            held.append(name)
+    project.add('Rig', Geometry(node_id=[1], node_xyz=[[0.0, 0.0, 0.0]]))
+    project.object_groups.append({'members': [*tests, 'Rig'], 'role': None, 'name': 'test.unv'})
+    project.object_groups.append({'members': models, 'role': None, 'name': 'model.unv'})
+    return project, tests, models
+
+
+def test_the_histories_of_two_groups_are_two_sets_in_project_order():
+    project, tests, models = _files()
+    # the model's picked first, each set backward: the sets still come in project order
+    assert project.time_history_sets(*reversed(models), *reversed(tests)) == (tests, models)
+    assert project.time_history_sets('Model 1X+', 'Test 2X+') == (['Model 1X+'], ['Test 2X+'])
+
+
+@pytest.mark.parametrize(('picked', 'message'), [
+    (['Test 1X+'], 'pick two time histories, or the histories of two groups'),
+    (['Test 1X+', 'Test 2X+', 'Model 1X+'], 'Test 3X\\+ of test.unv is not picked'),
+    (['Test 1X+', 'Test 2X+', 'Test 3X+'], 'the histories picked are all in one group'),
+    (['Test 1X+', 'Model 1X+', 'Rig'], 'Rig is not a time history'),
+])
+def test_a_pick_that_is_not_two_whole_groups_is_refused(picked, message):
+    project, _tests, _models = _files()
+    with pytest.raises(ValueError, match=message):
+        project.time_history_sets(*picked)
+
+
+def test_a_history_in_no_group_is_refused_by_name_among_many():
+    project, tests, models = _files()
+    project.add('Loose', project['Test 1X+'])
+    with pytest.raises(ValueError, match='Loose is in no group'):
+        project.time_history_sets(*tests, *models, 'Loose')
+
+
+def test_two_groups_compare_station_by_station_across_their_histories():
+    project, tests, models = _files()
+    name = project.compare_time_histories(*project.time_history_sets(*tests, *models)[0],
+                                          *models)
+    assert [row['strac'] for row in scores(project[name])] == pytest.approx([-0.5] * 3)
+    assert project[name].pairs[2] == ['Test 3X+', 0, 'Model 3X+', 0]
