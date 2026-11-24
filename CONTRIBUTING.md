@@ -19,7 +19,7 @@ Any contributed code has to meet two conditions:
 
 ## Licensing
 
-Hertzforge is under the MIT License (`LICENSE`), copyright Brandon Zwink and Kevin Cross. You are free to install, use, copy, change and redistribute it, in open or closed work, as long as the copyright notice travels with it. Contributions come in under the same license they go out under, and there is no separate agreement to sign.
+Hertzforge is under the MIT License (`LICENSE`), copyright Brandon Zwink, Kevin Cross and the contributors listed in `CONTRIBUTORS.md`. You are free to install, use, copy, change and redistribute it, in open or closed work, as long as the copyright notice travels with it. Contributions come in under the same license they go out under, and there is no separate agreement to sign.
 
 ## Getting set up
 

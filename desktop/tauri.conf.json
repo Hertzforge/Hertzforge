@@ -55,7 +55,7 @@
       "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
-    "copyright": "Copyright (c) 2026 Brandon Zwink and Kevin Cross",
+    "copyright": "Copyright (c) 2026 Brandon Zwink, Kevin Cross and the Hertzforge contributors",
     "category": "Utility",
     "shortDescription": "Structural dynamics testing and analysis",
     "longDescription": "Hertzforge acquires, controls and analyzes structural dynamics tests: closed-loop Random vibration control on a simulator or NI-DAQmx hardware, and the analysis of what was measured.",
