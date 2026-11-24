@@ -71,7 +71,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPlaces, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene } from './arrows';
+	import { arrowMatrices, arrowMesh, cubeFaceUnder, drawViewCube, labelPlaces, labelPoints, moveArrows, placeCubeLetters, riddenOffsets, triadScene, turnArrowPaths, turnArrowUnder } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { fixedWideLines, wideLines } from './wideLines';
@@ -90,7 +90,7 @@
 	import { amplitudeUnit, linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
 	import { homeFit, homePose as poseOf } from './fit';
-	import { StageCamera, lookAtFace } from './projection';
+	import { StageCamera, isSquare, lookAtFace, turnView } from './projection';
 
 	interface Props {
 		view: Shape3DView;
@@ -221,18 +221,27 @@
 
 	/**
 	 * A press on a face of the cube at the orientation axes turns the view to look straight at
-	 * that face, and goes no further: the camera does not start a drag on it and nothing is picked.
+	 * that face, and one on a quarter-turn arrow over it (shown while the view is square) turns
+	 * the view about the line of sight. Either goes no further: the camera does not start a drag
+	 * on it and nothing is picked.
 	 */
 	function pressCube(e: PointerEvent) {
 		if (e.button !== 0 || !triad || !orientation || !renderer) return;
-		const face = cubeFaceUnder(orientation, triad.getBoundingClientRect(), camera.quaternion, e.clientX, e.clientY);
-		if (!face) return;
+		const box = triad.getBoundingClientRect();
+		const turn = isSquare(camera.position, controls.target) ? turnArrowUnder(box, e.clientX, e.clientY) : null;
+		const face = turn ? null : cubeFaceUnder(orientation, box, camera.quaternion, e.clientX, e.clientY);
+		if (!turn && !face) return;
 		e.stopPropagation();
 		e.preventDefault();
-		lookAtFace(camera, controls.target, face.axis, face.sign);
+		if (turn) turnView(camera, controls.target, turn);
+		else if (face) lookAtFace(camera, controls.target, face.axis, face.sign);
 		controls.update();
 		dirty = true;
 	}
+
+	/** Whether the view looks squarely along an axis, when the quarter-turn arrows show. */
+	let square = $state(false);
+	const TURNS = [1, -1] as const;
 
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
@@ -1436,6 +1445,8 @@
 			drawViewCube(renderer, orientation, triad, camera.quaternion);
 			placeCubeLetters(triad, camera.quaternion);
 		}
+		const nowSquare = isSquare(camera.position, controls.target);
+		if (nowSquare !== square) square = nowSquare;
 		updateAxes();
 		updateLabels();
 		updateNumbers();
@@ -2135,10 +2146,17 @@
 
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="72" height="72" aria-hidden="true" data-testid="shape3d-triad">
-				<!-- the letters only: the arrows are solids drawn into the canvas behind them (`drawViewCube`), in the gimbal's colors: X red, Y green, Z blue -->
+				<!-- the letters and the quarter-turn arrows only: the axes' arrows are solids drawn into the canvas behind them (`drawViewCube`), in the gimbal's colors: X red, Y green, Z blue -->
 				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
 				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
 				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
+				{#if square}
+					<!-- the quarter turns about the line of sight: clockwise at the top right, counterclockwise at the top left (`turnArrowUnder` takes the press) -->
+					{#each TURNS as turn (turn)}
+						{@const paths = turnArrowPaths(turn)}
+						<g class="turn" data-testid="shape3d-turn-{turn > 0 ? 'clockwise' : 'counterclockwise'}"><path class="band" d={paths.band} /><path class="head" d={paths.head} /></g>
+					{/each}
+				{/if}
 			</svg>
 
 			<div class="stats num" aria-live="off">
@@ -2503,6 +2521,16 @@
 
 	.triad {
 		margin-right: -6px;
+	}
+
+	.triad .turn .band {
+		fill: none;
+		stroke: var(--text-2);
+		stroke-width: 1.6;
+	}
+
+	.triad .turn .head {
+		fill: var(--text-2);
 	}
 
 	.triad text {

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Box3, Raycaster, Vector2, Vector3 } from 'three';
-import { StageCamera, lookAtFace } from './projection';
+import { SQUARE, StageCamera, isSquare, lookAtFace, turnView } from './projection';
 import { TrackballControls } from './trackball';
 import { fitDistance } from './fit';
-import { CUBE_FACES, cubeFaceUnder, cubeLetters, triadScene } from './arrows';
+import { CUBE_FACES, TURN_ARC, cubeFaceUnder, cubeLetters, triadScene, turnArrowPaths, turnArrowUnder } from './arrows';
 
 function camera(position = [3, -4, 2], target = [0.5, 0.25, 0]): { cam: StageCamera; target: Vector3 } {
 	const cam = new StageCamera(32, 1.5, 0.01, 100);
@@ -192,6 +192,161 @@ describe('the view cube', () => {
 		const cube = triad.scene.children.find((o) => Array.isArray((o as unknown as { material: unknown }).material)) as unknown as { material: { color: { r: number; g: number; b: number } }[] };
 		const light = (k: number) => cube.material[k].color.r + cube.material[k].color.g + cube.material[k].color.b;
 		for (const k of [0, 2, 4]) expect(light(k + 1)).toBeGreaterThan(light(k));
+		triad.dispose();
+	});
+});
+
+describe('the quarter-turn arrows over the view cube', () => {
+	const target = new Vector3(1, 2, 3);
+	const facing = (axis: number, sign: number) => {
+		const cam = { position: new Vector3(4, -2, 5), up: new Vector3(0, 0, 1) };
+		lookAtFace(cam, target, axis, sign);
+		return cam;
+	};
+	const close = (a: Vector3, b: Vector3) => a.toArray().forEach((v, c) => expect(v).toBeCloseTo(b.getComponent(c), 12));
+
+	it('turns the picture clockwise about the line of sight from every face, the camera staying put', () => {
+		const view = new StageCamera(32, 1, 0.1, 100);
+		for (const { axis, sign } of CUBE_FACES) {
+			const cam = facing(axis, sign);
+			const position = cam.position.clone();
+			const up = cam.up.clone();
+			const sight = target.clone().sub(position).normalize();
+			turnView(cam, target, 1);
+			close(cam.position, position);
+			expect(cam.up.length()).toBeCloseTo(1, 12);
+			expect(cam.up.dot(sight)).toBeCloseTo(0, 12);
+			expect(cam.up.dot(up)).toBeCloseTo(0, 12);
+			// the old up and the new one turn about the line of sight, clockwise as seen along it
+			close(up.clone().cross(cam.up), sight.clone().negate());
+			// what was up on screen is now to the right of the middle
+			view.position.copy(cam.position);
+			view.up.copy(cam.up);
+			view.lookAt(target);
+			view.lookedAt.copy(target);
+			view.updateMatrixWorld();
+			view.updateProjectionMatrix();
+			const was = target.clone().add(up).project(view);
+			expect(was.x).toBeGreaterThan(0.01);
+			expect(was.y).toBeCloseTo(0, 9);
+		}
+	});
+
+	it('turns a view square within the tolerance, its up left as a drag leaves it, about its own line of sight', () => {
+		// a degree off looking along -Y, with Z kept as up though it is no longer square to the sight
+		const a = Math.PI / 180;
+		const cam = { position: target.clone().add(new Vector3(Math.sin(a), 6 * Math.cos(a), 0)), up: new Vector3(0.02, 0, 1).normalize() };
+		expect(isSquare(cam.position, target)).toBe(true);
+		const sight = target.clone().sub(cam.position).normalize();
+		const position = cam.position.clone();
+		turnView(cam, target, 1);
+		close(cam.position, position);
+		expect(cam.up.length()).toBeCloseTo(1, 12);
+		expect(cam.up.dot(sight)).toBeCloseTo(0, 12);
+		turnView(cam, target, 1);
+		turnView(cam, target, 1);
+		turnView(cam, target, 1);
+		expect(cam.up.dot(sight)).toBeCloseTo(0, 12);
+	});
+
+	it('puts Y on the right looking down from above', () => {
+		const cam = facing(2, 1);
+		turnView(cam, target, 1);
+		close(cam.up, new Vector3(-1, 0, 0));
+		turnView(cam, target, -1);
+		turnView(cam, target, -1);
+		close(cam.up, new Vector3(1, 0, 0));
+	});
+
+	it('comes back after four clockwise turns, and after one each way', () => {
+		for (const { axis, sign } of CUBE_FACES) {
+			const cam = facing(axis, sign);
+			const up = cam.up.clone();
+			for (let k = 0; k < 4; k++) {
+				turnView(cam, target, 1);
+				if (k < 3) expect(cam.up.distanceTo(up)).toBeGreaterThan(1);
+			}
+			close(cam.up, up);
+			turnView(cam, target, 1);
+			turnView(cam, target, -1);
+			close(cam.up, up);
+			turnView(cam, target, -1);
+			turnView(cam, target, 1);
+			close(cam.up, up);
+		}
+	});
+
+	it('shows while the view is square to an axis, and not off it', () => {
+		for (const { axis, sign } of CUBE_FACES) {
+			const cam = facing(axis, sign);
+			expect(isSquare(cam.position, target)).toBe(true);
+			turnView(cam, target, 1);
+			expect(isSquare(cam.position, target)).toBe(true);
+		}
+		expect(isSquare(new Vector3(4, -2, 5), target)).toBe(false);
+		// tipped from straight down by less than the tolerance, and by more
+		const tipped = (degrees: number) => {
+			const a = (degrees * Math.PI) / 180;
+			return target.clone().add(new Vector3(Math.sin(a), 0, Math.cos(a)).multiplyScalar(7));
+		};
+		expect(Math.cos((2 * Math.PI) / 180)).toBeGreaterThan(SQUARE);
+		expect(isSquare(tipped(2), target)).toBe(true);
+		expect(isSquare(tipped(3), target)).toBe(false);
+		expect(isSquare(target.clone(), target)).toBe(false);
+	});
+
+	it('takes a press on either arrow where it is drawn, and none on the cube, the axes or off the marker', () => {
+		const box = { left: 100, top: 200, width: 72, height: 72 };
+		const pixel = (u: number, v: number): [number, number] => [box.left + (u / 48) * box.width, box.top + (v / 48) * box.height];
+		for (const turn of [1, -1] as const) {
+			const { band, head } = turnArrowPaths(turn);
+			// every point the arrow is drawn through: the arc's ends (past the radii and flags) and the head's corners
+			const numbers = (d: string) => (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+			const b = numbers(band);
+			const points = [[b[0], b[1]], [b[7], b[8]]];
+			const h = numbers(head);
+			for (let k = 0; k < h.length; k += 2) points.push([h[k], h[k + 1]]);
+			expect(points).toHaveLength(5);
+			for (const [u, v] of points) {
+				expect(Math.sign(u - 24)).toBe(turn);
+				expect(v).toBeLessThan(24);
+				expect(turnArrowUnder(box, ...pixel(u, v))).toBe(turn);
+			}
+			const middle = ((TURN_ARC.from + TURN_ARC.to) / 2) * (Math.PI / 180);
+			expect(turnArrowUnder(box, ...pixel(24 + turn * TURN_ARC.radius * Math.sin(middle), 24 - TURN_ARC.radius * Math.cos(middle)))).toBe(turn);
+		}
+		expect(turnArrowUnder(box, ...pixel(24, 24))).toBeNull();
+		// the axis pointing up, and the one pointing right
+		expect(turnArrowUnder(box, ...pixel(24, 24 - TURN_ARC.radius))).toBeNull();
+		expect(turnArrowUnder(box, ...pixel(24 + TURN_ARC.radius, 24))).toBeNull();
+		expect(turnArrowUnder(box, ...pixel(24, 24 + TURN_ARC.radius))).toBeNull();
+		expect(turnArrowUnder(box, ...pixel(1, 1))).toBeNull();
+		expect(turnArrowUnder(box, 99, 236)).toBeNull();
+		expect(turnArrowUnder({ left: 0, top: 0, width: 0, height: 0 }, 0, 0)).toBeNull();
+	});
+
+	it('sits clear of the cube from every face: no press is both an arrow\'s and a face\'s', () => {
+		const triad = triadScene();
+		const view = new StageCamera(32, 1, 0.1, 100);
+		const box = { left: 100, top: 200, width: 72, height: 72 };
+		for (const { axis, sign } of CUBE_FACES) {
+			const cam = facing(axis, sign);
+			for (let turn = 0; turn < 4; turn++) {
+				view.position.copy(cam.position);
+				view.up.copy(cam.up);
+				view.lookAt(target);
+				let arrows = 0;
+				for (let x = box.left; x <= box.left + box.width; x += 0.5) {
+					for (let y = box.top; y <= box.top + box.height / 2; y += 0.5) {
+						if (turnArrowUnder(box, x, y) === null) continue;
+						arrows++;
+						expect(cubeFaceUnder(triad, box, view.quaternion, x, y)).toBeNull();
+					}
+				}
+				expect(arrows).toBeGreaterThan(100);
+				turnView(cam, target, 1);
+			}
+		}
 		triad.dispose();
 	});
 });
