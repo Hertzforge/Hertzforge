@@ -73,3 +73,23 @@ export function lookAtFace(camera: { position: Vector3; up: Vector3 }, target: V
 
 /** Looking this squarely at a face already, a click on it turns the view to the opposite face. */
 export const SQUARE = 0.999;
+
+/** Whether a camera at `position` looks squarely along one of the axes at `target`: the views a face of the cube turns to. */
+export function isSquare(position: Vector3, target: Vector3): boolean {
+	const away = position.clone().sub(target);
+	const distance = away.length();
+	if (!distance) return false;
+	return Math.max(Math.abs(away.x), Math.abs(away.y), Math.abs(away.z)) / distance > SQUARE;
+}
+
+/**
+ * Turn the view a quarter turn about the line of sight: the picture turns clockwise on screen for
+ * `turn` 1 and counterclockwise for -1. The camera stays where it is and keeps looking at
+ * `target`; only which way is up changes.
+ */
+export function turnView(camera: { position: Vector3; up: Vector3 }, target: Vector3, turn: 1 | -1): void {
+	const sight = target.clone().sub(camera.position).normalize();
+	// the up a camera is drawn with is its own up made square to the line of sight
+	const up = camera.up.clone().addScaledVector(sight, -camera.up.dot(sight)).normalize();
+	camera.up.copy(sight.cross(up).multiplyScalar(-turn));
+}

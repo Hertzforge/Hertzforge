@@ -219,6 +219,50 @@ export function drawViewCube(renderer: WebGLRenderer, triad: Triad, marker: Elem
 	renderer.autoClear = auto;
 }
 
+/**
+ * The quarter-turn arrows over the view cube, in the marker's 48 units: arcs about its middle at
+ * `radius`, `width` wide, each running between two angles from the top and ending in a head
+ * `head` degrees long. The clockwise one is at the top right, the other its mirror at the top
+ * left, both clear of the cube and of the axes, which point along the picture's edges whenever
+ * the arrows show.
+ */
+export const TURN_ARC = { radius: 11, width: 1.6, from: 20, to: 52, head: 16, headWidth: 4.4 } as const;
+
+/** A point of the marker at `r` from its middle, `degrees` clockwise from the top, mirrored left for `turn` -1. */
+function arcPoint(r: number, degrees: number, turn: 1 | -1): string {
+	const a = (degrees * Math.PI) / 180;
+	return `${(24 + turn * r * Math.sin(a)).toFixed(2)} ${(24 - r * Math.cos(a)).toFixed(2)}`;
+}
+
+/** A quarter-turn arrow's band and head as SVG path data in the marker's 48 units: `turn` 1 the clockwise one. */
+export function turnArrowPaths(turn: 1 | -1): { band: string; head: string } {
+	const { radius: r, from, to, head, headWidth } = TURN_ARC;
+	const sweep = turn > 0 ? 1 : 0;
+	return {
+		band: `M ${arcPoint(r, from, turn)} A ${r} ${r} 0 0 ${sweep} ${arcPoint(r, to, turn)}`,
+		head: `M ${arcPoint(r - headWidth / 2, to, turn)} L ${arcPoint(r + headWidth / 2, to, turn)} L ${arcPoint(r, to + head, turn)} Z`
+	};
+}
+
+/**
+ * The quarter-turn arrow under a point on screen (`x`, `y` in client pixels), with the marker
+ * drawn in `box`: 1 for the clockwise one, -1 for the other, null off both. The arrows are only
+ * drawn, and only taken, while the view is square to an axis (`isSquare`); the caller asks that.
+ */
+export function turnArrowUnder(box: Box, x: number, y: number): 1 | -1 | null {
+	if (!box.width || !box.height) return null;
+	const u = ((x - box.left) / box.width) * 48 - 24;
+	const v = 24 - ((y - box.top) / box.height) * 48;
+	const { radius, headWidth, from, to, head } = TURN_ARC;
+	// a little more than is drawn, since the arrows are small, and never as far in as the cube's
+	// corners, which reach 7.4 units out when it is seen square
+	const reach = Math.hypot(u, v);
+	if (Math.abs(reach - radius) > headWidth / 2 + 1) return null;
+	const degrees = (Math.atan2(Math.abs(u), v) * 180) / Math.PI;
+	if (degrees < from - 6 || degrees > to + head + 4) return null;
+	return u > 0 ? 1 : -1;
+}
+
 /** How far along an axis its letter sits, in the marker's 48 units. */
 const LETTER = (24 / TRIAD_HALF) * 1.2;
 const AXES = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)];

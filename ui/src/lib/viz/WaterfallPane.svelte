@@ -57,8 +57,8 @@
 		type Material
 	} from 'three';
 	import { TrackballControls } from './trackball';
-	import { SQUARE, StageCamera, lookAtFace } from './projection';
-	import { cubeFaceUnder, drawViewCube, placeCubeLetters, triadScene } from './arrows';
+	import { SQUARE, StageCamera, isSquare, lookAtFace, turnView } from './projection';
+	import { cubeFaceUnder, drawViewCube, placeCubeLetters, triadScene, turnArrowPaths, turnArrowUnder } from './arrows';
 	import { AXIS_HEX } from './pick';
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
@@ -478,17 +478,25 @@
 		face(view.facing ?? 'perspective');
 	}
 
+	/** Whether the view looks squarely along an axis, when the quarter-turn arrows show. */
+	let square = $state(false);
+	const TURNS = [1, -1] as const;
+
 	/**
-	 * A press on a face of the view cube looks straight at that face, and goes no further: the
-	 * camera does not start a drag on it and no region is grabbed.
+	 * A press on a face of the view cube looks straight at that face, and one on a quarter-turn
+	 * arrow over it (shown while the view is square) turns the view about the line of sight.
+	 * Either goes no further: the camera does not start a drag on it and no region is grabbed.
 	 */
 	function pressCube(e: PointerEvent): boolean {
 		if (e.button !== 0 || !triad || !orientation || !renderer) return false;
-		const face = cubeFaceUnder(orientation, triad.getBoundingClientRect(), camera.quaternion, e.clientX, e.clientY);
-		if (!face) return false;
+		const box = triad.getBoundingClientRect();
+		const turn = isSquare(camera.position, controls.target) ? turnArrowUnder(box, e.clientX, e.clientY) : null;
+		const face = turn ? null : cubeFaceUnder(orientation, box, camera.quaternion, e.clientX, e.clientY);
+		if (!turn && !face) return false;
 		e.stopPropagation();
 		e.preventDefault();
-		lookAtFace(camera, controls.target, face.axis, face.sign);
+		if (turn) turnView(camera, controls.target, turn);
+		else if (face) lookAtFace(camera, controls.target, face.axis, face.sign);
 		controls.update();
 		dirty = true;
 		return true;
@@ -860,6 +868,8 @@
 		}
 		const above = probe.copy(camera.position).sub(controls.target).normalize().z > SQUARE;
 		if (above !== fromAbove) fromAbove = above;
+		const nowSquare = isSquare(camera.position, controls.target);
+		if (nowSquare !== square) square = nowSquare;
 		placeLabels();
 		// kept as it is drawn, not as the pane goes: the view that replaces it is made first
 		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
@@ -1091,10 +1101,17 @@
 		{/if}
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="64" height="64" aria-hidden="true" data-testid="waterfall-triad">
-				<!-- the letters only: the cube and arrows are drawn into the canvas behind them (`drawViewCube`): X the abscissa, Y the records, Z the level -->
+				<!-- the letters and the quarter-turn arrows only: the cube and the axes' arrows are drawn into the canvas behind them (`drawViewCube`): X the abscissa, Y the records, Z the level -->
 				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
 				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
 				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
+				{#if square}
+					<!-- the quarter turns about the line of sight: clockwise at the top right, counterclockwise at the top left (`turnArrowUnder` takes the press) -->
+					{#each TURNS as turn (turn)}
+						{@const paths = turnArrowPaths(turn)}
+						<g class="turn" data-testid="waterfall-turn-{turn > 0 ? 'clockwise' : 'counterclockwise'}"><path class="band" d={paths.band} /><path class="head" d={paths.head} /></g>
+					{/each}
+				{/if}
 			</svg>
 		<div class="stats num" aria-live="off">
 			{#if view.page}<span data-testid="waterfall-page">Page {view.page.number} of {view.page.count}, {formatCount(view.page.records)} records</span>{/if}
@@ -1176,6 +1193,16 @@
 		flex-direction: column;
 		align-items: flex-end;
 		gap: 2px;
+	}
+
+	.triad .turn .band {
+		fill: none;
+		stroke: var(--text-2);
+		stroke-width: 1.6;
+	}
+
+	.triad .turn .head {
+		fill: var(--text-2);
 	}
 
 	.triad text {
