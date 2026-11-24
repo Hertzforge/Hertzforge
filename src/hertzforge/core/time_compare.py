@@ -131,7 +131,7 @@ def match_records(histories: Mapping[str, TimeHistory],
                 raise ValueError(
                     f'{_label(key)}: {len(members)} record{"s" * (len(members) != 1)} '
                     f'({where}), and a comparison needs two; pick both sets, or pair '
-                    f'the records by hand')
+                    f'the records in record order and edit the pairs')
             pairs.append([*members[0], *members[1]])
     if not pairs:
         raise ValueError('no pairs to compare')
@@ -160,6 +160,53 @@ def match_records(histories: Mapping[str, TimeHistory],
                 f'a pair is one quantity')
         resolved.append([str(first), i, str(second), j])
     return resolved
+
+
+def pairs_in_order(first: Mapping[str, TimeHistory], second: Mapping[str, TimeHistory],
+                   records: Mapping[str, Sequence[int]] | None = None) -> list[list[Any]]:
+    """Pairs made in record order, for two sets whose DOFs do not match:
+    the k-th response record of the first set, across its histories in
+    order, with the k-th of the second. Nothing is guessed from a name or a
+    node number; the pairs are then checked as hand-made ones are
+    (`match_records`), so two quantities are never paired.
+
+    Parameters
+    ----------
+    first, second : mapping of str to TimeHistory
+        The two sets, the test's first.
+    records : mapping of str to sequence of int, optional
+        The records of a history to take, by name; its response records
+        (`response_records`) otherwise, and only response records either way.
+
+    Returns
+    -------
+    list of [str, int, str, int]
+        One pair a response record of the first set.
+
+    Raises
+    ------
+    ValueError
+        If the two sets hold different numbers of response records, or a
+        pair joins two quantities or an undeclared unit.
+    """
+    def taken(histories: Mapping[str, TimeHistory]) -> list[tuple[str, int]]:
+        out = []
+        for name, data in histories.items():
+            responses = response_records(data)
+            chosen = (responses if records is None or name not in records
+                      else [int(i) for i in records[name] if int(i) in responses])
+            out += [(name, i) for i in chosen]
+        return out
+
+    a, b = taken(first), taken(second)
+    if len(a) != len(b):
+        raise ValueError(f'the first set holds {len(a)} response records and the second '
+                         f'{len(b)}: in record order they pair one for one')
+    if not a:
+        raise ValueError('no response records to compare: forces, references and monitors '
+                         'are left out')
+    pairs = [[*x, *y] for x, y in zip(a, b, strict=True)]
+    return match_records({**first, **second}, pairs)
 
 
 def compare(histories: Mapping[str, TimeHistory], *,
@@ -299,3 +346,82 @@ def scores(data: TimeComparison, start: float | None = None,
                      'trac': trac, 'correlation': correlation, 'rms_ratio': ratio,
                      'strac': strac, 'samples': int(keep.sum()), 'reason': reason})
     return rows
+
+
+def station_positions(data: TimeComparison, geometry: Any) -> tuple[np.ndarray, list[int]]:
+    """Where each station of a comparison is on the test's geometry: the
+    position of the node its first trace's DOF names.
+
+    Parameters
+    ----------
+    data : TimeComparison
+        The comparison.
+    geometry : Geometry
+        The test's geometry, its nodes in the frame the scores are drawn in.
+
+    Returns
+    -------
+    (numpy.ndarray, list of int)
+        The positions, (S, 3), of the stations found, and which stations
+        they are (indices into the pairs). A station whose node the
+        geometry does not hold is left out.
+    """
+    from .data import parse_dof
+
+    ids = {int(node): row for row, node in enumerate(np.asarray(geometry.node_id))}
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    found, where = [], []
+    for k in range(len(data.pairs)):
+        node, _rest = parse_dof(data.response_dof[2 * k])
+        if node is not None and node in ids:
+            found.append(k)
+            where.append(xyz[ids[node]])
+    return np.asarray(where, dtype=float).reshape(-1, 3), found
+
+
+def spread_scores(stations: np.ndarray, values: np.ndarray, points: np.ndarray, *,
+                  smooth: bool = False) -> np.ndarray:
+    """Station scores carried onto other points, the nodes of a finite
+    element model: each point takes the score of the station nearest it,
+    or with `smooth` an inverse-distance-squared mean of every station's,
+    sum(s_i / d_i²) / sum(1 / d_i²), which is a station's own score where
+    the point lies on it.
+
+    Parameters
+    ----------
+    stations : numpy.ndarray
+        (S, 3), where the scores were read.
+    values : numpy.ndarray
+        (S,), the scores; a station without one is left out by the caller.
+    points : numpy.ndarray
+        (P, 3), where they are wanted.
+    smooth : bool, default False
+        The inverse-distance-squared mean in place of the nearest station.
+
+    Returns
+    -------
+    numpy.ndarray
+        (P,), one score a point.
+
+    Raises
+    ------
+    ValueError
+        If there is no station to carry a score from.
+    """
+    stations = np.asarray(stations, dtype=float).reshape(-1, 3)
+    values = np.asarray(values, dtype=float).reshape(-1)
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    if not len(stations):
+        raise ValueError('no station with a score lies on the geometry')
+    # a station at a time: a model's nodes by the stations, never by the stations and three
+    squared = np.empty((len(points), len(stations)))
+    for i, station in enumerate(stations):
+        squared[:, i] = ((points - station) ** 2).sum(axis=1)
+    if not smooth:
+        return values[np.argmin(squared, axis=1)]
+    out = np.empty(len(points))
+    on = squared.min(axis=1) == 0.0
+    out[on] = values[np.argmin(squared[on], axis=1)]
+    weights = 1.0 / squared[~on]
+    out[~on] = (weights @ values) / weights.sum(axis=1)
+    return out

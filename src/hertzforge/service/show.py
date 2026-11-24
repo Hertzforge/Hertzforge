@@ -494,7 +494,8 @@ def _alone(project: Any, name: str, picks: list[int],
     if isinstance(obj, TimeComparison):
         # its scores, and the stations picked under it in the tree drawn over each other
         return _run(project, 'project.time_comparison', comparison=name,
-                    records=_runs(sorted(set(picks))) if picks else ''), []
+                    records=_runs(sorted(set(picks))) if picks else '',
+                    flat=bool({**PREFS, **(prefs or {})}['flat'])), []
     if _is_data(obj):
         prefs = {**PREFS, **(prefs or {})}
         component = prefs['component']
@@ -1419,6 +1420,12 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
 
                 return projection_views(project, other, geometry), []
             return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
+        from hertzforge.core.data import TimeComparison
+
+        if isinstance(obj, TimeComparison):
+            # its scores on the test's geometry, a point at each station (Score Map)
+            return _run(project, 'project.time_comparison_map', comparison=other,
+                        geometry=geometry), []
         if isinstance(obj, ChannelTable):
             # the geometry alone; `_marks` draws the table's arrows over it
             return _run(project, 'project.view_geometry', geometry=geometry), []
@@ -1536,7 +1543,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
     from hertzforge.core.data import TimeComparison
     from hertzforge.core.shapes import ShapeSet
 
-    # a time comparison draws its scores and overlay whatever the bar says
+    # a time comparison takes the bar's 3D and 2D, its stage and its overlay, and no component
+    compared = [name for name in objects if isinstance(project[name], TimeComparison)]
     data = [project[name] for name in objects if _is_data(project[name])
             and not isinstance(project[name], TimeComparison)]
     sets = [name for name in objects if isinstance(project[name], ShapeSet)]
@@ -1595,7 +1603,7 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
                         and _picked_channels(objects, records or {}, table) is None else []),
         'sensors': bool(placed),
         'projection': apart,
-        'flat': bool(data),
+        'flat': bool(data) or bool(compared),
         # an object with warning and abort limits to draw on the 2-D plot, or leave off
         'limits': any(bool(getattr(obj, 'limits', None)) for obj in data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'

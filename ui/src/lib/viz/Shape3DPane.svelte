@@ -2101,8 +2101,10 @@
 				/>
 				<span class="num">{motion.label} {formatFixed(motion.start + sample * motion.step, 4)} {motion.unit}</span>
 			</div>
-			{#if view.note}<div class="note">{view.note}</div>{/if}
 		{/if}
+		<!-- what the view says about itself (a score map's mean, the elements past those drawn), with or
+		     without a motion: it was drawn only under a motion's scrub bar, so a still view's said nothing -->
+		{#if view.note}<div class="note" data-testid="shape3d-note">{view.note}</div>{/if}
 
 		{#if current}
 			<div class="modetag">

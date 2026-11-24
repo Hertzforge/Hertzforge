@@ -300,6 +300,12 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
         # with their modal responses appended went red, every M record
         # read as a node the geometry lacked): each kind by its own rule
         skipped = set(modal)
+        from .core.data import TimeComparison
+
+        if isinstance(obj, TimeComparison):
+            # the test's stations are on the test's geometry; the model's records, the second
+            # of each pair, are at its own nodes, which may be numbered otherwise
+            skipped |= set(range(1, obj.num_records, 2))
         missing, flagged = [], []
         for i in range(obj.num_records):
             if geometry is None or i in skipped:
