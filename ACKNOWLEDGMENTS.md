@@ -12,6 +12,7 @@ purpose:
 | --- | --- | --- |
 | This page | Thanks and provenance, freely given, at the authors' discretion | Here, and on hertzforge.com/credits.html |
 | The terms of the work itself, and of every contribution to it | MIT | [`LICENSE`](LICENSE) |
+| Who wrote it | Authorship, and the copyright that goes with it | [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
 | Third-party licenses | Attribution the dependencies require | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 
 Being named here is not a claim on anything, authorship, ownership or otherwise, and it is not an
@@ -21,7 +22,8 @@ affiliation: no one named here endorses Hertzforge or is responsible for it.
 
 ## Authors
 
-Hertzforge is written by Brandon Zwink and Kevin Cross, who hold the copyright in it; see
+Hertzforge is written by Brandon Zwink, Kevin Cross and the contributors listed in
+[`CONTRIBUTORS.md`](CONTRIBUTORS.md), each of whom holds the copyright in what they wrote; see
 [`LICENSE`](LICENSE).
 
 

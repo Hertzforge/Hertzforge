@@ -3,7 +3,7 @@ people bring their work over. A scan of every tracked file, its path and its
 text. Each entry below is a place the name must stay: a format identifier a
 reader has to match, the file-type label of `.vdyn`, the one sentence telling
 a user of the old product that their projects open here, the legal notice MIT
-requires, and the address the plate's test data is fetched from until it has
+requires, where a contributor's work first came from, and the address the plate's test data is fetched from until it has
 a home of its own."""
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ MINIFIED = frozenset({'src/hertzforge/report/viewer.html'})
 #: path: the exact text in it that may hold the name
 ALLOWED = {
     'ACKNOWLEDGMENTS.md': ("- **Visual Dynamics**, Brandon Zwink's structural dynamics toolset",),
+    'CONTRIBUTORS.md': ('from his contribution to Visual Dynamics.',),
     'site/public/credits.html': (
         "<li><strong>Visual Dynamics</strong>, Brandon Zwink's structural dynamics toolset",),
     'README.md': ('If you used Visual Dynamics, your `.vdyn` projects open here.',),
