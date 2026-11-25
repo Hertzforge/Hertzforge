@@ -43,6 +43,16 @@ describe('defaults', () => {
 		expect(hasObjectsFor(withObjects([levels], []))).toBe(true);
 	});
 
+	it('starts two optional params of the same objects both on (none)', () => {
+		const optional = (name: string): ParamDescriptor => ({ name, label: name, type: 'enum', default: '', options_from: 'objects:geometry' });
+		const filled = withObjects([optional('known'), optional('model')], [{ name: 'Layout', kind: 'geometry', groups: [] }, { name: 'Model', kind: 'geometry', groups: [] }]);
+		expect(defaultValues(filled)).toEqual({ known: '', model: '' });
+		// a required one after them still starts on the first object, which (none) has not taken
+		const required: ParamDescriptor = { name: 'geometry', label: 'Geometry', type: 'enum', options_from: 'objects:geometry' };
+		const mixed = withObjects([optional('known'), required, optional('model')], [{ name: 'Layout', kind: 'geometry', groups: [] }]);
+		expect(defaultValues(mixed)).toEqual({ known: '', geometry: 'Layout', model: '' });
+	});
+
 	it('falls back sensibly when a default is missing or invalid', () => {
 		expect(defaultFor({ ...tol, default: undefined })).toBe(0.5);
 		expect(defaultFor({ ...tol, default: 99 })).toBe(6);

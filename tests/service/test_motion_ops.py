@@ -62,8 +62,8 @@ def test_the_preview_draws_the_sensors_and_changes_nothing(project, validate):
     wire_views([scene, motions, table, reading], validate)
     assert list(project) == ['Run', 'Some Nodes'] and project.journal == journal
     assert [param.name for param in OP.params] == ['source', 'low', 'high', 'known', 'span',
-                                                   'mirror', 'records', 'more', 'more_records',
-                                                   'keep']
+                                                   'mirror', 'model', 'records', 'more',
+                                                   'more_records', 'keep']
     assert OP.commits == 'keep' and OP.opens_previewed
     # a point a sensor, an arrow a channel, and a line through each one-axis sensor
     assert scene['unit'] == 'undefined' and scene['nodes'].shape == (11, 3)
@@ -400,3 +400,79 @@ def test_apply_on_table_tests_needs_the_geometry_and_makes_its_nodes(table_proje
     made = table_project['Table X Sensors']
     assert list(made.node_id) == list(SOME) and made.length_unit == 'm'
     assert np.degrees(np.arccos(made.dof_direction('60X+') @ layout.frame[60][0])) < 0.25
+
+
+# ---- a model drawn behind the sensors ---------------------------------------
+
+
+def _model(length_unit='m'):
+    """A plate of one four-sided element and a bar off its corner: two
+    triangles, and five lines with the plate's outline."""
+    return Geometry(node_id=[1, 2, 3, 4, 5, 6],
+                    node_xyz=[[-0.3, -0.3, 0.0], [0.3, -0.3, 0.0], [0.3, 0.3, 0.0],
+                              [-0.3, 0.3, 0.0], [0.3, 0.3, 0.3], [9.0, 9.0, 9.0]],
+                    elem_id=[1, 2], elem_type=[44, 21],
+                    elem_conn=[np.array([1, 2, 3, 4]), np.array([3, 5])], elem_group=[1, 1],
+                    group_id=[1], length_unit=length_unit)
+
+
+def test_a_model_is_drawn_behind_sensors_a_known_geometry_has_framed(project, layout, validate):
+    project.add('Model', _model())
+    plain, *_rest = run(project, known='Some Nodes')
+    scene, _motions, _table, reading = run(project, known='Some Nodes', model='Model')
+    wire_views([scene], validate)
+    # the sensors first, as without the model, then the nodes its faces and lines use
+    assert scene['nodes'].shape == (16, 3) and scene['unit'] == 'm'
+    np.testing.assert_array_equal(scene['nodes'][:11], plain['nodes'])
+    np.testing.assert_allclose(scene['nodes'][11:], project['Model'].node_xyz[:5], atol=1e-6)
+    assert scene['node_ids'].tolist() == [10 * k for k in range(1, 12)] + [1, 2, 3, 4, 5]
+    assert scene['triangles'].shape == (2, 3) and scene['triangles'].min() == 11
+    assert scene['lines'].shape == (5, 2) and scene['lines'].min() == 11
+    assert int(max(scene['triangles'].max(), scene['lines'].max())) == 15
+    assert scene['opacity'] == pytest.approx(0.3)
+    # the sensors are drawn as they were
+    np.testing.assert_array_equal(scene['points'][0]['xyz'], plain['points'][0]['xyz'])
+    assert scene['arrows']['labels'] == plain['arrows']['labels']
+    assert 'triangles' not in plain and 'opacity' not in plain
+    assert _rows(reading)['Model'] == (('Model is drawn behind the sensors, in the frame Some '
+                                        'Nodes sets them in'), 'info')
+    assert 'Model' not in _rows(run(project, known='Some Nodes')[3])
+
+
+def test_a_model_is_refused_where_the_sensors_are_in_a_frame_of_their_own(project, layout):
+    project.add('Model', _model())
+    project.add('Two Nodes', Geometry(node_id=[10, 20],
+                                      node_xyz=[layout.position[node] for node in (10, 20)],
+                                      length_unit='m'))
+    project.add('Bare Model', _model(length_unit=None))
+    journal = list(project.journal)
+    for given, said in (
+            ({}, ('the sensors are in a frame of their own, so Model cannot be drawn behind '
+                  'them: a geometry that holds three of the nodes, not in a line, sets them in '
+                  'its frame$')),
+            ({'span': 0.5}, 'sets them in its frame$'),
+            # two known nodes give the size and not the frame
+            ({'known': 'Two Nodes'}, 'sets them in its frame, and Two Nodes does not$')):
+        for keep in (False, True):
+            with pytest.raises(ProtocolError, match=said):
+                run(project, model='Model', keep=keep, **given)
+    with pytest.raises(ProtocolError, match='Bare Model has no length unit, so its coordinates '
+                                            'cannot be drawn with those of Some Nodes: define '
+                                            'its units'):
+        run(project, known='Some Nodes', model='Bare Model')
+    assert project.journal == journal and 'Run Sensors' not in project
+
+
+def test_a_model_is_drawn_behind_table_tests_only_with_the_geometry_that_holds_the_nodes(
+        table_project, layout):
+    table_project.add('Model', _model())
+    with pytest.raises(ProtocolError, match='so Model cannot be drawn behind them: a geometry '
+                                            'that holds the nodes sets them in its frame$'):
+        run(table_project, model='Model', **TABLE)
+    scene, _motions, _table, reading = run(table_project, known='Layout', model='Model', **TABLE)
+    assert scene['nodes'].shape == (len(SOME) + 5, 3) and scene['triangles'].min() == len(SOME)
+    assert scene['node_ids'].tolist() == [*SOME, 1, 2, 3, 4, 5]
+    assert _rows(reading)['Model'][0].endswith('in the frame Layout sets them in')
+    # Apply makes the sensors' geometry, and nothing of the model is in it
+    *_views, reading = run(table_project, known='Layout', model='Model', keep=True, **TABLE)
+    assert list(table_project['Table X Sensors'].node_id) == list(SOME)

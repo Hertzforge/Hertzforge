@@ -82,7 +82,8 @@ export function defaultFor(p: ParamDescriptor): ParamValue {
 /**
  * Every param's starting value. A project-object param filled from the same objects as an earlier
  * one starts on an object the earlier ones have not taken, when there is one: two shape sets to
- * match or compare start as two sets, not one set twice.
+ * match or compare start as two sets, not one set twice. An optional param that starts on (none)
+ * takes no object: a second optional one starts on (none) too, not on the first object.
  */
 export function defaultValues(params: ParamDescriptor[]): ParamValues {
 	const taken = new Map<string, Set<ParamValue>>();
@@ -90,7 +91,7 @@ export function defaultValues(params: ParamDescriptor[]): ParamValues {
 		params.map((p) => {
 			let value = defaultFor(p);
 			const source = objectKinds(p).length || objectVerb(p) ? p.options_from : undefined;
-			if (source) {
+			if (source && value !== '') {
 				const used = taken.get(source) ?? new Set();
 				if (used.has(value)) value = optionsFor(p).find((o) => !used.has(o.value))?.value ?? value;
 				used.add(value);

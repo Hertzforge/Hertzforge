@@ -69,6 +69,7 @@ mirror image.
 | Geometry holding some of the nodes | A geometry whose nodes, by number, are sensors already placed |
 | Span of the two farthest sensors | The distance between the two sensors the reading names, when no node is known |
 | The other mirror image | Takes the mirror image of the layout |
+| Model drawn behind the sensors | A geometry in the same coordinates as the known one, such as the finite element model, drawn behind the sensors |
 
 ### The band
 
@@ -204,6 +205,21 @@ sensors with two or three axes.
 A one-axis sensor whose node is in that geometry is slid along its axis to the point nearest the
 node. When no node is known, type the span between the two sensors the reading names to give the
 size. Select the geometry with the time histories in the tree, or choose it in the form.
+
+## A model behind the sensors
+
+When there is a model of the structure, choose it as **Model drawn behind the sensors** and the
+preview draws it with the sensors, see-through, so each sensor can be seen against the surface it
+should sit on. The model is only drawn: it takes no part in the fit, and nothing of it goes into
+the geometry that Apply makes.
+
+The two can be drawn together only when the sensors are in the model's coordinates. That is so
+once a geometry holding some of the nodes, in those coordinates, has set the sensors in its frame:
+three known nodes that are not in a line for sensors placed by six motions, or the geometry that
+holds the nodes for tests on a table. With no such geometry, with a span, or with two known nodes
+that give the size alone, the sensors are in a frame of their own and the model is refused. It is
+refused as well when one of the model and the known geometry has a length unit and the other has
+none.
 
 ## Apply
 

@@ -171,6 +171,10 @@ def test_mixed_sensors_are_placed_and_turned_under_the_default_window(layout, re
     assert [one.node for one in placed.sensors] == layout.nodes
     assert [len(one.axes) for one in placed.sensors] == [len(kind) for kind in KINDS]
     assert placed.length_unit == 'm' and not placed.image_open
+    # in the known nodes' frame only once they have set it: a span or two nodes size it alone
+    assert placed.framed and not recovered.framed
+    assert not mg.place(recovered, span=0.5).framed
+    assert not mg.place(recovered, known=layout.known(FOUR[:2])).framed
     assert recovered.misfit < 0.01 and recovered.starts == 1
 
 
@@ -745,6 +749,8 @@ def test_three_table_tests_turn_the_sensors_and_place_none(layout, turned):
     told = mg.turn(turned, frames=layout.frame)
     assert told.agree == (len(layout.dofs), len(layout.dofs))
     assert set(told.off) == set(layout.dofs) and max(told.off.values()) < 0.25
+    # turned into the geometry's frame, and with no position still nowhere in it
+    assert not told.framed
     assert not told.notes and not any(one.note for one in told.sensors)
     # the frame it comes in before any geometry is known is the first three-axis sensor's
     assert np.allclose(turned.sensor(10).frame, np.eye(3), atol=1e-9)
@@ -936,7 +942,7 @@ def test_positions_come_from_the_known_nodes_and_the_rest_have_none(layout, turn
     some = (10, 20, 60, 90)
     told = mg.turn(turned, frames={node: layout.frame[node] for node in some},
                    positions=layout.known(some), length_unit='m')
-    assert told.length_unit == 'm'
+    assert told.length_unit == 'm' and told.framed and not turned.framed
     assert [one.node for one in told.sensors if one.placed] == list(some)
     assert all(np.array_equal(told.sensor(node).position, layout.position[node]) for node in some)
     assert told.notes[-1] == ('30, 40, 50, 70, 80, 100 and others: not in the known geometry, so '

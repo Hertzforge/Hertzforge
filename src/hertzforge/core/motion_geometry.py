@@ -195,7 +195,12 @@ class Recovered:
     position only where `turn` took it from a known geometry. `off` is
     then how far each channel reads from its direction in that geometry,
     degrees by DOF, and `agree` how many of the channels compared read
-    within `AGREES` of it, and how many were compared."""
+    within `AGREES` of it, and how many were compared.
+
+    `framed` says the sensors are in the frame of a known geometry, at
+    its size: `place` moved them onto three of its nodes that are not in
+    a line, or `turn` put them at its nodes. Until then they are in a
+    frame of their own, and nothing else is in it with them."""
 
     sensors: tuple[Sensor, ...]
     motion: Motion
@@ -209,6 +214,7 @@ class Recovered:
     turned_only: bool = False
     off: Mapping[str, float] = field(default_factory=dict)
     agree: tuple[int, int] | None = None
+    framed: bool = False
 
     def sensor(self, node: int) -> Sensor:
         """The sensor at `node`."""
@@ -1106,7 +1112,8 @@ def place(recovered: Recovered, *, span: float | None = None,
     # known nodes in a plane fit both images alike, so they do not choose
     pick = 0 if flat or fits[0][3] <= fits[1][3] else 1
     rotation, scale, shift, _miss = fits[pick]
-    moved = _moved(out, rotation, scale, shift, length_unit=length_unit, image_open=flat)
+    moved = _moved(out, rotation, scale, shift, length_unit=length_unit, image_open=flat,
+                   framed=True)
     return _slid(moved, {node: xyz for node, xyz in points.items()})
 
 
@@ -1517,7 +1524,8 @@ def turn(recovered: Recovered, *, frames: Mapping[int, np.ndarray],
                      'and left without a place')
     return replace(recovered, sensors=tuple(sensors), notes=tuple(notes), off=off,
                    agree=(agreeing, len(listed)), image_open=image_open,
-                   length_unit=length_unit if points else None)
+                   length_unit=length_unit if points else None,
+                   framed=any(one.placed for one in sensors))
 
 
 def recover(histories: Sequence[Any], band: tuple[float, float] | None = None, *,
