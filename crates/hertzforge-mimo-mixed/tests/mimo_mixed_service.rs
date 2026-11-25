@@ -484,7 +484,13 @@ fn mimo_mixed_mv8_shared_ceiling_in_turn_in_the_run() {
 
 fn mv8_run(rule: &str) {
     let s = SineStructure::Linear4x4;
-    let mut probe = service(s, mv8_config(rule, None));
+    // The law calls are timed on the stopped clock. The requirement is the
+    // shared ceiling's, not the laws' time budget, and on the wall clock one
+    // late reading ends the run: a tone's first call is given no second
+    // chance (found: `in_turn` ended `law_fault`, `over_budget` at t1's
+    // first call, which takes about 20 us of its 2.5 ms, when the machine
+    // running the test was late once).
+    let mut probe = service_unhurried(s, mv8_config(rule, None));
     engage(&mut probe);
     let fc = probe.budget_forecast().expect("forecast");
     println!(
@@ -495,7 +501,7 @@ fn mv8_run(rule: &str) {
     while probe.run_chunk().unwrap_or(false) {}
     let peak = 1.05 * fc.need_v;
     {
-        let mut svc = service(s, mv8_config(rule, Some(peak)));
+        let mut svc = service_unhurried(s, mv8_config(rule, Some(peak)));
         engage(&mut svc);
         let (mut chunks, mut limiting) = (0usize, [0usize; 3]);
         while svc.run_chunk().expect("chunk") {
