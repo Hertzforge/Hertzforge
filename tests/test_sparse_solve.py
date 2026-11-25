@@ -371,6 +371,92 @@ def test_pardiso_is_threaded_through_tbb():
     assert code == 0 and 'threaded by tbb' in message, message
 
 
+on_linux = pytest.mark.skipif(not sys.platform.startswith('linux'),
+                              reason='the hold reads /proc/self/maps')
+
+CLOSED = '''
+import _ctypes, glob, os, sys, sysconfig
+import numpy
+from hertzforge.core import sparse_solve
+
+def mapped(path):
+    with open('/proc/self/maps') as maps:
+        return any(line.rstrip().endswith(' ' + path) for line in maps)
+
+# an extension module's file that nothing here has loaded
+spare = (glob.glob(os.path.join(os.path.dirname(numpy.__file__), '_core', '_*_tests*.so'))
+         + glob.glob(os.path.join(sysconfig.get_path('stdlib'), 'lib-dynload', '*.so')))
+for path in sorted(os.path.realpath(found) for found in spare):
+    if mapped(path):
+        continue
+    try:
+        handle = _ctypes.dlopen(path, os.RTLD_NOW)
+    except OSError:
+        continue
+    break
+else:
+    sys.exit('no library to open')
+assert mapped(path), path
+if sys.argv[1] == 'held':
+    assert path in sparse_solve._hold_libraries()
+_ctypes.dlclose(handle)
+print('still mapped' if mapped(path) else 'unloaded')
+'''
+
+
+def _python(script, *arguments):
+    import subprocess
+
+    done = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', script, *arguments],
+                          capture_output=True, text=True, timeout=300, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return done.stdout
+
+
+@on_linux
+def test_a_library_closed_after_the_hold_stays_mapped():
+    """What the hold is for: TBB closes the libraries it opened from a
+    worker thread while the main thread is in exit()'s handlers, and a
+    library unmapped under a handler still to run is a crash. A library
+    opened and closed is unloaded; with the hold taken, it is not."""
+    assert _python(CLOSED, 'not held').split() == ['unloaded']
+    assert _python(CLOSED, 'held').split() == ['still', 'mapped']
+
+
+EXITING = '''
+import atexit, os
+
+def report():
+    # TBB's own libraries, and those it opens for itself
+    with open('/proc/self/maps') as maps:
+        mapped = {line.split(None, 5)[5].strip() for line in maps if line.count('/')}
+    mapped = {path for path in mapped
+              if os.path.basename(path).startswith(('libtbb', 'libtcm', 'libhwloc'))}
+    held = set(sparse_solve._pardiso.get('held', ()))
+    print('mapped:', sorted(os.path.basename(path).split('.so')[0] for path in mapped))
+    print('not held:', sorted(mapped - held))
+
+# registered first, so run last, after the hold
+atexit.register(report)
+from hertzforge.core import sparse_solve
+
+code, message = sparse_solve.check()
+assert code == 0 and message.startswith('pardiso'), message
+'''
+
+
+@on_linux
+@on_pardiso
+def test_a_process_that_factored_with_pardiso_holds_its_libraries_as_it_exits():
+    """About one process in 175 that had factored with PARDISO died of
+    SIGSEGV on its way out, its work done (`_hold_libraries`). The hold
+    is taken as the interpreter exits, when everything TBB opens for
+    itself has been opened."""
+    mapped, not_held = _python(EXITING).splitlines()
+    assert "'libtbb'" in mapped, mapped
+    assert not_held == 'not held: []'
+
+
 def _benchmark():
     import importlib.util
     import pathlib

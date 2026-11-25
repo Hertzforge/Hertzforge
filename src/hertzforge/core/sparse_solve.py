@@ -16,6 +16,7 @@ so it orders and pivots for that.
 
 from __future__ import annotations
 
+import atexit
 import ctypes as C
 import math
 import os
@@ -370,7 +371,58 @@ def _pypardiso() -> Any:
             pypardiso = None
             _pardiso['why'] = f'{type(missing).__name__}: {missing}'
         _pardiso['module'] = pypardiso
+        if pypardiso is not None:
+            atexit.register(_hold_libraries)
     return _pardiso['module']
+
+
+def _hold_libraries() -> list[str]:
+    """Take one more reference on every shared library the process has
+    mapped, so that closing one no longer unloads it, and return their
+    paths. Linux only: nothing is held, and the list is empty, where
+    there is no ``/proc/self/maps``.
+
+    Run as the interpreter exits in a process that loaded oneMKL. TBB
+    opens libraries for itself as it starts (its memory allocator, the
+    thread composability manager, hwloc behind that) and closes them
+    when its last reference goes. At exit that reference is let go
+    without waiting for the worker threads, so it is the last worker
+    out that closes them, while the main thread is still walking the
+    exit handlers: the main thread then calls a destructor in a library
+    the worker has just unmapped. With a reference held here the
+    worker's close unloads nothing, and the destructors run where they
+    always do, on the main thread.
+    """
+    # About one process in 175 that had factored with PARDISO died of
+    # SIGSEGV on its way out, its work done and printed: 233 of 40,685
+    # on four-core Linux machines under load, none of 3,804 with oneMKL
+    # sequential, none of 4,919 through SuperLU and none of 28,957 with
+    # this hold (oneMKL 2026.2.1, TBB 2023.2.0, 2026-11-25). Of 60
+    # cores read, 58 had libtcm gone from the process and the other two
+    # a worker part way through closing it; 40 showed the main thread
+    # under exit()'s handlers at an address no longer mapped, and 29 a
+    # TBB worker in dlclose under governor::release_resources. Taken at
+    # exit, not at the first factorization: TBB opens what it needs as
+    # it needs it, and nothing is closed before the handlers run
+    try:
+        with open('/proc/self/maps', encoding='utf-8', errors='replace') as maps:
+            # address, permissions, offset, device, inode, then the path
+            mapped = {fields[5].strip() for fields in (line.split(None, 5) for line in maps)
+                      if len(fields) == 6 and fields[5].startswith('/')}
+    except OSError:
+        return []
+    held = []
+    for path in sorted(mapped):
+        if '.so' not in os.path.basename(path):
+            continue
+        try:
+            # only what is loaded already: a reference, never a load
+            C.CDLL(path, mode=os.RTLD_NOW | os.RTLD_NOLOAD)
+        except OSError:
+            continue
+        held.append(path)
+    _pardiso['held'] = held
+    return held
 
 
 def expected_backend() -> str:
