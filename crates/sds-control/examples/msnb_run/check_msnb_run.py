@@ -2,6 +2,7 @@
 
     MSNB_RUN=<msnb_run build> OBS_PLAY=<obs_play build> MSNB_PROBLEMS=<problem folder> \
         python3 check_msnb_run.py [-v]
+    MSNB_PROBLEMS=<problem folder> python3 check_msnb_run.py case <problem id> '<test json>' <amplitude> <out.json> ['<extra json>']
 
 Builds its cases in a temporary folder and runs them through the program, at most four at once
 (each run is one process on one core). Every check is also run on a case built to break it and
@@ -300,4 +301,12 @@ class MsnbRun(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if sys.argv[1:2] == ['case']:
+        # Write one case as the checks build them (the timing runs use this):
+        #   check_msnb_run.py case <problem id> '<test json>' <amplitude m/s^2> <out.json> ['<extra json>']
+        pid, test, amp, path = sys.argv[2], json.loads(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
+        extra = json.loads(sys.argv[6]) if len(sys.argv) > 6 else {}
+        with open(path, 'w') as fh:
+            json.dump(case(pid, test, amp, **extra), fh)
+    else:
+        unittest.main()
