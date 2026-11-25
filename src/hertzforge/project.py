@@ -2277,6 +2277,15 @@ class Project(dict):
         with three shared nodes not in a line, the image with four not in
         a plane, and a one-axis sensor's place when it holds its node.
 
+        Where three motions stand clear and six do not, as in tests on a
+        table that only translates, the sensors are turned and not
+        placed (`Recovered.turned_only`): each has its axes and no
+        position. `known` then gives the positions of the nodes it holds
+        and the frame, fitted to the coordinate systems it measures those
+        nodes in, and each channel is given how far it reads from its
+        direction there (`Recovered.off`). `span` and `mirror` are
+        refused, since there is no layout to size or reflect.
+
         Parameters
         ----------
         *sources : str or object
@@ -2311,20 +2320,38 @@ class Project(dict):
             geometry.
         ValueError
             If the histories hold different channels, fewer than seven
-            read a translation, a channel does not move, fewer than six
-            rigid motions stand clear in the band, or `known`, `span` and
-            `mirror` cannot be used as given; the message says which.
+            read a translation, a channel does not move, neither six
+            rigid motions nor three translations stand clear in the band,
+            or `known`, `span` and `mirror` cannot be used as given; the
+            message says which.
         """
         from .core import motion_geometry
 
         _names, histories, picked, frames = self._motion_inputs(sources, records)
+        held = None if known is None else self[self.name_of(known)]
+        if held is not None and not isinstance(held, Geometry):
+            raise TypeError(f'{self.name_of(known)} is not a geometry')
         recovered = motion_geometry.recover(histories, band, records=picked, averagings=frames)
-        if known is None:
+        if recovered.turned_only:
+            if span is not None or mirror:
+                raise ValueError('the data holds three translations and no rotation, so the '
+                                 'sensors are turned and not placed: there is no layout for '
+                                 + ('a span to size' if span is not None else 'Mirror to reflect'))
+            if held is None:
+                return recovered
+            nodes = {one.node for one in recovered.sensors}
+            points = {int(node): xyz for node, xyz in zip(held.node_id, held.node_xyz, strict=True)
+                      if int(node) in nodes}
+            # a node in a cylindrical or spherical system has no direction here: placed, not compared
+            axes = {node: [held.dof_direction(f'{node}{axis}+') for axis in 'XYZ']
+                    for node in points}
+            return motion_geometry.turn(
+                recovered, positions=points, length_unit=held.length_unit,
+                frames={node: np.array(rows) for node, rows in axes.items()
+                        if all(row is not None for row in rows)})
+        if held is None:
             return motion_geometry.place(recovered, span=span, mirror=mirror,
                                          length_unit='m' if span is not None else None)
-        held = self[self.name_of(known)]
-        if not isinstance(held, Geometry):
-            raise TypeError(f'{self.name_of(known)} is not a geometry')
         points = {int(node): xyz for node, xyz in zip(held.node_id, held.node_xyz, strict=True)}
         return motion_geometry.place(recovered, span=span, known=points, mirror=mirror,
                                      length_unit=held.length_unit)
@@ -2343,6 +2370,12 @@ class Project(dict):
         geometry yet. With neither `known` nor `span` it has no length
         unit and its two farthest sensors are one apart. It is not made
         again when the histories change: call this again.
+
+        Sensors that were turned and not placed (three translations in
+        the data and no rotation) are made into a geometry only with
+        `known`, which gives the positions: it holds the sensors whose
+        nodes `known` holds, each with the coordinate system the data
+        gives it.
 
         Parameters
         ----------
@@ -2371,7 +2404,9 @@ class Project(dict):
         Raises
         ------
         TypeError, ValueError
-            As `motion_sensors` raises them.
+            As `motion_sensors` raises them, and a ValueError when the
+            sensors were turned and not placed and no geometry gives
+            their positions.
         """
         from .core import motion_geometry
 
