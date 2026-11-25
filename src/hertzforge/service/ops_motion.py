@@ -13,6 +13,7 @@ from hertzforge.drawing.viz.geometry import dof_arrow_solids
 
 from . import views as v
 from .descriptors import Operation, Param
+from .mesh import SEE_THROUGH, drawn_mesh
 from .ops_project import MORE, MORE_RECORDS, RECORDS, _more_picks, _source, more_histories
 from .ops_scan import _colors
 from .parsing import parse_picks
@@ -26,6 +27,8 @@ KNOWN = Param('known', 'Geometry holding some of the nodes', 'enum', default='',
 SPAN = Param('span', 'Span of the two farthest sensors [m] (0: not known)', 'number',
              default=0.0, unit='m', min=0.0, length=True)
 MIRROR = Param('mirror', 'The other mirror image', 'boolean', default=False)
+MODEL = Param('model', 'Model drawn behind the sensors', 'enum', default='',
+              options_from='objects:geometry')
 KEEP = Param('keep', 'Create the geometry', 'boolean', default=False)
 
 #: a one-axis sensor's line, which it may sit anywhere along (sRGB)
@@ -48,7 +51,26 @@ def _settings(params: dict[str, Any], project: Any) -> dict[str, Any]:
             'mirror': params['mirror']}
 
 
-def _scene(title: str, recovered: Any) -> dict:
+def _behind(project: Any, name: str, recovered: Any, known: str | None) -> Any:
+    """The geometry to draw behind the sensors, refused where the two are
+    not in one frame at one size: the sensors are in a known geometry's
+    frame only once it has set them there (`Recovered.framed`), and
+    coordinates with a unit are not the numbers of ones without."""
+    model = project[name]
+    if not recovered.framed:
+        how = ('holds the nodes' if recovered.turned_only
+               else 'holds three of the nodes, not in a line,')
+        raise refused(f'the sensors are in a frame of their own, so {name} cannot be drawn '
+                      f'behind them: a geometry that {how} sets them in its frame'
+                      + (f', and {known} does not' if known else ''))
+    if model.units_defined != (recovered.length_unit is not None):
+        without, other = (name, known) if not model.units_defined else (known, name)
+        raise refused(f'{without} has no length unit, so its coordinates cannot be drawn with '
+                      f'those of {other}: define its units')
+    return model
+
+
+def _scene(title: str, recovered: Any, model: Any = None) -> dict:
     """The sensors where they were placed: a point each, colored by how
     much of its motion the fit leaves unexplained, an arrow along each
     channel the way the data has it reading, and through a one-axis
@@ -57,7 +79,11 @@ def _scene(title: str, recovered: Any) -> dict:
     Sensors that were turned and not placed are drawn at the positions a
     known geometry gave them, those it does not hold left out. With no
     such geometry they are set out on a grid, one apart, in the order of
-    their channels, so each one's arrows can be read."""
+    their channels, so each one's arrows can be read.
+
+    `model` is a geometry in the sensors' frame, drawn behind them: its
+    nodes follow the sensors' in the scene, with its faces and lines, and
+    the view opens see-through so a sensor inside it shows."""
     sensors = [one for one in recovered.sensors if one.placed]
     centers = np.array([one.position for one in sensors])
     length = None
@@ -67,8 +93,15 @@ def _scene(title: str, recovered: Any) -> dict:
         centers = np.array([[k % side, -(k // side), 0.0] for k in range(len(sensors))])
         length = 0.4
     reach = float(np.linalg.norm(np.ptp(centers, axis=0))) or 1.0
-    view = v.shape3d(title, 'm' if recovered.length_unit else 'undefined', centers, [],
-                     node_ids=np.array([one.node for one in sensors]))
+    nodes, ids, mesh = centers, np.array([one.node for one in sensors]), {}
+    if model is not None:
+        rows, triangles, lines = drawn_mesh(model)
+        nodes = np.vstack([centers, np.asarray(model.node_xyz, dtype=float)[rows]])
+        ids = np.concatenate([ids, np.asarray(model.node_id)[rows]])
+        mesh = {'triangles': triangles + len(centers), 'lines': lines + len(centers),
+                'opacity': SEE_THROUGH}
+    view = v.shape3d(title, 'm' if recovered.length_unit else 'undefined', nodes, [],
+                     node_ids=ids, **mesh)
     view['points'] = [{'xyz': np.ascontiguousarray(centers, np.float32),
                        'colors': _colors(np.array([one.misfit for one in sensors]),
                                          POOR_MISFIT / 2),
@@ -250,7 +283,12 @@ def geometry_from_motion(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     title = ', '.join(names)
     turned = recovered.turned_only
+    model = (_behind(project, params['model'], recovered, settings['known'])
+             if params['model'] else None)
     readings = (_turned_readings if turned else _readings)(recovered, names, settings)
+    if model is not None:
+        readings.append(v.row('Model', f'{params["model"]} is drawn behind the sensors, in the '
+                              f'frame {settings["known"]} sets them in', None, 'info'))
     if params['keep']:
         try:
             added = project.geometry_from_motion(*names, **settings)
@@ -268,7 +306,7 @@ def geometry_from_motion(project: Any, params: dict[str, Any]) -> list[dict]:
         scene = f'Sensors of {title} as they are turned, at their nodes in {settings["known"]}'
     else:
         scene = f'Sensors of {title} as they are turned, set out on a grid'
-    return [_scene(scene, recovered),
+    return [_scene(scene, recovered, model),
             _motions(f'Motions of {title}', recovered.motion, settings['band'] is None),
             (_turned_table if turned else _table)(f'Sensors of {title}', recovered),
             v.reading(f'Geometry from the motion of {title}', readings)]
@@ -293,9 +331,10 @@ OPERATIONS = (
                 'adds a geometry with a node and a coordinate system for each sensor. Tests on '
                 'a table that only translates hold three motions: the sensors are then turned '
                 'and not placed, and a geometry that holds the nodes gives their positions and '
-                'shows which channels do not read the way it has them.',
+                'shows which channels do not read the way it has them. A model in the '
+                'coordinates of that geometry can be drawn behind the sensors.',
         params=(_source('geometry_from_motion', 'Time history'), LOW, HIGH, KNOWN, SPAN, MIRROR,
-                RECORDS, MORE, MORE_RECORDS, KEEP),
+                MODEL, RECORDS, MORE, MORE_RECORDS, KEEP),
         outputs=('shape3d', 'spectrum', 'table', 'reading'),
         run=geometry_from_motion, edits_when=_kept, commits='keep', opens_previewed=True),
 )
