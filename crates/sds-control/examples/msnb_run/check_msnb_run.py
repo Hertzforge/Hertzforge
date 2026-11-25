@@ -25,6 +25,11 @@ must fail there: a check that cannot fail checks nothing.
 5. The runner refuses what it must (unknown keys, a reference that does not cover the test) with
    exit 2 and no folder, and records the engine's refusal of a rig over its size with exit 3.
 6. A down sweep starts at the top of the band and falls.
+7. A drive gain lets a reference whose ideal drive is over the converter's 10 V be met: a linear
+   dwell whose ideal drive peaks near 30 V, with the gain set to that peak (so 1 V in engine
+   volts) and the ceiling 6 dB over it, completes within the alarm band with the drive near 1 V;
+   the run file states the gain. Broken case: the same dwell with no gain (the drive held at its
+   9 V ceiling, the controls under).
 
 The structures are read from MSNB_PROBLEMS and never written. reference_model.py is the one in
 the problem's own folder.
@@ -197,6 +202,27 @@ def completes_within_alarm(out):
     return bad
 
 
+def ideal_peak(pid, test, amp):
+    """The least-squares drive's largest size over the reference's lines near the dwell, V."""
+    rm, st = reference_model(pid)
+    rows = [i for i, o in enumerate(st.raw['outputs']) if o['role'] == 'control']
+    ref = reachable_reference(pid, amp, (test['freq_hz'] / 1.5, test['freq_hz'] * 1.5))
+    f = np.array(ref['frequency_hz'])
+    want = np.array(ref['amplitude_m_s2_pk']) * np.exp(1j * np.radians(np.array(ref['phase_deg'])))
+    H = rm.frf(st, f, rows=rows)
+    return float(max(np.abs(np.linalg.lstsq(H[k], want[k], rcond=None)[0]).max() for k in range(len(f))))
+
+
+def gain_met(out, gain, ceiling):
+    r = load(out)
+    bad = completes_within_alarm(out)
+    if r['settings'].get('drive_gain') != gain:
+        bad.append(f'the run file states the gain as {r["settings"].get("drive_gain")}')
+    if not r['summary']['largest_drive_vpk'] <= ceiling + 1e-9:
+        bad.append(f'the drive reached {r["summary"]["largest_drive_vpk"]} V over the {ceiling} V ceiling')
+    return bad
+
+
 def ends_as_the_engine_says(out, ceiling=9.0):
     r = load(out)
     o, s, h = r['outcome'], r['summary'], r['history']
@@ -236,6 +262,12 @@ class MsnbRun(unittest.TestCase):
                                    'direction': 'down'}, 1.0), []),
             'big': (case(BIG, dwell, 10.0), []),
         }
+        lin = {'type': 'dwell', 'freq_hz': 150.0, 'dwell_s': 5.0}
+        amp = 10.0 * 30.0 / ideal_peak(LINEAR, lin, 10.0)            # the ideal drive peaks near 30 V
+        cls.gain = float(f'{ideal_peak(LINEAR, lin, amp):.9g}')
+        cls.ceiling = float(f'{10 ** (6 / 20):.9g}')
+        jobs['gain'] = (case(LINEAR, lin, amp, drives={'gain': cls.gain, 'ceiling_vpk': cls.ceiling}), ['--ideal-frf'])
+        jobs['no_gain'] = (case(LINEAR, lin, amp), ['--ideal-frf'])
         with cf.ThreadPoolExecutor(4) as ex:
             futs = {k: ex.submit(run, cls.tmp, k, c, *fl) for k, (c, fl) in jobs.items()}
             cls.res = {k: f.result() for k, f in futs.items()}
@@ -290,6 +322,11 @@ class MsnbRun(unittest.TestCase):
         # The refusal check fails on a case the runner takes.
         code, _, err = run(self.tmp, 'taken', base)
         self.assertNotEqual(code, 2, err)
+
+    def test_7_a_drive_gain_meets_a_reference_over_the_converters_range(self):
+        self.assertGreater(self.gain, 10.0)
+        self.assertEqual(gain_met(self.out('gain'), self.gain, self.ceiling), [])
+        self.assertNotEqual(gain_met(self.out('no_gain'), self.gain, self.ceiling), [], 'the check cannot fail')
 
     def test_6_a_down_sweep_starts_at_the_top_and_falls(self):
         r = load(self.out('down'))

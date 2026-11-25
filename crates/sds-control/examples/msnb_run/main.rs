@@ -280,6 +280,9 @@ struct Case {
     rung: RungFor,
     ceiling: Vec<f64>,
     abort: Vec<f64>,
+    /// The amplifier's gain: structure input (V) per engine volt. Applied at the
+    /// station's edge only; the engine, its law and its ceilings work in engine volts.
+    gain: f64,
     noise_rms_m_s2: f64,
     noise_seed: u64,
     ident_seed: u64,
@@ -486,14 +489,19 @@ fn parse_case(v: &Value) -> Result<Case, String> {
     if levels_db.is_empty() {
         return Err("ladder.levels_db is an empty list".into());
     }
-    let (ceiling, abort) = match present(c, "drives") {
-        None => (vec![9.0], vec![10.0]),
+    let (ceiling, abort, gain) = match present(c, "drives") {
+        None => (vec![9.0], vec![10.0], 1.0),
         Some(d) => {
             let d = obj(d, "drives")?;
-            only(d, &["ceiling_vpk", "abort_vpk"], "drives")?;
+            only(d, &["ceiling_vpk", "abort_vpk", "gain"], "drives")?;
+            let gain = match opt_f64(d, "gain", "drives")? {
+                None => 1.0,
+                Some(g) => pos(g, "drives.gain")?,
+            };
             (
                 volts(d.get("ceiling_vpk"), 9.0, "drives.ceiling_vpk")?,
                 volts(d.get("abort_vpk"), 10.0, "drives.abort_vpk")?,
+                gain,
             )
         }
     };
@@ -581,6 +589,7 @@ fn parse_case(v: &Value) -> Result<Case, String> {
         rung,
         ceiling,
         abort,
+        gain,
         noise_rms_m_s2,
         noise_seed,
         ident_seed,
@@ -966,6 +975,10 @@ struct Edge {
     pbuf: Vec<f32>,
     frame: Vec<f64>,
     one: Vec<f64>,
+    /// The amplifier's gain (`drives.gain`): every drive sample the engine writes is
+    /// multiplied by it before the structure (and the drive tap) play it.
+    gain: f64,
+    gbuf: Vec<f32>,
 }
 
 impl Edge {
@@ -1079,6 +1092,15 @@ impl Backend for Edge {
         Ok(got)
     }
     fn write_drive(&mut self, drive: &[f32]) -> Result<usize, HalError> {
+        // The amplifier: engine volts to the structure's input. A gain of 1 passes the
+        // samples unchanged, so such a run's bytes are a build without the gain's.
+        let drive: &[f32] = if self.gain == 1.0 {
+            drive
+        } else {
+            self.gbuf.clear();
+            self.gbuf.extend(drive.iter().map(|&v| (v as f64 * self.gain) as f32));
+            &self.gbuf
+        };
         let a = self.main.write_drive(drive)?;
         let b = self.probe.write_drive(drive)?;
         if a != b {
@@ -1787,6 +1809,8 @@ fn main() {
         record: a.record,
         shared: shared.clone(),
         pbuf: Vec::new(),
+        gain: case.gain,
+        gbuf: Vec::new(),
         frame: vec![0.0; nd],
         one: vec![0.0; 1],
     };
@@ -1845,7 +1869,7 @@ fn main() {
             "max_rise_db_per_s": guards.max_rise_db_per_s, "rotation_cap_deg": guards.rotation_cap_deg,
             "law_budget_fraction": guards.law_budget, "law_misses": guards.law_misses,
             "law_call_deadline_s": hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET.as_secs_f64(),
-            "ceiling_vpk": ceiling, "abort_vpk": abort,
+            "ceiling_vpk": ceiling, "abort_vpk": abort, "drive_gain": case.gain,
             "ladder_db": case.levels_db,
             "rung": match case.rung { RungFor::Seconds(s) => json!({"seconds": s}), RungFor::Sweeps(n) => json!({"sweeps": n}) },
             "noise_rms_m_s2": case.noise_rms_m_s2, "noise_seed": case.noise_seed,
@@ -1941,7 +1965,8 @@ fn main() {
             let line = &h.data()[k * (nc + nl) * nd..(k + 1) * (nc + nl) * nd];
             for i in 0..nc + nl {
                 for j in 0..nd {
-                    let v = line[i * nd + j] * rot / units::G0;
+                    // Per engine volt: the structure's response times the amplifier's gain.
+                    let v = line[i * nd + j] * rot * case.gain / units::G0;
                     if i < nc {
                         r.data_mut()[k * nc * nd + i * nd + j] = v;
                     } else {

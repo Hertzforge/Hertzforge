@@ -86,6 +86,7 @@ JSON. Unknown keys are refused at every level. Optional keys may be left out or 
 | `ladder.rung` | `{"seconds": s}` or `{"sweeps": n}` | the control service's: `{"sweeps": 1}` for a sweep, `{"seconds": 10}` otherwise | How long each level but the last is held; the last is held to the end of the test |
 | `drives.ceiling_vpk` | number or list (one per drive) | `9` | Each drive's ceiling, V peak (engine: above 0, at most 10) |
 | `drives.abort_vpk` | number or list | `10` | Each drive's abort, V peak (above the ceiling, at most 10) |
+| `drives.gain` | number > 0 | `1` | The amplifier's gain: the structure's input in volts per engine volt. The runner multiplies every drive sample by it at the station's edge (`Edge::write_drive`, beside the units conversion); the engine, the law, the ceilings, the aborts and every drive in the run file are in engine volts, and the identification the law is built on is per engine volt (with `--ideal-frf`, the small-signal response times the gain). The run file states it as `settings.drive_gain`. The MIMO Sine suite sets it so each problem's ideal full-level drive peak is 1 V (its `FORMAT_SINE.md` section 7) |
 | `noise.rms_m_s2` | number >= 0 | `0` | Measurement noise on every simulated output the run reads, m/s^2 rms per sample |
 | `noise.seed` | integer >= 0 | `1` | The seed of the simulator's noise |
 | `identification_seed` | integer >= 0 | `1592590339` (`0x5EED0003`) | The engine's identification seed; the default is the control service's own |
@@ -197,7 +198,7 @@ per-limit `(points, limits)`.
 | `law` | common: `id`, `params`, `phase_specified`; engine: `name`, `version`, `amplitude_only` | `params` as given; `amplitude_only` the manifest's; `phase_specified` as run |
 | `test` | common | The test as run: `type`, and `band_hz`, `rate_oct_per_min`, `direction`, `start_hz`, `sweeps` (sweep); `band_hz`, `steps_per_octave`, `spacing`, `step_s` (stepped); `freq_hz`, `dwell_s` (dwell) |
 | `reference` | common | `source` (`file` or `inline`), `file`, `sha256` (of the file, or null), `lines`, `full_level_scale`, `phase_splits` |
-| `settings` | common: `protective`, `alarm_db`, `abort_db`, `abort_ticks`, `limit_alarm_db`, `limit_abort_db`, `ceiling_vpk`, `abort_vpk`, `ladder_db`, `rung`, `noise_rms_m_s2`, `noise_seed`, `max_test_s`; engine: the rest | Every protective and drive value in force; engine-only: `divergence_s`, `max_step_db`, `max_rise_db_per_s`, `rotation_cap_deg`, `law_budget_fraction`, `law_misses`, `law_call_deadline_s`, `identification_seed`, `tracking`, `identification` |
+| `settings` | common: `protective`, `alarm_db`, `abort_db`, `abort_ticks`, `limit_alarm_db`, `limit_abort_db`, `ceiling_vpk`, `abort_vpk`, `drive_gain`, `ladder_db`, `rung`, `noise_rms_m_s2`, `noise_seed`, `max_test_s`; engine: the rest | Every protective and drive value in force; engine-only: `divergence_s`, `max_step_db`, `max_rise_db_per_s`, `rotation_cap_deg`, `law_budget_fraction`, `law_misses`, `law_call_deadline_s`, `identification_seed`, `tracking`, `identification` |
 | `identification` | below | |
 | `outcome` | below | |
 | `events` | engine | The engine's timeline, below |

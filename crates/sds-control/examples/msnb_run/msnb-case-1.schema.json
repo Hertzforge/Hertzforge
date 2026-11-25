@@ -83,7 +83,8 @@
     },
     "drives": {
       "type": ["object", "null"], "additionalProperties": false,
-      "properties": {"ceiling_vpk": {"$ref": "#/$defs/volts"}, "abort_vpk": {"$ref": "#/$defs/volts"}}
+      "properties": {"ceiling_vpk": {"$ref": "#/$defs/volts"}, "abort_vpk": {"$ref": "#/$defs/volts"},
+                     "gain": {"type": "number", "exclusiveMinimum": 0}}
     },
     "noise": {
       "type": ["object", "null"], "additionalProperties": false,
