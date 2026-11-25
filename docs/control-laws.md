@@ -903,16 +903,16 @@ octave band, by a softening fitted from the run's pulses at each level and carri
 bounded power of the amplitude (margin 1.5, power at most 1, only ever widened). The ladder's first
 two levels are its probes, played on the identification. Known weakness: the ceiling is a number
 for the structure; without one a strongly softening structure is played 8 to 11 dB over at full
-level. On the simulator it ended in tolerance in 0.761 of 1,140 runs, 0.28 to 0.30 on the most
-nonlinear frames and 0.534 on SRS targets.
+level. On the simulator it ended in tolerance in 76.1 % of 1,140 runs, 28.3 to 30.0 % on the most
+nonlinear frames and 53.4 % on SRS targets.
 
 | Key | What it does |
 |---|---|
 | `ceiling_pct` | The largest drop in frequency the model assumes in any band (default 12 %) |
 
 **`followed-hold`** (SRS only). `followed` with no ceiling and three protections, each a setting.
-Known weakness: it is cautious and often stops below full level; it kept 0.981 of 1,140 runs within
-3 dB of the full-level target but ended in tolerance in 0.530 (0.147 on SRS targets), most misses
+Known weakness: it is cautious and often stops below full level; it kept 98.1 % of 1,140 runs within
+3 dB of the full-level target but ended in tolerance in 53.0 % (14.7 % on SRS targets), most misses
 at its probes. Once it holds it stops correcting, and the probe check can stall a structure that
 does not soften under measurement noise.
 
