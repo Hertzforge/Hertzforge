@@ -5,7 +5,7 @@
 //! - `ok`: return the target at the scheduled level as the drive.
 //! - `trap`: panic (a trap, with a message on stderr).
 //! - `spin`: loop forever.
-//! - `grow`: allocate until memory runs out.
+//! - `grow`: reserve memory until the cap refuses it.
 //! - `open_file`: try to read, list and write files and open a network
 //!   connection; return an error if every attempt fails.
 //! - `sleep`: sleep for 30 seconds, then return the target.
@@ -184,9 +184,15 @@ impl RandomLaw for Misbehave {
                 }
             }
             "grow" => {
+                // Reserved, never written: the cap counts linear memory, which
+                // grows the same either way, and an untouched reservation
+                // reaches the cap in well under a millisecond. Filling each
+                // block faulted in every page first, which on a loaded runner
+                // could outlast the run's call budget, so the call was stopped
+                // as late before it ever reached the cap.
                 let mut hoard: Vec<Vec<u8>> = Vec::new();
                 loop {
-                    hoard.push(vec![1u8; 8 << 20]);
+                    hoard.push(Vec::with_capacity(8 << 20));
                     black_box(&hoard);
                 }
             }
