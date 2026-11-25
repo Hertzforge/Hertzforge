@@ -7,29 +7,41 @@ on the simulator, and writes one run folder. This file describes the case file i
 writes (`msnb-run/1`). The machine-readable form of the case is `msnb-case-1.schema.json`
 beside this file.
 
+The run format is meant to be written by more than one producer: this program (the Hertzforge
+engine) and a closed-loop harness in Python. A key is either **common** (every producer writes
+it; the scorer may rely on it) or **engine** (this program writes it; another producer may
+leave it out or write `null`, and a scorer must not need it). Every table below marks which.
+Where a common key depends on how the loop is built (what an update is, which updates are
+judged, how the history is thinned), the rule is stated here exactly so another producer can
+follow it.
+
 ```text
 cargo build --release -p sds-control --example msnb_run
-msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record]
+msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record] [--no-true-modes]
 ```
 
 - `<problem-root>`: the folder every path in the case is relative to (for the benchmark, the
   folder holding the problem folders). The run file never holds an absolute path.
 - `<run-dir>`: made by the program; it must not exist yet or must be empty (a run folder is
   never overwritten).
-- `--ideal-frf`: hand the law the structure's small-signal frequency response at the controls
-  in place of the engine's identification (see "Identification" below). An option for the
-  suite to separate the identification's error from the law's; not the default.
+- `--ideal-frf`: hand the law the structure's small-signal frequency response in place of the
+  engine's identification (see "Identification" below). An option for the suite to separate
+  the identification's error from the law's; not the default.
 - `--record`: also write the raw samples of the engaged run (see "Recording"). For checks, not
-  for the study: a 400 s run at 8192 Hz is about 40 MB a drive.
+  for the study: a 400 s run at 8192 Hz is about 26 MB a channel.
+- `--no-true-modes`: do not follow the modes' frequencies (`true_modes.tracked` is false). On
+  a 6x6 realistic structure, 1 octave a minute over 20 to 2000 Hz, following them took 24 % of
+  the run's processor time (MSNB-A-E7).
 
 One run uses one core: the program starts no thread of its own and does no network or screen
 work.
 
 Exit status: `0` the run completed; `1` the run ended any other way (aborted, stopped, law
 fault; the run folder is written); `2` the case was refused by the runner (unreadable, a key
-unknown, a value out of range; nothing is written); `3` the engine refused the setup, the law
-could not be resolved or built, or the identification's coherence gate held the run (the run
-folder is written with that outcome).
+unknown, a value out of range, a grid that does not cover the test; nothing is written); `3`
+the engine refused the setup (for instance more than 16 controls or 8 drives), the law could not
+be resolved or built, or the identification's coherence gate held the run (the run folder is
+written with that outcome).
 
 ## Units, and Where They Are Converted
 
@@ -41,9 +53,9 @@ in one module (`units` in `main.rs`, `G0 = 9.80665` m/s^2 per g) and only there:
   when the engine's profiles are built; every sample the simulator returns (m/s^2) is divided
   by `G0` at the station's edge (`read_input` of the runner's station tap), so the engine reads
   g as it would from an accelerometer channel;
-- out: every response, reference, limit value and identification value the run file holds is
-  multiplied by `G0`, so the run file is in m/s^2 (responses) and m/s^2 per volt
-  (identification), like the structure.
+- out: every response, reference, limit value and identification value the run folder holds
+  is multiplied by `G0`, so it is in m/s^2 (responses) and m/s^2 per volt (identification),
+  like the structure.
 
 The simulator's measurement noise is added inside the simulator, before the station's edge, so
 `noise.rms_m_s2` is given to it in m/s^2 unchanged. Drives are volts everywhere; nothing is
@@ -57,29 +69,29 @@ JSON. Unknown keys are refused at every level. Optional keys may be left out or 
 |---|---|---|---|
 | `schema` | `"msnb-case/1"` | required | |
 | `case_id` | string | required | Free text, echoed in the run file |
-| `structure.file` | string | required | `structure.json` of the problem, relative to `--root`; no absolute path, no `..` |
+| `structure.file` | string | required | `structure.json` of the problem, relative to `--root`; no absolute path, no `..`. Kind `jointed` (the realistic and strong tiers, with their level rule) or `modal` (the linear tier, run as the Random study's runner ran it: the fitted discretization of its `simulator` block) |
 | `structure.sha256` | hex string | none | Checked against the file's bytes when given |
 | `controls` | list of output names | every output with role `control`, in file order | The control channels, in the order of every per-control list |
 | `fs_hz` | number | `8192` | The rate asked of the simulated station, Hz (the Open Benchmark Set's grid rate) |
 | `tick_s` | number | `0.01` | The control update, s (the engine's default); the engine rounds it to whole samples |
 | `law.id` | string | required | A built-in law: `matrix`, `paired`, `ratio`, `steepest_descent`, `secant` |
-| `law.params` | object | `{}` | Values for the law's declared parameters by key; the rest take the law's defaults. Checked as the control service checks them |
+| `law.params` | object | `{}` | Values for the law's declared parameters by key; the rest take the law's defaults. A key the law does not declare, or a value not of its kind, is refused |
 | `test` | object | required | One of the three forms below |
 | `reference.file` | string | one of `file`, `inline` | A `msnb-reference/1` file, relative to `--root` |
 | `reference.sha256` | hex string | none | Checked when given |
 | `reference.inline` | object | | The body of a reference file, in the case itself |
-| `reference.phase` | `"specified"`, `"amplitude_only"`, `"auto"` | `"auto"` | Whether the reference's phases are part of the test. `auto`: amplitude only when the law's manifest accepts an amplitude-only reference (as the law check does), specified otherwise |
+| `reference.phase` | `"specified"`, `"amplitude_only"`, `"auto"` | `"auto"` | Whether the reference's phases are part of the test. `auto`: amplitude only when the law's manifest says it takes an amplitude-only reference, specified otherwise |
 | `full_level_scale` | number > 0 | `1` | Multiplies every reference amplitude (the full level) |
-| `ladder.levels_db` | list of numbers, ascending, each -60 to 12 | `[0]` | The level ladder, dB against full level; the last is the judged level |
-| `ladder.rung` | `{"seconds": s}` or `{"sweeps": n}` | `{"seconds": 2}` | How long each level but the last is held; the last is held to the end of the test |
+| `ladder.levels_db` | list of numbers, ascending, each -60 to 12 | `[0]` (the control service's default: one level, full) | The level ladder, dB against full level; the last is the judged level |
+| `ladder.rung` | `{"seconds": s}` or `{"sweeps": n}` | the control service's: `{"sweeps": 1}` for a sweep, `{"seconds": 10}` otherwise | How long each level but the last is held; the last is held to the end of the test |
 | `drives.ceiling_vpk` | number or list (one per drive) | `9` | Each drive's ceiling, V peak (engine: above 0, at most 10) |
 | `drives.abort_vpk` | number or list | `10` | Each drive's abort, V peak (above the ceiling, at most 10) |
-| `noise.rms_m_s2` | number >= 0 | `0` | Measurement noise on every simulated output, m/s^2 rms per sample |
+| `noise.rms_m_s2` | number >= 0 | `0` | Measurement noise on every simulated output the run reads, m/s^2 rms per sample |
 | `noise.seed` | integer >= 0 | `1` | The seed of the simulator's noise |
 | `identification_seed` | integer >= 0 | `1592590339` (`0x5EED0003`) | The engine's identification seed; the default is the control service's own |
 | `limits` | list | `[]` | Limit channels, at most 8, see below |
 | `protective` | `"default"` or `"widened"` | `"default"` | The protective settings, see below |
-| `max_test_s` | number > 0 | the test's own length times 1.5 plus 60 | The runner's own cap on test time; a run still going is stopped (`runner_stopped`) |
+| `max_test_s` | number > 0 | 1.5 times (the test's own length plus every lower level's time) plus 60 | The runner's own cap on test time; a run still going is stopped (`runner_stopped`) |
 
 ### `test`
 
@@ -90,15 +102,15 @@ JSON. Unknown keys are refused at every level. Optional keys may be left out or 
 | `"dwell"` | `freq_hz` > 0; `dwell_s` > 0 | A dwell (`DwellPlan`, `DwellFor::Seconds`) |
 
 A down-only sweep is the engine's own: the scheduler starts at the top of the band and sweeps
-down once. A reversal inside one run is not available.
+down once (checked: MSNB-A-E3). A reversal inside one run is not available.
 
 ### `limits[k]`
 
 | Key | Type | Meaning |
 |---|---|---|
 | `output` | string | The output's name in `structure.json` (not a control) |
-| `bound.frequency_hz` | list, ascending, at least 2 | The bound's grid, Hz; it must cover the test band |
-| `bound.amplitude_m_s2_pk` | list, same length, each > 0 | The bound, m/s^2 peak, interpolated in log-log between points (the engine's profile form); not scaled by `full_level_scale` |
+| `bound.frequency_hz` | list, ascending, at least 2 | The bound's grid, Hz; it must cover the frequencies the test visits |
+| `bound.amplitude_m_s2_pk` | list, same length, each > 0 | The bound, m/s^2 peak, log-log between points (the engine's profile form); not scaled by `full_level_scale` |
 
 ### `protective`
 
@@ -120,7 +132,8 @@ Only the checks that end a run are. The run file states every value in force.
 - The identification runs at the engine's defaults (`IdentificationSettings::default()`:
   -20 dB, 0.25 Hz lines, `max(24, 6 x drives)` records, trust and gate coherence 0.5) with the
   review answered "proceed" at once.
-- The tracking filter is the engine's default (10 percent of the frequency, at most 100 Hz).
+- The tracking filter is the engine's default (noise bandwidth 10 percent of the frequency, at
+  most 100 Hz).
 - Law requests to hold or slow the sweep are not honoured (the engine's default); they are
   recorded.
 - The channel table holds the controls (role control), the limit channels (role monitor) and
@@ -139,156 +152,221 @@ Only the checks that end a run are. The run file states every value in force.
 |---|---|---|
 | `schema` | `"msnb-reference/1"` | |
 | `controls` | list of output names | Must equal the case's controls, in order |
-| `frequency_hz` | list, ascending, at least 2 | The grid, Hz; it must cover the test band |
+| `frequency_hz` | list, ascending, at least 2 | The grid, Hz; it must cover the frequencies the test visits (the runner refuses it otherwise: the engine's profile gives no value outside its grid) |
 | `amplitude_m_s2_pk` | list of lists, `(lines, controls)` | Each control's reference at full level, m/s^2 peak, each > 0 |
 | `phase_deg` | list of lists, `(lines, controls)` | Each control's phase, degrees, relative to the tone, in (-180, 180]; required, ignored when the run is amplitude only |
 
 How it becomes the engine's own form (`ControlChannel`): each control's amplitude becomes a
-profile of acceleration rows, one row per grid point (log-log between rows, held flat beyond
-the ends only where the engine holds it); each phase becomes phase points, interpolated by the
-engine linearly in phase against log frequency without unwrapping. Where two neighbouring
-phases differ by more than 180 degrees (a wrap), the runner splits the segment where the
-unwrapped phase crosses +/-180 degrees into two points 1e-9 of the frequency apart, so the
-engine's interpolation follows the short way everywhere except inside that gap. The run file
-records how many splits were made.
+profile of acceleration rows, one row per grid point, read log-log between rows
+(`SineProfile::target_accel_g_pk`); each phase becomes phase points, read by the engine linearly
+in phase against log frequency without unwrapping, and held at the first or last point outside
+the grid. Where two neighbouring phases differ by more than 180 degrees (a wrap), the runner
+splits the segment where the short way crosses +/-180 degrees (at the log-frequency fraction
+where the unwrapped phase reaches it) into two points a relative 1e-9 apart, 180 on one side
+and -180 + 1e-9 on the other, so the engine's interpolation follows the short way everywhere
+except inside that gap. The run file records how many splits were made. Another producer
+should interpolate the same way: log-log in amplitude, linear in unwrapped phase against log
+frequency along the short way.
 
 ## The Run Folder, `msnb-run/1`
 
-| File | Deterministic | What |
-|---|---|---|
-| `run.json` | yes: the same case, root, options and runner give the same bytes | The run file, below |
-| `timing.json` | no (clock times) | Clock time of each phase, law call times |
-| `record/` | yes (with `--record` only) | The engaged run's raw samples, for the player check |
+| File | Deterministic | Kind | What |
+|---|---|---|---|
+| `run.json` | yes: the same case, root, options and program give the same bytes | common | The run file, below |
+| `law_identification.f8` | yes | common | The frequency response the law was built on, below |
+| `timing.json` | no (clock times) | engine | Clock time of each phase, law call times |
+| `record/` | yes (with `--record` only) | engine | The engaged run's raw samples, for the player check |
 
 ### `run.json`
 
-Numbers are rounded to 9 significant digits. Complex values are given as separate real and
-imaginary arrays. Every per-point array is indexed by point; per-control arrays are
-`(points, controls)`, per-drive `(points, drives)`, per-limit `(points, limits)`.
+Compact JSON. Numbers are rounded to 9 significant digits; a number that is not finite is
+`null`. Complex values are given as separate real and imaginary arrays. Every per-point array is
+indexed by point; per-control arrays are `(points, controls)`, per-drive `(points, drives)`,
+per-limit `(points, limits)`.
 
-| Key | What |
-|---|---|
-| `schema` | `"msnb-run/1"` |
-| `case_id` | From the case |
-| `case_sha256` | SHA-256 of the case file's bytes |
-| `runner_sha256` | SHA-256 of the running program's file |
-| `code_commit` | The commit the program was built from (`HF_BUILD_COMMIT` at build time), or `"unstated build"` |
-| `options` | `{"ideal_frf": bool, "record": bool}` |
-| `structure` | `file` (as in the case), `sha256`, `structure_id`, `variant`, `controls`, `limits` and `drives` (names), `n_modes`, `fs_hz` (as configured), `tick_s` (as rounded), `tick_frames` |
-| `law` | `id`, `name`, `params` (as given), `amplitude_only` (the manifest's), `phase_specified` (as run) |
-| `test` | The test as the engine was given it: `type`, and `band_hz`, `rate_oct_per_min`, `direction`, `start_hz` (sweep); `band_hz`, `steps_per_octave`, `step_s` (stepped); `freq_hz`, `dwell_s` (dwell) |
-| `reference` | `source` (`file` or `inline`), `sha256` (of the file, or null), `lines`, `full_level_scale`, `phase_splits` |
-| `settings` | Every protective and drive value in force (`protective`, `alarm_db`, `abort_db`, `abort_ticks`, `limit_alarm_db`, `limit_abort_db`, `divergence_s`, `max_step_db`, `max_rise_db_per_s`, `rotation_cap_deg`, `law_budget_fraction`, `law_misses`, `ceiling_vpk`, `abort_vpk`, `ladder_db`, `rung`, `noise_rms_m_s2`, `noise_seed`, `identification_seed`, `max_test_s`) |
-| `identification` | Below |
-| `outcome` | Below |
-| `events` | The engine's timeline, below |
-| `history` | The judged updates, decimated, below |
-| `true_modes` | The simulator's mode frequencies along the run, below |
-| `summary` | `updates` (records received), `records_dropped` (the engine's count; 0 expected), `judged_updates`, `largest_drive_vpk`, `over_ceiling_samples`, `drive_is_zero` (at the end), `engaged_at_s` |
+| Key | Kind | What |
+|---|---|---|
+| `schema` | common | `"msnb-run/1"` |
+| `producer` | common | `{"program", "engine", "simulator"}`: who wrote the file (here `msnb_run`, `hertzforge-mimo-sine`, `hertzforge-hal-sim`) |
+| `case_id` | common | From the case |
+| `case_sha256` | common | SHA-256 of the case file's bytes |
+| `runner_sha256` | engine | SHA-256 of the running program's file |
+| `code_commit` | engine | The commit the program was built from (`HF_BUILD_COMMIT` at build time), or `"unstated build"` |
+| `options` | common | `{"ideal_frf", "record", "true_modes"}`, booleans |
+| `structure` | common | `file` (as in the case), `sha256`, `structure_id`, `variant`, `seed`, `controls`, `limits` and `drives` (names), `n_modes`, `fs_hz` (as configured), `tick_s` (as rounded to whole samples), `tick_frames` |
+| `law` | common: `id`, `params`, `phase_specified`; engine: `name`, `version`, `amplitude_only` | `params` as given; `amplitude_only` the manifest's; `phase_specified` as run |
+| `test` | common | The test as run: `type`, and `band_hz`, `rate_oct_per_min`, `direction`, `start_hz`, `sweeps` (sweep); `band_hz`, `steps_per_octave`, `spacing`, `step_s` (stepped); `freq_hz`, `dwell_s` (dwell) |
+| `reference` | common | `source` (`file` or `inline`), `file`, `sha256` (of the file, or null), `lines`, `full_level_scale`, `phase_splits` |
+| `settings` | common: `protective`, `alarm_db`, `abort_db`, `abort_ticks`, `limit_alarm_db`, `limit_abort_db`, `ceiling_vpk`, `abort_vpk`, `ladder_db`, `rung`, `noise_rms_m_s2`, `noise_seed`, `max_test_s`; engine: the rest | Every protective and drive value in force; engine-only: `divergence_s`, `max_step_db`, `max_rise_db_per_s`, `rotation_cap_deg`, `law_budget_fraction`, `law_misses`, `law_call_deadline_s`, `identification_seed`, `tracking`, `identification` |
+| `identification` | below | |
+| `outcome` | below | |
+| `events` | engine | The engine's timeline, below |
+| `events_dropped` | engine | Counts by kind of events not kept |
+| `history` | below | The updates, thinned in a sweep |
+| `true_modes` | below | The simulator's mode frequencies along the run |
+| `summary` | common: `updates`, `judged_updates`, `largest_drive_vpk`; engine: `records_dropped` (0 expected), `largest_sample_v`, `over_ceiling_samples`, `drive_is_zero` (at the end) | |
+| `record` | engine | With `--record`: `drive_frames`, `input_frames`, `channels`, `drives` |
 
 #### `identification`
 
-| Key | What |
-|---|---|
-| `source` | `"engine"` (the engine's own identification), or `"ideal_frf"` (the law was handed the small-signal response; the engine's own was still measured and is what its guards use) |
-| `level_db` | The level it was taken at, dB against full level, by response (the engine's reading) |
-| `lag_frames`, `frames_ahead` | The drive-to-response lag taken out, and the frames queued ahead of the first drive frame, samples |
-| `record_len`, `realizations`, `line_spacing_hz`, `duration_s` | The measurement as made |
-| `band_coherence` | Each control's mean coherence over the test band |
-| `gate_passed` | Whether every control reached the gate |
-| `resonances` | The resonances the engine's modal fit finds in the identification over the test band (for a dwell, the dwell frequency /1.25 to x1.25): `f_hz` and `q` each (the sweep-rate warning's own fit; for a sweep, `time_constants` and `flagged` too) |
-| `ideal_vs_measured` | With `--ideal-frf`: the median and largest difference between the measured identification and the response handed to the law over trusted lines in the test band, dB and degrees |
+| Key | Kind | What |
+|---|---|---|
+| `source` | common | `"engine"` (the law was built on the engine's own identification), or `"ideal_frf"` (on the small-signal response; the engine's own was still measured and is what its guards use) |
+| `law_given` | common | The identification the law was built on, in `law_identification.f8`: `file`, `sha256`, `lines`, `controls`, `limits`, `drives`, `builds` (how many times the law was built; the file holds the first), `columns` (the file's layout, below) |
+| `level_db` | engine | The level the identification was taken at, dB against full level, by response (the engine's reading) |
+| `lag_frames`, `frames_ahead` | engine | The drive-to-response lag taken out, and the frames queued ahead of the first drive frame, samples |
+| `record_len`, `realizations`, `line_spacing_hz`, `duration_s` | engine | The measurement as made |
+| `band_coherence` | engine | Each control's mean coherence over the test band |
+| `gate_passed` | engine | Whether every control reached the gate |
+| `resonances` | engine | The resonances the engine's modal fit finds in the identification over the test band (for a dwell, the dwell frequency /1.25 to x1.25): `f_hz` and `q` each (the sweep-rate warning's own fit; for a sweep, `time_constants` and `flagged` too) |
+| `ideal_vs_measured` | engine | The measured identification against the small-signal response turned as below (on every run, with or without `--ideal-frf`): `elements` compared (trusted lines, elements at least 1/1000 of their line's largest), `median_db`, `largest_db`, `median_deg`, `largest_deg` of the measured over the small-signal; `fitted_delay_samples` and `fitted_angle_deg`, the straight line that best fits the angle left against frequency (both near 0 when the turn is right); `delay_turn_samples`, the turn used |
 
-#### `outcome`
+#### `law_identification.f8`
+
+Little-endian float64, one row a line of the identification's grid (ascending), the columns in
+the order `identification.law_given.columns` lists them: `frequency_hz` (1); `response_re`,
+`response_im` (controls x drives each, control-major: control 0's drives, then control 1's);
+`limit_response_re`, `limit_response_im` (limits x drives each); `coherence` (one per control);
+`limit_coherence` (one per limit); `trusted` (1 or 0). Responses are m/s^2 peak per volt peak,
+in the engine's convention: drive `D` plays `Re{D exp(j phi(t))}`, a channel's complex value
+is its response's phase minus the tone's with the identification's lag taken out, so a linear
+structure in steady state gives `C = H D` with the `H` of this file and the `C` and `D` of the
+history. With `--ideal-frf` the file holds the small-signal response the law was handed (every
+line trusted, coherence 1). 9937 lines for the benchmark's 20 to 2000 Hz band (16 to 2500 Hz
+at 0.25 Hz): 6.4 MB for 6x6, 12.6 MB for 12x6.
+
+#### `outcome` (common)
 
 | Key | What |
 |---|---|
 | `class` | `completed`; `aborted` (a guard ended the run with `widened` protective settings); `stopped_by_protective_default` (a guard ended the run with `default` protective settings); `law_fault`; `station_fault`; `runner_stopped` (the runner's `max_test_s`); `refused` (the engine refused the setup or the law); `held_by_identification` (the coherence gate held the run) |
-| `engine_outcome` | The engine's own name (`completed`, `control_abort`, `limit_abort`, `drive_abort`, `kinematic`, `law_fault`, `divergence`, `frequency_out_of_range`, `run_thread_failure`, `station`, `stopped`), or null |
-| `guard` | For a guard's end: the guard (`control_abort`, `limit_abort`, `drive_abort`, `divergence`, `kinematic`, `frequency_out_of_range`); else null |
+| `engine_outcome` | Engine: the engine's own name (`completed`, `control_abort`, `limit_abort`, `drive_abort`, `kinematic`, `law_fault`, `divergence`, `frequency_out_of_range`, `run_thread_failure`, `station`, `stopped`), or null |
+| `guard` | For a guard's end: `control_abort`, `limit_abort`, `drive_abort`, `divergence`, `kinematic`, `frequency_out_of_range`; else null |
 | `channel` | The control, limit or drive it named, by output or drive name; else null |
 | `frequency_hz`, `time_s`, `level_db` | Where the stop began (the engine's `stopping` event); null for a completed run |
 | `message` | The engine's or the runner's words for a refusal, a hold or a fault; else null |
 
-#### `events`
+#### `events` (engine)
 
 The engine's timeline in order, each `{"time_s", "index", "frequency_hz", "level_db",
 "kind", "detail"}`. `kind` is the engine's name (`engaged`, `level`, `notch_in`, `notch_out`,
 `notched_reference_refused`, `alarm`, `alarm_cleared`, `law_miss`, `over_ceiling`, `stopping`,
 `ended`, `held`, `resumed`); `detail` holds the event's own fields (the control, error, depth,
 scale, reason or outcome), channels by name. `alarm` and `alarm_cleared` are kept for the
-first 200 of each and then counted only (`events_dropped` gives the counts by kind).
+first 200 of each and then counted only (`events_dropped`).
 
 #### `history`
 
-| Key | What |
-|---|---|
-| `decimation` | `"1/48 octave"` for a sweep, `"every update"` for a stepped sine or a dwell |
-| `points` | How many points |
-| `index` | The update's index (0 at engage) |
-| `time_s` | Seconds since engage at the end of the update |
-| `frequency_hz` | The frequency the controls were measured at |
-| `level_db` | The scheduled level |
-| `judged` | Whether the update is judged: outside a settle window, the law's answer used, at the last level of the ladder (the law check's rule) |
-| `settling` | A settle window was open |
-| `miss` | null, or why the law's answer was not used |
-| `control_re`, `control_im` | Each control's tracked response, m/s^2 peak |
-| `reference_re`, `reference_im` | Each control's reference at this frequency and level, m/s^2 peak |
-| `judged_reference_re`, `judged_reference_im` | The reference the controls were judged against (a notched one where the engine accepted it); present only when the case has limit channels |
-| `error_db` | Each control's error, tracked over judged reference, dB (the engine's) |
-| `drive_re`, `drive_im` | Each drive played from this update on, after every guard, V peak |
-| `limit_re`, `limit_im`, `limit_bound` | Each limit channel's tracked response and its bound here, m/s^2 peak; present only with limit channels |
-| `notch_depth`, `ceiling_scale`, `cap_bound`, `opposition_ratio` | The engine's readings of the update |
-| `bin_updates` | Sweep only: how many updates the point stands for (its 1/48-octave bin at its level) |
-| `bin_judged` | Sweep only: how many of those are judged |
-| `bin_error_db_min`, `bin_error_db_max` | Sweep only: each control's smallest and largest error over the judged updates of the bin (`(points, controls)`; null where none is judged) |
+**What an update is.** The loop runs once every `structure.tick_s` (`tick_frames` samples) from
+engage. Update `k` (`index`, 0 at engage) does, in this order: (1) reads every channel's tracked
+value at the end of its interval (`time_s`, the engine's own seconds since engage at the end of
+the update); (2) forms the reference at the
+update's frequency and level; (3) judges the controls and limit channels against their abort
+bands and the drives against their aborts; if a guard ends the run here, the update is recorded
+with the law not called and the run stops; (4) schedules the next interval (frequency, level,
+settle window); (5) calls the law with this update's readings; its answer, after the engine's
+caps and ceilings, is `drive`, played from the next interval on. So `control` at update `k`
+answers the drives of earlier updates, through the structure and its delay.
 
-In a sweep a point is the first update of each 1/48-octave bin (bins counted from the band's
-lower edge, so the same frequency falls in the same bin up or down) at each level, and the last
-update of the run is always a point. The bin columns let a scorer find the worst excursion
-anywhere in the sweep without the full history.
+**Tracked values.** `control` and `limit` are each channel's complex amplitude at the tone,
+peak, in the convention of `law_identification.f8`. Here they are the engine's tone trackers:
+synchronous demodulation against the tone's own phase, a cascade of 4 one-pole low-pass
+sections whose noise bandwidth is the tracking width (10 % of the frequency, at most 100 Hz),
+read at the end of the update. Another producer states its own tracker; a scorer compares
+values, not filters.
 
-#### `true_modes`
+**Settle windows.** At engage, after a level change and after a step (stepped sine), the engine
+opens a settle window of 2 tracker settle times (1.3 over the tracking width each) plus 3 times
+the structure's group delay at that frequency (from the identification, over twice the tracking
+width) plus the identification's lag. `settling` is true inside it.
+
+**Judged.** An update is judged when it is outside a settle window (`settling` false), the law's
+answer was not refused (`miss` null), and it is at the last level of the ladder
+(|`level_db` - last level| < 1e-6 dB): the law check's rule
+(`hertzforge_mimo_sine_laws::check`). The update on which a guard ended the run is judged by the
+same rule (its readings are real; the law was not called on it).
+
+**Thinning.** A stepped sine or a dwell keeps every update (`decimation` `"every update"`). A
+sweep (`decimation` `"1/48 octave"`) keeps one point per bin and level: with `lo` the band's
+lower edge, an update's bin is `floor(48 log2(f / lo) + 1e-9)`; its key is (its level rounded to
+1e-6 dB, its bin); a point is the first update of each run of consecutive updates with the same
+key; and the last update of the run is a point too if it is not one already. A point stands for
+the updates from it up to the next point (the last update stands for itself alone). Bins are
+counted from the lower edge whichever way the sweep goes, so a frequency falls in the same bin
+up or down.
+
+| Key | Kind | What |
+|---|---|---|
+| `decimation` | common | `"1/48 octave"` (sweep) or `"every update"` (stepped sine, dwell) |
+| `points` | common | How many points |
+| `index` | common | The update's index (0 at engage) |
+| `time_s` | common | Seconds since engage at the end of the update |
+| `frequency_hz` | common | The frequency the channels were tracked at |
+| `level_db` | common | The scheduled level, dB against full level |
+| `judged` | common | As above |
+| `settling` | common | A settle window was open |
+| `miss` | engine | null, or why the law's answer was refused |
+| `control_re`, `control_im` | common | Each control's tracked value, m/s^2 peak |
+| `reference_re`, `reference_im` | common | Each control's reference at this frequency and level, m/s^2 peak |
+| `judged_reference_re`, `judged_reference_im` | engine | The reference the controls were judged against (a notched one where the engine accepted it); present only when the case has limit channels |
+| `error_db` | common | Each control's error, 20 log10 of the tracked value's size over the judged reference's (the engine's; a reading of zero gives about -6000 dB, the engine's floor of 1e-300 on both) |
+| `drive_re`, `drive_im` | common | Each drive played from the next interval on, after every guard, V peak |
+| `limit_re`, `limit_im`, `limit_bound` | common, with limit channels only | Each limit channel's tracked value and its bound here, m/s^2 peak |
+| `notch_depth`, `ceiling_scale`, `cap_bound`, `opposition_ratio` | engine | The engine's readings of the update |
+| `bin_updates` | common, sweep only | How many updates the point stands for |
+| `bin_judged` | common, sweep only | How many of those are judged |
+| `bin_error_db_min`, `bin_error_db_max` | common, sweep only | Each control's smallest and largest error over the judged updates the point stands for (`(points, controls)`; null where none is judged) |
+
+#### `true_modes` (common; `resolution_samples` and `configures_seen` engine)
 
 What the simulator's level rule says each mode's frequency is at the moment of each history
 point: the structure's state as tested.
 
 | Key | What |
 |---|---|
-| `tracked` | Whether the modes were followed (false for a structure with no level rule: its modes do not move) |
+| `tracked` | Whether the modes were followed (false for a structure with no level rule, whose modes do not move, and with `--no-true-modes`) |
 | `modes` | The modes followed: `index` (in `structure.json`), `f0_hz` (small-signal) |
 | `frequency_hz` | `(points, modes)`: each mode's frequency at the point |
-| `resolution_samples` | The envelope is read at the end of each block the station is read in (256 samples at the simulator's block); a point takes the last read at or before its time |
+| `resolution_samples` | The envelope is read at the end of each block the station is read in (256 samples at the simulator's block); a point takes the last read at or before round(`time_s` x fs) samples from the engaged start |
+| `configures_seen` | The station's configures seen (2: the identification's, the engaged run's) |
 
 The modes followed are those whose small-signal frequency lies in the identification's band
-(the test band /1.25 to x1.25). The runner steps a copy of those modes alone on the exact
+(`ident::grid_band` of the test band). The runner steps a copy of those modes alone on the exact
 drive the simulator played (read from a second, drive-only simulator fed the same calls), so
-the frequencies are the simulator's own rule applied to the simulator's own state.
+the frequencies are the simulator's own rule applied to the simulator's own state. Checked
+against the open-loop player's envelopes put through `reference_model.level_state`: a relative
+3.5e-9 (MSNB-A-E4).
 
-### `timing.json`
+### `timing.json` (engine)
 
 `identify_s`, `engage_s` (the law's build and the core), `run_s` (the engaged loop), `write_s`,
 `total_s` (clock seconds, wall); `law_calls`, `law_median_s`, `law_slowest_s`,
-`law_over_setup_budget` (calls over a quarter of the update), `setup_law_budget_s`; and
-`law_s` per history point (null where the law was not called).
+`law_over_setup_budget` (calls over a quarter of the update), `setup_law_budget_s`, `test_s`;
+and `law_s` per history point (null where the law was not called).
 
-### Recording (`--record`)
+### Recording (`--record`, engine)
 
 `record/drive.f8`: the drive the simulator played to the structure in the engaged run, every
 sample, `(samples, drives)` little-endian float64 row-major, read from the drive-only
 simulator. `record/inputs.f8`: every sample the station returned in the engaged run, before
 the conversion to g, `(samples, controls + limits)` float64 (each the float32 the station
-gave). `record/structure.json`: the structure the simulator ran, in the player's keys (case
-schema `mm-x4-case/2`: the controls and limit channels as its outputs, the structure's step).
-`obs_play record/structure.json --drive record/drive.f8 --out <f8> --fs <fs_hz>` gives the
-same samples with no noise.
+gave). `record/structure.json`: the structure the simulator ran, in the research runner's keys
+(case schema `mm-x4-case/2` for a jointed structure, the controls and limit channels as its
+outputs, with the structure's step; `mm-x4-case/1`'s modal object for the linear tier). For a
+jointed structure, `obs_play record/structure.json --drive record/drive.f8 --out <f8> --fs
+<fs_hz>` gives the same samples with no noise: equal to `inputs.f8` once rounded to float32
+(MSNB-A-E4). The player does not step a modal structure. Sample 0 of both files is the first
+sample of the engaged run, so update `k`'s readings end at sample round(`time_s` x fs).
 
 ## Identification
 
 By default the engine's own (what a user gets). With `--ideal-frf` the law's build is handed,
 on the identification's own grid, the structure's small-signal frequency response at the
-controls and limit channels (`JointedPlant::frf_at_envelope` with every envelope zero, at the
-station's rate, through the structure's step and delays), turned by the station's delay the
-same way the identification is (`exp(j w (lag_frames - frames_ahead) / fs)`), converted to g
-per volt, with every line trusted and coherence 1. The engine's guards still use its measured
-identification; only the law sees the ideal one.
+controls and limit channels (the simulator's own exact response of the discrete structure,
+`analytic_frf_at`; for a jointed structure every mode at zero envelope; at the station's rate, through
+the structure's step and delays), turned by the delay the identification carries,
+`exp(j w (lag_frames - frames_ahead - 256) / fs)` (256 is the service's simulator block,
+`SIM_BLOCK_FRAMES`; found by fitting, MSNB-A-E2, and fitted again on every run as
+`ideal_vs_measured.fitted_delay_samples`), converted to g per volt, with every line trusted and
+coherence 1. The engine's guards still use its measured identification; only the law sees the
+ideal one.
