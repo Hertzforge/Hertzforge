@@ -201,10 +201,10 @@ ceiling (12 % unless you change it), is the most the model assumes the structure
 band. It accepts SRS targets only. Its known limits:
 
 - On the simulator, over 380 structures and 1,140 runs, it ended at full level inside the SRS
-  tolerance in about three runs in four (0.761; 0.772 on 230 structures held back from the study),
-  and kept every pulse within 3 dB of the full-level target in about nine in ten (0.904).
+  tolerance in about three runs in four (76.1 %; 77.4 % on 230 structures held back from the study),
+  and kept every pulse within 3 dB of the full-level target in about nine in ten (90.4 %).
 - It struggles on strongly nonlinear structures, where about three runs in ten ended in tolerance
-  (0.28 to 0.30 on the hardest frames), and on SRS targets, about one run in two (0.534). Almost
+  (28.3 to 30.0 % on the hardest frames), and on SRS targets, about one run in two (53.4 %). Almost
   every miss is a run that stopped below full level.
 - 109 runs of the 1,140 over-tested by more than 3 dB at some pulse, 14 by more than 6 dB.
 - The ceiling is a number for your structure. Without one, a strongly softening structure was
@@ -220,13 +220,13 @@ is within the hold tolerance, 3 dB, it plays the same drive again). It accepts S
 is cautious, and often stops below full level. Its known limits:
 
 - On the simulator, over the same 1,140 runs, it kept every pulse within 3 dB of the full-level
-  target in 98 runs in 100 (0.981), the most of the laws studied, and over-tested by more than
-  6 dB in 2 runs. But it ended at full level in tolerance in only about half the runs (0.530; 0.542
-  held back), and on SRS targets in about one run in seven (0.147).
+  target in 98 runs in 100 (98.1 %), the most of the laws studied, and over-tested by more than
+  6 dB in 2 runs. But it ended at full level in tolerance in only about half the runs (53.0 %; 54.3 %
+  held back), and on SRS targets in about one run in seven (14.7 %).
 - Nearly every miss is a run that never reached full level: 534 of 536, and 428 of those never got
-  past its probes. On structures with linear joints it ended in tolerance in 0.48 to 0.93 of runs,
-  where `followed` ended in tolerance in nearly all of them; on strongly nonlinear frames, in 0.07
-  to 0.13.
+  past its probes. On structures with linear joints it ended in tolerance in 48.3 to 93.3 % of runs,
+  where `followed` ended in tolerance in nearly all of them; on strongly nonlinear frames, in 6.7
+  to 13.3 %.
 - Once it holds it stops correcting, so a held pulse can drift on a structure that changes during
   the run (+2.6 to +3.1 dB on a drifting structure), and it does nothing for a full-level pulse
   that is outside the tolerance.
