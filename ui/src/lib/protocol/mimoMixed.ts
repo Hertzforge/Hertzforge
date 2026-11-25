@@ -70,8 +70,8 @@ export type MimoMixedNotBuiltReason = (typeof MIMO_MIXED_NOT_BUILT)[keyof typeof
 /** Which world `laws.list` is asked for, by role. */
 export const MIMO_MIXED_LAW_WORLDS = { floor: 'mimo', tones: 'sine_mimo' } as const;
 
-export const MIMO_MIXED_MAX_CONTROLS = 16;
-export const MIMO_MIXED_MAX_DRIVES = 8;
+export const MIMO_MIXED_MAX_CONTROLS = 24;
+export const MIMO_MIXED_MAX_DRIVES = 12;
 export const MIMO_MIXED_MAX_LIMITS = 8;
 export const MIMO_MIXED_MAX_TONES = 12;
 export const MIMO_MIXED_MAX_BANDS = 12;

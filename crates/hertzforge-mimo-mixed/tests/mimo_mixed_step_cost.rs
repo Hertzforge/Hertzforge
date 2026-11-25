@@ -1,6 +1,6 @@
 //! The run's per-frame step: it allocates nothing in its steady state, and
-//! its cost at 12 tones on 16 controls, 8 limits and 8 drives against the
-//! frame period.
+//! its cost at 12 tones on 24 controls, 8 limits and 12 drives (the largest
+//! run) against the frame period.
 
 use hertzforge_engine::ProcessStep;
 use hertzforge_mimo_mixed::service::StepCostProbe;
@@ -152,11 +152,11 @@ fn mimo_mixed_step_does_not_allocate() {
     assert_eq!(allocs, 0);
 }
 
-/// Requirement: the step's mean cost per frame at 12 tones, 16 controls,
-/// 8 limits and 8 drives is under the frame period at 16384 Hz (61.0 us).
+/// Requirement: the step's mean cost per frame at 12 tones, 24 controls,
+/// 8 limits and 12 drives is under the frame period at 16384 Hz (61.0 us).
 #[test]
 fn mimo_mixed_step_cost_at_twelve_tones_is_under_the_frame_period() {
-    let (n, m, p) = (16, 8, 8);
+    let (n, m, p) = (24, 12, 8);
     let mut pr = probe(n, m, p, 12);
     let mut input = vec![0.0f32; BLOCK * pr.n_in];
     let mut out = Vec::with_capacity(BLOCK * m);

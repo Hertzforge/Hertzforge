@@ -38,8 +38,24 @@ fn mimo_mixed_a_plain_configuration_validates() {
     assert_eq!(cfg.law.fill_rule.id, "no_error");
     assert_eq!(
         (MAX_CONTROLS, MAX_DRIVES, MAX_LIMITS, MAX_TONES, MAX_BANDS),
-        (16, 8, 8, 12, 12)
+        (24, 12, 8, 12, 12)
     );
+}
+
+#[test]
+fn mimo_mixed_takes_24_controls_and_12_drives_and_no_more() {
+    let parts = || vec![floor("f"), tone("t1", fixed(100.0), 1.0)];
+    assert_eq!(name(&config(24, 12, 0.0, parts())), "ok");
+    for (n, m, want) in [
+        (25, 2, "1 to 24 control channels"),
+        (2, 13, "1 to 12 drives"),
+    ] {
+        let e = config(n, m, 0.0, parts())
+            .validate(Some(10_240.0))
+            .unwrap_err();
+        assert_eq!(e.name(), "bad_config", "{n} by {m}");
+        assert!(e.to_string().contains(want), "{n} by {m}: {e}");
+    }
 }
 
 #[test]
@@ -177,8 +193,8 @@ fn mimo_mixed_single_output_refusals_keep_their_names() {
     for (want, parts) in cases {
         assert_eq!(name(&base(parts)), want, "case {want}");
     }
-    let mut cfg = config(17, 2, 0.0, vec![floor("f")]);
-    cfg.reference = reference(2048, 1.0, (20, 2001), 0.01, &coherence(17, 0.0));
+    let mut cfg = config(25, 2, 0.0, vec![floor("f")]);
+    cfg.reference = reference(2048, 1.0, (20, 2001), 0.01, &coherence(25, 0.0));
     assert_eq!(name(&cfg), "bad_config");
     let mut cfg = base(vec![floor("f")]);
     cfg.tracking_hz = 0.0;

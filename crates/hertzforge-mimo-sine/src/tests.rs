@@ -40,7 +40,7 @@ fn setup(nc: usize, nd: usize) -> MimoSineSetup {
             .collect(),
         drives: (0..nd)
             .map(|i| DriveChannel {
-                channel: 20 + i,
+                channel: 60 + i,
                 ceiling_vpk: 2.0,
                 abort_vpk: 3.0,
             })
@@ -83,7 +83,7 @@ fn mimo_sine_a_well_formed_setup_passes_and_states_its_shape_and_type() {
     assert_eq!(s.test_type(), TestType::Sweep);
     assert_eq!(setup(6, 3).shape(), MimoShape::MoreControlsThanDrives);
     assert_eq!(setup(3, 6).shape(), MimoShape::FewerControlsThanDrives);
-    setup(16, 8).validate().unwrap();
+    setup(24, 12).validate().unwrap();
 }
 
 #[test]
@@ -108,10 +108,20 @@ fn mimo_sine_the_defaults_are_the_design_defaults() {
 }
 
 #[test]
-fn mimo_sine_sizes_are_capped_at_16_controls_8_drives_8_limits() {
-    assert_eq!(rule(&setup(17, 4)), SetupRule::ControlsOutOfRange);
+fn mimo_sine_sizes_are_capped_at_24_controls_12_drives_8_limits() {
+    assert_eq!((MAX_CONTROLS, MAX_DRIVES, MAX_LIMITS), (24, 12, 8));
+    setup(24, 12).validate().unwrap();
+    setup(24, 1).validate().unwrap();
+    setup(1, 12).validate().unwrap();
+    let e = setup(25, 4).validate().unwrap_err();
+    assert_eq!(e.rule, SetupRule::ControlsOutOfRange);
+    assert_eq!(e.field, "controls");
+    assert_eq!(e.message, "25 control channels; 1 to 24 are accepted");
     assert_eq!(rule(&setup(0, 4)), SetupRule::ControlsOutOfRange);
-    assert_eq!(rule(&setup(4, 9)), SetupRule::DrivesOutOfRange);
+    let e = setup(4, 13).validate().unwrap_err();
+    assert_eq!(e.rule, SetupRule::DrivesOutOfRange);
+    assert_eq!(e.field, "drives");
+    assert_eq!(e.message, "13 drives; 1 to 12 are accepted");
     assert_eq!(rule(&setup(4, 0)), SetupRule::DrivesOutOfRange);
     let mut s = setup(4, 4);
     s.limits = (0..9)
@@ -396,7 +406,14 @@ fn law_rule(s: &LawSetup) -> LawSetupRule {
 fn mimo_sine_a_law_setup_is_checked_against_its_counts() {
     law_setup(4, 4, 1).validate().unwrap();
     law_setup(3, 6, 0).validate().unwrap();
-    assert_eq!(law_rule(&law_setup(17, 4, 0)), LawSetupRule::SizeOutOfRange);
+    law_setup(24, 12, 8).validate().unwrap();
+    assert_eq!(law_rule(&law_setup(25, 4, 0)), LawSetupRule::SizeOutOfRange);
+    let e = law_setup(4, 13, 0).validate().unwrap_err();
+    assert_eq!(e.rule, LawSetupRule::SizeOutOfRange);
+    assert_eq!(
+        e.message,
+        "4 controls, 13 drives and 0 limit channels; 1 to 24, 1 to 12 and 0 to 8 are accepted"
+    );
     let mut s = law_setup(4, 4, 1);
     s.shape = MimoShape::MoreControlsThanDrives;
     assert_eq!(law_rule(&s), LawSetupRule::ShapeMismatch);

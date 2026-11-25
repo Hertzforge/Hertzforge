@@ -26,7 +26,7 @@ schedule, tracking, hold, resume and frequency verbs with Sine (see [sine.md](si
   drive differ.
 - **One schedule for every control.** The levels scale every reference together.
 
-The first version runs up to 16 control points, 8 drives and 8 limit channels.
+The first version runs up to 24 control points, 12 drives and 8 limit channels.
 
 ## What a Run Does
 

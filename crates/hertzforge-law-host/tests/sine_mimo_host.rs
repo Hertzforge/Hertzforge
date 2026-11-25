@@ -4,7 +4,7 @@
 
 use hertzforge_law_host::sine_mimo::{
     Complex, Hold, Identification, MatrixStack, ProportionalTracking, SineMimoInputs,
-    SineMimoSetup, SineShape, TestType, Tolerance, Tracking,
+    SineMimoSetup, TestType, Tolerance, Tracking,
 };
 use hertzforge_law_host::{
     AnyLaw, HostConfig, LawError, LawHost, Param, ParamValue, SineMimoLawInstance,
@@ -39,7 +39,11 @@ const TEMPLATE: &str = "law_fixture_sine_mimo_template";
 
 /// Two controls, three drives, one limit channel.
 fn setup(test_type: TestType) -> SineMimoSetup {
-    let (nc, nd, nl) = (2u32, 3u32, 1u32);
+    sized(2, 3, 1, test_type)
+}
+
+/// `nc` controls, `nd` drives and `nl` limit channels.
+fn sized(nc: u32, nd: u32, nl: u32, test_type: TestType) -> SineMimoSetup {
     let grid = vec![20.0, 60.0, 100.0, 140.0, 200.0];
     let lines = grid.len() as u32;
     let stack = |rows: u32| MatrixStack {
@@ -63,8 +67,8 @@ fn setup(test_type: TestType) -> SineMimoSetup {
         band_lo_hz: 20.0,
         band_hi_hz: 200.0,
         test_type,
-        shape: SineShape::FewerControlsThanDrives,
-        drive_ceiling_v: vec![1.0, 2.0, 3.0],
+        shape: hertzforge_law_host::sine_mimo::shape_of(nc, nd),
+        drive_ceiling_v: (1..=nd).map(f64::from).collect(),
         identification: Identification {
             frequency_hz: grid,
             response: stack(nc),
@@ -374,4 +378,47 @@ fn mimo_sine_a_late_law_is_stopped_at_its_budget_and_stays_stopped() {
         budget,
     );
     assert!(matches!(r, Err(LawError::Deadline { budget: b }) if b == budget));
+}
+
+#[test]
+fn mimo_sine_a_law_file_is_built_for_24_controls_12_drives_8_limits_and_no_more() {
+    assert_eq!(
+        (
+            hertzforge_law_host::sine_mimo::MAX_SINE_MIMO_CONTROLS,
+            hertzforge_law_host::sine_mimo::MAX_SINE_MIMO_DRIVES,
+            hertzforge_law_host::sine_mimo::MAX_SINE_MIMO_LIMITS,
+        ),
+        (24, 12, 8)
+    );
+    let host = LawHost::new(HostConfig::default()).unwrap();
+    // The template is a law file as a third party writes it from the SDK:
+    // nothing in it names a size.
+    let law = host.load_sine_mimo(&law_bytes(TEMPLATE)).unwrap();
+    for (nc, nd) in [(24, 12), (12, 12), (24, 1), (1, 12)] {
+        let s = sized(nc, nd, 8, TestType::Dwell);
+        let mut i = law.instantiate(&s, &[], BUDGET).unwrap();
+        let first = i.engage(&inputs(&s, 0), BUDGET).unwrap();
+        assert_eq!(first.drive.len(), nd as usize, "{nc} by {nd}");
+        let next = i.tick(&inputs(&s, 1), BUDGET).unwrap();
+        assert_eq!(next.drive.len(), nd as usize, "{nc} by {nd}");
+        // The template steps each pair's drive off the drive in force (0.1)
+        // and leaves the rest: min(controls, drives) of them move, the
+        // highest-numbered pair included.
+        let moved: Vec<usize> = (0..nd as usize)
+            .filter(|&j| next.drive[j].re != 0.1 || next.drive[j].im != 0.0)
+            .collect();
+        let pairs = nc.min(nd) as usize;
+        assert_eq!(moved, (0..pairs).collect::<Vec<_>>(), "{nc} by {nd}");
+    }
+    for (nc, nd, nl, want) in [
+        (25, 12, 0, "25 controls; 1 to 24 are accepted"),
+        (24, 13, 0, "13 drives; 1 to 12 are accepted"),
+        (24, 12, 9, "9 limit channels; 0 to 8 are accepted"),
+    ] {
+        match law.instantiate(&sized(nc, nd, nl, TestType::Dwell), &[], BUDGET) {
+            Err(LawError::SetupInvalid(m)) => assert!(m.contains(want), "{m}"),
+            Err(e) => panic!("{nc} by {nd} by {nl}: {e}"),
+            Ok(_) => panic!("{nc} by {nd} by {nl} was built"),
+        }
+    }
 }

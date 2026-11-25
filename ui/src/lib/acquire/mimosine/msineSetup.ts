@@ -129,8 +129,8 @@ export interface MsineDraft {
 	metadata: { key: string; label: string; value: string }[];
 }
 
-export const MAX_CONTROLS = 16;
-export const MAX_DRIVES = 8;
+export const MAX_CONTROLS = 24;
+export const MAX_DRIVES = 12;
 export const MAX_LIMITS = 8;
 
 export const TEST_KINDS: { id: MimoSineTestType; label: string }[] = [

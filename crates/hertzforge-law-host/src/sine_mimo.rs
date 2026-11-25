@@ -53,9 +53,9 @@ pub use bindings::hertzforge::control_law::mimo_sine_types::{
 /// The most values a MIMO Sine law may report on one call.
 pub const MAX_SINE_MIMO_VALUES: usize = 8;
 /// The most control channels a MIMO Sine law is built for.
-pub const MAX_SINE_MIMO_CONTROLS: usize = 16;
+pub const MAX_SINE_MIMO_CONTROLS: usize = 24;
 /// The most drives a MIMO Sine law commands.
-pub const MAX_SINE_MIMO_DRIVES: usize = 8;
+pub const MAX_SINE_MIMO_DRIVES: usize = 12;
 /// The most limit channels a MIMO Sine run has.
 pub const MAX_SINE_MIMO_LIMITS: usize = 8;
 

@@ -104,9 +104,9 @@ export interface MimoSineDrive {
 }
 
 export interface MimoSineChannels {
-	/** 1 to 16. */
+	/** 1 to 24. */
 	controls: MimoSineControl[];
-	/** 1 to 8, in the table's order. */
+	/** 1 to 12, in the table's order. */
 	drives: MimoSineDrive[];
 }
 
