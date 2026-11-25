@@ -164,7 +164,7 @@ earned. Better laws are an active area of work. A new law is written as a law fi
 interface the built-in laws use, and is added without changing anything else in the test; the
 law-writing guide ([control-laws.md](control-laws.md)) starts from `paired`, the simplest of them.
 
-The catalog names the laws; the three built in at present are below.
+The catalog names the laws; the five built in at present are below.
 
 **`inverse`** builds the first drives by passing each control's target through the regularized
 inverse of the identified structure, line by line, and after each pulse corrects the drives by a
@@ -187,6 +187,50 @@ control. It uses no model of how one drive moves the other controls. It accepts 
 target. Pick it when the drives barely affect each other's control points, or to see what a law
 without a coupling model does on your structure. On a coupled structure the pairs work against
 each other. It is also the template for a new law.
+
+**`followed`** works as `shape` does, but through a model that follows a structure that softens as
+it is driven harder: the identification and copies of it shifted down in frequency, octave band by
+octave band, by a softening fitted from the run's own pulses and carried up the ladder. The first
+two levels of the ladder are its probes, played on the identification; the study below began its
+ladder with two low levels, -40 and -34 dB, ahead of -12 dB. Its one setting, the softening
+ceiling (12 % unless you change it), is the most the model assumes the structure softens in any
+band. It accepts SRS targets only. Its known limits:
+
+- On the simulator, over 380 structures and 1,140 runs, it ended at full level inside the SRS
+  tolerance in about three runs in four (0.761; 0.772 on 230 structures held back from the study),
+  and kept every pulse within 3 dB of the full-level target in about nine in ten (0.904).
+- It struggles on strongly nonlinear structures, where about three runs in ten ended in tolerance
+  (0.28 to 0.30 on the hardest frames), and on SRS targets, about one run in two (0.534). Almost
+  every miss is a run that stopped below full level.
+- 109 runs of the 1,140 over-tested by more than 3 dB at some pulse, 14 by more than 6 dB.
+- The ceiling is a number for your structure. Without one, a strongly softening structure was
+  played 8 to 11 dB over at full level. Under measurement noise near the probes' own level, its
+  first pulse after the probes can be several dB over that level's target.
+
+**`followed-hold`** is `followed` with no ceiling and three protections, each on unless you turn it
+off: a probe check (before each probe it predicts the probe's SRS through the identification and
+scales the probe down when the prediction, with a margin from the errors measured so far, is more
+than the probe limit, 3 dB, over its target); a power bound on how fast the assumed softening may
+grow with level; and a hold (on a repeat pulse at one level, once every SRS point of every control
+is within the hold tolerance, 3 dB, it plays the same drive again). It accepts SRS targets only. It
+is cautious, and often stops below full level. Its known limits:
+
+- On the simulator, over the same 1,140 runs, it kept every pulse within 3 dB of the full-level
+  target in 98 runs in 100 (0.981), the most of the laws studied, and over-tested by more than
+  6 dB in 2 runs. But it ended at full level in tolerance in only about half the runs (0.530; 0.542
+  held back), and on SRS targets in about one run in seven (0.147).
+- Nearly every miss is a run that never reached full level: 534 of 536, and 428 of those never got
+  past its probes. On structures with linear joints it ended in tolerance in 0.48 to 0.93 of runs,
+  where `followed` ended in tolerance in nearly all of them; on strongly nonlinear frames, in 0.07
+  to 0.13.
+- Once it holds it stops correcting, so a held pulse can drift on a structure that changes during
+  the run (+2.6 to +3.1 dB on a drifting structure), and it does nothing for a full-level pulse
+  that is outside the tolerance.
+- Under measurement noise the probe check can stall a structure that does not soften; turn it off
+  there.
+
+Neither has run on a shaker. Every number above was measured on the simulator, with one level of
+measurement noise.
 
 **How a law's model follows the structure.** `inverse` and `shape` build every drive through a
 model of the structure, and both have a `model` option for how that model is kept current as the

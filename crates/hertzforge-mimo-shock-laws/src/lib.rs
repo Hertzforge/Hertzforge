@@ -41,14 +41,22 @@ pub enum BuiltinMimoShock {
     Shape,
     /// Each control paired with one drive, scaled by its own magnitude ratio.
     Paired,
+    /// `shape` through a model that follows a structure that softens with
+    /// level, under a softening ceiling.
+    Followed,
+    /// `followed` with no ceiling, the probe check, the power bound and the
+    /// hold.
+    FollowedHold,
 }
 
 impl BuiltinMimoShock {
     /// Every built-in law, the default for each target kind first.
-    pub const ALL: [BuiltinMimoShock; 3] = [
+    pub const ALL: [BuiltinMimoShock; 5] = [
         BuiltinMimoShock::Inverse,
         BuiltinMimoShock::Shape,
         BuiltinMimoShock::Paired,
+        BuiltinMimoShock::Followed,
+        BuiltinMimoShock::FollowedHold,
     ];
 
     /// The target kinds this built-in is the default for.
@@ -65,6 +73,8 @@ impl BuiltinMimoShock {
             BuiltinMimoShock::Inverse => "inverse",
             BuiltinMimoShock::Shape => "shape",
             BuiltinMimoShock::Paired => "paired",
+            BuiltinMimoShock::Followed => "followed",
+            BuiltinMimoShock::FollowedHold => "followed-hold",
         }
     }
 
@@ -77,7 +87,9 @@ impl BuiltinMimoShock {
     pub fn targets(self) -> &'static [TargetKind] {
         match self {
             BuiltinMimoShock::Inverse | BuiltinMimoShock::Paired => &TargetKind::ALL,
-            BuiltinMimoShock::Shape => &[TargetKind::Srs],
+            BuiltinMimoShock::Shape
+            | BuiltinMimoShock::Followed
+            | BuiltinMimoShock::FollowedHold => &[TargetKind::Srs],
         }
     }
 
@@ -144,7 +156,9 @@ pub fn resolve_builtin_with(
     params: &[Param],
 ) -> Result<Arc<dyn MimoShockLawFactory>, ResolveError> {
     use hertzforge_law_sdk::shock_mimo::builtin as decl;
-    use hertzforge_mimo_shock::builtin::{InverseFactory, PairedFactory, ShapeFactory};
+    use hertzforge_mimo_shock::builtin::{
+        FollowedFactory, FollowedHoldFactory, InverseFactory, PairedFactory, ShapeFactory,
+    };
     let Some(b) = BuiltinMimoShock::from_id(id) else {
         return Err(ResolveError::Unknown(id.into()));
     };
@@ -193,6 +207,22 @@ pub fn resolve_builtin_with(
                     .map_err(|_| bad(format!("{count} smoothing lines")))?,
                 weight: all.number("weight").map_err(bad)?,
                 max_step_db: all.number("max_step_db").map_err(bad)?,
+            })
+        }
+        BuiltinMimoShock::Followed => {
+            let c = decl::followed_config(&all).map_err(bad)?;
+            Arc::new(FollowedFactory {
+                ceiling: c.options.ceiling,
+            })
+        }
+        BuiltinMimoShock::FollowedHold => {
+            decl::followed_hold_config(&all).map_err(bad)?;
+            Arc::new(FollowedHoldFactory {
+                probe_check: all.toggle("probe_check").map_err(bad)?,
+                probe_limit_db: all.number("probe_limit_db").map_err(bad)?,
+                power_bound: all.toggle("power_bound").map_err(bad)?,
+                hold: all.toggle("hold").map_err(bad)?,
+                hold_db: all.number("hold_db").map_err(bad)?,
             })
         }
     })
@@ -286,7 +316,10 @@ mod tests {
     #[test]
     fn mimo_shock_builtin_ids_are_plain_and_round_trip() {
         let ids: Vec<&str> = BuiltinMimoShock::ALL.iter().map(|b| b.id()).collect();
-        assert_eq!(ids, ["inverse", "shape", "paired"]);
+        assert_eq!(
+            ids,
+            ["inverse", "shape", "paired", "followed", "followed-hold"]
+        );
         for b in BuiltinMimoShock::ALL {
             assert_eq!(BuiltinMimoShock::from_id(b.id()), Some(b));
             assert!(b.targets().contains(&TargetKind::Srs));
@@ -324,11 +357,18 @@ mod tests {
 
     #[test]
     fn mimo_shock_the_declared_defaults_are_the_engine_laws_defaults() {
-        use hertzforge_mimo_shock::builtin::{InverseFactory, PairedFactory, ShapeFactory};
+        use hertzforge_mimo_shock::builtin::{
+            FollowedFactory, FollowedHoldFactory, InverseFactory, PairedFactory, ShapeFactory,
+        };
         let d = |id: &str| resolve_builtin(id).unwrap().describe().params;
         assert_eq!(d("inverse"), InverseFactory::default().describe().params);
         assert_eq!(d("shape"), ShapeFactory::default().describe().params);
         assert_eq!(d("paired"), PairedFactory::default().describe().params);
+        assert_eq!(d("followed"), FollowedFactory::default().describe().params);
+        assert_eq!(
+            d("followed-hold"),
+            FollowedHoldFactory::default().describe().params
+        );
     }
 
     #[test]
@@ -362,5 +402,36 @@ mod tests {
         .err()
         .unwrap();
         assert!(matches!(e, ResolveError::BadParams(_)), "{e:?}");
+        let f = resolve_builtin_with(
+            "followed",
+            &[Param {
+                key: "ceiling_pct".into(),
+                value: ParamValue::Number(20.0),
+            }],
+        )
+        .unwrap();
+        assert_eq!(f.describe().params["ceiling"], 0.2);
+        let f = resolve_builtin_with(
+            "followed-hold",
+            &[Param {
+                key: "probe_check".into(),
+                value: ParamValue::Toggle(false),
+            }],
+        )
+        .unwrap();
+        assert_eq!(f.describe().params["probe_check"], false);
+        assert_eq!(f.describe().params["hold"], true);
+    }
+
+    #[test]
+    fn mimo_shock_the_followed_laws_open_on_their_protective_defaults() {
+        let d = |id: &str| resolve_builtin(id).unwrap().describe().params;
+        assert_eq!(d("followed")["ceiling"], 0.12);
+        let h = d("followed-hold");
+        for on in ["probe_check", "power_bound", "hold"] {
+            assert_eq!(h[on], true, "{on}");
+        }
+        assert_eq!(h["probe_limit_db"], 3.0);
+        assert_eq!(h["hold_db"], 3.0);
     }
 }

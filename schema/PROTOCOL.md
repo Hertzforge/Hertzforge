@@ -7771,8 +7771,8 @@ folder.
   most 8, reported once per call. The built-in `twr_correct` comes first.
 - A MIMO Shock law's entry has `world: "shock_mimo"`, its `diagnostics` scalar values (`layout`
   null), at most 8, reported once per call, and `targets`: the target kinds it accepts
-  (`waveform`, `srs` or both). The built-ins `inverse`, `shape` and `paired` come first, in that
-  order. `default_for` lists the target kinds a law is the default for, the law a new setup of
+  (`waveform`, `srs` or both). The built-ins `inverse`, `shape`, `paired`, `followed` and
+  `followed-hold` come first, in that order. `default_for` lists the target kinds a law is the default for, the law a new setup of
   that kind opens on (`["waveform"]` on `inverse`, `["srs"]` on `shape`, empty on every other
   entry). `laws.import` takes a `shock-mimo` law file like any other; it runs on the simulator at
   once and drives hardware after a passing `laws.check`.

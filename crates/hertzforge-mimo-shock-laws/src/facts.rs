@@ -124,6 +124,8 @@ pub fn decl(b: BuiltinMimoShock) -> &'static LawDecl {
         BuiltinMimoShock::Inverse => &builtin::INVERSE,
         BuiltinMimoShock::Shape => &builtin::SHAPE,
         BuiltinMimoShock::Paired => &builtin::PAIRED,
+        BuiltinMimoShock::Followed => &builtin::FOLLOWED,
+        BuiltinMimoShock::FollowedHold => &builtin::FOLLOWED_HOLD,
     }
 }
 
@@ -186,6 +188,32 @@ pub fn known_failures(b: BuiltinMimoShock) -> Vec<KnownFailure> {
                 &[Srs],
                 "with every path's delay wrong it does not pass the first level",
             );
+            add(
+                MeasurementNoise,
+                &[Srs],
+                "under measurement noise it does not pass the first level",
+            );
+            add(LimitChannel, &[Srs], NO_LIMITS);
+        }
+        BuiltinMimoShock::Followed | BuiltinMimoShock::FollowedHold => {
+            add(
+                Jointed6x3,
+                &[Srs],
+                "with more controls than drives its first correction is refused by the band growth \
+                 cap",
+            );
+            add(
+                DelayError,
+                &[Srs],
+                "with every path's delay wrong it does not pass the first level",
+            );
+            if b == BuiltinMimoShock::FollowedHold {
+                add(
+                    IdentificationError,
+                    &[Srs],
+                    "with the identification wrong it does not pass the first level",
+                );
+            }
             add(
                 MeasurementNoise,
                 &[Srs],

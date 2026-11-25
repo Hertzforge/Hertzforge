@@ -73,7 +73,7 @@ async fn mimo_shock_laws_check_runs_every_case_and_records_a_law_file() {
     let addr = serve(Service::with_options(o)).await;
     let mut c = Client::connect(addr).await;
     c.ok("session.claim", json!({"name": "Check"})).await;
-    for id in ["inverse", "shape", "paired"] {
+    for id in ["inverse", "shape", "paired", "followed", "followed-hold"] {
         let r = long_call(&mut c, "laws.check", json!({"id": id})).await;
         let report = &r["report"];
         print_table(id, report);

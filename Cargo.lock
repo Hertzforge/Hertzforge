@@ -1153,6 +1153,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-shock-followed"
+version = "0.1.26"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-shock-followed-hold"
+version = "0.1.26"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-shock-inverse"
 version = "0.1.26"
 dependencies = [

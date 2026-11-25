@@ -333,7 +333,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// a law file) joined them with the law plumbing. So was the MIMO Mixed Mode set
 /// (2026-11-21): the laws' roles, the hardware rule per role and the check's cases
 /// (`hertzforge-mimo-mixed-laws`); it adds no world (its floor law is a MIMO Random
-/// law and its tone law a MIMO Sine law), so no law file or fixture.
+/// law and its tone law a MIMO Sine law), so no law file or fixture. The MIMO
+/// Shock law files `mimo-shock-followed` and `mimo-shock-followed-hold` followed
+/// (2026-11-25), the SDK over the law mathematics' `followed` module, as the
+/// other three.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -346,6 +349,8 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-mimo-nearly-independent",
     "hertzforge-law-mimo-open-loop",
     "hertzforge-law-mimo-pinv",
+    "hertzforge-law-mimo-shock-followed",
+    "hertzforge-law-mimo-shock-followed-hold",
     "hertzforge-law-mimo-shock-inverse",
     "hertzforge-law-mimo-shock-paired",
     "hertzforge-law-mimo-shock-shape",
