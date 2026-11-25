@@ -7,7 +7,6 @@
 	 * off, a standing notice says so above every page. The window on another monitor shows the same,
 	 * compact.
 	 */
-	import type { Snippet } from 'svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import type { BodyPanel, PlotBodies } from '../screen/bodies';
 	import LawLine from '../pulse/LawLine.svelte';
@@ -25,14 +24,13 @@
 	interface Props {
 		ms: MimoShockStore;
 		views: MsViewsState;
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { ms, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
+	let { ms, views, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(ms.now);
 	const state = $derived(ms.run?.state ?? null);
@@ -110,8 +108,6 @@
 		<MsVerdictGrid rows={ms.pulses} controls={ms.runControls} shown={ms.picked} onpick={(i) => ms.pick(i)} />
 	{:else if kind === 'pulse'}
 		<MsPulseDetail row={shown} windowS={ms.windowS} latest={ms.picked === null} onlatest={() => ms.pick(null)} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

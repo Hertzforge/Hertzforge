@@ -17,7 +17,7 @@ function stations(selected: 'sim' | string[], devices: NiDevice[] = []): Station
 	const ni = Array.isArray(selected);
 	return {
 		stations: [
-			{ kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: 8, outputs: 1, clock: 'shared' },
+			{ kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: 8, outputs: 1, clock: 'shared', models: { shock_plant: [], sine_structure: [] } },
 			{ kind: 'ni', title: 'NI-DAQmx', available: true, unavailable: null, scanned_unix: 1, devices }
 		],
 		selected: ni

@@ -426,9 +426,6 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
         w.max_velocity_ips = s.opt_f64("max_velocity_ips")?;
         w.max_displacement_in = s.opt_f64("max_displacement_in")?;
     }
-    if let Some(s) = c.opt_obj("simulator")? {
-        w.plant = s.opt_str("plant")?.map(str::to_owned);
-    }
     // Every run is recorded in its run folder (`record`); the module's own capture
     // is gone, and a configuration that still asks for it is told so rather than
     // left to believe it is capturing.
@@ -1121,7 +1118,7 @@ impl WireMs {
                 err(
                     &mut r,
                     "plant_unknown",
-                    "simulator.plant",
+                    "station.simulator.shock_plant",
                     format!(
                         "\"{p}\" is not a simulator plant; the shock plants are {}.",
                         PLANTS.join(", ")

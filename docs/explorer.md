@@ -8,8 +8,8 @@ service keeps the response level at each frequency it has visited, the survey li
 operator reads a resonance.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the tone and the drive, the records, then the run itself. Explorer shares its
-run bar, station panel and channel table with the other test types.
+channels, the tone and the drive, the records, then the run itself. Explorer shares its run bar and
+channel table with the other test types.
 
 ## What the Test Does
 
@@ -29,7 +29,7 @@ run bar, station panel and channel table with the other test types.
 ## Opening the Test
 
 In Acquire & Control, choose **Explorer** from the test types, under Specialized. The screen has
-two steps, **Setup** and **Run**. The run bar (where the data comes from, the run's state, the
+two steps, **Setup** and **Run**. The run bar (the run's state, the
 station time, the tone's frequency and drive, any sweep, who holds control, and Stop and Abort once
 a run is live) stays in view on both. The summary beside every setup section says what the setup
 holds, what the control service worked out from it, and what is still missing.
@@ -37,13 +37,14 @@ holds, what the control service worked out from it, and what is still missing.
 **Proceed to Run** applies the setup (with any channel table edits first) and shows the run.
 **Start** opens the station and starts the tone at 0 V, in one step.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for the other test types. The run
-drives the channel table's one enabled **drive** row; a table with no drive row or with more than
-one is refused, since the extra outputs would stay silent. Every other enabled row is acquired, and
-at least one is needed. The **control row** is the first enabled control row, else the first enabled
-input: the survey line, the measured frequency and the derived motion are read from it.
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The run drives the channel
+table's one enabled **drive** row; a table with no drive row or with more than one is refused, since
+the extra outputs would stay silent. Every other enabled row is acquired, and at least one is
+needed. The **control row** is the first enabled control row, else the first enabled input: the
+survey line, the measured frequency and the derived motion are read from it.
 
 Each row's **abort limits** (acceleration in g, velocity in in/s, displacement in mil, peak) are the
 run's: they are checked on every input sample, and a row past one aborts the run at once.

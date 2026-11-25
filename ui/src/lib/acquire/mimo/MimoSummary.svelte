@@ -27,8 +27,6 @@
 			lawsLoaded: mimo.laws !== null,
 			check: mimo.check && mimo.checkedKey === mimo.key ? mimo.check : null,
 			counts: mimo.counts,
-			station: mimo.acq.selected ? { kind: mimo.acq.selected.kind, dirty: mimo.acq.stationDirty } : null,
-			tableErrors: mimo.acq.tableErrorCount,
 			setupStatus: mimo.setupStatus
 		})
 	);

@@ -8,7 +8,6 @@
 	 * are the service's views as they come: against frequency on the sweep grid in a sweep or a
 	 * stepped sine, against time in a dwell. The window on another monitor shows the same, compact.
 	 */
-	import type { Snippet } from 'svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import type { RunOpen } from '../runOpen.svelte';
 	import type { PlotPanel } from '../screen/screen.svelte';
@@ -23,14 +22,13 @@
 	interface Props {
 		ms: MimoSineStore;
 		views: MsineViewsState;
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		onoverride?: () => void;
 		abortKeys: string;
 		compact?: boolean;
 		opener?: RunOpen | null;
 	}
-	let { ms, views, station, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
+	let { ms, views, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(ms.now);
 	const live = $derived(ms.frameOfRun);
@@ -84,8 +82,6 @@
 		<MsineLevelCard {status} {live} report={ms.report} {compact} />
 	{:else if kind === 'law'}
 		<MsineLawCard law={status?.law ?? null} live={live?.law ?? null} entry={ms.runLaw} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

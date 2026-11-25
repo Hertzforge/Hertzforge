@@ -84,8 +84,8 @@ describe('the MIMO Mixed Mode goldens', () => {
 		const d = defaultMmixSetup();
 		fitChannels(d, TABLE);
 		const wire = toMmixConfig(d, null, { floor: null, tones: null }) as unknown as Record<string, unknown>;
-		// what the shell leaves to the service's defaults: the seed, the metadata, the article mass and
-		// the simulator's structure (the standard one of the table's size); what the golden leaves to
+		// what the shell leaves to the service's defaults: the seed, the metadata and the article mass;
+		// the simulator's structure is the station's, never the setup's; what the golden leaves to
 		// them and the shell states: the identification and the record's streams; the specification
 		// is sent only when a document is named
 		const left = ['seed', 'metadata', 'article_mass_lb', 'simulator', 'identification', 'record', 'specification'];

@@ -7,7 +7,7 @@
 	 * it under. A row is off until switched on. Rows are selected by their number, and an edit to
 	 * one selected row reaches every selected row. The rows are the channel table's: a role or a
 	 * unit changed here is changed in the table, which the setup applies with it, and the File menu
-	 * saves and opens it. Wiring to the hardware is under Backend.
+	 * saves and opens it. The wiring to the hardware is the channel table's, beside it.
 	 */
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';

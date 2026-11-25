@@ -21,7 +21,6 @@
 	import RunRecordEditor from '$lib/acquire/RunRecordEditor.svelte';
 	import ScheduleEditor from '$lib/acquire/ScheduleEditor.svelte';
 	import SetupSummary from '$lib/acquire/SetupSummary.svelte';
-	import StationPanel from '$lib/acquire/StationPanel.svelte';
 	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import type { AcquireTab } from '$lib/acquire/store.svelte';
 	import SetupFileBar from '$lib/acquire/setupFiles/SetupFileBar.svelte';
@@ -58,7 +57,7 @@
 		const tf = acq.findings;
 		const rows = [...tf.table, ...[...tf.rows.values()].flat()];
 		return [
-			{ id: 'station' as const, label: 'Station & Channels', errors: rows.filter((f) => f.level === 'error').length, warnings: rows.filter((f) => f.level === 'warning').length },
+			{ id: 'station' as const, label: 'Channels', errors: rows.filter((f) => f.level === 'error').length, warnings: rows.filter((f) => f.level === 'warning').length },
 			{ id: 'test' as const, label: 'Profile & Schedule', errors: countUnder(TEST_KEYS, E), warnings: countUnder(TEST_KEYS, W) },
 			{ id: 'control' as const, label: 'Control & Limits', errors: countUnder(CONTROL_KEYS, E), warnings: countUnder(CONTROL_KEYS, W) }
 		];
@@ -162,6 +161,7 @@
 		onrun={proceed}
 		runWhy={proceedWhy}
 		onleave={tests.canLeave ? () => tests.toChooser() : null}
+		onconfigure={() => tests.toConfigure()}
 		{reason}
 		ends={endsInHeader}
 		{abortKeys}
@@ -210,7 +210,6 @@
 		<SetupFileBar {app} module="random" />
 		{#if acq.tab === 'station'}
 			<div class="stack">
-				<StationPanel {acq} />
 				<ChannelTable {acq} />
 			</div>
 		{:else if acq.tab === 'test'}

@@ -71,7 +71,7 @@ export const MS_SCREEN: PulseScreenSpec<MsPageKind, MimoShockQuantity> = {
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }],
 		['pulses', { words: 'Pulse Rows', help: 'Every pulse fired, in a table.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'verdicts', 'pulse', 'station'],
+	cards: ['run', 'level', 'verdicts', 'pulse'],
 	pageCards: { verdicts: ['verdicts'] },
 	selectors: ['all']
 };

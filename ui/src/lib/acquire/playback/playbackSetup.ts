@@ -149,7 +149,7 @@ export function fitMap(map: (number | null)[], channels: number, drives: Channel
 export type PlaybackSection = 'station' | 'drive' | 'check' | 'level' | 'capture';
 
 export const PLAYBACK_SECTIONS: { id: PlaybackSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'drive', label: 'Drive File' },
 	{ id: 'check', label: 'Check' },
 	{ id: 'level', label: 'Level & Limits' },

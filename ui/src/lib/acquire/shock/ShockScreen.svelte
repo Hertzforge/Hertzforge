@@ -10,7 +10,6 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import { clock } from '../words';
 	import ShockControl from './ShockControl.svelte';
@@ -70,7 +69,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={shock.acq} />
 			<p class="aq-small aq-muted" data-testid="shock-run-channels">The run controls on the table's first enabled control row ({channels.control ? `channel ${channels.control.index}` : 'none yet'}) and drives on its first enabled drive row ({channels.drive ? `channel ${channels.drive.index}` : 'none yet'}).</p>
 			<ChannelTable acq={shock.acq} />
 		</div>
@@ -96,10 +94,8 @@
 	<ShockSummary {shock} onopen={(s: ShockSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={shock.acq} />{/snippet}
-
 {#snippet run()}
-	<ShockRunView {shock} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} opener={app.shockRunOpen} />
+	<ShockRunView {shock} {views} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} opener={app.shockRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -114,6 +110,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

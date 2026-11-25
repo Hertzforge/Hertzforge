@@ -294,7 +294,6 @@ export class PlaybackStore {
 	}
 
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		return null;
 	}
 

@@ -57,8 +57,10 @@ import type {
 	RunRecordRef,
 	RunState,
 	SessionState,
+	SimModels,
 	SimProfile,
 	SimStation,
+	SimulatorChoice,
 	SpectrumView,
 	StationClass,
 	StationList,
@@ -79,7 +81,7 @@ import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
 import { createModalTestMock } from './modalTest';
 import { createMimoShockMock } from './mimoShock';
-import { createMimoSineMock } from './mimoSine';
+import { createMimoSineMock, MOCK_STRUCTURES, structureSize } from './mimoSine';
 import { createMimoMixedMock } from './mimoMixed';
 import { binEdges } from './bins';
 import {
@@ -363,6 +365,42 @@ function plantT2(f: number): number {
 
 // ---------------------------------------------------------------------------------------------
 // Validation (the item reasons of PROTOCOL.md, "Refusals")
+
+/** The simulator's models for the multiple-drive modules, with the table size each plays (the service's `sim_model_list`). */
+export const SIM_MODELS: SimModels = {
+	shock_plant: [
+		{ name: 'shock-linear-4x4', inputs: 4, drives: 4 },
+		{ name: 'shock-jointed-4x4-moderate', inputs: 4, drives: 4 },
+		{ name: 'shock-jointed-4x4-severe', inputs: 4, drives: 4 },
+		{ name: 'shock-jointed-6x3', inputs: 6, drives: 3 }
+	],
+	sine_structure: MOCK_STRUCTURES.map((name) => {
+		const [inputs, drives] = structureSize(name);
+		return { name, inputs, drives };
+	})
+};
+
+/**
+ * Read `simulator` from `station.select`, as the service's `SimModels::from_params`: absent or
+ * null members are "sized to the table"; a name the simulator does not have is refused.
+ */
+function simModelsOf(v: unknown): SimulatorChoice {
+	const none: SimulatorChoice = { shock_plant: null, sine_structure: null };
+	if (v === undefined || v === null) return none;
+	if (typeof v !== 'object' || Array.isArray(v)) refuse('bad_request', 'bad_params', '"simulator" is an object of model names.', { param: 'simulator' });
+	const m = v as Record<string, unknown>;
+	const extra = Object.keys(m).find((k) => k !== 'shock_plant' && k !== 'sine_structure');
+	if (extra) refuse('bad_request', 'bad_params', `"simulator" has no member "${extra}".`, { param: 'simulator' });
+	const name = (key: keyof SimModels): string | null => {
+		const n = m[key];
+		if (n === undefined || n === null) return null;
+		const known = SIM_MODELS[key].map((x) => x.name);
+		if (typeof n !== 'string') refuse('bad_request', 'bad_params', "A model is named by its text, or null for the table's size.", { param: `simulator.${key}` });
+		if (!known.includes(n)) refuse('bad_request', 'bad_params', `The simulator has no model "${n}"; it has ${known.join(', ')}.`, { param: `simulator.${key}` });
+		return n;
+	};
+	return { shock_plant: name('shock_plant'), sine_structure: name('sine_structure') };
+}
 
 export interface Selection {
 	kind: 'sim' | 'ni';
@@ -1055,6 +1093,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
+		models: () => ({ ...simModels }),
 		clientName,
 		absoluteAbort: options.mimoShockAbsoluteAbort ?? false,
 		record: options.record,
@@ -1074,6 +1113,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
+		models: () => ({ ...simModels }),
 		clientName,
 		record: options.record,
 		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_sine')}`
@@ -1092,6 +1132,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
+		models: () => ({ ...simModels }),
 		clientName,
 		toneLaws: () => mimoSine.laws(),
 		record: options.record,
@@ -1118,6 +1159,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	// ---- stations and the channel table -------------------------------------------------------
 	let selection: Selection = { kind: 'sim', devices: [] };
+	/** The simulator's models, kept while NI is selected so returning to the simulator states them again. */
+	let simModels: SimulatorChoice = { shock_plant: null, sine_structure: null };
 	const scan = niInstalled ? scanDevices(niReal) : [];
 	const scannedAt = Math.floor(Date.now() / 1000);
 	let revision = 1;
@@ -1126,7 +1169,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	let restored: RestoredTable | null = null;
 
 	const niClass = (): StationClass => (niReal ? 'ni_real' : 'ni_simulated');
-	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: simInputs, outputs: simOutputs, clock: 'shared' };
+	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: simInputs, outputs: simOutputs, clock: 'shared', models: SIM_MODELS };
 
 	function niStation(): NiStation {
 		if (!niInstalled) {
@@ -1146,7 +1189,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function selected(): StationSelected {
-		if (selection.kind === 'sim') return { kind: 'sim', devices: [], class: 'sim', source: 'SIM', inputs: simInputs, outputs: simOutputs, timing_family: null };
+		if (selection.kind === 'sim') return { kind: 'sim', devices: [], class: 'sim', source: 'SIM', inputs: simInputs, outputs: simOutputs, timing_family: null, simulator: { ...simModels } };
 		const devices = scan.filter((d) => selection.devices.includes(d.id));
 		const cls = niClass();
 		return {
@@ -2075,8 +2118,12 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				notWhileLive('changing the station');
 				const kind = params.kind;
 				if (kind === 'sim') {
+					simModels = simModelsOf(params.simulator);
 					selection = { kind: 'sim', devices: [] };
 				} else if (kind === 'ni') {
+					if (params.simulator !== undefined && params.simulator !== null) {
+						refuse('bad_request', 'bad_params', "The simulator's models are set with the simulator, not with NI.", { param: 'simulator' });
+					}
 					const devices = params.devices;
 					if (!Array.isArray(devices) || devices.length === 0 || !devices.every((d) => typeof d === 'string')) {
 						refuse('bad_request', 'bad_params', 'Selecting NI hardware needs at least one device.', { param: 'devices' });

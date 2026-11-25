@@ -5,6 +5,7 @@
 	 * order, and cannot be opened. While a run is live, its card says so and returns to it.
 	 */
 	import { onMount } from 'svelte';
+	import ConfigureButton from './ConfigureButton.svelte';
 	import { TEST_GROUPS, typesIn, type TestTypeId, type TestTypeView } from './testTypes.svelte';
 
 	interface Props {
@@ -41,7 +42,10 @@
 </script>
 
 <section class="chooser" data-testid="test-type-chooser" aria-labelledby="tt-title">
-	<h1 id="tt-title">Choose a Test Type</h1>
+	<div class="top">
+		<h1 id="tt-title">Choose a Test Type</h1>
+		<ConfigureButton onclick={() => tests.toConfigure()} />
+	</div>
 
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="groups" bind:this={list} onkeydown={onKey}>
@@ -152,6 +156,14 @@
 		height: 100%;
 		overflow-y: auto;
 		padding: var(--sp-5) var(--sp-5) var(--sp-6);
+	}
+
+	.top {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: var(--sp-3);
+		max-width: 1180px;
 	}
 
 	h1 {

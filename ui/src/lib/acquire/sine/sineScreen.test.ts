@@ -53,8 +53,7 @@ describe('Sine on the screen frame', () => {
 		expect(l.dock.cards.map((c) => [c.kind, c.shown])).toEqual([
 			['run', true],
 			['level', true],
-			['law', true],
-			['station', true]
+			['law', true]
 		]);
 		expect(l.rate).toBe(5);
 	});

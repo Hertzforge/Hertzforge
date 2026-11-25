@@ -7,9 +7,9 @@ builds the next drive from them and checks it before it plays. The drive is in v
 held under a drive ceiling and an abort that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the target, the synthesis, the envelope, the schedule, identification,
-control, limits and limit channels, then the run itself. SRS shock shares its run bar, station
-panel, channel table, control-law panel and manual ladder with classical shock, so an engineer who
+channels, the target, the synthesis, the envelope, the schedule, identification,
+control, limits and limit channels, then the run itself. SRS shock shares its run bar,
+channel table, control-law panel and manual ladder with classical shock, so an engineer who
 has run one will find the other familiar.
 
 ## What the Test Does
@@ -42,7 +42,7 @@ The controller holds every law to the same checks, whichever law it is.
 ## Opening the Test
 
 In Acquire & Control, choose **SRS** from the test types. The screen has two steps, **Setup** and
-**Run**. The run bar (where the data comes from, the run's state, elapsed time, level, the pulses
+**Run**. The run bar (the run's state, elapsed time, level, the pulses
 fired and passed, who holds control, and Stop and Abort once a run is live) stays in view on both.
 The setup's sections are tabs; the summary beside every section says what the setup holds, what
 the control service worked out from it, and what is still missing, each a click from its section.
@@ -51,9 +51,10 @@ the control service worked out from it, and what is still missing, each a click 
 **Start** arms if needed, then runs identification. The setup is checked as it is edited: every
 problem shows in the section it belongs to, and a setup with errors is never accepted.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for Random. The run controls on the
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The run controls on the
 channel table's first enabled **control** row and drives its first enabled **drive** row; the
 section names both. Other enabled inputs can be monitored (Limits) or held under a bound (Limit
 Channels).

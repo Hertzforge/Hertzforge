@@ -58,7 +58,7 @@
 
 	<section class="aq-panel" aria-labelledby="pb-aborts" data-testid="pb-aborts">
 		<div class="aq-head"><h2 id="pb-aborts">Response Aborts</h2></div>
-		<p class="aq-small">Each enabled input row's abort limits, from the channel table, are read on every sample: a breach takes the drive to zero at once and ends the run. An input overload on a row with limits does the same. Set them in the channel table (Station &amp; Channels).</p>
+		<p class="aq-small">Each enabled input row's abort limits, from the channel table, are read on every sample: a breach takes the drive to zero at once and ends the run. An input overload on a row with limits does the same. Set them in the channel table (Channels).</p>
 		{#if inputs.length}
 			<table class="aq-table">
 				<thead><tr><th>Row</th><th>Description</th><th>Unit</th><th>Abort limits</th></tr></thead>

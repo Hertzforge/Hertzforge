@@ -7,7 +7,6 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 	import PlaybackCapture from './PlaybackCapture.svelte';
@@ -48,7 +47,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={playback.acq} />
 			<p class="aq-small aq-muted" data-testid="playback-run-channels">The run records every enabled input row of the table, in table order: {rows.inputs.length ? `row${rows.inputs.length === 1 ? '' : 's'} ${rows.inputs.map((r) => r.index).join(', ')}` : 'none yet'}. Each file channel plays on an enabled drive row ({rows.drives.length ? rows.drives.map((r) => r.index).join(', ') : 'none yet'}), and every drive is recorded as played. A drive row no channel plays on is driven at 0 V. Each input row's abort limits are the run's response aborts.</p>
 			<ChannelTable acq={playback.acq} />
 		</div>
@@ -68,10 +66,8 @@
 	<PlaybackSummary {playback} onopen={(s: PlaybackSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={playback.acq} />{/snippet}
-
 {#snippet run()}
-	<PlaybackRunView {playback} {views} {station} {abortKeys} opener={app.playbackRunOpen} />
+	<PlaybackRunView {playback} {views} {abortKeys} opener={app.playbackRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -86,6 +82,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup, which the control service checks with the drive file, and show the run: start from there."
 	{abortKeys}

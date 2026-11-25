@@ -347,7 +347,7 @@ export function setModalMode(d: ModalDraft, mode: ModalMode, rows: ChannelRow[])
 export type ModalSection = 'station' | 'dofs' | 'acquisition' | 'roving' | 'excitation' | 'capture';
 
 export const MODAL_SECTIONS: { id: ModalSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'dofs', label: 'DOFs' },
 	{ id: 'acquisition', label: 'Mode & Acquisition' },
 	{ id: 'roving', label: 'Roving' },

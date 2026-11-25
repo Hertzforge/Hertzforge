@@ -14,7 +14,6 @@
 	 * The keys (Enter or A, Backspace or R, U, the Left and Right arrows, Space) work wherever the
 	 * focus is, never while a text field has it, and in both accept modes.
 	 */
-	import type { Snippet } from 'svelte';
 	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
 	import type { SpectrumView } from '$lib/protocol/types';
 	import type { PaneNote } from '$lib/viz/paneOptions';
@@ -34,7 +33,6 @@
 		modal: ModalTestStore;
 		abortKeys: string;
 		opener?: RunOpen | null;
-		station?: Snippet;
 	}
 	let { modal, abortKeys, opener = null }: Props = $props();
 

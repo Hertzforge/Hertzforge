@@ -13,7 +13,8 @@ use std::time::Duration;
 #[allow(unused_imports)]
 pub use msine::{no_driver, opts, paced, LONG};
 
-/// The structure every run here plays on.
+/// The structure every run here plays on: the standard one of the 4 by 4 table,
+/// which the station takes when its `sine_structure` is null.
 pub const STRUCTURE: &str = "sine-linear-4x4";
 /// The grid: 16384 Hz in frames of 4096 points (4 Hz lines).
 pub const FS_HZ: f64 = 16_384.0;
@@ -70,7 +71,6 @@ pub fn from_case(case: MimoMixedCheckCase) -> Value {
     o.insert("operator".into(), json!("A. Operator"));
     o.insert("article".into(), json!("Plate"));
     o.insert("notes".into(), json!(""));
-    o.insert("simulator".into(), json!({"structure": STRUCTURE}));
     v
 }
 

@@ -8,8 +8,8 @@ is judged against, the playback schedule and every abort are the controller's, n
 drive is in volts throughout, held under a drive ceiling that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the reference, identification, control, the schedule, limits and the run's
-record, then the run itself. TWR shares its run bar, station panel, channel table and control-law
+channels, the reference, identification, control, the schedule, limits and the run's
+record, then the run itself. TWR shares its run bar, channel table and control-law
 panel with the other test types.
 
 ## What the Test Does
@@ -50,7 +50,7 @@ The controller holds every law to the same checks, whichever law it is.
 ## Opening the Test
 
 In Acquire & Control, choose **TWR** from the test types. The screen has two steps, **Setup** and
-**Run**. The run bar (where the data comes from, the run's state, station time, level, the plays
+**Run**. The run bar (the run's state, station time, level, the plays
 judged and the playback under way, who holds control, and Stop and Abort once a run is live) stays
 in view on both. The setup's sections are tabs; the summary beside every section says what the setup
 holds, what the control service worked out from it, and what is still missing, each a click from its
@@ -60,9 +60,10 @@ section.
 **Start** arms if needed, then runs identification. The setup is checked as it is edited: every
 problem shows in the section it belongs to, and a setup with errors is never accepted.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for Random. The run controls on the
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The run controls on the
 channel table's first enabled **control** row and drives on its first enabled **drive** row. The
 reference is in the control row's unit (g unless the row says otherwise); a reference in any other
 unit is refused.

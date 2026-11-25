@@ -6,7 +6,6 @@
 	 * they come: against frequency on the sweep grid in a sweep or a step test, against time in a
 	 * dwell. The window on another monitor shows the same, compact.
 	 */
-	import type { Snippet } from 'svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import type { PlotPanel } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
@@ -20,8 +19,6 @@
 	interface Props {
 		sine: SineStore;
 		views: SineViewsState;
-		/** The station panel. */
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		onoverride?: () => void;
 		abortKeys: string;
@@ -29,7 +26,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { sine, views, station, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
+	let { sine, views, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(sine.now);
 	const live = $derived(sine.frameOfRun);
@@ -71,8 +68,6 @@
 		<SineLevelCard {status} {live} config={sine.runConfig} {compact} />
 	{:else if kind === 'law'}
 		<SineLiveParams {sine} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

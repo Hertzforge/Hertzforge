@@ -10,7 +10,6 @@
 	 */
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import { clock } from '../words';
 	import MmixChannels from './MmixChannels.svelte';
@@ -89,10 +88,8 @@
 	<MmixSummary {mm} onopen={(s: MmixSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={mm.acq} />{/snippet}
-
 {#snippet run()}
-	<MmixRunView {mm} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_mixed')} opener={app.mimoMixedRunOpen} />
+	<MmixRunView {mm} {views} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_mixed')} opener={app.mimoMixedRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -107,6 +104,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

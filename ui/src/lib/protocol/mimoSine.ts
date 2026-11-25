@@ -191,7 +191,6 @@ export interface MimoSineConfig {
 	requests?: MimoSineRequests;
 	limits?: MimoSineLimits;
 	feasibility?: { shakers: MimoSineShaker[] } | null;
-	simulator?: { structure?: string | null };
 	operator?: string;
 	article?: string;
 	notes?: string;

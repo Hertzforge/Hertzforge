@@ -7,7 +7,6 @@
 	 * and the end's message), the drive check the run was armed on, and the station. No spectra and
 	 * no analysis: the run folder carries the time histories to the analysis side.
 	 */
-	import type { Snippet } from 'svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import type { RunOpen } from '../runOpen.svelte';
 	import type { PlotPanel } from '../screen/screen.svelte';
@@ -19,13 +18,12 @@
 	interface Props {
 		playback: PlaybackStore;
 		views: PlaybackViewsState;
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
 		opener?: RunOpen | null;
 	}
-	let { playback, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
+	let { playback, views, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const s = $derived(playback.now);
 	const state = $derived(s?.state ?? null);
@@ -75,8 +73,6 @@
 		{:else}
 			<p class="aq-small aq-muted">The check the run was set up with is shown once the setup is applied.</p>
 		{/if}
-	{:else if kind === 'station'}
-		{#if station}{@render station()}{/if}
 	{/if}
 {/snippet}
 

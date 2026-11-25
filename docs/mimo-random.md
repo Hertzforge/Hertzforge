@@ -8,7 +8,7 @@ in any shape: as many controls as drives, more controls than drives, or fewer.
 This guide is written for the test engineer running the test. It follows the order of a run:
 channels, reference, control settings, schedule, backend, the prediction, the run views, and what
 is kept afterwards. The single-output Random test and MIMO Random share their run bar, schedule
-editor, station panel and level ladder, so an engineer who has run one will find the other
+editor and level ladder, so an engineer who has run one will find the other
 familiar.
 
 ## What the Test Does
@@ -49,7 +49,7 @@ In Acquire & Control, choose **MIMO Random** from the test types. The screen has
 **Setup**, **Predict** and **Run**, shown in the breadcrumb at the top. The run bar (state, elapsed
 time, level, time at level, and Stop and Abort once a run is live) stays in view on every step.
 The setup has five sections as tabs: **Channels**, **Reference**, **Control**, **Schedule** and
-**Backend**. The summary beside every section lists what each section holds and what is still
+**Run Record**. The summary beside every section lists what each section holds and what is still
 missing before a run, and each item opens its section.
 
 **Apply Setup** sends the setup to the control service, which checks it and holds it for the run.
@@ -73,8 +73,8 @@ A limit channel is a monitor row with a limit entered. Control names must be dis
 reference and its tables are kept by name. The test article mass, entered at the foot of the
 table, is split equally across the shakers for the feasibility check.
 
-The wiring of each channel (the device, the physical channel, IEPE) lives under Backend with the
-station, as in single-output Random.
+The wiring of each channel (the device, the physical channel, IEPE) lives under Channels, as in
+single-output Random, with **Feasibility per Drive** below it.
 
 ### Physical and Virtual Control
 
@@ -337,15 +337,16 @@ rising order, and the last is full level. With **Automatic**, the run steps up t
 holds each for its dwell, holds full level for its time, and ends complete. **Add Level** adds a
 rung; the level ramp under Control sets how fast the level moves between rungs.
 
-## Backend
+## Feasibility per Drive
 
-The station panel and the channel wiring, as in single-output Random, and **Feasibility per
-Drive**. Before identification the drive the test needs is not known, so each drive reads **After
-identification**; the Predict page gives the numbers. A drive with no shaker record is not checked
-for feasibility.
+**Feasibility per Drive** sits under Channels, below the channel wiring. The station, the
+simulator or the NI hardware, is set for every test type in the Configure view, opened from
+**Configure** at the upper right of Acquire & Control. Before identification the drive the test
+needs is not known, so each drive reads **After identification**; the Predict page gives the
+numbers. A drive with no shaker record is not checked for feasibility.
 
-The simulator and the NI station are the two backends. A run on the simulator is marked SIM on
-every screen and in every record.
+The simulator and the NI station are the two stations. A run on the simulator is labeled SIM in
+every record.
 
 ## Running the Test
 
@@ -574,4 +575,4 @@ table of another size is refused, naming the sizes it has). Use it to:
 - run an imported law before its law check, and see its faults handled,
 - check that a large reference, its transformations and the run views behave at full scale.
 
-A simulated run is marked SIM everywhere it appears and is never a hardware result.
+A simulated run is labeled SIM in its record and is never a hardware result.

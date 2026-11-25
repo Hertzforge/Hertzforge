@@ -38,6 +38,7 @@ import type {
 	SessionReleaseResult,
 	SessionState,
 	SpectrumView,
+	SimulatorChoice,
 	StationList,
 	StationSelected,
 	ValidationReport
@@ -59,6 +60,27 @@ const BASE_KEY = 'hertzforge.acquire.setup.base.v1';
 const LOG_LIMIT = 500;
 
 export type AcquireTab = 'station' | 'test' | 'control' | 'live';
+
+/** The station as Configure drafts it: the kind, the NI devices, and the simulator's models. */
+export interface StationDraft {
+	kind: 'sim' | 'ni';
+	devices: string[];
+	/** Kept while NI is drafted, so going back to the simulator keeps the models chosen. */
+	simulator: SimulatorChoice;
+}
+
+const NO_MODELS: SimulatorChoice = { shock_plant: null, sine_structure: null };
+
+function sameModels(a: SimulatorChoice, b: SimulatorChoice | undefined): boolean {
+	const o = b ?? NO_MODELS;
+	return a.shock_plant === o.shock_plant && a.sine_structure === o.sine_structure;
+}
+
+/** The draft for a selected station; on NI the simulator's models already drafted are kept. */
+function draftOf(sel: StationSelected, before: StationDraft): StationDraft {
+	const simulator = sel.kind === 'sim' ? { ...NO_MODELS, ...(sel.simulator ?? {}) } : { ...before.simulator };
+	return { kind: sel.kind, devices: [...sel.devices], simulator };
+}
 
 export interface Note {
 	tone: 'info' | 'pass' | 'warn';
@@ -199,8 +221,8 @@ export class AcquireState {
 
 	// ---- station ----------------------------------------------------------------------------
 	stations = $state.raw<StationList | null>(null);
-	/** The station the operator is choosing in the panel, before it is sent. */
-	stationDraft = $state<{ kind: 'sim' | 'ni'; devices: string[] }>({ kind: 'sim', devices: [] });
+	/** The station the operator is choosing in Configure, before it is sent: its kind, NI devices and the simulator's models. */
+	stationDraft = $state<StationDraft>({ kind: 'sim', devices: [], simulator: { shock_plant: null, sine_structure: null } });
 	scanning = $state(false);
 
 	// ---- channel table ----------------------------------------------------------------------
@@ -340,7 +362,7 @@ export class AcquireState {
 		const sel = this.selected;
 		if (!sel) return false;
 		if (this.stationDraft.kind !== sel.kind) return true;
-		if (sel.kind === 'sim') return false;
+		if (sel.kind === 'sim') return !sameModels(this.stationDraft.simulator, sel.simulator);
 		const a = [...this.stationDraft.devices].sort();
 		const b = [...sel.devices].sort();
 		return a.length !== b.length || a.some((x, i) => x !== b[i]);
@@ -443,7 +465,6 @@ export class AcquireState {
 
 	/** Why Apply, Arm and Start wait on this screen, or null. */
 	get pending(): string | null {
-		if (this.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (this.tableDirty) return 'Apply the channel table edits, or discard them, first.';
 		return null;
 	}
@@ -631,8 +652,10 @@ export class AcquireState {
 		const followed =
 			force ||
 			!before ||
-			(this.stationDraft.kind === before.kind && JSON.stringify([...this.stationDraft.devices].sort()) === JSON.stringify([...before.devices].sort()));
-		if (followed) this.stationDraft = { kind: list.selected.kind, devices: [...list.selected.devices] };
+			(this.stationDraft.kind === before.kind &&
+				JSON.stringify([...this.stationDraft.devices].sort()) === JSON.stringify([...before.devices].sort()) &&
+				(before.kind !== 'sim' || sameModels(this.stationDraft.simulator, before.simulator)));
+		if (followed) this.stationDraft = draftOf(list.selected, this.stationDraft);
 		this.refit();
 		this.scheduleSetupCheck();
 	}
@@ -656,7 +679,12 @@ export class AcquireState {
 
 	chooseStation(kind: 'sim' | 'ni') {
 		const sel = this.selected;
-		this.stationDraft = { kind, devices: kind === 'ni' ? (sel?.kind === 'ni' ? [...sel.devices] : [...this.stationDraft.devices]) : [] };
+		this.stationDraft = { kind, devices: kind === 'ni' ? (sel?.kind === 'ni' ? [...sel.devices] : [...this.stationDraft.devices]) : [], simulator: { ...this.stationDraft.simulator } };
+	}
+
+	/** Choose a simulator model for the draft: a name from `station.list`, or null for the one of the table's size. */
+	chooseModel(key: keyof SimulatorChoice, name: string | null) {
+		this.stationDraft.simulator = { ...this.stationDraft.simulator, [key]: name };
 	}
 
 	toggleDevice(id: string, on?: boolean) {
@@ -668,7 +696,7 @@ export class AcquireState {
 
 	revertStation() {
 		const sel = this.selected;
-		if (sel) this.stationDraft = { kind: sel.kind, devices: [...sel.devices] };
+		if (sel) this.stationDraft = draftOf(sel, this.stationDraft);
 	}
 
 	async rescan(): Promise<void> {
@@ -683,11 +711,11 @@ export class AcquireState {
 
 	async useStation(): Promise<boolean> {
 		const d = this.stationDraft;
-		const params = d.kind === 'sim' ? { kind: 'sim' } : { kind: 'ni', devices: [...d.devices] };
+		const params = d.kind === 'sim' ? { kind: 'sim', simulator: { ...d.simulator } } : { kind: 'ni', devices: [...d.devices] };
 		const res = await this.act<{ selected: StationSelected }>('Use Station', 'station.select', params);
 		if (!res) return false;
 		if (this.stations) this.stations = { ...this.stations, selected: res.selected };
-		this.stationDraft = { kind: res.selected.kind, devices: [...res.selected.devices] };
+		this.stationDraft = draftOf(res.selected, this.stationDraft);
 		this.refit();
 		return true;
 	}

@@ -15,7 +15,6 @@
 	import ChannelTable from '../ChannelTable.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
 	import ProfileEditor from '../ProfileEditor.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import MixedRecord from './MixedRecord.svelte';
 	import { runChannels } from '../sine/sineSetup';
@@ -95,7 +94,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={mixed.acq} />
 			<p class="aq-small aq-muted" data-testid="mixed-run-channels">The run controls on the table's enabled control rows ({channels.control ? `the first is channel ${channels.control.index}` : 'none yet'}) and drives on its first enabled drive row ({channels.drive ? `channel ${channels.drive.index}` : 'none yet'}).</p>
 			<ChannelTable acq={mixed.acq} />
 		</div>
@@ -134,10 +132,8 @@
 	<MixedSummary {mixed} onopen={(s: MixedSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={mixed.acq} />{/snippet}
-
 {#snippet run()}
-	<MixedRunView {mixed} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mixed')} opener={app.mixedRunOpen} />
+	<MixedRunView {mixed} {views} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mixed')} opener={app.mixedRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -152,6 +148,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

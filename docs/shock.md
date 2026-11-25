@@ -6,8 +6,8 @@ control law proposes the next drive and the controller checks it before it plays
 volts throughout, held under a drive ceiling and an abort that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the pulse, the standard, the schedule, identification, control and limits,
-trains and the run's record, then the run itself. Classical shock shares its run bar, station panel,
+channels, the pulse, the standard, the schedule, identification, control and limits,
+trains and the run's record, then the run itself. Classical shock shares its run bar,
 channel table and control-law panel with Random and MIMO Random, so an engineer who has run one
 will find the others familiar.
 
@@ -40,7 +40,7 @@ whichever law it is.
 ## Opening the Test
 
 In Acquire & Control, choose **Classical Shock** from the test types. The screen has two steps,
-**Setup** and **Run**. The run bar (where the data comes from, the run's state, elapsed time,
+**Setup** and **Run**. The run bar (the run's state, elapsed time,
 level, the pulses fired and passed, who holds control, and Stop and Abort once a run is live)
 stays in view on both. The setup's sections are tabs; the summary beside every section says what
 the setup holds, what the control service worked out from it, and what is still missing, each a
@@ -50,9 +50,10 @@ click from its section.
 **Start** arms if needed, then runs identification. The setup is checked as it is edited: every
 problem shows in the section it belongs to, and a setup with errors is never accepted.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for Random. The run controls on the
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The run controls on the
 channel table's first enabled **control** row and drives its first enabled **drive** row; the
 section names both. Any other enabled row can be monitored (Limits).
 

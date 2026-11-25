@@ -6,7 +6,7 @@
  *
  * Numbers are held as numbers; a field that holds no number is NaN, which `localErrors` names
  * before anything is sent. A choice the wire leaves to the service (the record length, the
- * identification frames, the absolute abort line, the simulator's plant) is null. Times the
+ * identification frames, the absolute abort line) is null. Times the
  * operator types in milliseconds (the timing window and the held delays) go out in seconds.
  *
  * The channels are the channel table's: every enabled control row is a control unless it is made
@@ -103,7 +103,6 @@ export interface MsDraft {
 		/** The abort lines scaled to the level also stop the run. */
 		scaled_aborts: boolean;
 	};
-	simulator: { plant: string | null };
 	/** The run's record: the operator's words and whether the folder keeps the time histories (Random's). */
 	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
@@ -127,14 +126,6 @@ export const COMPENSATIONS: { id: CompensationShape; label: string }[] = [
 export const STANDARDS: { id: ShockStandardName; label: string }[] = [
 	{ id: 'mil_std_810_516', label: 'MIL-STD-810, Method 516' },
 	{ id: 'iec_60068_2_27', label: 'IEC 60068-2-27' }
-];
-
-/** The simulator's plants, by name, with what each is. */
-export const PLANTS: { id: string; label: string }[] = [
-	{ id: 'shock-linear-4x4', label: 'Linear, 4 controls by 4 drives' },
-	{ id: 'shock-jointed-4x4-moderate', label: 'Jointed, 4 by 4, moderate' },
-	{ id: 'shock-jointed-4x4-severe', label: 'Jointed, 4 by 4, severe' },
-	{ id: 'shock-jointed-6x3', label: 'Jointed, 6 controls by 3 drives' }
 ];
 
 export const RECORD_LENGTHS = [1024, 2048, 4096, 8192, 16384];
@@ -201,7 +192,6 @@ export function defaultMsSetup(): MsDraft {
 			max_displacement_in: null,
 			scaled_aborts: true
 		},
-		simulator: { plant: null },
 		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
@@ -231,7 +221,6 @@ export function mergeMsSetup(saved: Partial<MsDraft> | null): MsDraft {
 	out.identification = { ...base.identification, ...(saved.identification ?? {}) };
 	out.law = { ...base.law, ...(saved.law ?? {}) };
 	out.control = { ...base.control, ...(saved.control ?? {}) };
-	out.simulator = { ...base.simulator, ...(saved.simulator ?? {}) };
 	// A draft saved before the run's record took the capture's place has a capture and no record.
 	delete (out as { capture?: unknown }).capture;
 	out.record = { ...base.record, ...(saved.record ?? {}) };
@@ -345,7 +334,6 @@ export function toMsConfig(d: MsDraft, law: MimoShockLawEntry | null): MimoShock
 			law: { id: d.law.id, params: lawWireParams(law, d.law.params) },
 			...d.control
 		},
-		simulator: { plant: d.simulator.plant },
 		operator: d.record.operator.trim(),
 		article: d.record.article.trim(),
 		notes: d.record.notes.trim(),
@@ -424,7 +412,6 @@ export function fromMsConfig(c: MimoShockConfig): MsDraft {
 		identification: { ...base.identification, ...(c.identification ?? {}) },
 		law: { id: wireLaw?.id ?? '', params: { ...((wireLaw?.params ?? {}) as LawDraft['params']) } },
 		control: { ...base.control, ...rest },
-		simulator: { plant: c.simulator?.plant ?? null },
 		record: {
 			operator: c.operator ?? '',
 			article: c.article ?? '',
@@ -443,7 +430,7 @@ export function fromMsConfig(c: MimoShockConfig): MsDraft {
 export type MsSection = 'channels' | 'target' | 'timing' | 'ladder' | 'law' | 'limits';
 
 export const MS_SECTIONS: { id: MsSection; label: string }[] = [
-	{ id: 'channels', label: 'Station & Channels' },
+	{ id: 'channels', label: 'Channels' },
 	{ id: 'target', label: 'Targets' },
 	{ id: 'timing', label: 'Timing & Verdict' },
 	{ id: 'ladder', label: 'Ladder & Identification' },
@@ -499,7 +486,7 @@ export function msByKey(items: { field?: string | null; channel?: number | null;
 
 /** The section a key belongs to. */
 export function msSectionOf(key: string): MsSection {
-	if (/^(channels|drives|station|table|simulator|metadata|operator|article|notes|specification|record)(\.|$)/.test(key)) return 'channels';
+	if (/^(channels|drives|station|table|metadata|operator|article|notes|specification|record)(\.|$)/.test(key)) return 'channels';
 	if (/^(title|kind|standard|pulses|srs)(\.|$)/.test(key)) return 'target';
 	if (/^(timing|verdict)(\.|$)/.test(key)) return 'timing';
 	if (/^(schedule|spacing|identification|acquisition)(\.|$)/.test(key)) return 'ladder';

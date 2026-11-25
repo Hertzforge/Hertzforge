@@ -120,7 +120,8 @@ describe('the screen', () => {
 		expect(MMIX_PLOT_TYPES.map((t) => t.id)).toEqual([...MMIX_QUANTITIES]);
 		expect([...MMIX_QUANTITIES]).toEqual([...MIMO_MIXED_QUANTITIES]);
 		expect(MMIX_PLOT_TYPES.filter((t) => t.channels).map((t) => t.id)).toEqual(['control', 'residual', 'cross', 'tone_amplitude', 'tone_phase', 'band_level']);
-		expect(MMIX_SCREEN.cards).toEqual(expect.arrayContaining(['run', 'parts', 'drives', 'limits', 'level', 'log', 'station']));
+		expect(MMIX_SCREEN.cards).toEqual(expect.arrayContaining(['run', 'parts', 'drives', 'limits', 'level', 'log']));
+		expect(MMIX_SCREEN.cards).not.toContain('station');
 		const control = MMIX_SCREEN.plots.find(([q]) => q === 'control')?.[1];
 		expect(control?.families).toEqual(expect.arrayContaining(['tolerance', 'abort']));
 	});

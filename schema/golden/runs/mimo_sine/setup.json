@@ -181,9 +181,6 @@
         "id": "matrix"
       }
     },
-    "simulator": {
-      "structure": "sine-linear-4x4"
-    },
     "operator": "A. Operator",
     "article": "Plate",
     "notes": "the golden run folder",

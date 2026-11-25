@@ -9,7 +9,6 @@
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 	import MsineChannels from './MsineChannels.svelte';
@@ -89,10 +88,8 @@
 	<MsineSummary {ms} onopen={(s: MsineSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={ms.acq} />{/snippet}
-
 {#snippet run()}
-	<MsineRunView {ms} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mimo_sine')} opener={app.mimoSineRunOpen} />
+	<MsineRunView {ms} {views} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mimo_sine')} opener={app.mimoSineRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -107,6 +104,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

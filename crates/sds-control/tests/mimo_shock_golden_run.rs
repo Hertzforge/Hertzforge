@@ -91,7 +91,6 @@ pub fn golden_config() -> Value {
         "spacing": {"cooling_s": 0.05, "settling_s": 0, "compute_s": 0},
         "identification": {"drive_vrms": 1, "frames": 40, "review": false},
         "control": {"law_budget": 1},
-        "simulator": {"plant": "shock-linear-4x4"},
     })
 }
 

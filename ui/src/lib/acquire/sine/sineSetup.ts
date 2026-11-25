@@ -544,7 +544,7 @@ export const hasProfileText = (text: string): boolean => text.split(/\r?\n/).som
 export type SineSection = 'station' | 'profile' | 'test' | 'schedule' | 'control' | 'limits' | 'record';
 
 export const SINE_SECTIONS: { id: SineSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'profile', label: 'Profile' },
 	{ id: 'test', label: 'Test' },
 	{ id: 'schedule', label: 'Schedule' },

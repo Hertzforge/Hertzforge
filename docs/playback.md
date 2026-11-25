@@ -8,8 +8,8 @@ control service checks the file: that it is whole, that it fits the channel tabl
 ceiling, and that each drive starts and ends at rest.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the drive file and its check, the level and the limits, the records, then
-the run itself and what it saves. Playback shares its run bar, station panel and channel table with
+channels, the drive file and its check, the level and the limits, the records, then
+the run itself and what it saves. Playback shares its run bar and channel table with
 the other test types.
 
 ## What the Test Does
@@ -30,7 +30,7 @@ the other test types.
 ## Opening the Test
 
 In Acquire & Control, choose **Playback** from the test types, under Specialized. The screen has
-two steps, **Setup** and **Run**. The run bar (where the data comes from, the run's state, the
+two steps, **Setup** and **Run**. The run bar (the run's state, the
 station time, the file's rate and the time played, who holds control, and Stop and Abort once a
 run is live) stays in view on both. The summary beside every setup section says what the setup
 holds, what the control service made of it, whether the drive passes its check, and what is still
@@ -45,9 +45,11 @@ project, as on every test screen: the drive folder with its SHA-256, the map, th
 ceiling, the rolls and the records. A setup opened names the folder it was made with; the control
 service refuses it if that folder's samples are no longer the ones the setup names.
 
-## Station and Channels
+## Channels
 
-The station panel and the channel table are shared with the other test types. Every enabled input
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table
+is shared with the other test types. Every enabled input
 row (control, monitor or reference) is recorded, in table order. Every enabled drive row is a
 place a file channel can play; a drive row that no channel plays on is driven at 0 V for the whole
 run. The run needs at least one enabled input and one enabled drive.

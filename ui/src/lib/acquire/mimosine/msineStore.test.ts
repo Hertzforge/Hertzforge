@@ -49,6 +49,12 @@ async function screen(options: ControlServerOptions = {}, controls = 4, drives =
 	return { client, acq, ms };
 }
 
+async function useStructure(acq: AcquireState, structure: string) {
+	acq.chooseModel('sine_structure', structure);
+	expect(await acq.useStation()).toBe(true);
+	expect(acq.selected?.simulator?.sine_structure).toBe(structure);
+}
+
 async function run(ms: MimoSineStore) {
 	await ms.checkSetup();
 	expect(ms.check?.errors).toEqual([]);
@@ -204,8 +210,8 @@ describe('the MIMO Sine store', () => {
 	});
 
 	it("ends a run whose control passes its abort band, and says what tripped in words", async () => {
-		const { ms } = await screen({}, 4, 4, 0);
-		ms.setup.simulator.structure = 'sine-softening-4x4-moderate';
+		const { ms, acq } = await screen({}, 4, 4, 0);
+		await useStructure(acq, 'sine-softening-4x4-moderate');
 		await run(ms);
 		await until(() => ms.status?.state === 'finished');
 		const end = ms.status?.end;
@@ -217,7 +223,7 @@ describe('the MIMO Sine store', () => {
 	});
 
 	it("refuses a notch release hysteresis out of 0 to 6 dB at its field, and takes the new structures", async () => {
-		const { ms } = await screen({}, 4, 4, 0);
+		const { ms, acq } = await screen({}, 4, 4, 0);
 		ms.setup.limits.notch.release_hysteresis_db = 7;
 		await ms.checkSetup();
 		expect(ms.findings.errors.map((e) => [e.reason, e.field])).toEqual([['out_of_range', 'limits.notch.release_hysteresis_db']]);
@@ -225,7 +231,7 @@ describe('the MIMO Sine store', () => {
 		expect(ms.counts.limits.errors).toBe(1);
 		ms.setup.limits.notch.release_hysteresis_db = 0;
 		for (const structure of ['sine-weak-4x4', 'sine-loopback-4x4']) {
-			ms.setup.simulator.structure = structure;
+			await useStructure(acq, structure);
 			await ms.checkSetup();
 			expect(ms.check?.errors).toEqual([]);
 		}
@@ -250,18 +256,18 @@ describe('the MIMO Sine store', () => {
 	});
 
 	it('takes the base and article on 4 controls, 2 monitors and 4 drives: a structure is sized by its inputs', async () => {
-		const { ms } = await screen({}, 4, 4, 2);
-		ms.setup.simulator.structure = 'sine-base-article-6x4';
+		const { ms, acq } = await screen({}, 4, 4, 2);
+		await useStructure(acq, 'sine-base-article-6x4');
 		await ms.checkSetup();
 		expect(ms.check?.errors).toEqual([]);
 	});
 
-	it('refuses a simulator structure of another size by name', async () => {
-		const { ms } = await screen({}, 4, 4, 0);
-		ms.setup.simulator.structure = 'sine-tall-6x3';
+	it("refuses the station's simulator structure of another size by name", async () => {
+		const { ms, acq } = await screen({}, 4, 4, 0);
+		await useStructure(acq, 'sine-tall-6x3');
 		await ms.checkSetup();
-		expect(ms.findings.errors.map((e) => e.reason)).toEqual(['structure_wrong_size']);
-		expect(ms.fieldErrors['simulator.structure']?.length).toBe(1);
+		expect(ms.findings.errors.map((e) => [e.reason, e.field])).toEqual([['structure_wrong_size', 'station.simulator.sine_structure']]);
+		expect(ms.fieldErrors['station.simulator.sine_structure']?.length).toBe(1);
 		expect(ms.counts.channels.errors).toBe(1);
 	});
 

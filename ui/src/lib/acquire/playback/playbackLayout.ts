@@ -39,7 +39,7 @@ export const PLAYBACK_SCREEN: PulseScreenSpec<PlaybackPageKind, PlaybackQuantity
 		['inputs', { words: 'Inputs', help: 'Every enabled input row, the last half second or so, on the station clock.', group: 'time', families: ['measured'] }],
 		['drives', { words: 'Drives', help: 'Every drive as played, the level and any stop ramp in it, on the station clock.', group: 'time', families: ['drive'] }]
 	],
-	cards: ['run', 'play', 'checked', 'station'],
+	cards: ['run', 'play', 'checked'],
 	selectors: ['all']
 };
 

@@ -8,8 +8,7 @@
  * Numbers are held as numbers; a field that holds no number is NaN, which `localErrors` names
  * before anything is sent. The rate is null when the usual one (16384 Hz) is wanted, a sweep's
  * start is null for the band's low edge, the identification's records null for the service's
- * count, the rotation cap null for none and the simulator's structure null for the one of the
- * run's size. Each drive's ceiling and abort have no default anywhere: the setup asks for both.
+ * count and the rotation cap null for none. Each drive's ceiling and abort have no default anywhere: the setup asks for both.
  *
  * The channels are the channel table's: every enabled control row is a control unless it is taken
  * out of the controls; every enabled drive row is a drive, in the table's order. Each control has
@@ -126,30 +125,8 @@ export interface MsineDraft {
 		notch: { smoothing_ticks: number; release_ramp_db_per_s: number; release_hysteresis_db: number; near_bound_db: number };
 	};
 	feasibility: { enabled: boolean; shakers: MsineShakerDraft[] };
-	simulator: { structure: string | null };
 	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
-}
-
-/** The simulator's standard sine structures, by name, with what each is and its size: its inputs (controls and limit channels) and its drives. */
-export const STRUCTURES: { id: string; label: string; inputs: number; drives: number }[] = [
-	{ id: 'sine-linear-4x4', label: 'Linear, 4 controls by 4 drives', inputs: 4, drives: 4 },
-	{ id: 'sine-softening-4x4-mild', label: 'Softening with level, 4 by 4, mild', inputs: 4, drives: 4 },
-	{ id: 'sine-softening-4x4-moderate', label: 'Softening with level, 4 by 4, moderate', inputs: 4, drives: 4 },
-	{ id: 'sine-hardening-4x4', label: 'Hardening with level, 4 by 4', inputs: 4, drives: 4 },
-	{ id: 'sine-tall-6x3', label: 'Linear, 6 controls by 3 drives', inputs: 6, drives: 3 },
-	{ id: 'sine-wide-3x6', label: 'Linear, 3 controls by 6 drives', inputs: 3, drives: 6 },
-	{ id: 'sine-base-article-6x4', label: 'Base and article: 4 controls and 2 limit channels, 4 drives', inputs: 6, drives: 4 },
-	{ id: 'sine-near-singular-4x4', label: 'Near-singular at one frequency, 4 by 4', inputs: 4, drives: 4 },
-	{ id: 'sine-weak-4x4', label: 'Weakly coupled pairs, 4 by 4', inputs: 4, drives: 4 },
-	{ id: 'sine-loopback-4x4', label: 'Loopback: four outputs wired to four inputs, 4 by 4', inputs: 4, drives: 4 }
-];
-
-/** The structures the table fits: as many enabled inputs (every row but a drive) and drives. */
-export function structuresFor(rows: readonly ChannelRow[]): typeof STRUCTURES {
-	const inputs = rows.filter((r) => r.enabled && r.role !== 'drive').length;
-	const drives = rows.filter((r) => r.enabled && r.role === 'drive').length;
-	return STRUCTURES.filter((s) => s.inputs === inputs && s.drives === drives);
 }
 
 export const MAX_CONTROLS = 16;
@@ -210,7 +187,6 @@ export function defaultMsineSetup(): MsineDraft {
 		requests: { honour: false, max_hold_s: 2, min_slow_factor: 0.1 },
 		limits: { kinematic_monitor: true, channels: [], notch: { smoothing_ticks: 3, release_ramp_db_per_s: 10, release_hysteresis_db: 1, near_bound_db: 3 } },
 		feasibility: { enabled: false, shakers: [] },
-		simulator: { structure: null },
 		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
@@ -263,7 +239,6 @@ export function mergeMsineSetup(saved: Partial<MsineDraft> | null): MsineDraft {
 	out.limits.channels = arr<MsineLimitDraft>(l.channels, []).map((ch) => ({ channel: ch?.channel ?? 0, profile: mergeProfile(newLimit(0).profile, ch?.profile) }));
 	const f = obj(saved.feasibility) as Partial<MsineDraft['feasibility']>;
 	out.feasibility = { enabled: f.enabled === true, shakers: arr<MsineShakerDraft>(f.shakers, []).map((x) => ({ ...newShaker(x?.drive ?? 0), ...x, moving_mass_lb: { ...newShaker(0).moving_mass_lb, ...obj(x?.moving_mass_lb) } })) };
-	out.simulator = { ...base.simulator, ...obj(saved.simulator) };
 	out.record = { ...base.record, ...obj(saved.record) };
 	out.metadata = arr(saved.metadata, base.metadata);
 	return followTitle(out, msineTitle);
@@ -443,7 +418,6 @@ export function toMsineConfig(d: MsineDraft, law: LawEntry | null): MimoSineConf
 			notch: { ...d.limits.notch }
 		},
 		feasibility: shakers ? { shakers: shakers as never } : null,
-		simulator: { structure: d.simulator.structure },
 		operator: r.operator.trim(),
 		article: r.article.trim(),
 		notes: r.notes.trim(),
@@ -529,7 +503,6 @@ export function fromMsineConfig(c: MimoSineConfig): MsineDraft {
 		feasibility: c.feasibility
 			? { enabled: true, shakers: c.feasibility.shakers.map((s) => ({ drive: s.drive, shaker_text: JSON.stringify(s.shaker, null, 2), moving_mass_lb: { ...newShaker(0).moving_mass_lb, ...s.moving_mass_lb } })) }
 			: base.feasibility,
-		simulator: { structure: c.simulator?.structure ?? null },
 		record: {
 			operator: c.operator ?? '',
 			article: c.article ?? '',
@@ -549,7 +522,7 @@ export function fromMsineConfig(c: MimoSineConfig): MsineDraft {
 export type MsineSection = 'channels' | 'references' | 'test' | 'schedule' | 'law' | 'limits';
 
 export const MSINE_SECTIONS: { id: MsineSection; label: string }[] = [
-	{ id: 'channels', label: 'Station & Channels' },
+	{ id: 'channels', label: 'Channels' },
 	{ id: 'references', label: 'References' },
 	{ id: 'test', label: 'Test' },
 	{ id: 'schedule', label: 'Schedule' },
@@ -597,7 +570,8 @@ export function msineItemKey(item: Pick<ReportItem, 'field' | 'channel' | 'row'>
 		if (li >= 0) return `limits.channels.${li}.profile.rows`;
 	}
 	if (item.reason === 'limit_unknown_channel' || item.reason === 'limit_on_control_channel') return 'limits.channels';
-	if (item.reason.startsWith('structure_')) return 'simulator.structure';
+	// The structure is the station's (Configure); its findings are listed with the channels.
+	if (item.reason.startsWith('structure_')) return 'station.simulator.sine_structure';
 	if (item.reason.startsWith('law_')) return 'law.id';
 	if (item.channel !== undefined && item.channel !== null) return 'channels.controls';
 	return 'setup';

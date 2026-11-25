@@ -1,10 +1,9 @@
 <script lang="ts">
 	/**
-	 * The run bar's status: where the data comes from, the run's state, phase, clock and level, the
+	 * The run bar's status: the run's state, phase, clock and level, the
 	 * run's id, and who holds control (with Take Control and Release, and the countdown while nobody
 	 * does during a run).
 	 */
-	import ProvenanceBadge from '$lib/shell/ProvenanceBadge.svelte';
 	import type { Snippet } from 'svelte';
 	import type { RunBarHost } from './actions';
 	import StateChip from './StateChip.svelte';
@@ -44,7 +43,6 @@
 </script>
 
 <div class="status">
-	{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" measured={acq.frame !== null} />{/if}
 	<StateChip {run} words={acq.outcomeWords} stateWords={acq.stateWords} />
 	{#if run && run.state !== 'unconfigured'}
 		<span class="phase" data-testid="run-phase">{acq.phaseWords?.[run.phase] ?? phaseWord(run.phase)}</span>

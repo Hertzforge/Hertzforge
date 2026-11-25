@@ -310,7 +310,7 @@ export function previewParams(d: TwrDraft): TwrReferencePreviewParams | null {
 export type TwrSetupSection = 'station' | 'reference' | 'identification' | 'control' | 'schedule' | 'limits' | 'record';
 
 export const TWR_SECTIONS: { id: TwrSetupSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'reference', label: 'Reference' },
 	{ id: 'identification', label: 'Identification' },
 	{ id: 'control', label: 'Control' },

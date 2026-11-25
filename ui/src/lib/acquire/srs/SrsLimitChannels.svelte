@@ -125,7 +125,7 @@
 				</div>
 			{/each}
 			<button class="btn sm spaced" disabled={locked || !rows.length} onclick={add} data-testid="srs-limit-add">Add Limit Channel</button>
-			{#if !rows.length}<p class="aq-small aq-muted">Enable an input in the channel table (Station & Channels) to hold it under a bound.</p>{/if}
+			{#if !rows.length}<p class="aq-small aq-muted">Enable an input in the channel table (Channels) to hold it under a bound.</p>{/if}
 			<Findings items={errs('limit_channels.channels').map((message) => ({ level: 'error' as const, message }))} />
 		{:else}
 			<p class="aq-muted aq-small">Off: only the control channel is controlled. The drive ceiling and the other limits still hold.</p>

@@ -7,12 +7,10 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import RecorderCapture from './RecorderCapture.svelte';
 	import RecorderRunView from './RecorderRunView.svelte';
 	import RecorderSetup from './RecorderSetup.svelte';
-	import RecorderSimSource from './RecorderSimSource.svelte';
 	import RecorderSummary from './RecorderSummary.svelte';
 	import { RECORDER_SECTIONS, recorderRows, type RecorderSection } from './recorderSetup';
 	import { rateWords } from './recorderWords';
@@ -29,7 +27,6 @@
 
 	const now = $derived(recorder.now);
 	const rows = $derived(recorderRows(recorder.rows));
-	const onSim = $derived(recorder.acq.selected?.kind === 'sim');
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
@@ -53,9 +50,7 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={recorder.acq} />
 			<p class="aq-small aq-muted" data-testid="recorder-run-channels">The run records every enabled input row of the table, in table order: {rows.recorded.length ? `channel${rows.recorded.length === 1 ? '' : 's'} ${rows.recorded.map((r) => r.index).join(', ')}` : 'none yet'}. Each recording holds one column per row. {rows.drives.length ? `Drive row${rows.drives.length === 1 ? '' : 's'} ${rows.drives.map((r) => r.index).join(', ')} ${rows.drives.length === 1 ? 'is' : 'are'} not opened and not recorded: the run opens no output.` : 'The run opens no output.'} A row's abort limits mark the recording and never stop it.</p>
-			{#if onSim}<div class="aq-panel"><RecorderSimSource rows={rows.recorded.map((r) => r.index)} /></div>{/if}
 			<ChannelTable acq={recorder.acq} />
 		</div>
 	{:else if section === 'trigger'}
@@ -72,10 +67,8 @@
 	<RecorderSummary {recorder} onopen={(s: RecorderSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={recorder.acq} />{/snippet}
-
 {#snippet run()}
-	<RecorderRunView {recorder} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} opener={app.recorderRunOpen} />
+	<RecorderRunView {recorder} {views} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} opener={app.recorderRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -90,6 +83,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start acquisition from there."
 	{abortKeys}

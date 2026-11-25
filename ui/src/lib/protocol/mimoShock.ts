@@ -132,7 +132,6 @@ export interface MimoShockConfig {
 	spacing?: MimoShockSpacing;
 	identification?: MimoShockIdentification;
 	control?: MimoShockControl;
-	simulator?: { plant: string | null };
 	/** The run's record (Random's): the operator's words, what the test is run to, and whether the folder keeps the time histories. */
 	operator?: string;
 	article?: string;

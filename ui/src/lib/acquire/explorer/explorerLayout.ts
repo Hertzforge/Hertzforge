@@ -77,7 +77,7 @@ export const EXPLORER_SCREEN: PulseScreenSpec<ExplorerPageKind, ExplorerLiveQuan
 		['time', { words: 'Time History', help: "The control channel's most recent samples, on the station's clock.", group: 'time', families: ['measured'] }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'steer', 'station'],
+	cards: ['run', 'level', 'steer'],
 	selectors: ['all', 'control']
 };
 

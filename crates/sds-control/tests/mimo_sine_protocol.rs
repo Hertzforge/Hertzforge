@@ -185,24 +185,6 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
             Some("control.law.id"),
         ),
         (
-            "structure_unknown",
-            with(
-                b.clone(),
-                &["simulator", "structure"],
-                json!("sine-flat-9x9"),
-            ),
-            Some("simulator.structure"),
-        ),
-        (
-            "structure_wrong_size",
-            with(
-                b.clone(),
-                &["simulator", "structure"],
-                json!("sine-tall-6x3"),
-            ),
-            Some("simulator.structure"),
-        ),
-        (
             "out_of_range",
             with(b.clone(), &["identification"], json!({"resolution_hz": 10})),
             Some("identification.resolution_hz"),
@@ -429,12 +411,77 @@ async fn mimo_sine_the_weak_and_loopback_structures_are_taken_by_name() {
         let r = c.ok("mimo_sine.configure", json!({"config": cfg})).await;
         assert_eq!(r["state"]["station"]["structure"], name, "{r}");
     }
-    let cfg = with(base(), &["simulator", "structure"], json!("sine-none"));
-    let (got, item) = refused_item(&mut c, cfg, "structure_unknown").await;
-    assert_eq!(got, "structure_unknown");
-    let msg = item["message"].as_str().unwrap();
+    // An unknown structure is refused at the station, naming the ones it has.
+    let e = c
+        .refused(
+            "station.select",
+            json!({"kind": "sim", "simulator": {"sine_structure": "sine-none"}}),
+        )
+        .await;
+    assert_eq!(e["reason"], "bad_params", "{e}");
+    assert_eq!(e["detail"]["param"], "simulator.sine_structure", "{e}");
+    let msg = e["message"].as_str().unwrap();
     assert!(
         msg.contains("sine-weak-4x4") && msg.contains("sine-loopback-4x4"),
         "{msg}"
     );
+}
+
+/// The structure is the station's: one of another size than the table is
+/// refused at configure on the station's field, and a configuration's own
+/// `simulator` member is not read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_plays_the_stations_structure_not_the_configurations() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 0, 4).await;
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"sine_structure": "sine-tall-6x3"}}),
+    )
+    .await;
+    let mut cfg = base();
+    cfg.as_object_mut().unwrap().remove("simulator");
+    let e = c
+        .call_raw("mimo_sine.configure", json!({"config": cfg.clone()}))
+        .await;
+    let items = e["error"]["detail"]["errors"].as_array().expect("a report");
+    let item = items
+        .iter()
+        .find(|i| i["reason"] == "structure_wrong_size")
+        .expect("structure_wrong_size");
+    assert_eq!(item["field"], "station.simulator.sine_structure", "{item}");
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"sine_structure": "sine-weak-4x4"}}),
+    )
+    .await;
+    cfg["simulator"] = json!({"structure": "sine-loopback-4x4"});
+    let r = c
+        .call_raw("mimo_sine.configure", json!({"config": cfg}))
+        .await;
+    assert_eq!(
+        r["result"]["state"]["station"]["structure"], "sine-weak-4x4",
+        "{r}"
+    );
+}
+
+/// Changing the station's structure after a run is configured refuses its arm.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_refuses_an_arm_after_the_stations_structure_changed() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 0, 4).await;
+    let mut cfg = base();
+    cfg.as_object_mut().unwrap().remove("simulator");
+    c.call_raw("mimo_sine.configure", json!({"config": cfg}))
+        .await;
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"sine_structure": "sine-weak-4x4"}}),
+    )
+    .await;
+    let e = c.refused("mimo_sine.arm", json!({})).await;
+    assert_eq!(e["reason"], "arm_refused", "{e}");
+    assert_eq!(e["detail"]["station"], "sine-weak-4x4", "{e}");
 }

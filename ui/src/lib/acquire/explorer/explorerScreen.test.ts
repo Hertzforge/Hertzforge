@@ -14,7 +14,7 @@ describe('Explorer on the screen frame', () => {
 			['readings', 'Readings', 'numbers', false, false]
 		]);
 		expect(EXPLORER_PLOT_TYPES[1].selectors).toEqual(['all', 'control']);
-		expect(EXPLORER_HOOKS.cards).toEqual(['run', 'level', 'steer', 'station']);
+		expect(EXPLORER_HOOKS.cards).toEqual(['run', 'level', 'steer']);
 	});
 
 	it('opens on its four pages, at ten frames a second', () => {

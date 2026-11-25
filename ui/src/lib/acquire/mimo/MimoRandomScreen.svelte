@@ -2,7 +2,7 @@
 	/**
 	 * The operator's screen for MIMO Random, in the format single-output Random set: a link back
 	 * to the test-type chooser, three steps (Setup, Predict, Run), the run bar always in view, and
-	 * the setup in sections (Channels, Reference, Control, Schedule, Run Record, Backend) with the setup
+	 * the setup in sections (Channels, Reference, Control, Schedule, Run Record) with the setup
 	 * summary beside every section, so whatever is missing is one click away. After
 	 * identification the service holds for the prediction, which comes forward by itself; engaging
 	 * brings the run forward.
@@ -10,17 +10,18 @@
 	import { onMount } from 'svelte';
 	import '$lib/acquire/acquire.css';
 	import type { AppState } from '$lib/app/state.svelte';
+	import ChannelTable from '../ChannelTable.svelte';
+	import ConfigureButton from '../ConfigureButton.svelte';
 	import Findings from '../Findings.svelte';
 	import Notices from '../Notices.svelte';
 	import RunBar from '../RunBar.svelte';
 	import RunRecordEditor from '../RunRecordEditor.svelte';
 	import ScheduleEditor from '../ScheduleEditor.svelte';
-	import MimoBackend from './MimoBackend.svelte';
 	import MimoChannels from './MimoChannels.svelte';
 	import MimoControl from './MimoControl.svelte';
+	import MimoFeasibility from './MimoFeasibility.svelte';
 	import MimoPredict from './MimoPredict.svelte';
 	import MimoReference from './MimoReference.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import { runBandsOf, runGeometryOf } from './runFrame';
 	import MimoRunView from './views/MimoRunView.svelte';
 	import MimoSpace from './MimoSpace.svelte';
@@ -47,8 +48,7 @@
 		{ id: 'reference', label: 'Reference' },
 		{ id: 'control', label: 'Control' },
 		{ id: 'schedule', label: 'Schedule' },
-		{ id: 'record', label: 'Run Record' },
-		{ id: 'backend', label: 'Backend' }
+		{ id: 'record', label: 'Run Record' }
 	];
 
 	const tabs = $derived(SECTIONS.map((s) => ({ ...s, errors: mimo.counts[s.id].errors, warnings: mimo.counts[s.id].warnings })));
@@ -156,6 +156,8 @@
 					</li>
 				{/each}
 			</ol>
+			<span class="grow"></span>
+			<ConfigureButton onclick={() => tests.toConfigure()} />
 		</div>
 		<RunBar acq={mimo} onoverride={() => (mimo.step = 'predict')} {abortKeys} />
 		<Notices acq={mimo} />
@@ -200,6 +202,8 @@
 							</section>
 							<MimoChannels {mimo} />
 							<MimoSpace {mimo} />
+							<ChannelTable acq={mimo.acq} />
+							<MimoFeasibility {mimo} />
 						</div>
 					{:else if section === 'reference'}
 						<MimoReference {mimo} onanalyze={() => app.go('signals')} />
@@ -213,8 +217,6 @@
 						<div class="narrow">
 							<RunRecordEditor acq={mimo} kept="The setup, the channel table, the log, the reference, the identification, every loop's spectra and the law's calls are still kept." />
 						</div>
-					{:else}
-						<MimoBackend {mimo} />
 					{/if}
 				</div>
 				<MimoSummary {mimo} onopen={open} />
@@ -242,7 +244,6 @@
 	{:else}
 		<div class="body fit" bind:this={body} data-testid="run-view">
 			<MimoRunView views={app.mimoViews} onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} {geometry} bands={runBands} diagnostics={mimo.law?.diagnostics ?? []} opener={app.mimoRunOpen}>
-				{#snippet station()}<StationPanel acq={mimo.acq} />{/snippet}
 				{#snippet end()}
 					<button class="btn sm" data-testid="back-to-setup" onclick={() => (mimo.step = 'setup')} title={mimo.isLive ? 'Look at the setup. It stays locked while the run is live.' : 'Back to the setup.'}>
 						<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -275,6 +276,10 @@
 		gap: var(--sp-1);
 		min-height: 24px;
 		min-width: 0;
+	}
+
+	.crumb .grow {
+		flex: 1;
 	}
 
 	.crumb .back {

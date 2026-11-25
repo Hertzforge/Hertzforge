@@ -349,18 +349,67 @@ async fn mimo_shock_the_simulator_refuses_a_table_not_the_plants_size() {
     let addr = serve(svc()).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
-    let mut cfg = config("auto");
-    cfg["simulator"] = json!({"plant": "shock-jointed-6x3"});
-    c.ok("mimo_shock.configure", json!({"config": cfg})).await;
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"shock_plant": "shock-jointed-6x3"}}),
+    )
+    .await;
+    c.ok("mimo_shock.configure", json!({"config": config("auto")}))
+        .await;
     let e = c.refused("mimo_shock.arm", json!({})).await;
     assert_eq!(e["reason"], "arm_refused", "{e}");
     assert_eq!(e["detail"]["plant"], "shock-jointed-6x3");
-    let mut cfg = config("auto");
-    cfg["simulator"] = json!({"plant": "no-such-plant"});
+    // A plant the simulator does not have is refused at the station.
     let e = c
-        .refused("mimo_shock.configure", json!({"config": cfg}))
+        .refused(
+            "station.select",
+            json!({"kind": "sim", "simulator": {"shock_plant": "no-such-plant"}}),
+        )
         .await;
-    assert_eq!(e["detail"]["errors"][0]["reason"], "plant_unknown");
+    assert_eq!(e["reason"], "bad_params", "{e}");
+    assert_eq!(e["detail"]["param"], "simulator.shock_plant", "{e}");
+}
+
+/// The plant is the station's: a configuration's own `simulator` member is not
+/// read, and the run plays (and its status names) the station's plant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_plays_the_stations_plant_not_the_configurations() {
+    let addr = serve(svc()).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"shock_plant": "shock-jointed-4x4-moderate"}}),
+    )
+    .await;
+    let mut cfg = config("auto");
+    cfg["simulator"] = json!({"plant": "shock-jointed-4x4-severe"});
+    let r = c
+        .call_raw("mimo_shock.configure", json!({"config": cfg}))
+        .await;
+    assert!(r.get("error").is_none(), "{r}");
+    let st = c.ok("mimo_shock.state", json!({})).await;
+    assert_eq!(st["station"]["plant"], "shock-jointed-4x4-moderate", "{st}");
+}
+
+/// Changing the station's plant after a run is configured refuses its arm: the
+/// run's checks, view and record name the plant it was configured on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_refuses_an_arm_after_the_stations_plant_changed() {
+    let addr = serve(svc()).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    c.ok("mimo_shock.configure", json!({"config": config("auto")}))
+        .await;
+    c.ok(
+        "station.select",
+        json!({"kind": "sim", "simulator": {"shock_plant": "shock-jointed-4x4-moderate"}}),
+    )
+    .await;
+    let e = c.refused("mimo_shock.arm", json!({})).await;
+    assert_eq!(e["reason"], "arm_refused", "{e}");
+    assert_eq!(e["detail"]["configured"], Value::Null, "{e}");
+    assert_eq!(e["detail"]["station"], "shock-jointed-4x4-moderate", "{e}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

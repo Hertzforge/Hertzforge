@@ -83,8 +83,10 @@ def test_the_mimo_sine_configuration_carries_every_field_and_the_record():
     config = _text('request_mimo_sine_configure')['params']['config']
     assert set(config) == {'title', 'channels', 'phase_specified', 'test', 'acquisition',
                            'schedule', 'identification', 'control', 'requests', 'limits',
-                           'feasibility', 'simulator', 'operator', 'article', 'notes',
+                           'feasibility', 'operator', 'article', 'notes',
                            'specification', 'record', 'metadata'}
+    # The simulator's structure is the station's (station.select), never the configuration's.
+    assert 'simulator' not in config
     assert 'capture' not in config and 'cola' not in config
     derived = _text('response_mimo_sine_configure')['result']['derived']
     assert derived['law']['test_types'] == ['sweep', 'dwell', 'stepped']

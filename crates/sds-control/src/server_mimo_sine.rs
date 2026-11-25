@@ -169,9 +169,10 @@ impl Service {
         ),
         MethodError,
     > {
-        let w = config::parse(config)?;
+        let mut w = config::parse(config)?;
         let (tbl, table_report, sim) = {
             let inner = self.inner.lock().await;
+            w.structure = inner.stations.sim_models().sine_structure.clone();
             (
                 inner.table.table.clone(),
                 table::validate(&inner.table.table, &inner.ctx()),
@@ -345,7 +346,13 @@ impl Service {
             }
             let fs_hz = run.wire.fs_hz();
             let (plan, hardware) = match inner.stations.selected() {
-                Selection::Sim => (sim_plan(&run.wire, &inner.table.table, fs_hz)?, false),
+                Selection::Sim => {
+                    station::models_unchanged(
+                        run.wire.structure.as_deref(),
+                        inner.stations.sim_models().sine_structure.as_deref(),
+                    )?;
+                    (sim_plan(&run.wire, &inner.table.table, fs_hz)?, false)
+                }
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -1062,7 +1069,7 @@ fn sim_plan(
                 "arm_refused",
                 format!(
                     "The simulator has no sine structure of {inputs} inputs and {drives} drives; \
-                     name one in \"simulator.structure\" or size the table to one."
+                     choose one in the station's simulator models or size the table to one."
                 ),
             )
         })?,

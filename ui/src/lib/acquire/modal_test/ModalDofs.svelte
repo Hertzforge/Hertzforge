@@ -64,7 +64,7 @@
 			</tbody>
 		</table>
 	{:else}
-		<p class="aq-small aq-muted">No input row yet: add the hammer and the accelerometers in Station &amp; Channels.</p>
+		<p class="aq-small aq-muted">No input row yet: add the hammer and the accelerometers in Channels.</p>
 	{/if}
 	{#if modal.acq.tableDirty}<p class="aq-small warn" data-testid="mt-dofs-dirty">The table has edits the service has not checked yet: Apply Setup sends the table first, then the setup.</p>{/if}
 	<Findings items={findings} testid="mt-dofs-findings" />

@@ -12,7 +12,7 @@ DOFs.
 This guide is written for the test engineer running the test. It follows the order of a test: the
 channels and DOFs, impact testing step by step, shaker testing, the windows, what the test checks
 and what it does not, what a run saves, and opening the test in the fit. The Modal Test shares its
-run bar, station panel and channel table with the other test types.
+run bar and channel table with the other test types.
 
 ## What the Test Does
 
@@ -42,10 +42,11 @@ open project, as on every test screen.
 
 ## Channels and DOFs
 
-The station panel and the channel table are shared with the other test types. Each measured row
-needs a DOF: a node number and a direction, such as `3` and `Z+`. The **DOFs** section shows the
-table's input rows with their node, direction and role, and edits them in the table itself; there
-is no separate list of DOFs. Each row is one of:
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table is shared with
+the other test types. Each measured row needs a DOF: a node number and a direction, such as `3` and
+`Z+`. The **DOFs** section shows the table's input rows with their node, direction and role, and
+edits them in the table itself; there is no separate list of DOFs. Each row is one of:
 
 - **Reference**: the force. In impact mode, the hammer's force gauge, which must be the one
   reference. In shaker mode, the force gauge of each shaker, one reference a shaker.
@@ -59,7 +60,7 @@ before the test starts.
 
 ## Impact Step by Step
 
-1. **Set up the channels.** In Station & Channels, add the hammer and the accelerometers, each
+1. **Set up the channels.** In Channels, add the hammer and the accelerometers, each
    with its unit and sensitivity. In DOFs, make the hammer row the reference and each
    accelerometer a response, and give each its node and direction.
 2. **Choose the mode and the acquisition.** In Mode & Acquisition, choose **Impact**, the sample
@@ -129,7 +130,7 @@ are checked the same way.
 
 In shaker mode, each shaker plays a broadband source open loop, at its own level in V RMS, on its
 own drive row. Choose **Shaker** in Mode & Acquisition. In the Shaker section, add a drive row for
-each shaker (drive rows are added in Station & Channels), its level, the source and the drive
+each shaker (drive rows are added in Channels), its level, the source and the drive
 ceiling. On the Measure screen, **Start Driving** ramps the drive up and averages frames until the
 point has its averages; the drive then ramps down, 40 dB over 3 s, and goes to zero. **Stop
 Driving** part way through a point is a pause: the frames taken stay, and **Start Driving** goes

@@ -184,7 +184,7 @@
 				{/if}
 			</section>
 		{:else}
-			<p class="aq-notice warn aq-small" data-testid="ms-no-controls">Switch on control rows in the channel table (Station & Channels) to give each its target.</p>
+			<p class="aq-notice warn aq-small" data-testid="ms-no-controls">Switch on control rows in the channel table (Channels) to give each its target.</p>
 		{/if}
 	</div>
 

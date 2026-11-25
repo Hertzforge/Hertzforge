@@ -263,9 +263,6 @@
     "operator": "A. Operator",
     "article": "Plate",
     "notes": "the golden run folder",
-    "simulator": {
-      "structure": "sine-linear-4x4"
-    },
     "control_tick_s": 0.05,
     "specification": {
       "document": "Example procedure",

@@ -8,8 +8,8 @@ abort are the controller's, never the law's. The drive is in volts peak througho
 drive ceiling and an abort that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the profile, the test, the schedule and identification, control, limits and
-the run's record, then the run itself. Sine shares its run bar, station panel, channel table and control-law
+channels, the profile, the test, the schedule and identification, control, limits and
+the run's record, then the run itself. Sine shares its run bar, channel table and control-law
 panel with the other test types, and its level and ladder controls with Random.
 
 ## What the Test Does
@@ -43,7 +43,7 @@ The controller holds every law to the same checks, whichever law it is.
 ## Opening the Test
 
 In Acquire & Control, choose **Sine** from the test types. The screen has two steps, **Setup** and
-**Run**. The run bar (where the data comes from, the run's state, elapsed time, level, the
+**Run**. The run bar (the run's state, elapsed time, level, the
 frequency, the sweep under way, who holds control, and Stop and Abort once a run is live) stays in
 view on both. The setup's sections are tabs; the summary beside every section says what the setup
 holds, what the control service worked out from it, and what is still missing, each a click from
@@ -53,9 +53,10 @@ its section.
 **Start** arms if needed, then runs identification. The setup is checked as it is edited: every
 problem shows in the section it belongs to, and a setup with errors is never accepted.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for Random. The run controls on the
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The run controls on the
 channel table's enabled **control** rows (combined as set under Control) and drives on its first
 enabled **drive** row. Other enabled inputs can be watched on the Responses page or held under a
 bound as limit channels.

@@ -1,5 +1,5 @@
 <script lang="ts">
-	/** Top bar: where you are, the palette trigger, the SIM badge, service state and theme. */
+	/** Top bar: where you are, the palette trigger, service state and theme. */
 	import FileBar from '$lib/project/FileBar.svelte';
 	import { hasFileMenu } from '$lib/project/files';
 	import type { AppState } from '$lib/app/state.svelte';
@@ -8,7 +8,6 @@
 	import ConnectionPill from './ConnectionPill.svelte';
 	import { db, STATE_WORDS } from '$lib/acquire/words';
 	import Icon from './Icon.svelte';
-	import ProvenanceBadge from './ProvenanceBadge.svelte';
 
 	interface Props {
 		app: AppState;
@@ -17,7 +16,6 @@
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
-	const prov = $derived(app.provenance);
 	/** A live Random run stays in reach from wherever it is not on screen: another workspace, or the test-type chooser. */
 	const away = $derived(app.acquire.isLive && !app.runOnScreen ? app.acquire : null);
 </script>
@@ -73,7 +71,6 @@
 				<button class="abort" data-testid="run-pill-abort" disabled={!away.actions.abort.enabled} onclick={() => away.abort()} title="Abort the run now ({isMac ? 'Cmd' : 'Ctrl'} and period)">Abort</button>
 			</span>
 		{/if}
-		{#if prov}<ProvenanceBadge source={prov.source} cls={prov.cls} compact />{/if}
 		{#if app.units.systems.length}
 			<select class="field units" data-testid="unit-system" aria-label="Display units" title="Display units: every plot and reading is drawn in them"
 				value={app.units.name} onchange={(e) => app.units.choose(e.currentTarget.value)}>

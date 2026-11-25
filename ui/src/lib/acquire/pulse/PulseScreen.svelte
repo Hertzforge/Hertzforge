@@ -35,6 +35,8 @@
 		nums?: Snippet;
 		/** Back to the test types; absent while the screen cannot be left. */
 		onleave?: (() => void) | null;
+		/** Open Configure (the station). */
+		onconfigure?: (() => void) | null;
 		/** True when the keyboard should land on the test's name on arrival. */
 		takeFocus?: () => boolean;
 		/** The footer's words while the run is live. */
@@ -43,7 +45,7 @@
 		proceedTitle?: string;
 		abortKeys: string;
 	}
-	let { host, screen, name, testid, ids, sections, setup, summary, run, nums, onleave = null, takeFocus, liveNote = 'The run is live; the setup is locked until it ends.', proceedTitle = 'Apply the setup and show the run.', abortKeys }: Props = $props();
+	let { host, screen, name, testid, ids, sections, setup, summary, run, nums, onleave = null, onconfigure = null, takeFocus, liveNote = 'The run is live; the setup is locked until it ends.', proceedTitle = 'Apply the setup and show the run.', abortKeys }: Props = $props();
 
 	let heading = $state<HTMLElement | null>(null);
 	onMount(() => {
@@ -133,7 +135,7 @@
 </script>
 
 <div class="acquire" data-testid={testid}>
-	<ScreenHeader acq={host} {name} {step} onsetup={() => (host.step = 'setup')} onrun={proceed} runWhy={proceedWhy} {onleave} {reason} ends={endsInHeader} {abortKeys} {nums} bind:heading />
+	<ScreenHeader acq={host} {name} {step} onsetup={() => (host.step = 'setup')} onrun={proceed} runWhy={proceedWhy} {onleave} {onconfigure} {reason} ends={endsInHeader} {abortKeys} {nums} bind:heading />
 	<!-- Notices float over the top of the page, so one never pushes the plots down. -->
 	<div class="notices"><div class="stack"><Notices acq={host} /></div></div>
 

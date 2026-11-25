@@ -227,7 +227,7 @@ function mimoHost(app: AppState, protocol: () => string | null): SetupHost {
 		const law = m.laws?.find((l) => l.id === d.draft.law.id) ?? null;
 		// a reference opened with the setup brings its own space, as the operator's matrices
 		const space = { kind: d.draft.space.kind, dofs: d.draft.space.dofs, response: d.draft.space.kind === 'virtual' ? d.draft.space.response : null, drive: d.draft.space.kind === 'virtual' && d.draft.space.driveOn ? d.draft.space.drive : null, from: 'operator' as const };
-		return toWireSetup(d.draft, { rows: m.rows, space, reference: d.reference, law, backend: m.stationKind });
+		return toWireSetup(d.draft, { rows: m.rows, space, reference: d.reference, law });
 	};
 	return {
 		module: 'mimo_random',

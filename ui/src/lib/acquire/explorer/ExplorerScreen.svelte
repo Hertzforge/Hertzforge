@@ -7,7 +7,6 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import ExplorerCapture from './ExplorerCapture.svelte';
 	import ExplorerRunView from './ExplorerRunView.svelte';
@@ -54,7 +53,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={explorer.acq} />
 			<p class="aq-small aq-muted" data-testid="explorer-run-channels">The run drives the table's one enabled drive row ({channels.drive ? `channel ${channels.drive.index}` : 'none yet'}) and reads the survey from its control row: the first enabled control row, else the first enabled input ({channels.control ? `channel ${channels.control.index}` : 'none yet'}). Every enabled input is acquired, and each row's abort limits are the run's.</p>
 			<ChannelTable acq={explorer.acq} />
 		</div>
@@ -70,10 +68,8 @@
 	<ExplorerSummary {explorer} onopen={(s: ExplorerSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={explorer.acq} />{/snippet}
-
 {#snippet run()}
-	<ExplorerRunView {explorer} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'explorer')} opener={app.explorerRunOpen} />
+	<ExplorerRunView {explorer} {views} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'explorer')} opener={app.explorerRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -88,6 +84,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	liveNote="The run is live; the setup is locked until it ends. The steering steps can still change."
 	proceedTitle="Apply the setup and show the run: start the tone from there."

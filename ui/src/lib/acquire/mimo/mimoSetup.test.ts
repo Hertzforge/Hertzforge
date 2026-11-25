@@ -204,7 +204,7 @@ describe('the pair table', () => {
 describe('where findings land', () => {
 	it('puts a drive finding on the drive channel and a channel finding on its row', () => {
 		const { rows, d } = bench();
-		const setup = toWireSetup(d, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'a'.repeat(64) }, law: null, backend: 'sim' });
+		const setup = toWireSetup(d, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'a'.repeat(64) }, law: null });
 		expect(itemKey({ reason: 'out_of_range', field: 'setup.channels.drives[1].peak_v', message: 'x' }, setup)).toBe('drive.4.peak_v');
 		expect(itemKey({ reason: 'out_of_range', field: 'setup.channels.controls[0].alarm_db', message: 'x' }, setup)).toBe('control.1.alarm_db');
 		expect(itemKey({ reason: 'out_of_range', field: 'setup.schedule.levels[2].dwell_s', message: 'x' }, setup)).toBe('schedule.levels.2.dwell_s');
@@ -268,7 +268,7 @@ describe('the setup on the wire', () => {
 		d.limits['5'] = { ceiling: 0.2, abort_margin_db: 4 };
 		d.drives['3'].shaker_text = '{"name":"S1"}';
 		d.law.params = { convergence: 0.6, stray: 1 };
-		const s = toWireSetup(d, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'b'.repeat(64) }, law: LAW, backend: 'sim' })!;
+		const s = toWireSetup(d, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'b'.repeat(64) }, law: LAW })!;
 		expect(s.channels.controls.map((c) => c.channel)).toEqual([1, 2]);
 		expect(s.channels.drives[0]).toEqual({ channel: 3, ceiling_vrms: 2, abort_vrms: null, peak_v: 6, shaker: { name: 'S1' }, moving_mass_lb: 0 });
 		expect(s.channels.limits).toEqual([{ channel: 5, ceiling: 0.2, abort_margin_db: 4 }]);
@@ -276,7 +276,9 @@ describe('the setup on the wire', () => {
 		expect(s.law).toEqual({ id: 'pinv_closed', params: { convergence: 0.6 } });
 		expect(s.schedule.levels.at(-1)).toEqual({ db: 0 });
 		expect(s.control?.cap_up_db).toBe(3.5);
-		expect(toWireSetup(d, { rows, space: PHYSICAL, reference: null, law: LAW, backend: null })).toBeNull();
+		// The station is the service's (Configure): the setup names no backend.
+		expect('backend' in s).toBe(false);
+		expect(toWireSetup(d, { rows, space: PHYSICAL, reference: null, law: LAW })).toBeNull();
 	});
 
 	it('under virtual control sends each degree of freedom its own bands, in their order', () => {
@@ -284,7 +286,7 @@ describe('the setup on the wire', () => {
 		const virt: EffectiveSpace = { kind: 'virtual', dofs: ['X', 'Y'], response: { rows: 2, cols: 2, values: [1, 0, 0, 1], source: null }, drive: null, from: 'operator' };
 		ensureDofBands(d, virt.dofs);
 		d.space.dofBands['Y'] = { alarm_db: [1, 2], abort_db: [3, 4] };
-		const s = toWireSetup(d, { rows, space: virt, reference: { kind: 'file', path: '/r', sha256: 'c'.repeat(64) }, law: LAW, backend: 'sim' })!;
+		const s = toWireSetup(d, { rows, space: virt, reference: { kind: 'file', path: '/r', sha256: 'c'.repeat(64) }, law: LAW })!;
 		if (s.space?.kind !== 'virtual') throw new Error('virtual expected');
 		expect(s.space.dof_bands).toEqual([
 			{ alarm_db: [3, 3], abort_db: [6, 6] },
@@ -312,9 +314,7 @@ describe('the setup summary', () => {
 			law: LAW,
 			lawsLoaded: true,
 			check: null,
-			counts: { channels: zero, reference: zero, control: zero, schedule: zero, record: zero, backend: zero, predict: zero },
-			station: { kind: 'sim', dirty: false },
-			tableErrors: 0,
+			counts: { channels: zero, reference: zero, control: zero, schedule: zero, record: zero, predict: zero },
 			setupStatus: 'none',
 			...over
 		};
@@ -337,9 +337,7 @@ describe('the setup summary', () => {
 				draft: d,
 				channels: { drives: [], controls: [], limits: [], monitors: [] },
 				law: null,
-				check: { law: bad } as MimoValidation,
-				station: { kind: 'ni', dirty: true },
-				tableErrors: 2
+				check: { law: bad } as MimoValidation
 			})
 		);
 		const m = missingList(s).map((x) => `${x.section}: ${x.text}`);
@@ -348,10 +346,10 @@ describe('the setup summary', () => {
 			'channels: Give an output the Drive role.',
 			'reference: Give the path of the reference to import.',
 			'control: Choose a control law.',
-			'control: The chosen law does not admit this test; choose another, or change its parameters.',
-			'backend: Use the chosen station, or put the choice back.',
-			'backend: Fix the 2 errors in the channel wiring.'
+			'control: The chosen law does not admit this test; choose another, or change its parameters.'
 		]);
+		// The station is Configure's: no section of the setup asks for it.
+		expect(s.map((x) => x.section)).toEqual(['channels', 'reference', 'control', 'schedule']);
 	});
 
 	it('asks for the repair when the service refused lines it can repair', () => {
@@ -365,7 +363,7 @@ describe("the run record's words", () => {
 	it('go with the setup, trimmed, the specification only when one is named, the streams on by default', () => {
 		const { rows, d } = bench();
 		expect(d.record).toEqual({ operator: '', article: '', notes: '', document: '', clause: '', streams: true });
-		const at = (draft: MimoDraft) => toWireSetup(draft, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'e'.repeat(64) }, law: LAW, backend: 'sim' })!;
+		const at = (draft: MimoDraft) => toWireSetup(draft, { rows, space: PHYSICAL, reference: { kind: 'file', path: '/r', sha256: 'e'.repeat(64) }, law: LAW })!;
 		const none = at(d);
 		expect([none.operator, none.article, none.notes, none.specification, none.record]).toEqual(['', '', '', null, { streams: true }]);
 		d.record = { operator: ' A. Operator ', article: 'Bracket, serial 7', notes: ' first article ', document: 'Test procedure 12', clause: '4.2', streams: false };
@@ -376,6 +374,8 @@ describe("the run record's words", () => {
 	it('are a section of their own, where a clause without its document is named', () => {
 		for (const key of ['operator', 'article', 'notes', 'specification.document', 'record.streams']) expect(sectionOf(key)).toBe('record');
 		expect(sectionOf('schedule.levels.0.db')).toBe('schedule');
+		// The channel table's findings are the Channels section's: there is no Backend section.
+		expect(sectionOf('table.rows')).toBe('channels');
 		const d = defaultMimoSetup();
 		d.record.clause = '4.2';
 		expect(settingErrors(d)['specification.document']).toEqual(['Name the document this clause is from.']);

@@ -6,9 +6,8 @@ and spectrum live, and saves recordings of those rows: from the run's first fram
 asks, or each time a row crosses a level. Monitoring saves nothing; only a recording does.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the rate and the trigger, the analysis, the records, then the run itself and
-what a recording holds. The Recorder shares its run bar, station panel and channel table with the
-other test types.
+channels, the rate and the trigger, the analysis, the records, then the run itself and what a
+recording holds. The Recorder shares its run bar and channel table with the other test types.
 
 ## What the Test Does
 
@@ -28,7 +27,7 @@ other test types.
 ## Opening the Test
 
 In Acquire & Control, choose **Recorder** from the test types, under Specialized. The screen has
-two steps, **Setup** and **Run**. The run bar (where the data comes from, the run's state, the station
+two steps, **Setup** and **Run**. The run bar (the run's state, the station
 time, the rate, the recording in progress, the recordings saved, who holds control, and Stop and Abort
 once a run is live) stays in view on both. The summary beside every setup section says what the setup
 holds, what the control service worked out from it, and what is still missing.
@@ -36,9 +35,10 @@ holds, what the control service worked out from it, and what is still missing.
 **Proceed to Run** applies the setup (with any channel table edits first) and shows the run.
 **Start** opens the station and starts acquisition, in one step.
 
-## Station and Channels
+## Channels
 
-The station panel chooses the simulator or the NI hardware, as for the other test types.
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control.
 
 - **Recorded rows.** Every enabled input row (control, monitor or reference) is recorded, in table
   order, and each recording holds one column per row in that order. At least one is needed.
@@ -51,7 +51,7 @@ The station panel chooses the simulator or the NI hardware, as for the other tes
 **On the simulator.** The simulator's test setup moves only when something drives it, and a Recorder
 drives nothing, so a Recorder run on the simulator carries a stated source on its inputs, on the
 simulator's small noise, in each row's unit, repeating every 2.000 s from the run's first frame. The
-screen names it whenever the run is on the simulator:
+Configure view names it whenever the station is the simulator:
 
 | Recorded row | Signal |
 |---|---|

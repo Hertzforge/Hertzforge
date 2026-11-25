@@ -2662,14 +2662,21 @@ impl Service {
         }
         match protocol::named_str(params, "kind")? {
             Some("sim") => {
+                let models = station::SimModels::from_params(params.get("simulator"))?;
                 let mut inner = self.inner.lock().await;
                 inner.session.require_controller(conn.id)?;
                 inner.run_active()?;
-                inner.stations.select_sim();
+                inner.stations.select_sim(models);
                 self.station_changed(&inner);
                 Ok(json!({"selected": inner.stations.selected_json()}))
             }
             Some("ni") => {
+                if !matches!(params.get("simulator"), None | Some(Value::Null)) {
+                    return Err(MethodError::bad_params(
+                        "simulator",
+                        "The simulator's models are set with the simulator, not with NI.",
+                    ));
+                }
                 let devices: Vec<String> = match params.get("devices") {
                     Some(Value::Array(a))
                         if !a.is_empty()

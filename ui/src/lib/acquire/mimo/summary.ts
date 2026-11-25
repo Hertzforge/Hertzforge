@@ -30,8 +30,6 @@ export interface SummaryInputs {
 	/** The dry run for the setup as it stands, or null. */
 	check: MimoValidation | null;
 	counts: Record<MimoSection, { errors: number; warnings: number }>;
-	station: { kind: 'sim' | 'ni'; dirty: boolean } | null;
-	tableErrors: number;
 	setupStatus: SetupStatus;
 }
 
@@ -124,21 +122,6 @@ export function summarize(x: SummaryInputs): SectionSummary[] {
 		});
 	}
 
-	// Backend.
-	{
-		const missing: string[] = [];
-		if (!x.station) missing.push('The station is read from the control service once it is connected.');
-		else if (x.station.dirty) missing.push('Use the chosen station, or put the choice back.');
-		if (x.tableErrors > 0) missing.push(`Fix the ${x.tableErrors === 1 ? 'error' : `${x.tableErrors} errors`} in the channel wiring.`);
-		out.push({
-			section: 'backend',
-			title: 'Backend',
-			state: x.station ? (x.station.kind === 'sim' ? 'Simulator' : 'NI hardware') : 'Not connected',
-			missing,
-			errors: x.counts.backend.errors,
-			warnings: x.counts.backend.warnings
-		});
-	}
 	return out;
 }
 

@@ -306,7 +306,6 @@ export class MixedStore {
 	}
 
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (!this.floorCatalog || !this.toneCatalog) return 'The law catalog has not been read yet.';
 		return null;
 	}

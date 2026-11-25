@@ -9,7 +9,6 @@
 	import '$lib/acquire/acquire.css';
 	import RunBar from '$lib/acquire/RunBar.svelte';
 	import RunView from '$lib/acquire/RunView.svelte';
-	import StationPanel from '$lib/acquire/StationPanel.svelte';
 	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import MimoRunView from '$lib/acquire/mimo/views/MimoRunView.svelte';
 	import ShockRunView from '$lib/acquire/shock/ShockRunView.svelte';
@@ -176,43 +175,33 @@
 			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
 		{:else if shockRun}
 			<ShockRunView {shock} views={app.shockViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'shock')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</ShockRunView>
 		{:else if mimoShockRun}
 			<MsRunView ms={mimoShock} views={app.mimoShockViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_shock')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</MsRunView>
 		{:else if mimoSineRun}
 			<MsineRunView ms={mimoSine} views={app.mimoSineViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_sine')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</MsineRunView>
 		{:else if mimoMixedRun}
 			<MmixRunView mm={mimoMixed} views={app.mimoMixedViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_mixed')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</MmixRunView>
 		{:else if srsRun}
 			<SrsRunView {srs} views={app.srsViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'srs')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</SrsRunView>
 		{:else if sineRun}
 			<SineRunView {sine} views={app.sineViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'sine')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</SineRunView>
 		{:else if mixedRun}
 			<MixedRunView {mixed} views={app.mixedViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mixed')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</MixedRunView>
 		{:else if twrRun}
 			<TwrRunView {twr} views={app.twrViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'twr')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</TwrRunView>
 		{:else if explorerRun}
 			<ExplorerRunView {explorer} views={app.explorerViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'explorer')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</ExplorerRunView>
 		{:else if recorderRun}
 			<RecorderRunView {recorder} views={app.recorderViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')}>
-				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</RecorderRunView>
 		{:else}
 			<RunView {acq} {display} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id)} />

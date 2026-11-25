@@ -7,7 +7,6 @@
 	 * folder, and a finished run's end line opens it in the Shock workspace. The window on another
 	 * monitor shows the same, compact.
 	 */
-	import type { Snippet } from 'svelte';
 	import LawLine from '../pulse/LawLine.svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import type { RunOpen } from '../runOpen.svelte';
@@ -22,8 +21,6 @@
 	interface Props {
 		shock: ShockStore;
 		views: ShockViewsState;
-		/** The station panel. */
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		onoverride?: () => void;
 		abortKeys: string;
@@ -31,7 +28,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { shock, views, station, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
+	let { shock, views, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(shock.now);
 	const state = $derived(shock.run?.state ?? null);
@@ -68,8 +65,6 @@
 		<ShockLevelCard {status} planned={shock.planned} {compact} />
 	{:else if kind === 'pulses'}
 		<ShockPulseTable pulses={shock.pulses} picked={shock.overlay} ontoggle={(i) => void shock.toggleOverlay(i)} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

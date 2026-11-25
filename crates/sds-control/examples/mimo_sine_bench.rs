@@ -179,8 +179,10 @@ fn flat(v: f64, abort_db: f64) -> Value {
            "alarm_db": [abort_db.min(1.5), abort_db.min(1.5)], "abort_db": [abort_db, abort_db]})
 }
 
-/// A configuration of `test` with `law` on the bench's table.
-fn config(test: Value, law: &str, phases: [f64; 4], abort_db: f64, rehearse: bool) -> Value {
+/// A configuration of `test` with `law` on the bench's table. A rehearsal's
+/// structure is the station's (selected in `main`), so `_rehearse` no longer
+/// changes the configuration.
+fn config(test: Value, law: &str, phases: [f64; 4], abort_db: f64, _rehearse: bool) -> Value {
     json!({
         "title": "Bench Row",
         "channels": {
@@ -193,7 +195,6 @@ fn config(test: Value, law: &str, phases: [f64; 4], abort_db: f64, rehearse: boo
         "test": test,
         "identification": {"level_db": -20, "resolution_hz": 1, "frames": 8, "review": false},
         "control": {"law": {"id": law}},
-        "simulator": {"structure": if rehearse { json!(TWIN) } else { Value::Null }},
         "operator": "Bench", "article": "Loopback", "notes": "",
     })
 }
@@ -632,7 +633,12 @@ async fn main() {
     // On NI: the input module then the output module, each row bound to its own channel.
     let mut modules: Option<(String, String)> = None;
     if rehearse {
-        c.ok("station.select", json!({"kind": "sim"})).await;
+        // The rehearsal plays the bench's twin: the station holds the structure.
+        c.ok(
+            "station.select",
+            json!({"kind": "sim", "simulator": {"sine_structure": TWIN}}),
+        )
+        .await;
     } else {
         let devices: Vec<String> = flag("--ni")
             .expect("--ni <input module>,<output module>")

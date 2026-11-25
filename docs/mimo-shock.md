@@ -10,7 +10,7 @@ abort that the operator gives.
 This guide is for a test engineer who has run single-shaker shock. It covers what a MIMO shock test
 holds and does not hold, how to set one up, the control laws and when to pick each, what the judge
 checks, the level ladder, what stops a run and why, and the limits of this version. It shares its
-station panel, channel table, run bar and control-law panel with the other test types, and its run
+channel table, run bar and control-law panel with the other test types, and its run
 screen with Classical Shock and SRS (see [shock.md](shock.md) and [srs.md](srs.md)).
 
 ## What a MIMO Shock Test Holds
@@ -66,9 +66,11 @@ nothing). **Proceed to Run** applies the setup and shows the run.
 
 ## Setting One Up
 
-### Station and Channels
+### Channels
 
-The channel table is the one every test type shares. MIMO Shock reads its enabled rows:
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table is the one
+every test type shares. MIMO Shock reads its enabled rows:
 
 - **Controls.** Every enabled control row is a control, in the table's order, each with its own
   target. A control row can be taken out of the controls, and then it can be a limit.
@@ -79,8 +81,10 @@ The channel table is the one every test type shares. MIMO Shock reads its enable
 - **Limits.** An enabled monitor row, or a control row taken out of the controls, can be a limit
   with the peak, in its own unit, that ends the run. A limit is watched, not controlled.
 
-On the simulator you may name the simulated structure the run is played on; its size must match
-the controls and drives.
+On the simulator, the simulated structure the run is played on is chosen in Configure, under
+**Simulator Models**; its size must match the controls and drives. By default it is "Sized to the
+Channel Table", which takes the standard model of the table's size. A run set up and then given
+other simulator models in Configure is refused at arm until it is set up again.
 
 The **Run Record** panel below the channels is the one every test type shares: who runs the test,
 on what, the document and clause it is run to, and notes, all optional, and whether the run's

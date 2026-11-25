@@ -123,9 +123,11 @@ def test_a_pulse_row_names_why_a_control_failed_and_its_margins(validate):
 def test_a_mimo_shock_configuration_carries_every_field_and_the_record(validate):
     config = _text('request_mimo_shock_configure')['params']['config']
     assert set(config) == {'title', 'channels', 'target', 'timing', 'verdict', 'acquisition',
-                           'schedule', 'spacing', 'identification', 'control', 'simulator',
+                           'schedule', 'spacing', 'identification', 'control',
                            'operator', 'article', 'notes', 'specification', 'record',
                            'metadata'}
+    # The simulator's plant is the station's (station.select), never the configuration's.
+    assert 'simulator' not in config
     spectrum = _text('request_mimo_shock_configure_spectrum')['params']['config']
     assert 'capture' not in spectrum and spectrum['record'] == {'streams': False}
     for key, value in (('record', {'streams': 'yes'}), ('record', {'folder': 'x'}),

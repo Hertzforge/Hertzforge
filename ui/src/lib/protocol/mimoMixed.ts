@@ -6,7 +6,7 @@
  *
  * The configuration is the controller's own, in its serialized form, less its reference, with the
  * wire's own members (`title`, `operator`, `article`, `notes`, `specification`, `reference`,
- * `record`, `simulator`). A value stated per control is one value for every control or a list
+ * `record`). A value stated per control is one value for every control or a list
  * with one entry per control, in the controls' order.
  */
 import type { BandDb, DataSource, LadderMode, LogEntry, RandomRunState, ReportItem, RunRecordRef, StationClass, StationRef, View } from './types';
@@ -320,7 +320,6 @@ export interface MimoMixedConfig {
 	metadata?: { key: string; label?: string; value: string }[];
 	seed?: number;
 	record?: { streams: boolean };
-	simulator?: { structure: string };
 }
 
 export interface MimoMixedConfigureParams {

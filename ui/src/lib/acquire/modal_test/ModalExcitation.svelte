@@ -172,7 +172,7 @@
 					</tbody>
 				</table>
 			{:else}
-				<p class="aq-small aq-muted">No drive row yet: add one for each shaker in Station &amp; Channels.</p>
+				<p class="aq-small aq-muted">No drive row yet: add one for each shaker in Channels.</p>
 			{/if}
 			<Findings items={findings('shaker.drives')} testid="mt-drives-findings" />
 			{#if cs}<p class="aq-small derived" data-testid="mt-shaker-derived">From the control service: crest factor {num(cs.crest)}, {cs.window === 'hann' ? 'a Hann window' : 'no window'}, about {num(cs.seconds_per_point, 's')} a point. Stop ramps the drives {num(cs.stop.depth_db, 'dB')} down over {num(cs.stop.ramp_s, 's')}; Abort takes them to zero at once.</p>{/if}
