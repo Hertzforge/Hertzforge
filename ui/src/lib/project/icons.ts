@@ -203,6 +203,10 @@ export const OBJECT_DRAW: Record<string, (color: string) => string> = {
 		return out + [...FRAME_TOP, ...FRAME_FEET].map((p) => dot(p, 5.5, c)).join('');
 	},
 	time_history: (c) => line([8, 32], [56, 32], c, 3) + polyline(RINGDOWN, c, 6),
+	// a group of time histories: a folder holding a ringdown, in the histories' green
+	history_group: (c) =>
+		polyline([[6, 14], [24, 14], [29, 20], [58, 20], [58, 54], [6, 54], [6, 14]], c, 4) +
+		polyline(RINGDOWN.map(([x, y]): Point => [12 + ((x - 8) * 40) / 48, 37 + (y - 32) * 0.55]), c, 4),
 	frf: (c) => polyline([[8, 47], [18, 45], [25, 41], [29, 15], [33, 41], [39, 43], [45, 31], [49, 43], [56, 45]], c, 6),
 	psd: psdBody,
 	octave_psd: (c) => {
@@ -413,7 +417,7 @@ export function objectIcon(kind: string, banded = false): string {
 /** The markup of an object kind's icon, in its own color. */
 export function drawObject(key: string, badge = false, color?: string): string {
 	const draw = OBJECT_DRAW[key] ?? defaultDraw;
-	const base = key === 'octave_psd' ? 'psd' : key === 'octave_specification' ? 'specification' : key;
+	const base = key === 'octave_psd' ? 'psd' : key === 'octave_specification' ? 'specification' : key === 'history_group' ? 'time_history' : key;
 	return draw(color ?? KIND_COLORS[base] ?? DEFAULT_COLOR) + (badge ? BADGE : '');
 }
 

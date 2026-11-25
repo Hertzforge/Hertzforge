@@ -28,12 +28,17 @@ function groupColors(links: NonNullable<ProjectSummary['links']>): string[] {
 	return links.map((group) => (group.role === 'Basis' ? BASIS_COLOR : CURVE_COLORS[1 + (others++ % (CURVE_COLORS.length - 1))]));
 }
 
-/** The spans to paint for `links`, given the tree's row `order`; groups with one row shown are left out. */
-export function spans(links: ProjectSummary['links'] | undefined, order: string[]): Span[] {
+/**
+ * The spans to paint for `links`, given the tree's row `order`; groups with one row shown are left
+ * out, and so are the groups in `rowed`, which the tree lists under a row of their own (`folders.ts`).
+ * Colors are counted over every group, those included, so no other group's color moves.
+ */
+export function spans(links: ProjectSummary['links'] | undefined, order: string[], rowed: ReadonlySet<unknown> = new Set()): Span[] {
 	if (!links) return [];
 	const colors = groupColors(links);
 	const out: Span[] = [];
 	for (const [k, group] of links.entries()) {
+		if (rowed.has(group)) continue;
 		const basis = group.role === 'Basis';
 		const color = colors[k];
 		const rows = order.filter((name) => group.members.includes(name));

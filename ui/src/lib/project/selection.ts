@@ -50,6 +50,32 @@ export function clickObject(selection: Selection, name: string, order: string[],
 	return { objects: [name], records: {}, part: null, anchor: name };
 }
 
+/**
+ * A group's row clicked (`folders.ts`): its members stand for it. A plain click selects them all and
+ * nothing else; Cmd (Ctrl) or Shift adds them to what is selected, or takes them out when they are
+ * all selected already, so a second group's row picked with Cmd gives the two sets together.
+ */
+export function clickGroup(selection: Selection, members: string[], mods: Modifiers = {}): Selection {
+	if (!members.length) return selection;
+	if (mods.toggle || mods.extend) {
+		if (members.every((m) => selection.objects.includes(m))) {
+			let next = selection;
+			for (const m of members) next = without(next, m);
+			return { ...next, part: null, anchor: next.objects.at(-1) ?? null };
+		}
+		const objects = [...selection.objects, ...members.filter((m) => !selection.objects.includes(m))];
+		const records = { ...selection.records };
+		for (const m of members) delete records[m];
+		return { objects, records, part: null, anchor: members[0] };
+	}
+	return { objects: [...members], records: {}, part: null, anchor: members[0] };
+}
+
+/** Whether every member of a group is selected, which is when its row shows as picked. */
+export function groupIsPicked(selection: Selection, members: string[]): boolean {
+	return members.length > 0 && members.every((m) => selection.objects.includes(m));
+}
+
 /** A cell of `name`'s grid clicked: record `index`. Shift extends the block from the anchor cell. */
 export function clickRecord(
 	selection: Selection,

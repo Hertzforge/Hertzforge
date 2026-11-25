@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY, clickObject, clickPart, clickRecord, partForService, partIsPicked, pruned, rectangle, renamed } from './selection';
+import { EMPTY, clickGroup, clickObject, clickPart, groupIsPicked, clickRecord, partForService, partIsPicked, pruned, rectangle, renamed } from './selection';
 
 const order = ['Geometry', 'Table', 'Time', 'FRF', 'Modes'];
 
@@ -148,5 +148,47 @@ describe('a list of sub-items', () => {
 		expect(s.records.Modes).toEqual([1, 2, 3, 4]);
 		s = clickRecord(s, 'Modes', 0, { extend: true }, { from: 1, to: 0, grid: column });
 		expect([...s.records.Modes].sort()).toEqual([0, 1, 2, 3, 4]);
+	});
+});
+
+describe('a group row picked', () => {
+	const test = ['Test 1X+', 'Test 2X+'];
+	const model = ['Model 1X+', 'Model 2X+'];
+
+	it('a plain click picks every member whole and nothing else', () => {
+		const before = clickRecord(clickObject(EMPTY, 'Geometry', ['Geometry']), 'Test 1X+', 2, { toggle: true });
+		const next = clickGroup(before, test);
+		expect(next.objects).toEqual(test);
+		expect(next.records).toEqual({});
+		expect(groupIsPicked(next, test)).toBe(true);
+	});
+
+	it('Cmd on a second group adds its members, so the two sets are picked together', () => {
+		const both = clickGroup(clickGroup(EMPTY, test), model, { toggle: true });
+		expect(both.objects).toEqual([...test, ...model]);
+		expect(groupIsPicked(both, test) && groupIsPicked(both, model)).toBe(true);
+	});
+
+	it('Shift adds as Cmd does', () => {
+		expect(clickGroup(clickGroup(EMPTY, test), model, { extend: true }).objects).toEqual([...test, ...model]);
+	});
+
+	it('Cmd on a group all picked takes its members out and leaves the rest', () => {
+		const both = clickGroup(clickGroup(EMPTY, test), model, { toggle: true });
+		const next = clickGroup(both, test, { toggle: true });
+		expect(next.objects).toEqual(model);
+		expect(groupIsPicked(next, test)).toBe(false);
+	});
+
+	it('Cmd on a group partly picked adds the rest and drops record picks under its members', () => {
+		const partly = clickRecord(EMPTY, 'Test 1X+', 0);
+		const next = clickGroup(partly, test, { toggle: true });
+		expect(next.objects).toEqual(test);
+		expect(next.records).toEqual({});
+	});
+
+	it('a group with one member left out of the selection is not shown as picked', () => {
+		expect(groupIsPicked(clickObject(EMPTY, 'Test 1X+', test), test)).toBe(false);
+		expect(groupIsPicked(EMPTY, [])).toBe(false);
 	});
 });
