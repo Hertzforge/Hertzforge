@@ -23,7 +23,7 @@ must fail there: a check that cannot fail checks nothing.
    ceiling, the controls under their abort band, a control abort, the drive ramped out. Broken
    case: check 3's completed run.
 5. The runner refuses what it must (unknown keys, a reference that does not cover the test) with
-   exit 2 and no folder, and records the engine's refusal of a rig over its size with exit 3.
+   exit 2 and no folder; the set's largest rig (24x12) is taken by the engine since Hertzforge#465.
 6. A down sweep starts at the top of the band and falls.
 7. A drive gain lets a reference whose ideal drive is over the converter's 10 V be met: a linear
    dwell whose ideal drive peaks near 30 V, with the gain set to that peak (so 1 V in engine
@@ -306,11 +306,14 @@ class MsnbRun(unittest.TestCase):
         self.assertNotEqual(ends_as_the_engine_says(self.out('ideal')), [], 'the check cannot fail')
 
     def test_5_refusals(self):
+        # Since Hertzforge#465 (4fd2a5c9) the engine takes 24 controls and 12 drives, so the
+        # set's largest rig is run, not refused (exit 3 is kept for a rig over the engine's size;
+        # the set holds none).
         code, out, err = self.res['big']
-        self.assertEqual(code, 3, err)
+        self.assertNotEqual(code, 3, err)
+        self.assertNotEqual(code, 2, err)
         o = load(out)['outcome']
-        self.assertEqual(o['class'], 'refused')
-        self.assertIn('controls_out_of_range', o['message'])
+        self.assertNotEqual(o['class'], 'refused', o)
         base = case(LINEAR, {'type': 'dwell', 'freq_hz': 150.0, 'dwell_s': 1.0}, 1.0)
         for name, c in [('unknown_key', dict(base, colour='red')),
                         ('unknown_param', dict(base, law={'id': 'matrix', 'params': {'no_such_key': 1}})),
