@@ -4,10 +4,10 @@
 //! applied per drive.
 
 /// The most control channels a run controls.
-pub const MAX_CONTROLS: usize = 16;
+pub const MAX_CONTROLS: usize = 24;
 
 /// The most drives a run commands.
-pub const MAX_DRIVES: usize = 8;
+pub const MAX_DRIVES: usize = 12;
 
 /// The most limit channels a run watches.
 pub const MAX_LIMITS: usize = 8;

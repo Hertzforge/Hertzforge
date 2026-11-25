@@ -142,9 +142,9 @@ interface mimo-sine-types {
 
     /// What a MIMO Sine law is built for: fixed for the run.
     record sine-mimo-setup {
-        /// Control channels, 1 to 16.
+        /// Control channels, 1 to 24.
         controls: u32,
-        /// Drives the law commands, 1 to 8.
+        /// Drives the law commands, 1 to 12.
         drives: u32,
         /// Limit channels, 0 to 8.
         limits: u32,

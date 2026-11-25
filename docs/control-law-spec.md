@@ -740,7 +740,7 @@ call budget, a quarter of the update by default. A law file's host deadlines are
 
 | Field | Meaning |
 |---|---|
-| `controls`, `drives`, `limits` | 1 to 16 control channels, 1 to 8 drives, 0 to 8 limit channels |
+| `controls`, `drives`, `limits` | 1 to 24 control channels, 1 to 12 drives, 0 to 8 limit channels |
 | `fs-hz`, `tick-s` | The sample rate and the control update interval (a whole number of samples) |
 | `band-lo-hz`, `band-hi-hz` | The band the run sweeps, steps or dwells in, inside the Nyquist frequency |
 | `test-type`, `shape` | The kind of test, and the controls against the drives |

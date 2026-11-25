@@ -8,7 +8,7 @@ import type { ChannelRow } from '$lib/protocol/types';
 import type { LawEntry } from '$lib/protocol/mimo';
 import { canonical } from '../mimo/mimoSetup';
 import { notchWords } from './msineWords';
-import { defaultMsineSetup, fitChannels, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
+import { defaultMsineSetup, fitChannels, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, newControl, setControl, shapeOf, toMsineConfig } from './msineSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -100,6 +100,19 @@ describe('the MIMO Sine setup draft', () => {
 		expect(wire.phase_specified).toBe(false);
 		expect(wire.channels.controls.every((c) => c.phase === undefined)).toBe(true);
 		expect(localErrors(d)['controls.0.phase']).toBeUndefined();
+	});
+
+	it('takes 24 controls and 12 drives, and names one more of either', () => {
+		const d = defaultMsineSetup();
+		d.controls = Array.from({ length: 24 }, (_, i) => newControl(i + 1));
+		const drive = (channel: number) => ({ channel, ceiling_vpk: 2, abort_vpk: 3 });
+		d.drives = Array.from({ length: 12 }, (_, j) => drive(25 + j));
+		expect(localErrors(d)['channels.controls']).toBeUndefined();
+		expect(localErrors(d)['channels.drives']).toBeUndefined();
+		d.controls.push(newControl(37));
+		d.drives.push(drive(38));
+		expect(localErrors(d)['channels.controls']).toEqual(['At most 24 controls.']);
+		expect(localErrors(d)['channels.drives']).toEqual(['At most 12 drives.']);
 	});
 
 	it('names what is missing before anything is sent', () => {

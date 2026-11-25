@@ -265,6 +265,58 @@ async fn mimo_sine_a_run_never_arms_on_the_default_one_drive_simulator() {
     assert!(reasons.contains(&"structure_wrong_size"), "{reasons:?}");
 }
 
+/// The service takes up to 24 controls and 12 drives and refuses one more of
+/// either by name and with the limit in its message. The simulator has no
+/// sine structure of these sizes, so every dry run here also names the
+/// structure; the count refusals are what is judged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_a_run_takes_24_controls_and_12_drives_and_no_more() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 25, 0, 13).await;
+    let dry = |nc: u32, nd: u32| {
+        let mut cfg = msine::config("sine-linear-4x4", nc, 0, nd, dwell(80.0, 1.0), "matrix");
+        // The drives are the table's last rows, after its 25 controls.
+        cfg["channels"]["drives"] = json!((0..nd)
+            .map(|j| json!({"channel": 26 + j, "ceiling_vpk": 2, "abort_vpk": 4}))
+            .collect::<Vec<_>>());
+        json!({"config": cfg, "dry_run": true})
+    };
+    let items = |r: &Value| -> Vec<(String, String)> {
+        r["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| {
+                (
+                    i["reason"].as_str().unwrap().to_owned(),
+                    i["message"].as_str().unwrap_or("").to_owned(),
+                )
+            })
+            .collect()
+    };
+    let at = items(&c.ok("mimo_sine.configure", dry(24, 12)).await);
+    assert!(
+        !at.iter().any(|(r, _)| r.ends_with("_out_of_range")),
+        "{at:?}"
+    );
+    let over = items(&c.ok("mimo_sine.configure", dry(25, 13)).await);
+    assert!(
+        over.contains(&(
+            "controls_out_of_range".into(),
+            "The run names 25 controls; it takes 1 to 24.".into()
+        )),
+        "{over:?}"
+    );
+    assert!(
+        over.contains(&(
+            "drives_out_of_range".into(),
+            "The run names 13 drives; it takes 1 to 12.".into()
+        )),
+        "{over:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mimo_sine_control_is_needed_and_one_run_at_a_time() {
     let addr = serve(Service::with_options(msine::paced(

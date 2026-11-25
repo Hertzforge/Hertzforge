@@ -424,8 +424,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		const lims = c.limits?.channels ?? [];
 		const nc = ctl.length;
 		const nd = drv.length;
-		if (nc < 1 || nc > 16) errors.push(item('controls_out_of_range', 'From 1 to 16 controls.', 'channels.controls'));
-		if (nd < 1 || nd > 8) errors.push(item('drives_out_of_range', 'From 1 to 8 drives.', 'channels.drives'));
+		if (nc < 1 || nc > 24) errors.push(item('controls_out_of_range', 'From 1 to 24 controls.', 'channels.controls'));
+		if (nd < 1 || nd > 12) errors.push(item('drives_out_of_range', 'From 1 to 12 drives.', 'channels.drives'));
 		if (lims.length > 8) errors.push(item('limits_out_of_range', 'At most 8 limit channels.', 'limits.channels'));
 		const named = [...ctl.map((x) => x.channel), ...drv.map((x) => x.channel), ...lims.map((x) => x.channel)];
 		if (new Set(named).size !== named.length) errors.push(item('duplicate_channel', 'A channel is named twice among the controls, drives and limit channels.', 'channels'));
