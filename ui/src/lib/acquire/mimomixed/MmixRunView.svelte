@@ -27,13 +27,12 @@
 	interface Props {
 		mm: MimoMixedStore;
 		views: MmixViewsState;
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
 		opener?: RunOpen | null;
 	}
-	let { mm, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
+	let { mm, views, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(mm.now);
 	const live = $derived(mm.frameOfRun);
@@ -104,8 +103,6 @@
 		<MmixLimitsCard {mm} />
 	{:else if kind === 'log'}
 		<MixedLogCard log={mm.log as unknown as MixedLogEntry[]} words={MMIX_LOG_WORDS} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

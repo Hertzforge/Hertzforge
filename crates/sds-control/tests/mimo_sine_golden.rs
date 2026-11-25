@@ -112,7 +112,9 @@ fn builtin(id: &str) -> Option<mlaws::LawFacts> {
 }
 
 fn check(cfg: &Value) -> (table::Report, Option<config::Derived>, config::WireMsine) {
-    let w = config::parse(cfg).unwrap();
+    let mut w = config::parse(cfg).unwrap();
+    // The station's structure, which the service sets on the parsed configuration.
+    w.structure = Some(GOLDEN_STRUCTURE.to_owned());
     let t = table_base_article();
     let ctx = CheckContext {
         table: &t,
@@ -123,6 +125,9 @@ fn check(cfg: &Value) -> (table::Report, Option<config::Derived>, config::WireMs
     let (r, d) = w.check(&ctx);
     (r, d, w)
 }
+
+/// The structure the golden configuration runs on: the station's (`station.select`).
+const GOLDEN_STRUCTURE: &str = "sine-base-article-6x4";
 
 fn sim_station() -> StationRef {
     StationRef {

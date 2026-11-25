@@ -549,7 +549,7 @@ export function toMmixConfig(d: MmixDraft, reference: MimoReference | null, laws
 export type MmixSection = 'channels' | 'reference' | 'parts' | 'schedule' | 'laws' | 'limits' | 'forecast';
 
 export const MMIX_SECTIONS: { id: MmixSection; label: string }[] = [
-	{ id: 'channels', label: 'Station & Channels' },
+	{ id: 'channels', label: 'Channels' },
 	{ id: 'reference', label: 'Floor Reference' },
 	{ id: 'parts', label: 'Parts' },
 	{ id: 'schedule', label: 'Schedule & Identification' },

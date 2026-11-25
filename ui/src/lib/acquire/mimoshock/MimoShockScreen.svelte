@@ -7,7 +7,6 @@
 	 */
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import { clock } from '../words';
 	import MsChannels from './MsChannels.svelte';
@@ -80,10 +79,8 @@
 	<MsSummary {ms} onopen={(s: MsSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={ms.acq} />{/snippet}
-
 {#snippet run()}
-	<MsRunView {ms} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_shock')} opener={app.mimoShockRunOpen} />
+	<MsRunView {ms} {views} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_shock')} opener={app.mimoShockRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -98,6 +95,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

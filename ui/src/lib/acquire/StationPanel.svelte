@@ -1,13 +1,13 @@
 <script lang="ts">
 	/**
-	 * The station: the simulator, or NI-DAQmx devices from the service's scan. Driver-simulated
-	 * NI devices are named as such and give SIM data; only physical devices give LIVE data. The
-	 * choice is a draft until Use This Station; the service checks it against a fresh scan and
-	 * says by name why a selection cannot be used. Nothing is opened until a run arms.
+	 * The station picker, in Configure: the simulator, or NI-DAQmx devices from the service's
+	 * scan. Driver-simulated NI devices are named as such and give SIM data; only physical devices
+	 * give LIVE data. The choice is a draft until Configure's Use This Station; the service checks
+	 * it against a fresh scan and says by name why a selection cannot be used. Nothing is opened
+	 * until a run arms.
 	 */
 	import type { NiDevice } from '$lib/protocol/types';
 	import type { AcquireState } from './store.svelte';
-	import DataFolderLine from '$lib/shell/DataFolderLine.svelte';
 
 	interface Props {
 		acq: AcquireState;
@@ -20,7 +20,6 @@
 	const draft = $derived(acq.stationDraft);
 	const disabled = $derived(acq.locked);
 	const why = $derived(acq.locked ? 'The station is locked while a run is live.' : null);
-	const useWhy = $derived(!acq.connected ? 'The control service is not connected.' : !acq.isController ? 'Take control to change the station.' : null);
 
 	interface Group {
 		chassis: NiDevice | null;
@@ -46,12 +45,6 @@
 		return on === 0 ? false : on === g.modules.length ? true : 'mixed';
 	}
 
-	function selectedWords(): string {
-		if (!sel) return '';
-		if (sel.kind === 'sim') return `Simulator, ${sel.inputs} inputs and ${sel.outputs} output on one shared clock.`;
-		const names = sel.devices.join(', ');
-		return `NI-DAQmx: ${names}. ${sel.inputs} inputs and ${sel.outputs} outputs${sel.timing_family ? `, one clock (${sel.timing_family})` : ''}.`;
-	}
 </script>
 
 <section class="aq-panel station" aria-labelledby="station-title" data-testid="station-panel">
@@ -158,17 +151,6 @@
 		</div>
 	{/if}
 
-	<div class="foot">
-		<p class="current" data-testid="station-current"><span class="eyebrow">In use</span> {selectedWords()}</p>
-		{#if acq.stationDirty}
-			<div class="aq-actions">
-				{#if useWhy}<span class="aq-muted aq-small">{useWhy}</span>{/if}
-				<button class="btn ghost sm" onclick={() => acq.revertStation()}>Put Back</button>
-				<button class="btn primary sm" data-testid="station-use" disabled={disabled || !!useWhy || (draft.kind === 'ni' && draft.devices.length === 0) || acq.busy !== null} onclick={() => acq.useStation()}>Use This Station</button>
-			</div>
-		{/if}
-		<DataFolderLine locked={acq.locked} />
-	</div>
 </section>
 
 {#snippet kind(d: NiDevice)}
@@ -315,24 +297,5 @@
 		color: var(--text-on-accent);
 		background: var(--blue-2);
 		border: 1px solid var(--blue-2);
-	}
-
-	.foot {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--sp-2) var(--sp-4);
-		margin-top: var(--sp-4);
-		padding-top: var(--sp-3);
-		border-top: 1px solid var(--line-1);
-	}
-
-	.current {
-		display: flex;
-		align-items: baseline;
-		gap: var(--sp-2);
-		font-size: var(--text-sm);
-		color: var(--text-2);
 	}
 </style>

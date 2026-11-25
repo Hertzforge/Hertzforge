@@ -12,7 +12,7 @@ This guide is for a test engineer who has run single-shaker sine. It covers what
 holds, how to set one up, the five built-in control laws, their limits and how to choose one, limit
 channels and the backstop notch, the guards every law is held to, what the readings on the run
 screen mean, how to write your own law, and what has been shown on the simulator only. It shares
-its station panel, channel table, run bar and control-law panel with the other test types, and its
+its channel table, run bar and control-law panel with the other test types, and its
 schedule, tracking, hold, resume and frequency verbs with Sine (see [sine.md](sine.md)).
 
 ## What a MIMO Sine Test Holds
@@ -57,20 +57,25 @@ setup is checked by the control service as you edit (a dry run that changes noth
 Run** applies the setup and shows the run. A setup saves to and opens from the project with the
 setup bar, as every test's does.
 
-### Station and Channels
+### Channels
 
-The channel table holds the rows. Every enabled control row is a control unless you take it out of
-the controls; a control row taken out, or a monitor row, can then be a limit channel. Every
-enabled drive row is a drive, in the table's order, each with its own **ceiling** and **abort** in
-volts peak. There is no default for either: they are your amplifier inputs. On the simulator,
-choose the **structure** the run is played on; its size must match the controls and drives, and
-by default the linear structure of the run's size is taken. The simulator's sine structures are a
-linear one in three sizes (4 controls by 4 drives, 6 by 3 and 3 by 6), three 4 by 4 structures
-whose resonances move with level (softening mildly, softening moderately, hardening), a base and
-article with two limit channels (6 by 4), a 4 by 4 that is nearly singular at one frequency, a 4
-by 4 of weakly coupled pairs (each drive's cross paths at least 21.9 dB under its direct one), and
-a 4 by 4 loopback (four outputs wired to four inputs: unity gain, a 0.8 ms delay, no coupling),
-the simulator's twin of the bench's wire loopback.
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table holds the rows.
+Every enabled control row is a control unless you take it out of the controls; a control row taken
+out, or a monitor row, can then be a limit channel. Every enabled drive row is a drive, in the
+table's order, each with its own **ceiling** and **abort** in volts peak. There is no default for
+either: they are your amplifier inputs. On the simulator, the **structure** the run is played on is
+chosen in Configure, under **Simulator Models**; its size must match the controls and drives, and by
+default it is "Sized to the Channel Table", which takes the linear structure of the table's size.
+The simulator's sine structures are a linear one in three sizes (4 controls by 4 drives, 6 by 3 and
+3 by 6), three 4 by 4 structures whose resonances move with level (softening mildly, softening
+moderately, hardening), a base and article with two limit channels (6 by 4), a 4 by 4 that is nearly
+singular at one frequency, a 4 by 4 of weakly coupled pairs (each drive's cross paths at least 21.9
+dB under its direct one), and a 4 by 4 loopback (four outputs wired to four inputs: unity gain, a
+0.8 ms delay, no coupling), the simulator's twin of the bench's wire loopback.
+
+A run set up and then given other simulator models in Configure is refused at arm until it is
+set up again.
 
 ### References
 

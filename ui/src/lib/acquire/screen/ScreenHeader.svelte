@@ -1,13 +1,13 @@
 <script lang="ts">
 	/**
 	 * A test screen's one header line: the way back to the test types, the test's name, its Setup
-	 * and Run steps, the run's state (its reason on hover), the clock and the level, where the data
-	 * comes from, and who holds control. Stop and Abort join it only while a run is live and the
+	 * and Run steps, the run's state (its reason on hover), the clock and the level, who holds
+	 * control, and the way to Configure (the station). Stop and Abort join it only while a run is live and the
 	 * Run card is out of view, so they are always in reach.
 	 */
-	import ProvenanceBadge from '$lib/shell/ProvenanceBadge.svelte';
 	import type { Snippet } from 'svelte';
 	import type { RunBarHost } from '../actions';
+	import ConfigureButton from '../ConfigureButton.svelte';
 	import StateChip from '../StateChip.svelte';
 	import { clock, db, phaseWord } from '../words';
 
@@ -23,6 +23,8 @@
 		runWhy?: string | null;
 		/** Back to the test types; absent while the screen cannot be left. */
 		onleave?: (() => void) | null;
+		/** Open Configure; absent in a window on another monitor. */
+		onconfigure?: (() => void) | null;
 		/** What the state chip says on hover, before the phase and the run's name. */
 		reason?: string | null;
 		/** Stop and Abort in the header: a run is live and the Run card is out of view. */
@@ -35,7 +37,7 @@
 		/** The test's name, for the keyboard to land on. */
 		heading?: HTMLElement | null;
 	}
-	let { acq, name, step = null, onsetup, onrun, runWhy = null, onleave = null, reason = null, ends = false, abortKeys, compact = false, nums, heading = $bindable(null) }: Props = $props();
+	let { acq, name, step = null, onsetup, onrun, runWhy = null, onleave = null, onconfigure = null, reason = null, ends = false, abortKeys, compact = false, nums, heading = $bindable(null) }: Props = $props();
 
 	const run = $derived(acq.run);
 	const frame = $derived(acq.frame);
@@ -123,7 +125,6 @@
 	</div>
 
 	<div class="seat" data-testid="session">
-		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} compact measured={acq.frame !== null} />{/if}
 		{#if orphanLeft !== null}
 			<span class="orphan" role="alert" data-testid="orphan" title="Nobody holds control. The run stops with its ramp when the time runs out.">
 				<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M7 1.6l5.6 10H1.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><path d="M7 5.4v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
@@ -161,6 +162,7 @@
 				{/if}
 			</span>
 		{/if}
+		{#if onconfigure}<ConfigureButton onclick={onconfigure} />{/if}
 	</div>
 </header>
 

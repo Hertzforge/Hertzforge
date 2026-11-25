@@ -293,9 +293,6 @@
     }
    },
    "feasibility": null,
-   "simulator": {
-    "structure": "sine-base-article-6x4"
-   },
    "operator": "A. Operator",
    "article": "Bracket, serial 7",
    "notes": "",

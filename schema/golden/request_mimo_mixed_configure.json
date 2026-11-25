@@ -295,10 +295,7 @@
    "title": "Four-Shaker Mixed Test",
    "operator": "A. Operator",
    "article": "Plate",
-   "notes": "",
-   "simulator": {
-    "structure": "sine-linear-4x4"
-   }
+   "notes": ""
   }
  }
 }

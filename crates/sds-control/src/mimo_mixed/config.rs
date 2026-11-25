@@ -11,8 +11,10 @@
 //! - `reference`: MIMO Random's (`{"kind": "inline", "freqs_hz", "n", "re", "im"}`
 //!   or `{"kind": "file", "path", "sha256"}`), put on the grid here;
 //! - `title`, `operator`, `article`, `notes`, `specification` and
-//!   `record.streams`: the record's words, as every module names them;
-//! - `simulator.structure`: the simulator's sine structure, as MIMO Sine's.
+//!   `record.streams`: the record's words, as every module names them.
+//!
+//! The simulator's sine structure is the station's (`station.select`), as MIMO
+//! Sine's; a configuration's own `simulator` member is not read.
 //!
 //! The laws resolve here too: the floor's through MIMO Random's catalog path
 //! (a built-in by `BuiltinMimo`, a law file by `LawCatalog::resolve_mimo`), the
@@ -61,7 +63,7 @@ pub struct WireMimoMixed {
     pub specification: Option<(String, String)>,
     /// `record.streams`: whether the run keeps its time histories.
     pub streams: bool,
-    /// `simulator.structure`.
+    /// The station's sine structure, set by the service after parsing.
     pub structure: Option<String>,
     pub fs_hz: f64,
     pub n_pts: usize,
@@ -178,11 +180,8 @@ pub fn parse(config: &Value) -> Result<WireMimoMixed, MethodError> {
             .and_then(|r| r.get("streams"))
             .and_then(Value::as_bool)
             .unwrap_or(true),
-        structure: o
-            .get("simulator")
-            .and_then(|s| s.get("structure"))
-            .and_then(Value::as_str)
-            .map(str::to_owned),
+        // The station's (`station.select`), set by the service after parsing.
+        structure: None,
         fs_hz,
         n_pts,
         reference,

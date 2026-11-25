@@ -458,7 +458,7 @@ export function previewParams(d: SrsDraft): SrsPreviewParams | null {
 export type SrsSection = 'station' | 'target' | 'synthesis' | 'envelope' | 'schedule' | 'identification' | 'control' | 'limits' | 'limit_channels' | 'record';
 
 export const SRS_SECTIONS: { id: SrsSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'target', label: 'Target' },
 	{ id: 'synthesis', label: 'Synthesis' },
 	{ id: 'envelope', label: 'Envelope' },

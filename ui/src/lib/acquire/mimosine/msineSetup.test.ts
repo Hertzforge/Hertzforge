@@ -8,7 +8,7 @@ import type { ChannelRow } from '$lib/protocol/types';
 import type { LawEntry } from '$lib/protocol/mimo';
 import { canonical } from '../mimo/mimoSetup';
 import { notchWords } from './msineWords';
-import { defaultMsineSetup, fitChannels, STRUCTURES, structuresFor, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
+import { defaultMsineSetup, fitChannels, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -42,20 +42,6 @@ describe('the MIMO Sine setup draft', () => {
 		d.limits.notch.release_hysteresis_db = Number.NaN;
 		expect(localErrors(d)['limits.notch.release_hysteresis_db']).toBeTruthy();
 		expect(msineSectionOf('limits.notch.release_hysteresis_db')).toBe('limits');
-	});
-
-	it("offers the simulator's weakly coupled and loopback structures", () => {
-		const ids = STRUCTURES.map((s) => s.id);
-		expect(ids).toContain('sine-weak-4x4');
-		expect(ids).toContain('sine-loopback-4x4');
-		expect(STRUCTURES.filter((s) => s.id === 'sine-weak-4x4' || s.id === 'sine-loopback-4x4').every((s) => s.inputs === 4 && s.drives === 4)).toBe(true);
-	});
-
-	it('offers a structure by the table\'s inputs and drives: the base and article for 4 controls, 2 monitors and 4 drives', () => {
-		const rows = [1, 2, 3, 4].map((i) => row(i, 'control')).concat([row(5, 'monitor'), row(6, 'monitor')], [7, 8, 9, 10].map((i) => row(i, 'drive')));
-		expect(structuresFor(rows).map((s) => s.id)).toEqual(['sine-base-article-6x4']);
-		expect(structuresFor(rows.slice(0, 4).concat(rows.slice(6))).map((s) => s.id)).toContain('sine-weak-4x4');
-		expect(structuresFor([...rows.slice(0, 5), row(6, 'monitor', false), ...rows.slice(6)])).toEqual([]);
 	});
 
 	it('says the notch as the service reports it: the reference held down, the drive cut, or none', () => {
@@ -94,13 +80,12 @@ describe('the MIMO Sine setup draft', () => {
 		d.test.stepped = { ...d.test.stepped, on: 'list', frequencies_hz: [40, 80, 160], by: 'cycles', cycles: 500 };
 		d.control.rotation_cap_deg = 20;
 		d.requests.honour = true;
-		d.simulator.structure = 'sine-tall-6x3';
 		d.law = { id: 'matrix', params: { carry: 0.5 } };
 		const wire = toMsineConfig(d, null);
 		expect(wire.test).toEqual({ kind: 'stepped', frequencies_hz: [40, 80, 160], dwell: { cycles: 500 } });
 		expect(wire.control?.rotation_cap_deg).toBe(20);
 		expect(wire.channels.controls[0].phase).toEqual([{ freq_hz: 20, phase_deg: 0 }]);
-		expect(Object.keys(wire).sort()).toEqual(['acquisition', 'article', 'channels', 'control', 'feasibility', 'identification', 'limits', 'metadata', 'notes', 'operator', 'phase_specified', 'record', 'requests', 'schedule', 'simulator', 'specification', 'test', 'title']);
+		expect(Object.keys(wire).sort()).toEqual(['acquisition', 'article', 'channels', 'control', 'feasibility', 'identification', 'limits', 'metadata', 'notes', 'operator', 'phase_specified', 'record', 'requests', 'schedule', 'specification', 'test', 'title']);
 		for (const kind of ['sweep', 'dwell', 'stepped'] as const) {
 			d.test.kind = kind;
 			const w = toMsineConfig(d, null);
@@ -158,9 +143,9 @@ describe('the MIMO Sine setup draft', () => {
 		expect(k('control.law.id')).toBe('law.id');
 		expect(k('test.frequencies_hz[2]')).toBe('test.frequencies_hz');
 		expect(k(null, 'profile_not_covering', { row: 0, channel: 6 })).toBe('limits.channels.0.profile.rows');
-		expect(k(null, 'structure_wrong_size')).toBe('simulator.structure');
+		expect(k(null, 'structure_wrong_size')).toBe('station.simulator.sine_structure');
 		expect(msineSectionOf('controls.1.phase')).toBe('references');
-		expect(msineSectionOf('simulator.structure')).toBe('channels');
+		expect(msineSectionOf('station.simulator.sine_structure')).toBe('channels');
 		expect(msineSectionOf('requests.max_hold_s')).toBe('law');
 		expect(msineSectionOf('feasibility.shakers.0')).toBe('limits');
 		expect(msineSectionOf('identification.level_db')).toBe('schedule');

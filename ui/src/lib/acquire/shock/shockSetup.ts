@@ -415,7 +415,7 @@ export function newMonitor(row: ChannelRow | undefined): ShockMonitor {
 export type ShockSection = 'station' | 'pulse' | 'standard' | 'schedule' | 'identification' | 'control' | 'limits' | 'trains';
 
 export const SHOCK_SECTIONS: { id: ShockSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'pulse', label: 'Pulse' },
 	{ id: 'standard', label: 'Standard' },
 	{ id: 'schedule', label: 'Schedule' },

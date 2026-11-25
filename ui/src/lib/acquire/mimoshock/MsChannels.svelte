@@ -1,18 +1,18 @@
 <script lang="ts">
 	/**
-	 * The station and the test's channels. The channel table (shared by every test type) holds the
+	 * The test's channels. The channel table (shared by every test type) holds the
 	 * rows; here each enabled row has its part in the run: a control row is a control, or is taken
 	 * out of the controls to be a limit; a drive row is a drive, in the table's order, with its own
 	 * ceiling and abort in volts peak (there is no default: they are the amplifier inputs); a monitor
-	 * row can be a limit with the peak it stops the run at. On the simulator, the plant the run is
-	 * played on; and the run's record (the shared Run Record panel).
+	 * row can be a limit with the peak it stops the run at. A finding on the simulator's plant (the
+	 * station's, set in Configure) is listed with the channels, since the table's size decides it;
+	 * and the run's record (the shared Run Record panel).
 	 */
 	import ChannelTable from '../ChannelTable.svelte';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
 	import RunRecordEditor from '../RunRecordEditor.svelte';
-	import StationPanel from '../StationPanel.svelte';
-	import { limitRows, MAX_CONTROLS, MAX_DRIVES, PLANTS, setControl } from './msSetup';
+	import { limitRows, MAX_CONTROLS, MAX_DRIVES, setControl } from './msSetup';
 	import type { MimoShockStore } from './msStore.svelte';
 
 	interface Props {
@@ -27,7 +27,6 @@
 	const rows = $derived(ms.rows.filter((r) => r.enabled));
 	const controlRows = $derived(rows.filter((r) => r.role === 'control'));
 	const limitable = $derived(limitRows(d, ms.rows));
-	const onSim = $derived(ms.acq.selected?.kind !== 'ni');
 	const name = (i: number) => {
 		const r = ms.rows.find((x) => x.index === i);
 		return r?.description ? `${i}, ${r.description}` : String(i);
@@ -41,7 +40,6 @@
 </script>
 
 <div class="stack">
-	<StationPanel acq={ms.acq} />
 	<ChannelTable acq={ms.acq} />
 
 	<section class="aq-panel" aria-labelledby="ms-ch-title" data-testid="ms-channels">
@@ -122,21 +120,9 @@
 			{/if}
 		</div>
 
-		<div class="aq-group">
-			<h3>Simulator</h3>
-			<div class="aq-fields">
-				<div class="sel">
-					<label for="ms-plant" class="lbl">Plant</label>
-					<select id="ms-plant" class="field" value={d.simulator.plant ?? ''} disabled={locked || !onSim} onchange={(e) => (d.simulator.plant = e.currentTarget.value || null)} data-testid="ms-plant">
-						<option value="">Chosen by the table's size</option>
-						{#each PLANTS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
-					</select>
-					<span class="aq-small aq-muted">The simulated structure the run is played on. Its size must match the controls and drives. Not used on hardware.</span>
-					<Findings items={errs('simulator.plant').map((message) => ({ level: 'error' as const, message }))} />
-				</div>
-			</div>
-		</div>
-
+		{#if errs('station.simulator.shock_plant').length}
+			<Findings items={errs('station.simulator.shock_plant').map((message) => ({ level: 'error' as const, message }))} testid="ms-model-findings" />
+		{/if}
 	</section>
 	<!-- The run's record is Random's: the operator's words and whether the folder keeps the time histories. -->
 	<RunRecordEditor acq={ms} kept="The setup, the channel table, the log, the targets, the identification, every pulse's results and the law's calls are still kept." />
@@ -167,17 +153,5 @@
 
 	.nm {
 		font-size: var(--text-sm);
-	}
-
-	.sel {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.lbl {
-		font-size: var(--text-xs);
-		font-weight: var(--weight-medium);
-		color: var(--text-2);
 	}
 </style>

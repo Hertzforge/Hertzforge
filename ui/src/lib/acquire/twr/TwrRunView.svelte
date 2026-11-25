@@ -8,7 +8,6 @@
 	 * Run card. From arm on the Run card names the run's folder, and a finished run's end line opens
 	 * it in Transient Analysis. The window on another monitor shows the same, compact.
 	 */
-	import type { Snippet } from 'svelte';
 	import LawLine from '../pulse/LawLine.svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import RunLine from '../pulse/RunLine.svelte';
@@ -24,8 +23,6 @@
 	interface Props {
 		twr: TwrStore;
 		views: TwrViewsState;
-		/** The station panel. */
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		onoverride?: () => void;
 		abortKeys: string;
@@ -33,7 +30,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { twr, views, station, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
+	let { twr, views, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(twr.now);
 	const state = $derived(status?.state ?? null);
@@ -86,8 +83,6 @@
 		<TwrLevelCard {status} gatePct={twr.gatePct} {compact} />
 	{:else if kind === 'plays'}
 		<TwrPlayTable plays={twr.plays} law={twr.runLaw} record={twr.record} busy={twr.recordBusy} ontoggle={(i) => void twr.toggleRecord(i)} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

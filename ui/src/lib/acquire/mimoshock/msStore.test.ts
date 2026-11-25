@@ -44,6 +44,13 @@ async function screen(options: ControlServerOptions = {}, controls = 4, drives =
 	return { client, acq, ms };
 }
 
+/** The station's plant, as Configure sets it: the simulator selected with the plant named. */
+async function usePlant(acq: AcquireState, plant: string) {
+	acq.chooseModel('shock_plant', plant);
+	expect(await acq.useStation()).toBe(true);
+	expect(acq.selected?.simulator?.shock_plant).toBe(plant);
+}
+
 async function toReview(ms: MimoShockStore) {
 	expect(await ms.apply()).toBe(true);
 	expect(await ms.start()).toBe(true);
@@ -129,9 +136,23 @@ describe('the MIMO Shock store', () => {
 		expect(ms.counts.target.errors).toBeGreaterThan(0);
 	});
 
+	it("plays the station's plant, and refuses an arm once the station's plant changed after the setup was applied", async () => {
+		const { ms, acq, client } = await screen();
+		await usePlant(acq, 'shock-jointed-4x4-moderate');
+		expect(await ms.apply()).toBe(true);
+		expect(ms.status?.station).toMatchObject({ kind: 'sim', plant: 'shock-jointed-4x4-moderate' });
+		await usePlant(acq, 'shock-jointed-4x4-severe');
+		await expect(client.request('mimo_shock.arm', {})).rejects.toMatchObject({ reason: 'arm_refused' });
+		// applied again, the run takes the station's plant as it is now
+		expect(await ms.apply()).toBe(true);
+		expect(ms.status?.station).toMatchObject({ plant: 'shock-jointed-4x4-severe' });
+		await client.request('mimo_shock.arm', {});
+		await until(() => ms.status?.state === 'armed');
+	});
+
 	it('runs from identification through the review and up the ladder to completion', async () => {
-		const { ms } = await screen();
-		ms.setup.simulator.plant = 'shock-linear-4x4';
+		const { ms, acq } = await screen();
+		await usePlant(acq, 'shock-linear-4x4');
 		await toReview(ms);
 		expect(ms.status?.identification?.passed).toBe(true);
 		expect(ms.mustAcknowledge).toBe(false);
@@ -169,8 +190,8 @@ describe('the MIMO Shock store', () => {
 	});
 
 	it("a new run's pulse rows and ladder are its own, not the run before's", async () => {
-		const { ms } = await screen();
-		ms.setup.simulator.plant = 'shock-jointed-4x4-severe';
+		const { ms, acq } = await screen();
+		await usePlant(acq, 'shock-jointed-4x4-severe');
 		ms.setup.identification.review = false;
 		expect(await ms.apply()).toBe(true);
 		expect(await ms.start()).toBe(true);
@@ -178,7 +199,7 @@ describe('the MIMO Shock store', () => {
 		const first = ms.status!.run_id;
 		expect(ms.pulses.some((p) => !p.passed)).toBe(true);
 		expect(await ms.reset()).toBe(true);
-		ms.setup.simulator.plant = 'shock-linear-4x4';
+		await usePlant(acq, 'shock-linear-4x4');
 		expect(await ms.apply()).toBe(true);
 		await until(() => ms.status?.run_id !== first && ms.status?.state === 'configured');
 		expect(ms.pulses).toEqual([]);
@@ -193,8 +214,8 @@ describe('the MIMO Shock store', () => {
 	}, 40000);
 
 	it('stops on the scaled line while scaled aborts are on, and says so in plain words', async () => {
-		const { ms } = await screen();
-		ms.setup.simulator.plant = 'shock-jointed-4x4-severe';
+		const { ms, acq } = await screen();
+		await usePlant(acq, 'shock-jointed-4x4-severe');
 		ms.setup.identification.review = false;
 		expect(await ms.apply()).toBe(true);
 		expect(ms.unscaledNotice).toBeNull();
@@ -206,8 +227,8 @@ describe('the MIMO Shock store', () => {
 	}, 30000);
 
 	it('with scaled aborts off, shows a standing notice, flags each crossing, and stops on the divergence watch', async () => {
-		const { ms } = await screen();
-		ms.setup.simulator.plant = 'shock-jointed-4x4-severe';
+		const { ms, acq } = await screen();
+		await usePlant(acq, 'shock-jointed-4x4-severe');
 		ms.setup.identification.review = false;
 		expect(ms.setScaledAborts(false)).toBe(true);
 		expect(await ms.apply()).toBe(true);
@@ -231,8 +252,8 @@ describe('the MIMO Shock store', () => {
 	}, 30000);
 
 	it('ends on the absolute line whatever the switch says, and names it', async () => {
-		const { ms } = await screen({ mimoShockAbsoluteAbort: true });
-		ms.setup.simulator.plant = 'shock-linear-4x4';
+		const { ms, acq } = await screen({ mimoShockAbsoluteAbort: true });
+		await usePlant(acq, 'shock-linear-4x4');
 		ms.setup.identification.review = false;
 		ms.setScaledAborts(false);
 		expect(await ms.apply()).toBe(true);
@@ -244,8 +265,8 @@ describe('the MIMO Shock store', () => {
 	}, 30000);
 
 	it('holds a halved step with its note on a plant that predicts an over-test', async () => {
-		const { ms } = await screen();
-		ms.setup.simulator.plant = 'shock-jointed-4x4-moderate';
+		const { ms, acq } = await screen();
+		await usePlant(acq, 'shock-jointed-4x4-moderate');
 		ms.setup.identification.review = false;
 		ms.setup.schedule.max_pulses_per_level = 5;
 		expect(await ms.apply()).toBe(true);

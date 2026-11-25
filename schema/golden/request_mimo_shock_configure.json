@@ -163,9 +163,6 @@
     "max_velocity_ips": null,
     "max_displacement_in": null
    },
-   "simulator": {
-    "plant": "shock-linear-4x4"
-   },
    "operator": "Operator",
    "article": "Bracket",
    "notes": "",

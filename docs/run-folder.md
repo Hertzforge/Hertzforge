@@ -18,7 +18,7 @@ written by.
 
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
 `Hertzforge_Data` in the home folder. The desktop app shows the folder in the
-Station panel and starts the control service with it; a folder chosen there
+Configure view and starts the control service with it; a folder chosen there
 takes effect at the services' next start (`docs/desktop-app.md`, "Run
 Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_random_<run id>`, a MIMO Random run's

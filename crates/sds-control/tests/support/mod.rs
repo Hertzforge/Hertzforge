@@ -158,7 +158,43 @@ impl Client {
         }
     }
 
-    pub async fn call(&mut self, method: &str, params: Value) -> Value {
+    /// Send a request and wait for its response.
+    ///
+    /// The tests describe a MIMO Shock, Sine or Mixed run's simulator model with
+    /// the configuration (`"simulator": {"plant"}` or `{"structure"}`), as the
+    /// protocol once took it. The service now takes the model from the station
+    /// (`station.select` with `simulator`), so a configure that carries one has it
+    /// moved onto the station first, and the configuration is sent without it.
+    /// [`Client::call_raw`] sends a request as it is.
+    pub async fn call(&mut self, method: &str, mut params: Value) -> Value {
+        let model = match method {
+            "mimo_shock.configure" => Some(("plant", "shock_plant")),
+            "mimo_sine.configure" | "mimo_mixed.configure" => Some(("structure", "sine_structure")),
+            _ => None,
+        };
+        if let Some((key, station_key)) = model {
+            let sim = params
+                .get_mut("config")
+                .and_then(Value::as_object_mut)
+                .and_then(|c| c.remove("simulator"));
+            if let Some(sim) = sim {
+                let name = sim.get(key).cloned().unwrap_or(Value::Null);
+                let r = self
+                    .call_raw(
+                        "station.select",
+                        json!({"kind": "sim", "simulator": {station_key: name}}),
+                    )
+                    .await;
+                if r.get("error").is_some() {
+                    return r;
+                }
+            }
+        }
+        self.call_raw(method, params).await
+    }
+
+    /// Send a request as it is and wait for its response.
+    pub async fn call_raw(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
         self.last_id = id;
         self.next_id += 1;

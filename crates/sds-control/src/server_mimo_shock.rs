@@ -97,9 +97,10 @@ impl Service {
         ),
         MethodError,
     > {
-        let w = config::parse(config)?;
+        let mut w = config::parse(config)?;
         let (tbl, table_report) = {
             let inner = self.inner.lock().await;
+            w.plant = inner.stations.sim_models().shock_plant.clone();
             (
                 inner.table.table.clone(),
                 table::validate(&inner.table.table, &inner.ctx()),
@@ -263,7 +264,13 @@ impl Service {
                 ));
             }
             let (plan, hardware) = match inner.stations.selected() {
-                Selection::Sim => (sim_plan(&w, &inner.table.table)?, false),
+                Selection::Sim => {
+                    station::models_unchanged(
+                        w.plant.as_deref(),
+                        inner.stations.sim_models().shock_plant.as_deref(),
+                    )?;
+                    (sim_plan(&w, &inner.table.table)?, false)
+                }
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -891,8 +898,8 @@ fn sim_plan(
         MethodError::named(
             ErrorCode::Refused,
             "arm_refused",
-            "The simulator plays a shock plant of 4 controls by 4 drives or 6 by 3; name one \
-             in \"simulator.plant\" or size the run to one.",
+            "The simulator plays a shock plant of 4 controls by 4 drives or 6 by 3; choose one \
+             in the station's simulator models or size the run to one.",
         )
     })?;
     let plant = hertzforge_station::SimShockPlant::from_name(name).ok_or_else(|| {

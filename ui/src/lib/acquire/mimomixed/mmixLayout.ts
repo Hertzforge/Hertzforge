@@ -68,7 +68,7 @@ export const MMIX_SCREEN: PulseScreenSpec<MmixPageKind, MimoMixedQuantity> = {
 		['tone_phase', { words: 'Tone Phase', help: "Each tone's phase history at every control.", group: 'time', families: ['measured'] }],
 		['band_level', { words: 'Band Level', help: "Each narrowband's level against its statement, at every control.", group: 'time', families: ['measured'] }]
 	],
-	cards: ['run', 'parts', 'drives', 'limits', 'level', 'log', 'station'],
+	cards: ['run', 'parts', 'drives', 'limits', 'level', 'log'],
 	pageCards: { tones: ['parts'], drives: ['drives', 'limits'] },
 	selectors: ['all']
 };

@@ -18,7 +18,7 @@
  * Nothing here is a measurement: the numbers are made up so that every screen can be reached.
  */
 
-import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, RunRecordRef, Series, SpectrumView, StationRef, View } from '../types';
+import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, RunRecordRef, Series, SimulatorChoice, SpectrumView, StationRef, View } from '../types';
 import type {
 	MimoShockConfig,
 	MimoShockControlVerdict,
@@ -47,6 +47,8 @@ export interface MimoShockMockHost {
 	broadcast(topic: string, data: Record<string, unknown>): void;
 	rows(): ChannelRow[];
 	station(): { source: DataSource; ref: StationRef };
+	/** The station's simulator models: the plant a simulated run plays. */
+	models(): SimulatorChoice;
 	clientName(conn: MockConnection): string;
 	/** The run's second level ends on an absolute abort line. */
 	absoluteAbort?: boolean;
@@ -331,6 +333,8 @@ interface Run {
 	station: StationRef & { plant: string | null };
 	source: DataSource;
 	plant: string;
+	/** The plant the station named at configure (null: sized to the run); the arm refuses another. */
+	named: string | null;
 	controls: number[];
 	drives: number[];
 	levels: number[];
@@ -359,10 +363,11 @@ interface Run {
 	record: RunRecordRef | null;
 }
 
-function plantOf(c: MimoShockConfig): string {
+/** The plant a run plays: the station's, else the standard one of the run's size. */
+function plantOf(c: MimoShockConfig, named: string | null): string {
 	const nc = c.channels.controls.length;
 	const nd = c.channels.drives.length;
-	return c.simulator?.plant ?? (nc > nd ? 'shock-jointed-6x3' : 'shock-linear-4x4');
+	return named ?? (nc > nd ? 'shock-jointed-6x3' : 'shock-linear-4x4');
 }
 
 export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
@@ -508,8 +513,8 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		const fs = c.acquisition?.fs_hz ?? 51200;
 		const band = c.acquisition?.band_hz ?? [5, Math.min(5000, 0.4 * fs)];
 		if (band[1] >= fs / 2) errors.push(item('band_above_grid', `The band's top edge is below half the rate, ${fs / 2} Hz.`, 'config.acquisition.band_hz'));
-		const plant = plantOf(c);
-		if (!['shock-linear-4x4', 'shock-jointed-4x4-moderate', 'shock-jointed-4x4-severe', 'shock-jointed-6x3'].includes(plant)) errors.push(item('plant_unknown', `No simulator plant "${plant}".`, 'config.simulator.plant'));
+		const plant = plantOf(c, host.models().shock_plant);
+		if (!['shock-linear-4x4', 'shock-jointed-4x4-moderate', 'shock-jointed-4x4-severe', 'shock-jointed-6x3'].includes(plant)) errors.push(item('plant_unknown', `No simulator plant "${plant}".`, 'station.simulator.shock_plant'));
 		const lawId = c.control?.law?.id ?? (t.kind === 'srs' ? 'shape' : 'inverse');
 		const law = LAWS.find((l) => l.id === lawId);
 		if (!law) errors.push(item('law_unknown', `No control law "${lawId}" in the catalog.`, 'config.control.law.id'));
@@ -894,10 +899,17 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 	const needRun = (): Run => run ?? refuse('refused', 'wrong_state', 'No MIMO Shock run is configured.');
 	const wrong = (r: Run, verb: string): never => refuse('refused', 'wrong_state', `${verb} does not apply while the run is ${r.state}.`, { state: r.state, phase: r.phase });
 
+	/** Refuse an arm on other simulator models than the run was configured on, as the service's `models_unchanged`. */
+	function modelsUnchanged(r: Run) {
+		const now = host.models().shock_plant;
+		if (host.station().ref.kind === 'sim' && r.named !== now) refuse('refused', 'arm_refused', "The station's simulator models changed after this test was configured; apply the setup again.", { configured: r.named, station: now });
+	}
+
 	function newRun(config: MimoShockConfig, derived: MimoShockDerived): Run {
 		runCount += 1;
 		const st = host.station();
-		const plant = plantOf(config);
+		const named = host.models().shock_plant;
+		const plant = plantOf(config, named);
 		const lawId = config.control?.law?.id ?? (config.target.kind === 'srs' ? 'shape' : 'inverse');
 		const law = LAWS.find((l) => l.id === lawId) ?? LAWS[0];
 		const params: Record<string, unknown> = {};
@@ -911,6 +923,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			station: { ...st.ref, plant: st.ref.kind === 'sim' ? plant : null },
 			source: st.source,
 			plant,
+			named,
 			controls: config.channels.controls.map((c) => c.channel),
 			drives: config.channels.drives.map((d) => d.channel),
 			levels: [...config.schedule.levels_db],
@@ -965,6 +978,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			if (r.state !== 'configured') wrong(r, 'Arm');
 			const other = host.otherRun();
 			if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+			modelsUnchanged(r);
 			claimRecord(r);
 			r.state = 'armed';
 			r.phase = 'armed';
@@ -979,6 +993,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			if (r.state !== 'configured' && r.state !== 'armed') wrong(r, 'Start');
 			const other = host.otherRun();
 			if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+			if (r.state === 'configured') modelsUnchanged(r);
 			claimRecord(r);
 			r.state = 'running';
 			r.phase = 'sysid';

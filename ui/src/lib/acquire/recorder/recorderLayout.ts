@@ -78,7 +78,7 @@ export const RECORDER_SCREEN: PulseScreenSpec<RecorderPageKind, RecorderLiveQuan
 		['frf', { words: 'FRF', help: "The pair's FRF (H1): its magnitude, its phase and the coherence.", group: 'frequency', families: ['measured'] }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'recording', 'recmarks', 'recordings', 'station'],
+	cards: ['run', 'recording', 'recmarks', 'recordings'],
 	pageCards: { readings: ['recmarks'], recordings: ['recordings'] },
 	selectors: ['all']
 };

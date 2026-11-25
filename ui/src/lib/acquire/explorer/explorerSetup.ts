@@ -167,7 +167,7 @@ export function explorerChannels(rows: ChannelRow[]): { control: ChannelRow | nu
 export type ExplorerSection = 'station' | 'test' | 'capture';
 
 export const EXPLORER_SECTIONS: { id: ExplorerSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'test', label: 'Tone & Drive' },
 	{ id: 'capture', label: 'Run Record' }
 ];

@@ -10,7 +10,6 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import TwrCapture from './TwrCapture.svelte';
 	import TwrControl from './TwrControl.svelte';
@@ -70,7 +69,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={twr.acq} />
 			<p class="aq-small aq-muted" data-testid="twr-run-channels">The run controls on the table's first enabled control row ({channels.control ? `channel ${channels.control.index}, in ${channels.control.units}` : 'none yet'}) and drives on its first enabled drive row ({channels.drive ? `channel ${channels.drive.index}` : 'none yet'}). The reference is in the control row's unit.</p>
 			<ChannelTable acq={twr.acq} />
 		</div>
@@ -94,10 +92,8 @@
 	<TwrSummary {twr} onopen={(s: TwrSetupSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={twr.acq} />{/snippet}
-
 {#snippet run()}
-	<TwrRunView {twr} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'twr')} opener={app.twrRunOpen} />
+	<TwrRunView {twr} {views} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'twr')} opener={app.twrRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -112,6 +108,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

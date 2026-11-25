@@ -72,7 +72,7 @@ export const SHOCK_SCREEN: PulseScreenSpec<ShockPageKind, ShockQuantity> = {
 		['law', { words: 'Law Values', help: "The control law's reported values on its last call.", group: 'numbers' }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'pulses', 'station'],
+	cards: ['run', 'level', 'pulses'],
 	pageCards: { pulses: ['pulses'] }
 };
 

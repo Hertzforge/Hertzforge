@@ -156,7 +156,7 @@ below (Run Folders).
 
 Every control run leaves a run folder in the data folder (`docs/run-folder.md`).
 
-- **The data folder** is shown in the Station panel: its path, where it comes from and whether a
+- **The data folder** is shown in the Configure view: its path, where it comes from and whether a
   run's record can be written there. The app starts both services with it in
   `HERTZFORGE_DATA_ROOT`: a folder chosen with Change Folder, else the variable as the app was
   started with it, else `Hertzforge_Data` in the home folder. The choice is kept in the app's

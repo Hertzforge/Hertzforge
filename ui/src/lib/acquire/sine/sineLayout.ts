@@ -92,7 +92,7 @@ export const SINE_SCREEN: PulseScreenSpec<SinePageKind, SineLiveQuantity> = {
 		['law', { words: 'Law Values', help: "The control law's values on its last call.", group: 'numbers' }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'law', 'station']
+	cards: ['run', 'level', 'law']
 };
 
 export const SINE_PLOT_TYPES: PlotType[] = pulsePlotTypes(SINE_SCREEN);

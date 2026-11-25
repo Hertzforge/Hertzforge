@@ -110,7 +110,6 @@ fn srs_config(cooling_s: f64) -> Value {
         "spacing": {"cooling_s": cooling_s, "settling_s": 0, "compute_s": 0},
         "identification": {"drive_vrms": 1, "frames": 40, "review": false},
         "control": {"law_budget": 1},
-        "simulator": {"plant": "shock-linear-4x4"},
     })
 }
 
@@ -126,7 +125,6 @@ fn waveform_config() -> Value {
         "spacing": {"cooling_s": 0.05, "settling_s": 0, "compute_s": 0},
         "identification": {"drive_vrms": 1, "frames": 40, "review": false},
         "control": {"law": {"id": "inverse"}, "law_budget": 1},
-        "simulator": {"plant": "shock-linear-4x4"},
     })
 }
 

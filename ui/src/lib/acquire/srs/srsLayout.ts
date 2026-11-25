@@ -82,7 +82,7 @@ export const SRS_SCREEN: PulseScreenSpec<SrsPageKind, SrsQuantity> = {
 		['law', { words: 'Law Values', help: "The control law's reported values on its last call.", group: 'numbers' }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'pulses', 'station'],
+	cards: ['run', 'level', 'pulses'],
 	pageCards: { pulses: ['pulses'] }
 };
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	/**
-	 * Acquire & Control: the test-type chooser, or the chosen test type's own screen. Which one is
+	 * Acquire & Control: the test-type chooser, the chosen test type's own screen, or Configure (the
+	 * station every test type runs on, opened from the upper right of each). Which one is
 	 * on show is kept in the shell state, so it survives moving between workspaces. Until the
 	 * control service has said whether a run is live, neither is shown, so a screen opened during
 	 * a live run goes straight to it.
@@ -28,6 +29,7 @@
 	import { MODAL_CHIP_WORDS, chipState } from '$lib/acquire/modal_test/modalTestWords';
 	import { RECORDER_STATE_WORDS } from '$lib/acquire/recorder/recorderWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
+	import ConfigureScreen from '$lib/acquire/ConfigureScreen.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
 	interface Props {
@@ -69,6 +71,8 @@
 
 {#if tests.deciding}
 	<p class="waiting" role="status" data-testid="acquire-waiting">Waiting for the control service</p>
+{:else if tests.screen === 'configure'}
+	<ConfigureScreen {app} />
 {:else if tests.screen === 'random'}
 	<RandomScreen {app} />
 {:else if tests.screen === 'mimo_random'}

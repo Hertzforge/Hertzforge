@@ -624,7 +624,7 @@ function mixedDraftOf(c: MixedConfig): MixedDraft {
 export type MixedSection = 'station' | 'floor' | 'parts' | 'schedule' | 'control' | 'limits' | 'record';
 
 export const MIXED_SECTIONS: { id: MixedSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'floor', label: 'Floor' },
 	{ id: 'parts', label: 'Tones & Bands' },
 	{ id: 'schedule', label: 'Schedule' },

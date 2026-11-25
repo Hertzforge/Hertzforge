@@ -83,7 +83,7 @@ export const MSINE_SCREEN: PulseScreenSpec<MsinePageKind, MimoSineQuantity> = {
 		['identification', { words: 'Identification', help: 'The response from every drive to a control, its phase, and every channel\'s coherence with the trust line.', group: 'frequency', families: ['measured', 'tolerance'] }],
 		['law', { words: 'Law Values', help: "The control law's declared values on its last call, its unusable calls, the ticks a guard bound and its requests.", group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'law', 'station'],
+	cards: ['run', 'level', 'law'],
 	selectors: ['all']
 };
 

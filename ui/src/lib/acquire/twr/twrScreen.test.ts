@@ -11,7 +11,7 @@ describe('TWR on the screen frame', () => {
 		expect(TWR_PLOT_TYPES.filter((t) => t.time).map((t) => t.id).sort()).toEqual([...TWR_POINTS_QUANTITIES].sort());
 		expect(TWR_PLOT_TYPES.map((t) => t.id)).not.toContain('plays');
 		expect(TWR_PLOT_TYPES.every((t) => !t.channels && t.help.length > 10)).toBe(true);
-		expect(TWR_HOOKS.cards).toEqual(['run', 'level', 'plays', 'station']);
+		expect(TWR_HOOKS.cards).toEqual(['run', 'level', 'plays']);
 	});
 
 	it('opens on the seven pages it had, the play table on the Plays page', () => {

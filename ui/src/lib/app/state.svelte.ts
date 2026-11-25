@@ -2858,47 +2858,6 @@ export class AppState {
 		return live !== null && this.workspace === 'acquire' && this.tests.screen === live;
 	}
 
-	/** The SIM badge rule: simulated control data is on screen. */
-	get simOnScreen(): boolean {
-		return this.workspace === 'simulate' && this.sim.display?.source === 'SIM';
-	}
-
-	/** Where the control data on screen comes from, for the top bar's badge, or null. */
-	get provenance(): { source: 'SIM' | 'HARDWARE'; cls: 'sim' | 'ni_simulated' | 'ni_real' } | null {
-		if (this.workspace === 'simulate') return this.simOnScreen ? { source: 'SIM', cls: 'sim' } : null;
-		// A live run is shown from every workspace (the top bar's run pill), so its source is too.
-		// The test-type chooser shows no control data of its own.
-		const onRandom = this.workspace === 'acquire' && this.tests.screen === 'random';
-		if (onRandom || this.acquire.isLive) return this.acquire.source;
-		const onMimo = this.workspace === 'acquire' && this.tests.screen === 'mimo_random';
-		if (onMimo || this.mimo.isLive) return this.mimo.source;
-		const onShock = this.workspace === 'acquire' && this.tests.screen === 'shock';
-		if (onShock || this.shock.isLive) return this.shock.source;
-		const onSrs = this.workspace === 'acquire' && this.tests.screen === 'srs';
-		if (onSrs || this.srs.isLive) return this.srs.source;
-		const onSine = this.workspace === 'acquire' && this.tests.screen === 'sine';
-		if (onSine || this.sine.isLive) return this.sine.source;
-		const onMixed = this.workspace === 'acquire' && this.tests.screen === 'mixed';
-		if (onMixed || this.mixed.isLive) return this.mixed.source;
-		const onTwr = this.workspace === 'acquire' && this.tests.screen === 'twr';
-		if (onTwr || this.twr.isLive) return this.twr.source;
-		const onExplorer = this.workspace === 'acquire' && this.tests.screen === 'explorer';
-		if (onExplorer || this.explorer.isLive) return this.explorer.source;
-		const onRecorder = this.workspace === 'acquire' && this.tests.screen === 'recorder';
-		if (onRecorder || this.recorder.isLive) return this.recorder.source;
-		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
-		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
-		const onMimoSine = this.workspace === 'acquire' && this.tests.screen === 'mimo_sine';
-		if (onMimoSine || this.mimoSine.isLive) return this.mimoSine.source;
-		const onMimoMixed = this.workspace === 'acquire' && this.tests.screen === 'mimo_mixed';
-		if (onMimoMixed || this.mimoMixed.isLive) return this.mimoMixed.source;
-		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
-		if (onPlayback || this.playback.isLive) return this.playback.source;
-		const onModal = this.workspace === 'acquire' && this.tests.screen === 'modal_test';
-		if (onModal || this.modalTest.isLive) return this.modalTest.source;
-		return null;
-	}
-
 	start(): void {
 		// #analyze and #model are addresses the analysis had; any of its earlier ids opens it (`go`)
 		const named = (hash: string) => {

@@ -479,7 +479,6 @@ export interface WireInputs {
 	/** The reference the service built or read, or null while there is none. */
 	reference: MimoReference | null;
 	law: LawEntry | null;
-	backend: 'sim' | 'ni' | null;
 }
 
 const finiteOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : v);
@@ -556,8 +555,7 @@ export function toWireSetup(d: MimoDraft, x: WireInputs): MimoSetup | null {
 			mode: d.schedule.mode,
 			levels: d.schedule.levels.map((l, i) => (i === last ? { db: l.db } : { db: l.db, dwell_s: l.dwell_s })),
 			full_level_s: d.schedule.full_level_s
-		},
-		backend: x.backend ? { kind: x.backend } : null
+		}
 	};
 	return setup;
 }
@@ -607,14 +605,13 @@ export function byKey(items: ReportItem[], setup: MimoSetup | null): FieldErrors
 }
 
 /** The section a key belongs to. */
-export type MimoSection = 'channels' | 'reference' | 'control' | 'schedule' | 'record' | 'backend' | 'predict';
+export type MimoSection = 'channels' | 'reference' | 'control' | 'schedule' | 'record' | 'predict';
 
 export function sectionOf(key: string): MimoSection {
 	if (/^(operator|article|notes|specification|record)(\.|$)/.test(key)) return 'record';
-	if (/^(channel|drive|control|limit)\.|^channels|^space|^title/.test(key)) return 'channels';
+	if (/^(channel|drive|control|limit)\.|^channels|^space|^title|^table/.test(key)) return 'channels';
 	if (/^reference/.test(key)) return 'reference';
 	if (/^schedule/.test(key)) return 'schedule';
-	if (/^backend|^table/.test(key)) return 'backend';
 	return 'control';
 }
 

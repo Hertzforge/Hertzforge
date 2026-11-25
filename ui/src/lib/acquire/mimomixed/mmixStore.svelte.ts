@@ -251,7 +251,17 @@ export class MimoMixedStore {
 	}
 
 	readonly wire = $derived<MimoMixedConfig>(toMmixConfig(this.setup, this.reference, { floor: this.floorLaw, tones: this.toneLaw }));
-	readonly key = $derived(canonical(this.wire));
+	/**
+	 * The simulator's structure the station names (Configure), null on NI or when it is sized to the
+	 * table. The service plays it and checks it at configure and arm, so it is part of what is applied.
+	 */
+	get stationModel(): string | null {
+		const sel = this.acq.selected;
+		return sel?.kind === 'sim' ? (sel.simulator?.sine_structure ?? null) : null;
+	}
+
+	/** The setup as applied: the wire's configuration and the station's structure; another structure is a setup to apply again. */
+	readonly key = $derived(canonical({ config: this.wire, model: this.stationModel }));
 	readonly local = $derived.by((): FieldErrors => {
 		const prefix = (role: MmixLawRole, e: LawErrors): FieldErrors => Object.fromEntries(Object.entries(e).map(([k, v]) => [`laws.${role}.${k.replace(/^law\./, '')}`, v]));
 		return mergeErrors(mergeErrors(localErrors(this.setup), prefix('floor', lawParamErrors(this.floorLaw, this.setup.laws.floor.params))), prefix('tones', lawParamErrors(this.toneLaw, this.setup.laws.tones.params)));
@@ -310,7 +320,6 @@ export class MimoMixedStore {
 	}
 
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (!this.floorLaws || !this.toneLaws) return 'The law catalogs have not been read yet.';
 		if (!this.reference) return this.refBusy ? 'The floor\'s reference is being built.' : 'The floor\'s reference has not been built yet.';
 		return null;

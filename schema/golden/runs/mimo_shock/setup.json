@@ -117,9 +117,6 @@
     },
     "control": {
       "law_budget": 1
-    },
-    "simulator": {
-      "plant": "shock-linear-4x4"
     }
   },
   "resolved": {

@@ -12,7 +12,7 @@ drive's peak ceiling is a budget they share.
 This guide is for a test engineer who has run single-output Mixed Mode and MIMO Random. It covers
 what the test holds, how to set one up, the parts and the five laws that run them, the shared drive
 budget and what the screen means by "limiting", what the floor's law is shown on the lines the parts
-occupy, what the setup refuses and why, and what is not built yet. It shares its station panel,
+occupy, what the setup refuses and why, and what is not built yet. It shares its
 channel table, run bar and control-law panels with the other test types, its floor, identification
 and gate with MIMO Random (see [mimo-random.md](mimo-random.md)), its tones' law with MIMO Sine (see
 [mimo-sine.md](mimo-sine.md)), and its parts, schedule, hold and part switches with Mixed Mode (see
@@ -73,13 +73,20 @@ sections, with a summary beside every section that lists what is left to fix and
 warning the control service gives, by name. The setup is checked by the control service as you edit
 (a dry run that changes nothing). **Proceed to Run** applies the setup and shows the run.
 
-### Station and Channels
+### Channels
 
-The station and channel table are shared with every test type. Every enabled control row is a
-control unless you switch it off here; every enabled drive row is a drive, in the table's order. Each
-drive takes its rms ceiling, its peak ceiling (at least the rms ceiling), its peak abort, the most the
-identification may put on it and, if you want one, its rms abort. The peak abort left empty is the
-peak ceiling plus 1 dB, and the field shows that value; one you give must be above the peak ceiling.
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table is shared with
+every test type. Every enabled control row is a control unless you switch it off here; every
+enabled drive row is a drive, in the table's order. Each drive takes its rms ceiling, its peak
+ceiling (at least the rms ceiling), its peak abort, the most the identification may put on it and,
+if you want one, its rms abort. The peak abort left empty is the peak ceiling plus 1 dB, and the
+field shows that value; one you give must be above the peak ceiling.
+
+On the simulator, the run is played on the sine structure chosen in Configure, under **Simulator
+Models**, the same one MIMO Sine plays. By default it is "Sized to the Channel Table", which takes
+the standard model of the table's size. A run set up and then given other simulator models in
+Configure is refused at arm until it is set up again.
 
 ### Floor Reference
 

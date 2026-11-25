@@ -215,7 +215,7 @@ export function recorderRows(rows: ChannelRow[]): { recorded: ChannelRow[]; driv
 export type RecorderSection = 'station' | 'trigger' | 'analysis' | 'capture';
 
 export const RECORDER_SECTIONS: { id: RecorderSection; label: string }[] = [
-	{ id: 'station', label: 'Station & Channels' },
+	{ id: 'station', label: 'Channels' },
 	{ id: 'trigger', label: 'Rate & Trigger' },
 	{ id: 'analysis', label: 'Analysis' },
 	{ id: 'capture', label: 'Records' }

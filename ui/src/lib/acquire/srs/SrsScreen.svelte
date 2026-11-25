@@ -10,7 +10,6 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import ShockSchedule from '../shock/ShockSchedule.svelte';
 	import { clock } from '../words';
@@ -72,7 +71,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={srs.acq} />
 			<p class="aq-small aq-muted" data-testid="srs-run-channels">The run controls on the table's first enabled control row ({channels.control ? `channel ${channels.control.index}` : 'none yet'}) and drives on its first enabled drive row ({channels.drive ? `channel ${channels.drive.index}` : 'none yet'}).</p>
 			<ChannelTable acq={srs.acq} />
 		</div>
@@ -102,10 +100,8 @@
 	<SrsSummary {srs} onopen={(s: SrsSection) => open(s)} />
 {/snippet}
 
-{#snippet station()}<StationPanel acq={srs.acq} />{/snippet}
-
 {#snippet run()}
-	<SrsRunView {srs} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'srs')} opener={app.srsRunOpen} />
+	<SrsRunView {srs} {views} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'srs')} opener={app.srsRunOpen} />
 {/snippet}
 
 <PulseScreen
@@ -120,6 +116,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup and show the run: start identification from there."
 	{abortKeys}

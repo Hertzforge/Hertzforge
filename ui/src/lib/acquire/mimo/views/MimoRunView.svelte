@@ -1,9 +1,8 @@
 <script lang="ts">
 	/**
 	 * The MIMO run as it happens, in the single-output run view's frame: the page bar, the page's
-	 * view, and beside it the run's state, the level card, the station panel and the drives. The run
-	 * bar with its verbs (and Stop and Abort) and the station panel come from the MIMO screen
-	 * around this view; the window on another monitor shows the same frame, compact. From arm on
+	 * view, and beside it the run's state, the level card and the drives. The run bar with its
+	 * verbs (and Stop and Abort) comes from the MIMO screen around this view; the window on another monitor shows the same frame, compact. From arm on
 	 * the run card names the folder the run is recorded in (the shared record line), and a
 	 * finished run offers Open in Analysis and Copy Folder Path (the shared actions).
 	 */
@@ -27,8 +26,6 @@
 		views: MimoViewsState;
 		/** The run bar (verbs, Stop and Abort), from the MIMO screen. */
 		bar?: Snippet;
-		/** The station panel, from the MIMO screen. */
-		station?: Snippet;
 		/** The page bar's right end (the way back to the setup). */
 		end?: Snippet;
 		onpopout?: (pageId: string) => boolean;
@@ -40,7 +37,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { views, bar, station, end, onpopout, geometry = null, bands = [], ceilings = null, diagnostics = [], compact = false, opener = null }: Props = $props();
+	let { views, bar, end, onpopout, geometry = null, bands = [], ceilings = null, diagnostics = [], compact = false, opener = null }: Props = $props();
 
 	const status = $derived(views.status);
 	/** The state chip reads the run's state and its end, which MIMO's status carries in the same form. */
@@ -61,7 +58,6 @@
 			<section class="card head">
 				<StateChip run={chipRun} />
 				{#if status?.law}<span class="law">{status.law.name} <span class="v">{status.law.version}</span></span>{/if}
-				{#if status?.source}<span class="src">{status.source === 'SIM' ? 'Simulator' : status.source}</span>{/if}
 			</section>
 			<section class="card"><MimoLevelCard {status} {bands} {compact} /></section>
 			{#if record}
@@ -69,9 +65,6 @@
 					<RunRecordLine {record} {ended} />
 					{#if ended && opener && !compact}<RunOpenActions {record} {opener} />{/if}
 				</section>
-			{/if}
-			{#if station && !compact}
-				<section class="card">{@render station()}</section>
 			{/if}
 			{#if status?.drive_rms_v.length && !compact}
 				<section class="card" aria-label="Drives" data-testid="mimo-drives">
@@ -168,10 +161,6 @@
 
 	.v {
 		color: var(--text-3);
-	}
-
-	.src {
-		margin-left: auto;
 	}
 
 	.chans {

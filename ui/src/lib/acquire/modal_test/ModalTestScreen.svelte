@@ -8,7 +8,6 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import ChannelTable from '../ChannelTable.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import type { ScreenState } from '../screen/screen.svelte';
 	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
@@ -53,7 +52,6 @@
 {#snippet setup(section: string)}
 	{#if section === 'station'}
 		<div class="stack">
-			<StationPanel acq={modal.acq} />
 			<p class="aq-small aq-muted">The test records every enabled input row of the table. Give each its DOF and its part (reference or response) in DOFs; in shaker mode each shaker needs a drive row.</p>
 			<ChannelTable acq={modal.acq} />
 		</div>
@@ -94,6 +92,7 @@
 	{run}
 	{nums}
 	onleave={tests.canLeave ? () => tests.toChooser() : null}
+	onconfigure={() => tests.toConfigure()}
 	takeFocus={() => app.tests.takeFocus()}
 	proceedTitle="Apply the setup, which the control service checks with the channel table's DOFs, and show the Measure screen: start from there."
 	liveNote="The test is live; the setup is locked until it ends."

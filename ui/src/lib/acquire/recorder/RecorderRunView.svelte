@@ -2,8 +2,7 @@
 	/**
 	 * The Recorder run as it happens, on the test screen's frame: the pages of plots, and the dock
 	 * with the Run card (the shared verbs and the Recorder's own: Arm, Record, Cut, with the service's
-	 * answer to the last of them), the recording card, every mark, the recordings and the station
-	 * (with the simulator's source when the run is on it). A time plot carries the limit marks that
+	 * answer to the last of them), the recording card, every mark and the recordings. A time plot carries the limit marks that
 	 * fall in view as thin lines, at their station time. The window on another monitor shows the
 	 * same, compact.
 	 */
@@ -17,7 +16,6 @@
 	import RecorderCard from './RecorderCard.svelte';
 	import RecorderRecordings from './RecorderRecordings.svelte';
 	import RecorderRunVerbs from './RecorderRunVerbs.svelte';
-	import RecorderSimSource from './RecorderSimSource.svelte';
 	import type { RecorderStore } from './recorderStore.svelte';
 	import type { RecorderViewsState } from './recorderViews.svelte';
 	import { markWords } from './recorderWords';
@@ -25,15 +23,13 @@
 	interface Props {
 		recorder: RecorderStore;
 		views: RecorderViewsState;
-		/** The station panel. */
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { recorder, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
+	let { recorder, views, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(recorder.now);
 	const live = $derived(recorder.frameOfRun);
@@ -42,7 +38,6 @@
 	const fs = $derived(status?.grid?.fs_hz ?? null);
 	const saved = $derived(recorder.recordings.filter((r) => r.complete));
 	const faulted = $derived(saved.find((r) => r.fault) ?? saved.at(-1) ?? null);
-	const onSim = $derived(status?.station?.kind === 'sim');
 	const hasPair = $derived(!!recorder.runConfig?.analysis?.frf);
 	const unitOf = (row: number) => live?.rows.find((r) => r.index === row)?.unit ?? '';
 	const channels = $derived(recorder.rows.filter((r) => r.enabled && r.role !== 'drive').map((r) => ({ index: r.index, name: r.description || r.role })));
@@ -108,9 +103,6 @@
 		</div>
 	{:else if kind === 'recordings'}
 		<RecorderRecordings {saved} now={status?.recording ?? null} folder={recorder.folder} {fs} />
-	{:else if kind === 'station'}
-		{#if station}{@render station()}{/if}
-		{#if onSim}<div class="src"><RecorderSimSource rows={status?.rows ?? []} /></div>{/if}
 	{/if}
 {/snippet}
 
@@ -164,10 +156,6 @@
 
 	.marklist p {
 		margin: 0;
-	}
-
-	.src {
-		margin-top: var(--sp-3);
 	}
 
 	.answer {

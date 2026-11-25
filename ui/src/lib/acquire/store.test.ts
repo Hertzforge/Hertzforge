@@ -170,7 +170,8 @@ describe('station and channel table', () => {
 		acq.toggleDevice('cDAQ1Mod1');
 		acq.toggleDevice('cDAQ1Mod2');
 		expect(acq.stationDirty).toBe(true);
-		expect(acq.actions.apply.reason).toMatch(/Use the chosen station/);
+		// a station chosen and not yet in use does not hold the table: the station is Configure's
+		expect(acq.actions.apply.reason ?? '').not.toMatch(/station/i);
 		expect(await acq.useStation()).toBe(true);
 		expect(acq.selected?.class).toBe('ni_simulated');
 		expect(acq.source?.source).toBe('SIM');

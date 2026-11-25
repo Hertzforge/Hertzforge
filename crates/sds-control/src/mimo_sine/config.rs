@@ -72,8 +72,8 @@ pub struct WireMsine {
     /// The rate as sent; null asks for [`DEFAULT_FS_HZ`].
     pub fs_given: Option<f64>,
     pub tick_ms: f64,
-    /// The simulator's structure by name; null takes the linear one of the
-    /// run's size.
+    /// The station's sine structure by name (`station.select`), set by the
+    /// service after parsing; null takes the linear one of the run's size.
     pub structure: Option<String>,
     pub feasibility: Option<Vec<WireShaker>>,
     pub operator: String,
@@ -476,10 +476,9 @@ pub fn parse(config: &Value) -> Result<WireMsine, MethodError> {
             Some(out)
         }
     };
-    let structure = match c.opt_obj("simulator")? {
-        None => None,
-        Some(s) => s.opt_str("structure")?.map(str::to_owned),
-    };
+    // The simulator's structure is the station's (`station.select`), set by the
+    // service after parsing; a configuration does not name it.
+    let structure = None;
     let words =
         |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
     let (operator, article, notes) = (words("operator")?, words("article")?, words("notes")?);
@@ -1612,7 +1611,7 @@ impl WireMsine {
                 None => {
                     r.errors.push(Item::field(
                         "structure_unknown",
-                        "simulator.structure",
+                        "station.simulator.sine_structure",
                         format!(
                             "The simulator has no structure \"{name}\"; it plays {}.",
                             and_list(&structure_names())
@@ -1626,7 +1625,7 @@ impl WireMsine {
                 None => {
                     r.errors.push(Item::field(
                         "structure_wrong_size",
-                        "simulator.structure",
+                        "station.simulator.sine_structure",
                         format!(
                             "The simulator has no sine structure of {inputs} inputs and {drives} \
                              drives; size the table to one of {}.",
@@ -1641,7 +1640,7 @@ impl WireMsine {
         if (inputs, drives) != (n_out, n_d) {
             r.errors.push(Item::field(
                 "structure_wrong_size",
-                "simulator.structure",
+                "station.simulator.sine_structure",
                 format!(
                     "The simulator's structure \"{}\" has {n_out} inputs and {n_d} drives; the \
                      table has {inputs} enabled inputs and {drives} drives.",

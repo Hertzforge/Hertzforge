@@ -1666,14 +1666,18 @@ receives its own copy.
 | Method | Params | Result |
 |---|---|---|
 | `station.list` | `{"rescan"}` (optional, default false) | `{"stations":[sim, ni],"selected"}` |
-| `station.select` | `{"kind":"sim"}` or `{"kind":"ni","devices":[id...]}` | `{"selected"}` |
+| `station.select` | `{"kind":"sim","simulator"}` (`simulator` optional) or `{"kind":"ni","devices":[id...]}` | `{"selected"}` |
 
-The service starts with the simulator selected. It never selects hardware on its own, and never
+The station is the one hardware and simulation setup every module runs on: no module's
+configuration names a station or a simulator model, and each takes the selection when it
+configures and when it arms. The service starts with the simulator selected. It never selects hardware on its own, and never
 falls back to the simulator when hardware is missing, busy or refused: the selection is refused
 by name instead.
 
 ```
-{"kind":"sim","title":"Simulator","available":true,"class":"sim","inputs":8,"outputs":1,"clock":"shared"}
+{"kind":"sim","title":"Simulator","available":true,"class":"sim","inputs":8,"outputs":1,"clock":"shared",
+ "models":{"shock_plant":[{"name":"shock-linear-4x4","inputs":4,"drives":4}, ...],
+           "sine_structure":[{"name":"sine-linear-4x4","inputs":4,"drives":4}, ...]}}
 {"kind":"ni","title":"NI-DAQmx","available":true,"unavailable":null,"scanned_unix":1793577600,
  "devices":[{"id":"cDAQ1Mod1","product":"NI 9234","serial":"01A2B3C4","simulated":false,
              "parent":"cDAQ1","slot":1,"timing_family":"cDAQ1",
@@ -1702,6 +1706,21 @@ by name instead.
 {"kind":"ni","devices":["cDAQ1Mod1","cDAQ1Mod2"],"class":"ni_real","source":"HARDWARE",
  "inputs":4,"outputs":4,"timing_family":"cDAQ1"}
 ```
+
+On the simulator `selected` also carries `simulator`: `{"shock_plant","sine_structure"}`, each a
+model's name or null.
+
+The simulator's models are the plants the multiple-drive modules play on the simulator, chosen
+with the station: `shock_plant` is MIMO Shock's plant, `sine_structure` the sine structure of MIMO
+Sine and MIMO Mixed. `models` in the simulator's entry lists every name with the table size it
+plays (`inputs`: for `shock_plant` the enabled control and monitor rows, for `sine_structure`
+every enabled row that is not a drive; `drives`: the enabled drive rows). A null model, or one left
+out, is sized to the channel table: the module takes its standard model of the table's size. A
+name the simulator does not have is refused `bad_params` (`detail.param`
+`simulator.shock_plant` or `simulator.sine_structure`), and so is `simulator` with `ni`. The
+models are kept while NI is selected and are not used there. A MIMO run configured on other
+models than the station holds when it arms is refused `arm_refused` (`detail`: `configured`,
+`station`): configure it again.
 
 `class` is `sim` (the simulator's plant), `ni_simulated` (driver-simulated NI devices: the real
 driver and tasks, no physical signal) or `ni_real` (physical NI devices). `source` follows from
@@ -3417,7 +3436,6 @@ views travels as a binary frame.
             "law_misses":3,"max_pulses":100,"max_growth_db":6,"max_band_growth_db":10,"divergence_pulses":3,
             "divergence_drive_ratio":1.3,"first_drive_ratio":2,"abort_db":null,
             "scaled_aborts":true,"max_velocity_ips":null,"max_displacement_in":null},
- "simulator":{"plant":null},
  "operator":"Operator","article":"Bracket","notes":"",
  "specification":{"document":"Example procedure","clause":"4.2"},"record":{"streams":true},
  "metadata":[]}
@@ -3470,7 +3488,6 @@ An SRS target replaces `target`:
 | `control.abort_db` | null: twice the standard's amplitude tolerance for `waveform` (2.28 dB under MIL-STD-810), 6 dB for `srs` | Each control's abort margin, dB, above 0, at most 40. The **absolute** line is this margin over the control's target peak at **full level**: a measured peak over it aborts the run at any level (`aborted`, `control_abort_absolute`), whatever `scaled_aborts` says. The **scaled** line is the same margin over the target's peak at the level played |
 | `control.scaled_aborts` | true | On: a measured peak over its scaled line ends the run in the controlled stop (`safe_stop`, `control_abort_scaled`). Off: the pulse is judged failing (the ladder does not climb on it), a warning names every control that crossed its scaled line, the run goes on, and the state carries a standing `notice`. Either way every row reports each control's margin to both lines. It cannot change while a run is live |
 | `control.max_velocity_ips`, `max_displacement_in` | null | A control's peak velocity (in/s) or peak-to-peak displacement (in), predicted or measured, over it ends the run (`kinematics`) |
-| `simulator.plant` | null: chosen by size | The simulator's plant by name: `shock-linear-4x4`, `shock-jointed-4x4-moderate`, `shock-jointed-4x4-severe` or `shock-jointed-6x3`. Null takes `shock-linear-4x4` for 4 controls and 4 drives and `shock-jointed-6x3` for 6 and 3. Ignored on NI |
 | `operator`, `article`, `notes`, `specification`, `record` | empty, null, `{"streams":true}` | The run's record, as Random's (see "Random Test Configuration" and "Run Folders"): the operator's words, what the test is run to, and whether the record holds the inputs and the drives as streams. None of them changes how the run drives. Every MIMO Shock run is recorded in its run folder (`docs/run-folder.md`, "What a MIMO Shock Run Saves") |
 | `metadata` | as shown | Random's |
 
@@ -3513,7 +3530,7 @@ figures).
   limit row as an input on one clock, asks it for `acquisition.fs_hz`, adopts the rate it
   programs, derives the grid and builds the targets at that rate, passes the arm gate and claims
   the run's folder (see "Run Folders"; refused `record_unwritable`, with the path and the reason,
-  when it cannot be written, and the station released). Nothing is driven. On the simulator the plant must be the table's size (`arm_refused`). An imported law
+  when it cannot be written, and the station released). Nothing is driven. On the simulator the run plays the station's `simulator.shock_plant` (Stations), or the plant of the run's size (`shock-linear-4x4` for 4 controls and 4 drives, `shock-jointed-6x3` for 6 and 3), and the plant must be the table's size (`arm_refused`). An imported law
   without a passed check is refused `law_not_checked` on a hardware station. The station's own
   refusals are Random's (`arm_refused`, `hardware_busy`, ...).
 - **`mimo_shock.start`** from `configured` arms first, then plays the identification shot
@@ -4310,7 +4327,6 @@ the simulator takes any law.
            "notch":{"smoothing_ticks":3,"release_ramp_db_per_s":10,"release_hysteresis_db":1,
                     "near_bound_db":3}},
  "feasibility":null,
- "simulator":{"structure":null},
  "operator":"A. Operator","article":"Bracket, serial 7","notes":"",
  "specification":{"document":"Test procedure 12","clause":"4.2"},"record":{"streams":true},
  "metadata":[]}
@@ -4350,7 +4366,6 @@ the simulator takes any law.
 | `limits.channels` | none | Limit channels, 0 to 8: each a table row's `channel` (an enabled input that is not a control) and a `profile` in the profile's form, its bound at each frequency, covering the test's band. Where the predicted or measured response of a limit channel would pass its bound the notch goes in: the controls are held to a share of their reference (its depth), which every built-in law aims for, and on any update where the drive asked for would still pass a bound the whole drive vector is scaled down, its direction kept; a channel outside its own abort band ends the run (`limit_channel`) |
 | `limits.notch` | `{"smoothing_ticks":3,"release_ramp_db_per_s":10,"release_hysteresis_db":1,"near_bound_db":3}` | The ticks each limit channel's measured-over-identified ratio is smoothed over (at least 1); how fast the notch's depth may rise back towards the whole reference once the limit readings allow, dB/s (above 0); how far the readings must allow it to rise before it begins to, dB (0 to 6), so a reading near its bound neither toggles the notch nor releases it with a kick; and how near its bound a limit channel must be, dB (above 0, at most 20), for a notched reference a law returns to be taken |
 | `feasibility` | null | Each shaker's record and moving mass, one per drive: `{"shakers":[{"drive","shaker","moving_mass_lb"}]}` with `drive` the drive's table index and the rest Sine's. Checked at configure and at arm against the references' peaks. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
-| `simulator.structure` | null: chosen by size | The simulator's structure by name, one of its standard sine structures: `sine-linear-4x4`, `sine-softening-4x4-mild`, `sine-softening-4x4-moderate`, `sine-hardening-4x4`, `sine-tall-6x3`, `sine-wide-3x6`, `sine-base-article-6x4` (4 controls, 2 limit channels, 4 drives), `sine-near-singular-4x4`, `sine-weak-4x4` (each drive's cross paths at least 21.9 dB under its direct one) or `sine-loopback-4x4` (four outputs wired to four inputs: unity gain, 0.8 ms delay, no coupling, the bench's twin); null takes the linear structure of the run's size where there is one. Ignored on NI |
 | `operator`, `article`, `notes`, `specification`, `record`, `metadata` | as Sine's | Sine's, for the run's record. None of them changes how the run drives |
 
 MIMO Sine takes no `capture` and no `cola`: a configuration that gives either is refused
@@ -4414,7 +4429,7 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
   tick to the nearest whole frame at that rate, narrows the band to under 0.45 times it (logged),
   passes the arm gate and claims the run's folder (refused `record_unwritable`, with the path and
   the reason, when it cannot be written, and the station released). Nothing is driven. On the
-  simulator the run plays `simulator.structure`, or the linear structure of the table's size
+  simulator the run plays the station's `simulator.sine_structure` (Stations), or the linear structure of the table's size
   (`sine-linear-4x4`, `sine-tall-6x3` or `sine-wide-3x6`); a table of another size is refused at
   configure (`structure_wrong_size`) and at arm (`arm_refused`), so a run never arms on the
   default one-drive simulator. Refusals are otherwise Sine's, with `law_not_checked` on a
@@ -4806,8 +4821,7 @@ Random's own handlers under this module's names, with the same parameters, resul
  "full_level_duration_s":15,
  "law":{"floor":{"id":"pinv_closed","params":{}},"tones":{"id":"matrix","params":{}},
         "bands":{"id":"auto"},"ceiling_rule":{"id":"common_scale"},"fill_rule":{"id":"no_error"}},
- "record":{"streams":true},
- "simulator":{"structure":"sine-linear-4x4"}}
+ "record":{"streams":true}}
 ```
 
 `schema/golden/request_mimo_mixed_configure.json` is a whole configuration. The members are the
@@ -4826,9 +4840,9 @@ reference, with these members of the wire's own:
   The floor's band is the reference's span on that grid.
 - `schedule.mode` is `auto` or `manual`.
 - `record.streams` (default true) keeps the time histories.
-- `simulator.structure` names the simulator's sine structure (`sine-linear-4x4`, ...); without it
-  the simulator takes the standard structure of the table's size, and a size it has none of is
-  refused `arm_refused` at arm.
+- The simulator's sine structure is the station's `simulator.sine_structure` (Stations), as MIMO
+  Sine's; when it is null the simulator takes the standard structure of the table's size, and a
+  size it has none of is refused `arm_refused` at arm.
 
 `derived` is `{"grid":{"fs_hz","n_pts","df_hz","lines"},"band_hz","reference_rms",
 "reference_source","law":{"floor","tones"}}`: `reference_rms` each control's reference rms at full
@@ -7127,8 +7141,8 @@ simulator a Recorder run's inputs carry a stated source, added to the plant's no
 recorded row, in table order, carries row k of the table below, and a fifth row and after repeat
 the four in order. The source repeats every 2.000 s from the run's first frame; each tone starts
 at phase 0 and makes whole cycles in that period. Levels are peak, in each row's unit: the
-simulator works in the row's unit, so a row's sensitivity does not scale it. The shell names the
-source whenever a Recorder run is on the simulator. The wire offers no way to change it.
+simulator works in the row's unit, so a row's sensitivity does not scale it. The shell's Configure
+view names the source while the simulator is the station. The wire offers no way to change it.
 
 | Row | Signal |
 |---|---|

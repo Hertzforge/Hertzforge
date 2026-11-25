@@ -9,8 +9,8 @@ controlled to its own target and judged against its own alarm and abort bands; o
 moves every part by the same dB.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the floor, the tones and narrowbands, the schedule and identification,
-control, limits and the run record, then the run itself. Mixed Mode shares its run bar, station panel,
+channels, the floor, the tones and narrowbands, the schedule and identification,
+control, limits and the run record, then the run itself. Mixed Mode shares its run bar,
 channel table and control-law panel with the other test types, its floor, ladder and identification
 with Random, and its tone tracking and tone law with Sine.
 
@@ -51,13 +51,15 @@ A run goes through these steps in order:
 
 Mixed Mode is in the Single Output group of the test types. Its screen has two steps, Setup and Run,
 under one header line that carries the run's state, the level, parts time and how many parts are on,
-where the data comes from (SIM or the hardware) and who holds control. Setup is in sections, with a
+and who holds control. Setup is in sections, with a
 summary beside every one; a section with something left to fix says how many. **Proceed to Run**
 applies the setup and shows the run.
 
-## Station and Channels
+## Channels
 
-The station and the channel table are shared with every test type. The run controls on the table's
+The station, the simulator or the NI hardware, is set for every test type in the Configure view,
+opened from **Configure** at the upper right of Acquire & Control. The channel table
+is shared with every test type. The run controls on the table's
 enabled control rows and drives on its first enabled drive row. Rows are picked by their number, and
 an edit to one picked row is made to every picked row.
 

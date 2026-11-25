@@ -103,7 +103,7 @@
 			</div>
 		</section>
 	{:else}
-		<p class="aq-panel aq-muted aq-small">Give channels the Control role under Station &amp; Channels; each control gets its breakpoint table here.</p>
+		<p class="aq-panel aq-muted aq-small">Give channels the Control role under Channels; each control gets its breakpoint table here.</p>
 	{/if}
 
 	<section class="aq-panel" aria-labelledby="mmix-ref-pv" data-testid="mmix-ref-preview">

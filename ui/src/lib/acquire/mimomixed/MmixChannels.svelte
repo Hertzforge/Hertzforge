@@ -11,7 +11,6 @@
 	import ChannelTable from '../ChannelTable.svelte';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import { MIMO_MIXED_MAX_CONTROLS, MIMO_MIXED_MAX_DRIVES } from '$lib/protocol/mimoMixed';
 	import { abortVpkOf, setControl } from './mmixSetup';
 	import { volts } from './mmixWords';
@@ -34,7 +33,6 @@
 </script>
 
 <div class="stack">
-	<StationPanel acq={mm.acq} />
 	<ChannelTable acq={mm.acq} />
 
 	<section class="aq-panel" aria-labelledby="mmix-ch-title" data-testid="mmix-channels">

@@ -92,7 +92,7 @@ export const TWR_SCREEN: PulseScreenSpec<TwrPageKind, TwrQuantity> = {
 		['law', { words: 'Law Values', help: "The control law's values on each call, and on its last.", group: 'other' }],
 		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'plays', 'station'],
+	cards: ['run', 'level', 'plays'],
 	pageCards: { plays: ['plays'] }
 };
 

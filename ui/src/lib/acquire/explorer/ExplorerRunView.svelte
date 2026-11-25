@@ -27,15 +27,13 @@
 	interface Props {
 		explorer: ExplorerStore;
 		views: ExplorerViewsState;
-		/** The station panel. */
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { explorer, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
+	let { explorer, views, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(explorer.now);
 	const live = $derived(explorer.frameOfRun);
@@ -90,8 +88,6 @@
 		<ExplorerLevelCard {status} {live} {compact} />
 	{:else if kind === 'steer'}
 		<ExplorerSteer {explorer} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

@@ -28,8 +28,7 @@ describe('the Recorder on the screen frame', () => {
 			['run', true],
 			['recording', true],
 			['recmarks', false],
-			['recordings', false],
-			['station', true]
+			['recordings', false]
 		]);
 		// the recordings card fills its page
 		expect(l.pages[4].panels[0].at).toEqual({ x: 0, y: 0, w: 12, h: 12 });

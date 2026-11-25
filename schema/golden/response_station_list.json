@@ -10,7 +10,83 @@
     "class": "sim",
     "inputs": 8,
     "outputs": 1,
-    "clock": "shared"
+    "clock": "shared",
+    "models": {
+     "shock_plant": [
+      {
+       "name": "shock-linear-4x4",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "shock-jointed-4x4-moderate",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "shock-jointed-4x4-severe",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "shock-jointed-6x3",
+       "inputs": 6,
+       "drives": 3
+      }
+     ],
+     "sine_structure": [
+      {
+       "name": "sine-linear-4x4",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-softening-4x4-mild",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-softening-4x4-moderate",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-hardening-4x4",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-tall-6x3",
+       "inputs": 6,
+       "drives": 3
+      },
+      {
+       "name": "sine-wide-3x6",
+       "inputs": 3,
+       "drives": 6
+      },
+      {
+       "name": "sine-base-article-6x4",
+       "inputs": 6,
+       "drives": 4
+      },
+      {
+       "name": "sine-near-singular-4x4",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-weak-4x4",
+       "inputs": 4,
+       "drives": 4
+      },
+      {
+       "name": "sine-loopback-4x4",
+       "inputs": 4,
+       "drives": 4
+      }
+     ]
+    }
    },
    {
     "kind": "ni",

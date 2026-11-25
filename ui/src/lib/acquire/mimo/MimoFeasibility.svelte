@@ -1,13 +1,11 @@
 <script lang="ts">
 	/**
-	 * Where the test runs: the station (simulator or NI hardware) and how the channels are wired
-	 * to it, exactly as for every test type, and each drive's feasibility. Before identification
+	 * Each drive's feasibility, with the channels: the drive against its ceiling and the shaker
+	 * behind it. Before identification
 	 * the drive a test needs is not known, so feasibility is shown as the service reports it: not
 	 * evaluated until identification, then predicted on the Predict page.
 	 */
 	import { formatFixed } from '$lib/viz/format';
-	import ChannelTable from '../ChannelTable.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import type { MimoState } from './mimoStore.svelte';
 
 	interface Props {
@@ -15,7 +13,6 @@
 	}
 	let { mimo }: Props = $props();
 
-	const acq = $derived(mimo.acq);
 	const feas = $derived(mimo.check && mimo.checkedKey === mimo.key ? mimo.check.feasibility : null);
 	const pred = $derived(mimo.status?.prediction ?? null);
 	const names = $derived(new Map(mimo.channels.drives.map((r) => [r.index, r.description.trim() || `Channel ${r.index}`])));
@@ -23,10 +20,7 @@
 	const VERDICT: Record<string, string> = { pass: 'Within the ratings', advisory: 'Advisory', exceeded: 'Exceeds the ratings', not_evaluated: 'After identification' };
 </script>
 
-<div class="stack">
-	<StationPanel {acq} />
-
-	<section class="aq-panel" aria-labelledby="mf-title" data-testid="mimo-feasibility">
+<section class="aq-panel" aria-labelledby="mf-title" data-testid="mimo-feasibility">
 		<div class="aq-head">
 			<h2 id="mf-title">Feasibility per Drive</h2>
 			<span class="aq-sub">Each drive against its ceiling and the shaker behind it.</span>
@@ -63,19 +57,9 @@
 		{:else}
 			<p class="aq-muted aq-small">Shown once the setup is checked by the control service: it needs the channels and the reference.</p>
 		{/if}
-	</section>
-
-	<ChannelTable {acq} />
-</div>
+</section>
 
 <style>
-	.stack {
-		display: flex;
-		flex-direction: column;
-		gap: var(--sp-3);
-		min-width: 0;
-	}
-
 	.verdict {
 		white-space: nowrap;
 	}

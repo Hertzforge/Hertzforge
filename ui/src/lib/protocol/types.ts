@@ -1265,6 +1265,29 @@ export interface SimStation {
 	inputs: number;
 	outputs: number;
 	clock: 'shared';
+	/** The models the simulator plays for the multiple-drive modules, each with the table size it plays. */
+	models: SimModels;
+}
+
+/**
+ * A simulator model and the table size it plays. For a shock plant, `inputs` counts the enabled
+ * control and monitor rows; for a sine structure, every enabled row that is not a drive.
+ */
+export interface SimModel {
+	name: string;
+	inputs: number;
+	drives: number;
+}
+
+export interface SimModels {
+	shock_plant: SimModel[];
+	sine_structure: SimModel[];
+}
+
+/** The simulator's models a station names; null is "sized to the channel table". */
+export interface SimulatorChoice {
+	shock_plant: string | null;
+	sine_structure: string | null;
 }
 
 export interface NiStation {
@@ -1284,6 +1307,8 @@ export interface StationSelected {
 	inputs: number;
 	outputs: number;
 	timing_family: string | null;
+	/** The simulator's models, on the simulator only. */
+	simulator?: SimulatorChoice;
 }
 
 export interface StationList {

@@ -18,7 +18,7 @@
  *   for the sweep to slow there (granted only with the request switch on).
  */
 
-import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, RunRecordRef, Series, SpectrumView, StationRef, View } from '../types';
+import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, RunRecordRef, Series, SimulatorChoice, SpectrumView, StationRef, View } from '../types';
 import type { LawEntry } from '../mimo';
 import type {
 	MimoSineConfig,
@@ -50,6 +50,8 @@ export interface MimoSineMockHost {
 	broadcast(topic: string, data: Record<string, unknown>): void;
 	rows(): ChannelRow[];
 	station(): { source: DataSource; ref: StationRef };
+	/** The station's simulator models: the structure a simulated run plays. */
+	models(): SimulatorChoice;
 	clientName(conn: MockConnection): string;
 	/** The run's record: refused at arm or start (`unwritable`). */
 	record?: 'unwritable' | 'problem';
@@ -97,6 +99,11 @@ const SIZE: Record<string, [number, number]> = {
 	'sine-wide-3x6': [3, 6],
 	'sine-base-article-6x4': [6, 4]
 };
+
+/** A structure's size: its inputs (every enabled row but a drive) and its drives. */
+export function structureSize(name: string): [number, number] {
+	return SIZE[name] ?? [4, 4];
+}
 
 function refuse(code: 'refused' | 'bad_request', reason: string, message: string, detail?: Record<string, unknown>): never {
 	throw new MockError(code, message, reason as RefusalReason, detail);
@@ -210,6 +217,8 @@ interface Run {
 	source: DataSource;
 	station: StationRef & { structure: string | null };
 	structure: string;
+	/** The structure the station named at configure (null: sized to the table); the arm refuses another. */
+	named: string | null;
 	controls: number[];
 	drives: number[];
 	limits: number[];
@@ -254,10 +263,11 @@ interface Run {
 	record: RunRecordRef | null;
 }
 
-function structureOf(c: MimoSineConfig): string {
+/** The structure a run plays: the station's, else the standard one of the run's size. */
+function structureOf(c: MimoSineConfig, named: string | null): string {
 	const nc = c.channels.controls.length;
 	const nd = c.channels.drives.length;
-	if (c.simulator?.structure) return c.simulator.structure;
+	if (named) return named;
 	if (nc === 6 && nd === 3) return 'sine-tall-6x3';
 	if (nc === 3 && nd === 6) return 'sine-wide-3x6';
 	return 'sine-linear-4x4';
@@ -454,13 +464,14 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		if (s.start_db !== undefined && !levels.includes(s.start_db)) errors.push(item('start_not_a_level', `${s.start_db} dB is not a level of the schedule.`, 'schedule.start_db'));
 		const hyst = c.limits?.notch?.release_hysteresis_db;
 		if (hyst !== undefined && !(typeof hyst === 'number' && hyst >= 0 && hyst <= 6)) errors.push(item('out_of_range', "The notch's release hysteresis runs from 0 to 6 dB.", 'limits.notch.release_hysteresis_db'));
-		const structure = structureOf(c);
-		if (!MOCK_STRUCTURES.includes(structure)) errors.push(item('structure_unknown', `No simulator structure "${structure}".`, 'simulator.structure'));
-		else if (c.simulator?.structure) {
-			// A structure named must be the table's size (its enabled inputs and drives); with none named the mock plays its linear story at any size.
-			const [si, sd] = SIZE[structure] ?? [4, 4];
+		const stationStructure = host.models().sine_structure;
+		const structure = structureOf(c, stationStructure);
+		if (!MOCK_STRUCTURES.includes(structure)) errors.push(item('structure_unknown', `No simulator structure "${structure}".`, 'station.simulator.sine_structure'));
+		else if (stationStructure) {
+			// A structure the station names must be the table's size (its enabled inputs and drives); with none named the mock plays its linear story at any size.
+			const [si, sd] = structureSize(structure);
 			const ni = rows.filter((r) => r.enabled && r.role !== 'drive').length;
-			if (host.station().ref.kind === 'sim' && (si !== ni || sd !== driveRows.length)) errors.push(item('structure_wrong_size', `The simulator's structure "${structure}" has ${si} inputs and ${sd} drives; the table has ${ni} enabled inputs and ${driveRows.length} drives.`, 'simulator.structure'));
+			if (host.station().ref.kind === 'sim' && (si !== ni || sd !== driveRows.length)) errors.push(item('structure_wrong_size', `The simulator's structure "${structure}" has ${si} inputs and ${sd} drives; the table has ${ni} enabled inputs and ${driveRows.length} drives.`, 'station.simulator.sine_structure'));
 		}
 		const lawId = c.control?.law?.id ?? 'matrix';
 		const law = LAWS.find((l) => l.id === lawId);
@@ -1132,7 +1143,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 	function newRun(config: MimoSineConfig, derived: MimoSineDerived): Run {
 		runCount += 1;
 		const st = host.station();
-		const structure = structureOf(config);
+		const named = host.models().sine_structure;
+		const structure = structureOf(config, named);
 		const law = LAWS.find((l) => l.id === (config.control?.law?.id ?? 'matrix')) ?? LAWS[0];
 		const params: Record<string, unknown> = {};
 		for (const p of law.params) params[p.key] = config.control?.law?.params?.[p.key] ?? (p as { default: unknown }).default;
@@ -1149,6 +1161,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			source: st.source,
 			station: { ...st.ref, structure: st.ref.kind === 'sim' ? structure : null },
 			structure,
+			named,
 			controls: config.channels.controls.map((c) => c.channel),
 			drives: config.channels.drives.map((d) => d.channel),
 			limits: (config.limits?.channels ?? []).map((l) => l.channel),
@@ -1193,6 +1206,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 	function armRun(r: Run) {
 		const other = host.otherRun();
 		if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+		const now = host.models().sine_structure;
+		if (host.station().ref.kind === 'sim' && r.named !== now) refuse('refused', 'arm_refused', "The station's simulator models changed after this test was configured; apply the setup again.", { configured: r.named, station: now });
 		claimRecord(r);
 	}
 

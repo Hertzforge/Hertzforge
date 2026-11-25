@@ -303,6 +303,20 @@ SUBSCRIBE_PLOTS = [
     {'id': 't2', 'quantity': 'time', 'channels': [2, 3], 'points': 1024},
 ]
 
+# The simulator's models a station may name (PROTOCOL.md, "Stations"), each with the
+# table size it plays, in the control service's order.
+SIM_SHOCK_PLANTS = [
+    {'name': n, 'inputs': i, 'drives': d} for n, i, d in [
+        ('shock-linear-4x4', 4, 4), ('shock-jointed-4x4-moderate', 4, 4),
+        ('shock-jointed-4x4-severe', 4, 4), ('shock-jointed-6x3', 6, 3)]]
+SIM_SINE_STRUCTURES = [
+    {'name': n, 'inputs': i, 'drives': d} for n, i, d in [
+        ('sine-linear-4x4', 4, 4), ('sine-softening-4x4-mild', 4, 4),
+        ('sine-softening-4x4-moderate', 4, 4), ('sine-hardening-4x4', 4, 4),
+        ('sine-tall-6x3', 6, 3), ('sine-wide-3x6', 3, 6), ('sine-base-article-6x4', 6, 4),
+        ('sine-near-singular-4x4', 4, 4), ('sine-weak-4x4', 4, 4),
+        ('sine-loopback-4x4', 4, 4)]]
+
 TEXT_GOLDENS = {
     'request_random_subscribe': {
         'type': 'request', 'id': 21, 'method': 'random.subscribe',
@@ -339,7 +353,9 @@ TEXT_GOLDENS = {
         'result': {
             'stations': [
                 {'kind': 'sim', 'title': 'Simulator', 'available': True, 'class': 'sim',
-                 'inputs': 8, 'outputs': 1, 'clock': 'shared'},
+                 'inputs': 8, 'outputs': 1, 'clock': 'shared',
+                 'models': {'shock_plant': SIM_SHOCK_PLANTS,
+                            'sine_structure': SIM_SINE_STRUCTURES}},
                 {'kind': 'ni', 'title': 'NI-DAQmx', 'available': True, 'unavailable': None,
                  'scanned_unix': 1793577600,
                  'devices': [
@@ -5560,7 +5576,6 @@ MSHOCK_CONFIG = {
     **MSHOCK_COMMON,
     'verdict': 'all',
     'control': {'law': {'id': 'inverse', 'params': {}}, **MSHOCK_CONTROL},
-    'simulator': {'plant': 'shock-linear-4x4'},
     'operator': 'Operator', 'article': 'Bracket', 'notes': '',
     'specification': {'document': 'Example procedure', 'clause': '4.2'},
     'record': {'streams': True},
@@ -5590,7 +5605,6 @@ MSHOCK_CONFIG_SPECTRUM = {
     'acquisition': {'fs_hz': 12800, 'record_len': 16384, 'band_hz': [5, 2500], 'lead_s': 0.05},
     'verdict': 'global',
     'control': {'law': {'id': 'shape', 'params': {'max_step_db': 6}}, **MSHOCK_CONTROL},
-    'simulator': {'plant': 'shock-jointed-4x4-moderate'},
     'operator': '', 'article': '', 'notes': '', 'specification': None,
     'record': {'streams': False},
     'metadata': [],
@@ -5982,7 +5996,6 @@ MSINE_CONFIG = {
                'notch': {'smoothing_ticks': 3, 'release_ramp_db_per_s': 10,
                          'release_hysteresis_db': 1, 'near_bound_db': 3}},
     'feasibility': None,
-    'simulator': {'structure': 'sine-base-article-6x4'},
     'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': '',
     'specification': {'document': 'Test procedure 12', 'clause': '4.2'},
     'record': {'streams': True},

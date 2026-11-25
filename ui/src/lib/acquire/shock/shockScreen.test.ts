@@ -25,7 +25,7 @@ describe('classical shock on the screen frame', () => {
 			['law', 'numbers', false, false],
 			['readings', 'numbers', false, false]
 		]);
-		expect(SHOCK_HOOKS.cards).toEqual(['run', 'level', 'pulses', 'station']);
+		expect(SHOCK_HOOKS.cards).toEqual(['run', 'level', 'pulses']);
 	});
 
 	it('opens on the six pages it had; the pulse table on the Pulses page and not in the dock', () => {

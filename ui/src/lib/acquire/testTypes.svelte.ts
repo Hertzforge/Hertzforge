@@ -11,6 +11,9 @@
  * - While a run is live, its screen has no way back to the chooser, and opening the workspace goes
  *   straight to the run. A chooser already on screen when a run goes live (started from another
  *   screen) stays, and the run's card and the top bar's run pill return to the run.
+ * - Configure, at the upper right of every one of these screens, sets the station every test type
+ *   runs on (the simulator and its models, or NI-DAQmx devices); it goes back to where it was
+ *   opened from.
  */
 
 import { untrack } from 'svelte';
@@ -99,8 +102,8 @@ export function typesIn(group: TestGroupId, types: readonly TestType[] = TEST_TY
 	return types.filter((t) => t.group === group);
 }
 
-/** What the workspace shows. */
-export type AcquireView = 'chooser' | TestTypeId;
+/** What the workspace shows: the chooser, a test type's screen, or Configure (the station, for every test type). */
+export type AcquireView = 'chooser' | 'configure' | TestTypeId;
 
 /** The test type whose run is live; null when none is; undefined until the control service has said. */
 export type LiveTest = TestTypeId | null | undefined;
@@ -156,6 +159,8 @@ export class TestTypeView {
 	view = $state<AcquireView>('chooser');
 	/** The test type on screen last this session. */
 	last = $state<TestTypeId | null>(null);
+	/** Where Configure was opened from, and goes back to. */
+	configureFrom = $state<'chooser' | TestTypeId>('chooser');
 	/** The workspace opened, and the control service's answer on a live run is not applied yet. */
 	private settling = $state(true);
 	/** A change of screen the operator asked for: the new screen takes the keyboard focus once. */
@@ -237,6 +242,28 @@ export class TestTypeView {
 		this.settling = false;
 		this.view = 'chooser';
 		return true;
+	}
+
+	/**
+	 * Open Configure from the screen on show. It can be opened while a run is live, to read the
+	 * station; the service refuses a change then, and the view says so.
+	 */
+	toConfigure(): void {
+		const here = this.screen;
+		if (here === null || here === 'configure') return;
+		this.configureFrom = here;
+		this.focusNext = true;
+		this.settling = false;
+		this.view = 'configure';
+	}
+
+	/** Back from Configure to where it was opened. */
+	fromConfigure(): void {
+		if (this.view !== 'configure') return;
+		const to = this.configureFrom;
+		this.focusNext = true;
+		if (to === 'chooser') this.view = 'chooser';
+		else this.show(to, true);
 	}
 
 	/** The live run's screen, from wherever the operator is (the top bar's run pill). */

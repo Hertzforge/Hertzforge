@@ -23,7 +23,6 @@
 	interface Props {
 		mixed: MixedStore;
 		views: MixedViewsState;
-		station?: Snippet;
 		onpopout?: (pageId: string) => boolean;
 		onoverride?: () => void;
 		abortKeys: string;
@@ -31,7 +30,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { mixed, views, station, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
+	let { mixed, views, onpopout, onoverride, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(mixed.now);
 	const live = $derived(mixed.frameOfRun);
@@ -90,8 +89,6 @@
 		<MixedInputsCard {live} />
 	{:else if kind === 'log'}
 		<MixedLogCard log={mixed.log} />
-	{:else if kind === 'station' && station}
-		{@render station()}
 	{/if}
 {/snippet}
 

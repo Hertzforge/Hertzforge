@@ -230,11 +230,6 @@ export class MimoState {
 		return this.acq.rows;
 	}
 
-	/** The station selected on the service, for the setup's backend. */
-	get stationKind(): 'sim' | 'ni' | null {
-		return this.acq.selected?.kind ?? null;
-	}
-
 	get isLive(): boolean {
 		return !!this.status && LIVE_STATES.includes(this.status.state);
 	}
@@ -318,7 +313,7 @@ export class MimoState {
 	}
 
 	readonly wire = $derived<MimoSetup | null>(
-		toWireSetup(this.setup, { rows: this.rows, space: this.space, reference: this.reference, law: this.law, backend: this.stationKind })
+		toWireSetup(this.setup, { rows: this.rows, space: this.space, reference: this.reference, law: this.law })
 	);
 	readonly key = $derived(this.wire ? canonical(this.wire) : '');
 
@@ -371,10 +366,10 @@ export class MimoState {
 
 	/** Errors and warnings per section. */
 	get counts(): Record<MimoSection, { errors: number; warnings: number }> {
-		const out = Object.fromEntries((['channels', 'reference', 'control', 'schedule', 'record', 'backend', 'predict'] as MimoSection[]).map((s) => [s, { errors: 0, warnings: 0 }])) as Record<MimoSection, { errors: number; warnings: number }>;
+		const out = Object.fromEntries((['channels', 'reference', 'control', 'schedule', 'record', 'predict'] as MimoSection[]).map((s) => [s, { errors: 0, warnings: 0 }])) as Record<MimoSection, { errors: number; warnings: number }>;
 		for (const [k, v] of Object.entries(this.fieldErrors)) out[sectionOf(k)].errors += v.length;
 		for (const [k, v] of Object.entries(this.fieldWarnings)) out[sectionOf(k)].warnings += v.length;
-		out.backend.errors += this.acq.tableErrorCount;
+		out.channels.errors += this.acq.tableErrorCount;
 		return out;
 	}
 
@@ -392,7 +387,6 @@ export class MimoState {
 
 	/** Why Apply and Start wait, in words, or null. */
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (!this.reference) {
 			if (this.refBusy) return 'The reference is being built.';
 			if (this.setup.reference.method === 'field') return 'Import the reference built from field data first.';
@@ -420,7 +414,7 @@ export class MimoState {
 		const status = this.setupStatus;
 		const apply = gate(!live && !this.acq.isLive, 'apply the setup', this.pending ?? errorWords ?? (status === 'applied' ? 'The service already holds this setup.' : null));
 		const changed = status === 'changed' ? 'The setup changed since it was applied. Apply it first.' : null;
-		const start = gate(state === 'configured', 'start', this.acq.stationDirty ? 'Use the chosen station first.' : changed);
+		const start = gate(state === 'configured', 'start', changed);
 		const p = s?.prediction ?? null;
 		const proceed = gate(
 			state === 'review',

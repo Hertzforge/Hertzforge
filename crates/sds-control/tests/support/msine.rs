@@ -83,17 +83,23 @@ pub fn channels(nc: u32, nm: u32, nd: u32) -> Value {
 }
 
 /// A configuration of `test` on `structure` with `law`: a quick
-/// identification (1 Hz lines, 8 records), no review hold.
+/// identification (1 Hz lines, 8 records), no review hold. The structure is the
+/// station's: a structure other than the linear 4 by 4 (the station's own for a 4
+/// by 4 table) is carried as `simulator`, which the test client moves onto the
+/// station before it configures (`Client::call`).
 pub fn config(structure: &str, nc: u32, nm: u32, nd: u32, test: Value, law: &str) -> Value {
-    json!({
+    let mut cfg = json!({
         "title": "Four-Shaker Test",
         "channels": channels(nc, nm, nd),
         "test": test,
         "identification": {"resolution_hz": 1, "frames": 8, "review": false},
         "control": {"law": {"id": law}},
-        "simulator": {"structure": structure},
         "operator": "A. Operator", "article": "Plate", "notes": "",
-    })
+    });
+    if structure != "sine-linear-4x4" {
+        cfg["simulator"] = json!({"structure": structure});
+    }
+    cfg
 }
 
 pub fn sweep(lo: f64, hi: f64, oct_per_min: f64) -> Value {

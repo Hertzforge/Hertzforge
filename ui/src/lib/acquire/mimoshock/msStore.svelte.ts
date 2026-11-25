@@ -200,7 +200,17 @@ export class MimoShockStore {
 	}
 
 	readonly wire = $derived<MimoShockConfig>(toMsConfig(this.setup, this.law));
-	readonly key = $derived(canonical(this.wire));
+	/**
+	 * The simulator's plant the station names (Configure), null on NI or when it is sized to the
+	 * table. The service plays it and checks it at configure and arm, so it is part of what is applied.
+	 */
+	get stationModel(): string | null {
+		const sel = this.acq.selected;
+		return sel?.kind === 'sim' ? (sel.simulator?.shock_plant ?? null) : null;
+	}
+
+	/** The setup as applied: the wire's configuration and the station's plant; another plant is a setup to apply again. */
+	readonly key = $derived(canonical({ config: this.wire, model: this.stationModel }));
 	readonly local = $derived.by((): FieldErrors => mergeErrors(localErrors(this.setup), lawParamErrors(this.law, this.setup.law.params)));
 
 	get fieldErrors(): FieldErrors {
@@ -235,7 +245,6 @@ export class MimoShockStore {
 	}
 
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (!this.laws) return 'The law catalog has not been read yet.';
 		return null;
 	}

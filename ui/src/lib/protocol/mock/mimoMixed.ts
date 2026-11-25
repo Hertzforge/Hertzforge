@@ -21,7 +21,7 @@
  * at the prediction.
  */
 
-import type { ChannelRow, DataSource, LogEntry, RefusalReason, RunRecordRef, Series, SpectrumView, StationRef, View } from '../types';
+import type { ChannelRow, DataSource, LogEntry, RefusalReason, RunRecordRef, Series, SimulatorChoice, SpectrumView, StationRef, View } from '../types';
 import { packedIndex, type LawEntry, type MimoBuildBreakpointsParams, type MimoReferenceResult } from '../mimo';
 import {
 	defaultAbortVpk,
@@ -62,6 +62,8 @@ export interface MimoMixedMockHost {
 	broadcast(topic: string, data: Record<string, unknown>): void;
 	rows(): ChannelRow[];
 	station(): { source: DataSource; ref: StationRef };
+	/** The station's simulator models: the sine structure a simulated run plays. */
+	models(): SimulatorChoice;
 	clientName(conn: MockConnection): string;
 	/** The tones' laws, world `sine_mimo`; absent: only the built-in `matrix`. */
 	toneLaws?(): LawEntry[];
@@ -176,6 +178,8 @@ interface Run {
 	mode: 'auto' | 'manual';
 	source: DataSource;
 	station: StationRef;
+	/** The sine structure the station named at configure (null: sized to the table); the arm refuses another. */
+	named: string | null;
 	unit: string;
 	n: number;
 	m: number;
@@ -1195,6 +1199,7 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 			mode: config.schedule.mode,
 			source: st.source,
 			station: st.ref,
+			named: host.models().sine_structure,
 			unit: unitRow && typeof unitRow.units === 'string' ? unitRow.units : 'g',
 			n,
 			m: config.drives.length,
@@ -1227,6 +1232,8 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 	function armRun(r: Run) {
 		const other = host.otherRun();
 		if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+		const now = host.models().sine_structure;
+		if (host.station().ref.kind === 'sim' && r.named !== now) refuse('refused', 'arm_refused', "The station's simulator models changed after this test was configured; apply the setup again.", { configured: r.named, station: now });
 		if (r.record) return;
 		const folder = host.recordFolder?.(r.id) ?? `~/Hertzforge_Data/${r.id}`;
 		if (host.record === 'unwritable') refuse('refused', 'record_unwritable', `The run's record could not be written, so the run did not arm: ${folder}.`, { path: folder });

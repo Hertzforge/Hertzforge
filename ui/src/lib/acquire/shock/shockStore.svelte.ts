@@ -283,7 +283,6 @@ export class ShockStore {
 
 	/** Why Apply and Start wait, in words, or null. */
 	get pending(): string | null {
-		if (this.acq.stationDirty) return 'Use the chosen station, or put the choice back, first.';
 		if (!this.laws) return 'The law catalog has not been read yet.';
 		return null;
 	}

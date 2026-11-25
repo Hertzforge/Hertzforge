@@ -58,6 +58,87 @@ pub enum Selection {
     Ni { devices: Vec<String> },
 }
 
+/// The simulator's models for the multiple-drive modules, set with the station
+/// (`station.select` with `simulator`) and read by MIMO Shock, MIMO Sine and MIMO
+/// Mixed when they configure and when they arm. `None` is "sized to the channel
+/// table": the module takes its standard model of the table's size.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SimModels {
+    /// MIMO Shock's plant by name.
+    pub shock_plant: Option<String>,
+    /// MIMO Sine's and MIMO Mixed's sine structure by name.
+    pub sine_structure: Option<String>,
+}
+
+impl SimModels {
+    /// Read `simulator` from `station.select`'s params: absent or null members are
+    /// "sized to the table"; a name the simulator does not have is refused.
+    pub fn from_params(v: Option<&Value>) -> Result<SimModels, MethodError> {
+        let m = match v {
+            None | Some(Value::Null) => return Ok(SimModels::default()),
+            Some(Value::Object(m)) => m,
+            Some(_) => {
+                return Err(MethodError::bad_params(
+                    "simulator",
+                    "\"simulator\" is an object of model names.",
+                ))
+            }
+        };
+        if let Some(k) = m
+            .keys()
+            .find(|k| !matches!(k.as_str(), "shock_plant" | "sine_structure"))
+        {
+            return Err(MethodError::bad_params(
+                "simulator",
+                format!("\"simulator\" has no member \"{k}\"."),
+            ));
+        }
+        let name = |key: &str, known: &[&str]| -> Result<Option<String>, MethodError> {
+            match m.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(n)) if known.contains(&n.as_str()) => Ok(Some(n.clone())),
+                Some(Value::String(n)) => Err(MethodError::bad_params(
+                    &format!("simulator.{key}"),
+                    format!(
+                        "The simulator has no model \"{n}\"; it has {}.",
+                        known.join(", ")
+                    ),
+                )),
+                Some(_) => Err(MethodError::bad_params(
+                    &format!("simulator.{key}"),
+                    "A model is named by its text, or null for the table's size.",
+                )),
+            }
+        };
+        Ok(SimModels {
+            shock_plant: name("shock_plant", &crate::mimo_shock::config::PLANTS)?,
+            sine_structure: name(
+                "sine_structure",
+                &crate::mimo_sine::config::structure_names(),
+            )?,
+        })
+    }
+
+    /// The models as the protocol states them.
+    pub fn to_json(&self) -> Value {
+        json!({"shock_plant": self.shock_plant, "sine_structure": self.sine_structure})
+    }
+}
+
+/// Refuse an arm whose run was configured on other simulator models than the
+/// station holds now: the run's checks, view and record name the configured one.
+pub fn models_unchanged(configured: Option<&str>, now: Option<&str>) -> Result<(), MethodError> {
+    if configured == now {
+        return Ok(());
+    }
+    Err(MethodError::named(
+        ErrorCode::Refused,
+        "arm_refused",
+        "The station's simulator models changed after this test was configured; apply the          setup again.",
+    )
+    .with_detail(json!({"configured": configured, "station": now})))
+}
+
 /// One scan's outcome.
 #[derive(Debug, Clone)]
 pub struct Scan {
@@ -84,6 +165,9 @@ pub struct Stations {
     scanner: Arc<dyn NiScanner>,
     last: Option<Scan>,
     selected: Selection,
+    /// The simulator's models, kept while NI is selected so returning to the
+    /// simulator states them again.
+    sim_models: SimModels,
     /// The class of the NI selection, from the scan it was checked against.
     ni_class: StationClass,
 }
@@ -94,6 +178,7 @@ impl Stations {
             scanner,
             last: None,
             selected: Selection::Sim,
+            sim_models: SimModels::default(),
             ni_class: StationClass::NiSimulated,
         }
     }
@@ -131,9 +216,15 @@ impl Stations {
         }
     }
 
-    /// Select the simulator.
-    pub fn select_sim(&mut self) {
+    /// Select the simulator with its models.
+    pub fn select_sim(&mut self, models: SimModels) {
         self.selected = Selection::Sim;
+        self.sim_models = models;
+    }
+
+    /// The simulator's models (what a simulated MIMO run plays).
+    pub fn sim_models(&self) -> &SimModels {
+        &self.sim_models
     }
 
     /// Select NI devices, checked against `scan` (fresh) and the hardware lock.
@@ -209,6 +300,7 @@ impl Stations {
             Selection::Sim => json!({
                 "kind": "sim", "devices": [], "class": "sim", "source": "SIM",
                 "inputs": SIM_INPUTS, "outputs": SIM_OUTPUTS, "timing_family": null,
+                "simulator": self.sim_models.to_json(),
             }),
             Selection::Ni { devices } => {
                 let scan = self.devices();
@@ -238,7 +330,31 @@ impl Stations {
 /// The simulator's station entry.
 pub fn sim_station() -> Value {
     json!({"kind": "sim", "title": "Simulator", "available": true, "class": "sim",
-           "inputs": SIM_INPUTS, "outputs": SIM_OUTPUTS, "clock": "shared"})
+           "inputs": SIM_INPUTS, "outputs": SIM_OUTPUTS, "clock": "shared",
+           "models": sim_model_list()})
+}
+
+/// The simulator's models a station may name, each with the table size it plays:
+/// `shock_plant` counts enabled control and monitor rows as inputs, `sine_structure`
+/// every enabled row that is not a drive.
+pub fn sim_model_list() -> Value {
+    let shock: Vec<Value> = crate::mimo_shock::config::PLANTS
+        .iter()
+        .filter_map(|n| {
+            hertzforge_station::SimShockPlant::from_name(n).map(|p| {
+                let (i, d) = p.dims();
+                json!({"name": n, "inputs": i, "drives": d})
+            })
+        })
+        .collect();
+    let sine: Vec<Value> = hertzforge_station::SimSineStructure::ALL
+        .iter()
+        .map(|s| {
+            let (i, d) = s.dims();
+            json!({"name": s.name(), "inputs": i, "drives": d})
+        })
+        .collect();
+    json!({"shock_plant": shock, "sine_structure": sine})
 }
 
 /// The protocol name of a station class.
@@ -892,5 +1008,72 @@ mod tests {
         let mut st = build(&plan, &DriverScanner).unwrap();
         assert_eq!(st.backend.caps().max_output_channels, 2);
         mimo_shock_arm(&mut st, &mimo_shock_table(1, 2)).unwrap();
+    }
+
+    #[test]
+    fn the_simulators_models_are_held_with_the_station_and_named_in_selected() {
+        let mut st = Stations::new(Arc::new(FixedScanner(Ok(Vec::new()))));
+        assert_eq!(
+            st.selected_json()["simulator"],
+            json!({"shock_plant": null, "sine_structure": null})
+        );
+        let models = SimModels::from_params(Some(&json!({
+            "shock_plant": "shock-jointed-6x3", "sine_structure": "sine-weak-4x4"})))
+        .unwrap();
+        st.select_sim(models.clone());
+        assert_eq!(st.sim_models(), &models);
+        assert_eq!(
+            st.selected_json()["simulator"],
+            json!({"shock_plant": "shock-jointed-6x3", "sine_structure": "sine-weak-4x4"})
+        );
+        // The list names every model the station may take, with its size.
+        let list = st.list();
+        let shock = list["stations"][0]["models"]["shock_plant"]
+            .as_array()
+            .unwrap();
+        assert_eq!(shock.len(), crate::mimo_shock::config::PLANTS.len());
+        assert!(shock.contains(&json!({"name": "shock-jointed-6x3", "inputs": 6, "drives": 3})));
+        let sine = list["stations"][0]["models"]["sine_structure"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            sine.len(),
+            crate::mimo_sine::config::structure_names().len()
+        );
+    }
+
+    #[test]
+    fn a_model_the_simulator_does_not_have_is_refused_by_its_param() {
+        for (v, param) in [
+            (json!({"shock_plant": "no-such"}), "simulator.shock_plant"),
+            (
+                json!({"sine_structure": "sine-none"}),
+                "simulator.sine_structure",
+            ),
+            (json!({"sine_structure": 3}), "simulator.sine_structure"),
+            (json!({"plant": "shock-linear-4x4"}), "simulator"),
+            (json!("sine-weak-4x4"), "simulator"),
+        ] {
+            let e = SimModels::from_params(Some(&v)).unwrap_err();
+            assert_eq!(e.reason, Some("bad_params"), "{v}");
+            assert_eq!(
+                e.detail.as_deref().map(|d| d["param"].clone()),
+                Some(json!(param)),
+                "{v}"
+            );
+        }
+        assert_eq!(SimModels::from_params(None).unwrap(), SimModels::default());
+        assert_eq!(
+            SimModels::from_params(Some(&json!({"shock_plant": null}))).unwrap(),
+            SimModels::default()
+        );
+    }
+
+    #[test]
+    fn an_arm_is_refused_when_the_models_changed_since_configure() {
+        assert!(models_unchanged(Some("sine-weak-4x4"), Some("sine-weak-4x4")).is_ok());
+        assert!(models_unchanged(None, None).is_ok());
+        assert!(models_unchanged(None, Some("sine-weak-4x4")).is_err());
+        assert!(models_unchanged(Some("sine-weak-4x4"), None).is_err());
     }
 }
