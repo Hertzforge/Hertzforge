@@ -216,7 +216,7 @@
 				{/if}
 			{:else}
 			<div class="runrow">
-				{#if a.op.commits && !a.op.opens_previewed}
+				{#if a.previewButton}
 					<button class="btn run" data-testid="preview-op" onclick={() => a.run(true)} disabled={a.running || !app.analysis.isOpen} title="Show what Apply would do, without changing the project">Preview</button>
 				{/if}
 				<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>

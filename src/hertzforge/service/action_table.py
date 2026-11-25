@@ -84,6 +84,8 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'solve_modes': (('geometry',), 'Its element groups have no properties yet'),
     'plan_instrumentation': (('shape_set',), 'It needs a mode above 0 Hz on a geometry with elements'),
     'create_sensors': (('geometry',), 'It holds no points measured on accelerometers'),
+    'geometry_from_motion': (
+        _HISTORY, 'It needs seven channels of translation with their units declared'),
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
     'expand_modes': (('shape_set',), "It needs a model's shape set to expand through"),
     'synthesize_modal_frfs': (('shape_set',), 'It needs real modes'),
@@ -658,17 +660,29 @@ def _sets_row(project: Any, op: Operation, names: list[str],
 #: operations on one time history that also take several picked together: the first is
 #: previewed, and Apply makes a copy of each with the same settings, into a group of their own
 #: (`Project.filter_histories`, `Project.rescale_histories`)
-SEVERAL_HISTORIES = frozenset({'project.set_filter', 'project.rescale'})
+SEVERAL_HISTORIES = frozenset({'project.set_filter', 'project.rescale',
+                               'project.geometry_from_motion'})
+#: of those, the ones that read their histories together and take one geometry beside
+#: them, as the param named: the nodes already placed (`Project.motion_sensors`)
+GEOMETRY_BESIDE = {'project.geometry_from_motion': 'known'}
 
 
 def _several_row(op: Operation, names: list[str], kinds: list[str],
                  records: dict[str, list[int]]) -> dict[str, Any] | None:
     """The row of an operation in `SEVERAL_HISTORIES` for several objects picked: the first
     history its source and the rest in `more`, the records picked under each in `records`
-    and `more_records` where it reads them; no row unless every object is a time history."""
-    if any(kind != 'time_history' for kind in kinds):
+    and `more_records` where it reads them; no row unless every object is a time history,
+    but for the one geometry an operation in `GEOMETRY_BESIDE` takes with them."""
+    beside = GEOMETRY_BESIDE.get(op.id)
+    stage = [name for name, kind in zip(names, kinds, strict=True) if kind == 'geometry']
+    if beside and len(stage) == 1:
+        kinds = [kind for kind in kinds if kind != 'geometry']
+        names = [name for name in names if name != stage[0]]
+    if any(kind != 'time_history' for kind in kinds) or len(names) < 2:
         return None
     fill = {'source': names[0], 'more': '\n'.join(names[1:])}
+    if beside and len(stage) == 1:
+        fill[beside] = stage[0]
     params = {p.name for p in op.params}
     if 'more_records' in params:
         fill['records'] = _runs(records.get(names[0], []))

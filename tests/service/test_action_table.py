@@ -134,9 +134,10 @@ def test_each_object_goes_on_the_param_that_takes_it_whichever_was_picked_first(
 
 def test_the_stage_rule_makes_no_false_combinations(plate):
     """A geometry stands by beside data as the stage, so Averaging fills from a
-    time history alone; it is not something the two do together."""
+    time history alone; it is not something the two do together. Infer Geometry is:
+    the geometry holds the nodes already placed."""
     col = column(table(plate, named(plate, 'geometry')), 'geometry', 'time_history')
-    assert verbs_in(col) == ['Animate']
+    assert verbs_in(col) == ['Animate', 'Infer Geometry']
 
 
 def test_two_geometries_default_to_the_overlay(plate):
