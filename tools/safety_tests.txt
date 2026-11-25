@@ -527,6 +527,9 @@ sds-control             tests/mimo_sine_law_check.rs           mimo_sine_an_unch
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_a_run_never_arms_on_the_default_one_drive_simulator  arm-gate  a multiple-drive sine run never arms on a station of another size
 sds-control             tests/mimo_sine_record.rs              mimo_sine_a_record_that_cannot_be_written_refuses_the_arm  arm-gate      a multiple-drive sine run whose record cannot be written does not arm
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_every_refusal_of_a_configuration_is_named       checked-input  every multiple-drive sine configuration error is refused by name
+sds-control             tests/mimo_sine_protocol.rs            mimo_sine_refuses_an_arm_after_the_stations_structure_changed  arm-gate  a MIMO Sine run configured on other station models than it arms on is refused
+sds-control             tests/mimo_shock_protocol.rs           mimo_shock_refuses_an_arm_after_the_stations_plant_changed     arm-gate  a MIMO Shock run configured on other station models than it arms on is refused
+sds-control             src/station.rs                         a_model_the_simulator_does_not_have_is_refused_by_its_param    checked-input  a simulator model the station is given is checked by name
 
 # ---------------------------------------------------------------- Modal Test
 hertzforge-modal-test   src/setup.rs                           modal_test_level_over_ceiling_is_refused_by_the_bounded_crest  drive-ceiling  a Modal Test drive level whose bounded crest is over the ceiling is refused
