@@ -9,6 +9,7 @@
 
 use super::super::math;
 use crate::Params;
+use math::followed::{FollowedLaw, FollowedOptions};
 use math::inverse::{InverseExtras, InverseLaw, InverseParams};
 use math::modal::{fit_modal, FitOptions};
 use math::provider::{
@@ -451,5 +452,115 @@ pub fn shape_config(p: &Params) -> Result<ShapeConfig, String> {
         model: model_options(p)?,
         gain_clamp_db: p.number("gain_clamp_db")?,
         stall_tol_db: p.number("stall_tol_db")?,
+    })
+}
+
+/// `followed` or `followed-hold` as its parameters build it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FollowedConfig {
+    /// The catalog id: `followed` or `followed-hold`.
+    pub id: &'static str,
+    /// The law's options. The probe check's levels are replaced at build by
+    /// the run's probes, the ladder's first levels.
+    pub options: FollowedOptions,
+}
+
+impl FollowedConfig {
+    /// `followed` at its declared defaults.
+    pub fn followed() -> Self {
+        let d = super::defaults(&super::FOLLOWED);
+        followed_config(&d).expect("the declared defaults are valid")
+    }
+
+    /// `followed-hold` at its declared defaults.
+    pub fn followed_hold() -> Self {
+        let d = super::defaults(&super::FOLLOWED_HOLD);
+        followed_hold_config(&d).expect("the declared defaults are valid")
+    }
+
+    /// The options for a run on `ladder_db`: the probe check, when on, checks
+    /// the ladder's first `probe_levels` levels below full level, the levels
+    /// the law plays on the identification.
+    pub fn options_for(&self, ladder_db: &[f64]) -> FollowedOptions {
+        let mut o = self.options.clone();
+        let n = o.probe_levels;
+        if let Some(c) = o.probe_check.as_mut() {
+            c.probes_db = ladder_db
+                .iter()
+                .copied()
+                .filter(|l| *l < 0.0)
+                .take(n)
+                .collect();
+        }
+        o
+    }
+
+    /// The law for `setup` on the ladder `ladder_db`.
+    pub fn build(&self, setup: math::Setup, ladder_db: &[f64]) -> Result<BuiltLaw, String> {
+        let law = FollowedLaw::new(setup, self.options_for(ladder_db))?;
+        Ok(BuiltLaw {
+            law: Box::new(law),
+            values: if self.id == "followed" {
+                FOLLOWED_VALUES
+            } else {
+                FOLLOWED_HOLD_VALUES
+            },
+            build: ModelBuild {
+                modes: 0,
+                fit_residual: f64::NAN,
+                starts_on_fallback: false,
+            },
+        })
+    }
+}
+
+/// The values `followed` reports, in its declaration's order.
+pub const FOLLOWED_VALUES: &[&str] = &[
+    "worst_srs_error_db",
+    "weight",
+    "drive_rms_full_level",
+    "model_source",
+    "model_prediction_residual",
+];
+
+/// The values `followed-hold` reports, in its declaration's order.
+pub const FOLLOWED_HOLD_VALUES: &[&str] = &[
+    "worst_srs_error_db",
+    "weight",
+    "drive_rms_full_level",
+    "model_source",
+    "model_prediction_residual",
+    "held",
+    "probe_predicted_over_db",
+    "probe_scale_db",
+];
+
+/// `followed` from checked values.
+pub fn followed_config(p: &Params) -> Result<FollowedConfig, String> {
+    Ok(FollowedConfig {
+        id: "followed",
+        options: FollowedOptions {
+            ceiling: p.number("ceiling_pct")? / 100.0,
+            ..FollowedOptions::followed()
+        },
+    })
+}
+
+/// `followed-hold` from checked values.
+pub fn followed_hold_config(p: &Params) -> Result<FollowedConfig, String> {
+    let mut o = FollowedOptions::followed_hold();
+    if !p.toggle("power_bound")? {
+        o.resolved_power_gate = None;
+    }
+    o.hold_db = p.toggle("hold")?.then_some(p.number("hold_db")?);
+    let limit = p.number("probe_limit_db")?;
+    if !p.toggle("probe_check")? {
+        o.probe_check = None;
+    } else if let Some(c) = o.probe_check.as_mut() {
+        c.limit_db = limit;
+    }
+    Ok(FollowedConfig {
+        id: "followed-hold",
+        options: o,
     })
 }

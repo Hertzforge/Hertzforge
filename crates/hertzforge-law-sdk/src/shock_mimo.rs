@@ -1200,8 +1200,137 @@ pub mod builtin {
         values: &[DRIVE_RMS],
     };
 
+    const WORST_SRS: ValueDecl = ValueDecl {
+        key: "worst_srs_error_db",
+        label: "Worst SRS error",
+        unit: "dB",
+        help: "The largest SRS deviation over every control and frequency.",
+    };
+    const WEIGHT: ValueDecl = ValueDecl {
+        key: "weight",
+        label: "Weight",
+        unit: "",
+        help: "The weight on the SRS ratio at the level just played.",
+    };
+
+    /// `followed`: `shape` through a model that follows a structure that
+    /// softens with level, the softening held under a ceiling.
+    pub const FOLLOWED: LawDecl = LawDecl {
+        id: "followed",
+        name: "followed",
+        version: "0.1.0",
+        summary: "Shapes each control's target by its SRS ratio after every pulse, as `shape` \
+                  does, through a model that follows a structure that softens with level: the \
+                  identification and copies of it shifted down in frequency, octave band by octave \
+                  band, by a softening fitted from the run's own pulses and carried up the ladder. \
+                  The first two levels of the ladder are its probes, played on the identification. \
+                  On the simulator, over 380 structures, it ended at full level in tolerance in \
+                  about three runs in four and kept every pulse within 3 dB of the full-level \
+                  target in about nine in ten. It is weakest on strongly nonlinear structures \
+                  (about three runs in ten ended in tolerance) and on SRS targets (about one in \
+                  two); most misses stop below full level. The softening ceiling is a number for \
+                  your structure: without one a strongly softening structure can be played 8 to 11 \
+                  dB over at full level. Measured on the simulator only; it has not run on a \
+                  shaker.",
+        targets: &[TargetKind::Srs],
+        params: &[ParamDecl {
+            key: "ceiling_pct",
+            label: "Softening ceiling",
+            help: "The largest drop in frequency the model assumes in any band. Larger lets it \
+                   follow a structure that softens more, and risks an over-test where the fit \
+                   is wrong.",
+            knob: number(1.0, 50.0, 0.5, 12.0, "%"),
+        }],
+        values: &[WORST_SRS, WEIGHT, DRIVE_RMS, MODEL_SOURCE, MODEL_RESIDUAL],
+    };
+
+    /// `followed-hold`: `followed` with no ceiling, and the probe check, the
+    /// power bound and the hold.
+    pub const FOLLOWED_HOLD: LawDecl = LawDecl {
+        id: "followed-hold",
+        name: "followed-hold",
+        version: "0.1.0",
+        summary: "`followed` with no softening ceiling and three protections, each of which you \
+                  can turn off: before each probe it predicts the probe's SRS through the \
+                  identification and scales the probe down when the prediction, with a margin from \
+                  the errors measured so far, is over the probe limit; it bounds how fast the \
+                  assumed softening grows with level; and on a repeat pulse at one level, once \
+                  every SRS point of every control is within the hold tolerance, it plays the same \
+                  drive again. It is cautious and often stops below full level. On the simulator, \
+                  over 380 structures, it kept every pulse within 3 dB of the full-level target in \
+                  98 runs in 100, the most of the laws studied, but ended in tolerance in only \
+                  about half the runs, most often because it stayed at its probes, and in about \
+                  one run in seven on SRS targets. Once it holds it stops correcting, and a held \
+                  pulse can drift on a structure that changes during the run. Under measurement \
+                  noise the probe check can stall a structure that does not soften; turn it off \
+                  there. Measured on the simulator only; it has not run on a shaker.",
+        targets: &[TargetKind::Srs],
+        params: &[
+            ParamDecl {
+                key: "probe_check",
+                label: "Probe check",
+                help: "Before each of the ladder's first two levels, predict the pulse's SRS \
+                       and scale the pulse down when it is predicted over the probe limit.",
+                knob: Knob::Toggle(true),
+            },
+            ParamDecl {
+                key: "probe_limit_db",
+                label: "Probe limit",
+                help: "The largest predicted SRS excess over a probe's target, with the margin, \
+                       before the probe is scaled down.",
+                knob: number(0.5, 6.0, 0.5, 3.0, "dB"),
+            },
+            ParamDecl {
+                key: "power_bound",
+                label: "Power bound",
+                help: "Carry the fitted softening up the ladder with the measured power of the \
+                       amplitude, rounded up, instead of the largest power.",
+                knob: Knob::Toggle(true),
+            },
+            ParamDecl {
+                key: "hold",
+                label: "Hold",
+                help: "On a repeat pulse whose every SRS point is within the hold tolerance, \
+                       play the same drive again.",
+                knob: Knob::Toggle(true),
+            },
+            ParamDecl {
+                key: "hold_db",
+                label: "Hold tolerance",
+                help: "How close to its target every SRS point must be for the hold.",
+                knob: number(0.5, 6.0, 0.5, 3.0, "dB"),
+            },
+        ],
+        values: &[
+            WORST_SRS,
+            WEIGHT,
+            DRIVE_RMS,
+            MODEL_SOURCE,
+            MODEL_RESIDUAL,
+            ValueDecl {
+                key: "held",
+                label: "Held",
+                unit: "",
+                help: "1 when the last pulse's drive is played again unchanged.",
+            },
+            ValueDecl {
+                key: "probe_predicted_over_db",
+                label: "Probe predicted excess",
+                unit: "dB",
+                help: "The probe's largest SRS excess over its target as predicted before it \
+                       was played.",
+            },
+            ValueDecl {
+                key: "probe_scale_db",
+                label: "Probe scale",
+                unit: "dB",
+                help: "How far the probe check scaled the probe; zero when it did not.",
+            },
+        ],
+    };
+
     /// Every built-in law, the default for a waveform target first.
-    pub const ALL: [LawDecl; 3] = [INVERSE, SHAPE, PAIRED];
+    pub const ALL: [LawDecl; 5] = [INVERSE, SHAPE, PAIRED, FOLLOWED, FOLLOWED_HOLD];
 
     /// The `inverse` parameters from checked values.
     pub fn inverse_params(p: &Params) -> Result<math::inverse::InverseParams, String> {
@@ -1529,6 +1658,10 @@ mod tests {
         assert_eq!(d.number("weight").unwrap(), p.weight);
         assert_eq!(d.integer("smooth_lines").unwrap() as usize, p.smooth_lines);
         assert_eq!(d.number("max_step_db").unwrap(), p.max_step_db);
+        let f = followed_config(&defaults(&FOLLOWED)).unwrap();
+        assert_eq!(f.options, math::followed::FollowedOptions::followed());
+        let h = followed_hold_config(&defaults(&FOLLOWED_HOLD)).unwrap();
+        assert_eq!(h.options, math::followed::FollowedOptions::followed_hold());
         for decl in ALL {
             let m = decl.manifest();
             assert_eq!(m.law.name, decl.id);

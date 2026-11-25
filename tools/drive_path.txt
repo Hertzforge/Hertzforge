@@ -76,6 +76,8 @@ laws/mimo-nearly-independent        a law file: computes a drive
 laws/mimo-open-loop                 a law file: computes a drive
 laws/mimo-pinv                      a law file: computes a drive
 laws/mimo-shape                     a law file: computes a drive
+laws/mimo-shock-followed            a law file: computes a drive
+laws/mimo-shock-followed-hold       a law file: computes a drive
 laws/mimo-shock-inverse             a law file: computes a drive
 laws/mimo-shock-paired              a law file: computes a drive
 laws/mimo-shock-shape               a law file: computes a drive

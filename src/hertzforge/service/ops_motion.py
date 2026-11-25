@@ -50,8 +50,8 @@ def _settings(params: dict[str, Any], project: Any) -> dict[str, Any]:
 def _scene(title: str, recovered: Any) -> dict:
     """The sensors where they were placed: a point each, colored by how
     much of its motion the fit leaves unexplained, an arrow along each
-    channel, and through a one-axis sensor the line it may sit anywhere
-    along."""
+    channel the way the data has it reading, and through a one-axis
+    sensor the line it may sit anywhere along."""
     sensors = recovered.sensors
     centers = np.array([one.position for one in sensors])
     reach = float(np.linalg.norm(np.ptp(centers, axis=0))) or 1.0
@@ -64,10 +64,12 @@ def _scene(title: str, recovered: Any) -> dict:
     rows = {one.node: row for row, one in enumerate(sensors)}
     drawn, labels = [], []
     for channel in recovered.motion.channels:
-        one = recovered.sensor(channel.node)
-        drawn.append((False, (rows[channel.node], channel.sign * one.frame[channel.axis],
-                              channel.axis)))
-        labels.append(channel.dof)
+        # as the data has it: a sensor that is left-handed as labeled is drawn left-handed,
+        # and a channel left out of its node's sensor has no arrow
+        along = recovered.reads_along(channel)
+        if along is not None:
+            drawn.append((False, (rows[channel.node], along, channel.axis)))
+            labels.append(channel.dof)
     view['arrows'] = dof_arrow_solids(centers, drawn, 0.08 * reach, labels)
     ends = [end for one in sensors if one.slides
             for end in (one.position - 0.25 * reach * one.frame[one.axes[0]],
@@ -102,11 +104,12 @@ def _table(title: str, recovered: Any) -> dict:
     rows = []
     for one in recovered.sensors:
         axes = ' '.join('XYZ'[axis] for axis in one.axes)
-        note = f'anywhere along its {axes}' if one.slides else ''
+        note = '; '.join(filter(None, [f'anywhere along its {axes}' if one.slides else '',
+                                       one.note]))
         rows.append([str(one.node), axes, *(f'{value:.6g}' for value in one.position),
                      f'{100 * one.misfit:.2f}', note])
     return v.table(title, ['Node', 'Axes', f'X{unit}', f'Y{unit}', f'Z{unit}', 'Misfit [%]',
-                           'Place'], rows)
+                           'Note'], rows)
 
 
 def _readings(recovered: Any, names: list[str], settings: dict[str, Any]) -> list[dict]:
@@ -115,7 +118,10 @@ def _readings(recovered: Any, names: list[str], settings: dict[str, Any]) -> lis
     kinds = ', '.join(f'{count} of {word}' for count, word in
                       zip(counts, ('three axes', 'two axes', 'one axis'), strict=True) if count)
     low, high = motion.band
-    rows = [v.row('Sensors', f'{len(recovered.sensors)} placed: {kinds}', None, 'pass'),
+    # placed, but not as labeled: the notes below say which DOFs
+    labeled = not recovered.left_out and not any(one.note for one in recovered.sensors)
+    rows = [v.row('Sensors', f'{len(recovered.sensors)} placed: {kinds}', None,
+                  'pass' if labeled else 'warn'),
             v.row('Histories', ', '.join(names), None, 'info'),
             v.row('Band', f'{low:.4g} to {high:.4g} Hz'
                   + ('' if settings['band'] else ', the lowest in which six motions stand '

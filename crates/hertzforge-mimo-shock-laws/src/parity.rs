@@ -5,7 +5,7 @@
 //! mathematics runs natively ([`MathLaw`]), and how a native built-in is shown
 //! to match its law file.
 
-use hertzforge_law_sdk::shock_mimo::builtin::{InverseConfig, ShapeConfig};
+use hertzforge_law_sdk::shock_mimo::builtin::{FollowedConfig, InverseConfig, ShapeConfig};
 use hertzforge_law_sdk::shock_mimo::math::{self, LawSteps};
 use hertzforge_mimo_shock::{
     ControlVerdict, MimoShockLaw, PulseInputs, PulseOutputs, Setup, Target,
@@ -130,6 +130,13 @@ impl MathLaw {
     pub fn paired(setup: &Setup, params: math::paired::PairedParams) -> Result<Self, String> {
         let law = math::paired::PairedLaw::new(math_setup(setup), params)?;
         Ok(Self::new("paired", setup, Box::new(law)))
+    }
+
+    /// `followed` or `followed-hold` as `config` builds it (the built-in's own
+    /// constructor), on the run's ladder.
+    pub fn followed_with(setup: &Setup, config: &FollowedConfig) -> Result<Self, String> {
+        let law = config.build(math_setup(setup), &setup.ladder_db)?;
+        Ok(Self::new(config.id, setup, Box::new(law)))
     }
 }
 

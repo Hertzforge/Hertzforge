@@ -66,6 +66,12 @@ DEAD = 1e-12
 GOOD_MISFIT = 0.01
 #: a fit further than this from the measured subspace is warned of
 POOR_MISFIT = 0.05
+#: how many sensors a poor fit is looked into by releasing, at most
+MOST_RELEASED = 3
+#: two channels are axes of one sensor when their directions are within this of a right
+#: angle, degrees, and their lines pass this close, as a part of the layout's size
+SQUARE = 5.0
+MEETING = 0.03
 #: random starts tried when there is no linear one, and after a poor linear one, which
 #: random starts seldom better
 STARTS = 24
@@ -123,11 +129,21 @@ class Sensor:
     position: np.ndarray
     #: the part of its channels' rigid motion the fit leaves unexplained
     misfit: float = 0.0
+    #: the axes whose channel reads along minus the frame's axis: a sensor whose X, Y and Z
+    #: are a left-handed set as labeled is given a right-handed frame with its Z reversed
+    reversed: tuple[int, ...] = ()
+    #: what is wrong with its DOFs as labeled, in a few words; '' when nothing was found
+    note: str = ''
 
     @property
     def slides(self) -> bool:
         """Whether its place along its own axis is open."""
         return len(self.axes) == 1
+
+    def reads_along(self, axis: int, sign: float = 1.0) -> np.ndarray:
+        """The direction a channel on `axis` with `sign` reads along, as
+        the data has it, which for a reversed axis is against the frame."""
+        return (-sign if axis in self.reversed else sign) * self.frame[axis]
 
 
 @dataclass(frozen=True)
@@ -137,7 +153,9 @@ class Recovered:
     axes or more that are farthest apart (`span_nodes`) then one apart.
     `misfit` is the part of the measured motion the sensors as placed do
     not explain, 0 to 1. `image_open` says the mirror image fits the
-    data as well and nothing chose between them."""
+    data as well and nothing chose between them. `left_out` are the DOFs
+    of channels that do not measure where their node's other channels do,
+    which are not part of any sensor here."""
 
     sensors: tuple[Sensor, ...]
     motion: Motion
@@ -147,10 +165,19 @@ class Recovered:
     image_open: bool = True
     span_nodes: tuple[int, int] | None = None
     notes: tuple[str, ...] = field(default=())
+    left_out: tuple[str, ...] = ()
 
     def sensor(self, node: int) -> Sensor:
         """The sensor at `node`."""
         return next(one for one in self.sensors if one.node == node)
+
+    def reads_along(self, channel: Channel) -> np.ndarray | None:
+        """The direction `channel` reads along, or None for a channel
+        that was left out of its node's sensor."""
+        if channel.dof in self.left_out:
+            return None
+        one = next((one for one in self.sensors if one.node == channel.node), None)
+        return None if one is None else one.reads_along(channel.axis, channel.sign)
 
 
 # ---- the channels ---------------------------------------------------------
@@ -613,6 +640,185 @@ def _refine(basis: np.ndarray, sensors: Mapping[int, list], start: np.ndarray,
     return fit.x, float(np.sqrt(2.0 * fit.cost / MOTIONS))
 
 
+def _started(basis: np.ndarray, groups: Mapping[Any, list], rng: np.random.Generator | None
+             ) -> tuple[np.ndarray, float, int, bool] | None:
+    """A fit of `groups`: its poses, its misfit, how many starts it took
+    and whether it had a linear one. With no `rng` only the linear start
+    is tried, and None is returned where the groups give too few
+    conditions for one."""
+    tried: list[tuple[float, np.ndarray]] = []
+    lines = _linear_start(basis, groups)
+    if lines is not None:
+        poses, misfit = _refine(basis, groups, _poses_from(lines, groups))
+        tried.append((misfit, poses))
+    if rng is None:
+        return (tried[0][1], tried[0][0], 1, True) if tried else None
+    if not tried or tried[0][0] > POOR_MISFIT:
+        for _ in range(AFTER_LINEAR if tried else STARTS):
+            start = np.concatenate([np.concatenate([Rotation.random(random_state=rng).as_rotvec(),
+                                                    rng.standard_normal(3)])
+                                    for _ in groups])
+            tried.append(_refine(basis, groups, start, 40)[::-1])
+            if tried[-1][0] <= GOOD_MISFIT:
+                break
+    misfit, poses = min(tried, key=lambda one: one[0])
+    return poses, misfit, len(tried), lines is not None
+
+
+def _left_over(basis: np.ndarray, groups: Mapping[Any, list], poses: np.ndarray) -> np.ndarray:
+    """What of each channel's row of the measured subspace the poses'
+    lines do not span."""
+    fitted = _lines(poses, groups, basis.shape[0])
+    size = float(np.sqrt(np.mean(poses.reshape(-1, 6)[:, 3:] ** 2))) or 1.0
+    fitted[:, 3:] /= size
+    q, _r = np.linalg.qr(fitted)
+    return basis - q @ (q.T @ basis)
+
+
+def _share(left: np.ndarray, basis: np.ndarray, members: Sequence[tuple]) -> float:
+    rows = [row for row, _axis, _sign in members]
+    whole = float(np.linalg.norm(basis[rows]))
+    return float(np.linalg.norm(left[rows]) / whole) if whole else 0.0
+
+
+def _one_body(lines: np.ndarray, members: Sequence[tuple], size: float) -> list[tuple]:
+    """The channels of `members` that are axes of one sensor: the most of
+    them whose directions are square to each other (`SQUARE`) and whose
+    lines meet (`MEETING` of `size`). Fewer than two is none."""
+    def apart(a: tuple, b: tuple) -> tuple[float, float]:
+        da, db = lines[a[0], :3], lines[b[0], :3]
+        pa, pb = np.cross(da, lines[a[0], 3:]), np.cross(db, lines[b[0], 3:])
+        across = np.cross(da, db)
+        off = float(np.degrees(np.arcsin(min(1.0, abs(float(da @ db))))))
+        length = float(np.linalg.norm(across))
+        return off, abs(float((pb - pa) @ across)) / length if length > 1e-9 else np.inf
+
+    pairs = [(a, b) for i, a in enumerate(members) for b in members[i + 1:]]
+    scores = {pair: apart(*pair) for pair in pairs}
+    fits = [pair for pair, (off, gap) in scores.items() if off <= SQUARE and gap <= MEETING * size]
+    if len(fits) == len(pairs):
+        return list(members)
+    if not fits:
+        return []
+    return list(min(fits, key=lambda pair: scores[pair][0] / SQUARE + scores[pair][1] / (MEETING * size)))
+
+
+def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarray
+                 ) -> tuple[dict, np.ndarray, float, set[int], int] | None:
+    """A poor fit looked into for DOFs that are labeled wrong.
+
+    The sensor the fit explains worst is released: each of its channels
+    is fitted as a sensor of one axis, bound by nothing its node says of
+    it. When the rest then fit, up to `MOST_RELEASED` sensors released,
+    the released channels' own lines say what they are. Those of one node
+    that are square to each other and meet are that sensor after all
+    (`_one_body`): a right-handed set needed only the better start, and a
+    left-handed one has an axis reversed or two exchanged, and is fitted
+    with its Z reversed. A channel that is not square to the others of
+    its node, or does not pass where they meet, is kept apart from them.
+
+    Returns the groups as they were found to be (a channel kept apart
+    under (node, axis)), their poses, the misfit, the nodes fitted
+    left-handed and the fits it took; None when releasing does not make
+    the rest fit, so the DOFs are not what is wrong.
+    """
+    count = basis.shape[0]
+    trial: dict[Any, list] = dict(groups)
+    released: list[int] = []
+    fit = None
+    for _ in range(MOST_RELEASED):
+        left = _left_over(basis, trial, poses)
+        whole = [(_share(left, basis, members), key) for key, members in trial.items()
+                 if isinstance(key, int) and len(members) > 1]
+        if not whole:
+            return None
+        worst = max(whole)[1]
+        trial = {inner: inner_members
+                 for key, members in trial.items()
+                 for inner, inner_members in (
+                     [((key, axis), [(row, axis, sign)]) for row, axis, sign in members]
+                     if key == worst else [(key, members)])}
+        fit = _started(basis, trial, None)
+        if fit is None:
+            return None
+        released.append(worst)
+        poses = fit[0]
+        if fit[1] <= POOR_MISFIT:
+            break
+    if fit is None or fit[1] > POOR_MISFIT:
+        return None
+    lines = _lines(poses, trial, count)
+    places = np.array([poses[6 * k + 3:6 * k + 6] for k, (key, members) in enumerate(trial.items())
+                       if isinstance(key, int) and len(members) > 1])
+    size = (float(np.sqrt(np.mean(np.sum((places - places.mean(axis=0)) ** 2, axis=1))))
+            if len(places) > 1 else 1.0) or 1.0
+    found: dict[Any, list] = {}
+    left_handed: set[int] = set()
+    for node, members in groups.items():
+        if node not in released:
+            found[node] = members
+            continue
+        body = _one_body(lines, members, size)
+        if len(body) == 3:
+            axes = np.array([sign * lines[row, :3]
+                             for row, _axis, sign in sorted(body, key=lambda m: m[1])])
+            if np.linalg.det(axes) < 0:
+                body = [(row, axis, -sign if axis == 2 else sign) for row, axis, sign in body]
+                left_handed.add(node)
+        if body:
+            found[node] = body
+        kept = {row for row, _axis, _sign in body}
+        for row, axis, sign in members:
+            if row not in kept:
+                found[node, axis] = [(row, axis, sign)]
+    again, misfit = _refine(basis, found, _poses_from(lines, found))
+    if misfit > POOR_MISFIT:
+        return None
+    return found, again, misfit, left_handed, len(released) + 1
+
+
+def _label_notes(channels: Sequence[Channel], groups: Mapping[Any, list], poses: np.ndarray,
+                 left_handed: set[int]) -> tuple[dict[int, str], list[str], list[str]]:
+    """What was found wrong with the DOFs: a few words per node for the
+    table, the notes in full, and the DOFs left out of their node."""
+    keys = list(groups)
+    place = {key: poses[6 * k + 3:6 * k + 6] for k, key in enumerate(keys)}
+    along = {key: Rotation.from_rotvec(poses[6 * k:6 * k + 3]).as_matrix().T
+             for k, key in enumerate(keys)}
+    bodies = [key for key, members in groups.items() if isinstance(key, int) and len(members) > 1]
+    centers = np.array([place[key] for key in bodies])
+    size = (float(np.sqrt(np.mean(np.sum((centers - centers.mean(axis=0)) ** 2, axis=1))))
+            if len(bodies) > 1 else 1.0) or 1.0
+    short: dict[int, str] = {}
+    notes, left_out = [], []
+    for node in sorted(left_handed):
+        short[node] = 'left-handed as labeled'
+        notes.append(f'sensor {node}: its X, Y and Z are a left-handed set as labeled, so one of '
+                     'them is reversed or two are exchanged; the data cannot say which. It is '
+                     'placed, and the coordinate system it is given has its Z reversed')
+    for key, members in groups.items():
+        if isinstance(key, int):
+            continue
+        node, axis = key
+        row = members[0][0]
+        dof = channels[row].dof
+        left_out.append(dof)
+        direction = members[0][2] * along[key][axis]
+        nearest, gap = None, np.inf
+        for other in bodies:
+            away = place[other] - place[key]
+            off = float(np.linalg.norm(away - (away @ direction) * direction))
+            if other != node and off < gap:
+                nearest, gap = other, off
+        where = (f'its line passes through sensor {nearest}' if gap <= MEETING * size
+                 else 'it measures somewhere else')
+        with_it = ' and '.join(channels[r].dof for r, _a, _s in groups.get(node, ()))
+        notes.append(f'{dof} does not measure at node {node}'
+                     + (f' with {with_it}' if with_it else '') + f': {where}. It is left out')
+        short[node] = '; '.join(filter(None, [short.get(node, ''), f'{dof} left out']))
+    return short, notes, left_out
+
+
 def fit_poses(motion: Motion, seed: int = 0) -> Recovered:
     """The sensors whose lines span the rigid motion `motion` found.
 
@@ -620,59 +826,65 @@ def fit_poses(motion: Motion, seed: int = 0) -> Recovered:
     and its lines through one point. The fit starts from the linear
     conditions (`_linear_start`) where the sensors give enough of them,
     about twenty, and is taken unless it leaves more than `POOR_MISFIT`
-    of the motion unexplained. Without that start, or after a poor one,
-    it is started from random poses, `STARTS` times or `AFTER_LINEAR`,
-    stopping at the first that leaves under `GOOD_MISFIT`, and the best
-    is taken; three
-    tri-axial sensors alone are placed this way. Every start is run, not
-    only until some agree: a wrong layout that fits partly is found from
-    more starts than the right one.
+    of the motion unexplained. A poor one is looked into for DOFs labeled
+    wrong (`_looked_into`), and what is found is in the notes: a sensor
+    whose axes are a left-handed set, and a channel that does not measure
+    where its node's others do. A cyclic exchange of a sensor's axes, two
+    reversed axes, and the polarity of a sensor of one axis all leave a
+    layout that fits, so they are not found.
+
+    Without a linear start, or when a poor fit is not explained by its
+    labels, the fit is started from random poses, `STARTS` times or
+    `AFTER_LINEAR`, stopping at the first that leaves under
+    `GOOD_MISFIT`, and the best is taken; three tri-axial sensors alone
+    are placed this way. Every start is run, not only until some agree:
+    a wrong layout that fits partly is found from more starts than the
+    right one.
 
     The result is in a frame of its own (`_settled`): the first sensor
     with three axes, or else two, gives the global axes, the middle of
     the sensors is the origin, and the two sensors of two axes or more
     farthest apart are one apart.
     """
-    sensors = _sensors_of(motion.channels)
+    groups: Mapping[Any, list] = _sensors_of(motion.channels)
     basis = motion.basis
-    count = basis.shape[0]
     rng = np.random.default_rng(seed)
-    tried: list[tuple[float, np.ndarray]] = []
-    lines = _linear_start(basis, sensors)
-    if lines is not None:
-        poses, misfit = _refine(basis, sensors, _poses_from(lines, sensors))
-        tried.append((misfit, poses))
-    if not tried or tried[0][0] > POOR_MISFIT:
-        for _ in range(AFTER_LINEAR if tried else STARTS):
-            start = np.concatenate([np.concatenate([Rotation.random(random_state=rng).as_rotvec(),
-                                                    rng.standard_normal(3)])
-                                    for _ in sensors])
-            tried.append(_refine(basis, sensors, start, 40)[::-1])
-            if tried[-1][0] <= GOOD_MISFIT:
-                break
-    misfit, poses = min(tried, key=lambda one: one[0])
-    fitted = _lines(poses, sensors, count)
-    size = float(np.sqrt(np.mean(poses.reshape(-1, 6)[:, 3:] ** 2))) or 1.0
-    scaled = fitted * np.array([1.0, 1.0, 1.0, 1 / size, 1 / size, 1 / size])
-    q, _r = np.linalg.qr(scaled)
-    left = basis - q @ (q.T @ basis)
+    left_handed: set[int] = set()
+    first = _started(basis, groups, None)
+    looked = (_looked_into(basis, groups, first[0])
+              if first is not None and first[1] > POOR_MISFIT else None)
+    if looked is not None:
+        groups, poses, misfit, left_handed, starts = looked
+        linear = True
+    elif first is not None and first[1] <= POOR_MISFIT:
+        poses, misfit, starts, linear = first
+    else:
+        poses, misfit, starts, linear = _started(basis, groups, rng)
+    left = _left_over(basis, groups, poses)
+    short, said, left_out = _label_notes(motion.channels, groups, poses, left_handed)
     made = []
-    for k, (node, members) in enumerate(sensors.items()):
-        rows = [row for row, _a, _s in members]
+    for k, (key, members) in enumerate(groups.items()):
+        if not isinstance(key, int):
+            continue
         frame = Rotation.from_rotvec(poses[6 * k:6 * k + 3]).as_matrix().T
-        whole = float(np.linalg.norm(basis[rows]))
-        made.append(Sensor(node, tuple(sorted(axis for _r, axis, _s in members)), frame,
-                           poses[6 * k + 3:6 * k + 6].copy(),
-                           float(np.linalg.norm(left[rows]) / whole) if whole else 0.0))
-    notes = list(motion.notes)
+        made.append(Sensor(key, tuple(sorted(axis for _r, axis, _s in members)), frame,
+                           poses[6 * k + 3:6 * k + 6].copy(), _share(left, basis, members),
+                           reversed=(2,) if key in left_handed else (),
+                           note=short.get(key, '')))
+    for node in dict.fromkeys(channel.node for channel in motion.channels):
+        if node not in groups:
+            said.append(f'sensor {node}: no two of its channels measure at one place; it is '
+                        'left out')
+    notes = [*motion.notes, *said]
     if misfit > POOR_MISFIT:
         notes.append(f'{misfit:.0%} of the motion is not explained by rigid sensors: a channel '
                      'may be on a part that moves on its own, or its DOF may be wrong')
-    elif lines is None and misfit > GOOD_MISFIT:
-        notes.append(f'{len(tried)} starts did not settle on one layout: the best leaves '
+    elif not linear and misfit > GOOD_MISFIT:
+        notes.append(f'{starts} starts did not settle on one layout: the best leaves '
                      f'{misfit:.1%} of the motion unexplained and may not be the right one. '
                      'More sensors of two or three axes would settle it')
-    return _settled(Recovered(tuple(made), motion, misfit, len(tried), notes=tuple(notes)))
+    return _settled(Recovered(tuple(made), motion, misfit, starts, notes=tuple(notes),
+                              left_out=tuple(left_out)))
 
 
 def _held(sensors: Sequence[Sensor]) -> list[Sensor]:

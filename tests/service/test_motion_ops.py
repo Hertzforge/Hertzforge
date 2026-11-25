@@ -75,7 +75,7 @@ def test_the_preview_draws_the_sensors_and_changes_nothing(project, validate):
     (slides,) = scene['segments']
     assert slides['xyz'].shape == (6, 3) and slides['color'] == list(SLIDE)
     # the table: no unit with no size, and a one-axis sensor's place said
-    assert table['columns'] == ['Node', 'Axes', 'X', 'Y', 'Z', 'Misfit [%]', 'Place']
+    assert table['columns'] == ['Node', 'Axes', 'X', 'Y', 'Z', 'Misfit [%]', 'Note']
     assert table['rows'][0][:2] == ['10', 'X Y Z'] and table['rows'][0][6] == ''
     assert table['rows'][8][1:2] == ['Z'] and table['rows'][8][6] == 'anywhere along its Z'
     said = _rows(reading)
@@ -138,6 +138,47 @@ def test_mirror_draws_the_other_image(project):
         if not row[6]:
             np.testing.assert_allclose([float(cell) for cell in row[2:5]],
                                        [-float(cell) for cell in was[2:5]], atol=1e-5)
+
+
+def _labeled(project, measured, change):
+    project.add('Labeled', TimeHistory(
+        measured.abscissa, measured.ordinate,
+        response_dof=[change.get(dof, dof) for dof in measured.response_dof],
+        ordinate_dim='acceleration', ordinate_unit='m/s**2'))
+    return run(project, source='Labeled')
+
+
+def test_a_left_handed_sensor_is_said_in_its_row_and_drawn_as_it_reads(project, measured):
+    scene, _motions, table, reading = _labeled(project, measured,
+                                               {'20X+': '20Y+', '20Y+': '20X+'})
+    notes = {row[0]: row[6] for row in table['rows']}
+    assert notes['20'] == 'left-handed as labeled' and notes['10'] == ''
+    assert notes['90'] == 'anywhere along its Z'
+    warned = [row['value'] for row in reading['rows']
+              if row['label'] == 'Note' and row['status'] == 'warn']
+    assert len(warned) == 1 and warned[0].startswith('Sensor 20: its X, Y and Z are a left-')
+    # placed, and not passed: its DOFs are not as labeled
+    assert _rows(reading)['Sensors'][1] == 'warn'
+    # the three arrows of sensor 20 as the data has them: a left-handed set
+    labels = scene['arrows']['labels']
+    rows = [labels.index(dof) for dof in ('20X+', '20Y+', '20Z+')]
+    assert np.linalg.det(scene['arrows']['directions'][rows].astype(float)) == pytest.approx(
+        -1.0, abs=1e-3)
+    others = [labels.index(dof) for dof in ('10X+', '10Y+', '10Z+')]
+    assert np.linalg.det(scene['arrows']['directions'][others].astype(float)) == pytest.approx(
+        1.0, abs=1e-3)
+
+
+def test_a_channel_left_out_of_its_node_has_no_arrow_and_is_said(project, measured):
+    scene, _motions, table, reading = _labeled(project, measured,
+                                               {'20Z+': '40Z+', '40Z+': '20Z+'})
+    labels = scene['arrows']['labels']
+    assert '20Z+' not in labels and '40Z+' not in labels and len(labels) == 22
+    notes = {row[0]: (row[1], row[6]) for row in table['rows']}
+    assert notes['20'] == ('X Y', '20Z+ left out') and notes['40'] == ('X Y', '40Z+ left out')
+    said = [row['value'] for row in reading['rows'] if row['label'] == 'Note']
+    assert any('20Z+ does not measure at node 20 with 20X+ and 20Y+: its line passes through '
+               'sensor 40' in note for note in said)
 
 
 def test_apply_adds_the_geometry(project):

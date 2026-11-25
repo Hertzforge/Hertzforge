@@ -73,6 +73,12 @@ describe('the MIMO Shock store', () => {
 		ms.chooseLaw('paired');
 		ms.setKind('srs');
 		expect(ms.setup.law.id).toBe('paired');
+		// an SRS-only law the operator chose gives way to the default on a classical target
+		ms.chooseLaw('followed-hold');
+		expect(ms.setup.law.id).toBe('followed-hold');
+		ms.setKind('waveform');
+		expect(ms.setup.law.id).toBe('inverse');
+		ms.setKind('srs');
 		// a new SRS setup with no law yet opens on the SRS default, not the first law that accepts SRS
 		const fresh = new MimoShockStore(acq, { local: null, checkDelayMs: 0 });
 		fresh.setup.kind = 'srs';

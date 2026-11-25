@@ -104,3 +104,22 @@ def test_single_axis_tests_place_the_sensors_only_together(axis_tests):
             project.motion_sensors(*picked, known=known)
     found = project.motion_sensors(*names, known=known)
     assert _worst(project, found) < 0.25e-3 and _axes_off(project, found) < 0.25
+
+
+def test_four_triaxial_sensors_fit_once_released_and_nothing_is_said(random_test):
+    """Four tri-axial sensors give just enough linear conditions to start
+    from, and the start is poor. Looked into, the worst sensor's channels
+    turn out square, meeting and right-handed: the sensor is put back, the
+    fit is good from where that left it, and no DOF is said to be wrong."""
+    from hertzforge.core.data import parse_dof
+
+    history = random_test['BARC Random']
+    rows = [row for row, dof in enumerate(history.response_dof) if parse_dof(dof)[0] in (1, 2, 3, 4)]
+    motion = mg.rigid_motion([history], records=[rows])
+    start = mg._started(motion.basis, mg._sensors_of(motion.channels), None)
+    assert start is not None and start[1] > mg.POOR_MISFIT
+    found = mg.fit_poses(motion)
+    assert found.misfit < mg.GOOD_MISFIT and found.starts == 2
+    assert not found.notes and not found.left_out
+    assert [(one.node, one.axes, one.reversed, one.note) for one in found.sensors] == [
+        (node, (0, 1, 2), (), '') for node in (1, 2, 3, 4)]

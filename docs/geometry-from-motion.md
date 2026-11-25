@@ -57,8 +57,8 @@ The plot under it shows the eight strongest motions in each third-octave band, a
 densities relative to the strongest. Where the structure moves as a rigid body, six of them stand
 above the other two. The band that was read is marked on the plot.
 
-The table lists each sensor: its node, the axes it measures, its position, and the percentage of
-its motion that is not explained. The reading beside it gives the band, the number of lines in it,
+The table lists each sensor: its node, the axes it measures, its position, the percentage of its
+motion that is not explained, and a note where it has one axis or its DOFs look wrong. The reading beside it gives the band, the number of lines in it,
 the motion not explained over all channels, and what was and was not settled about the size and the
 mirror image.
 
@@ -171,13 +171,47 @@ true place, and every measured axis is within 0.25 degrees of the true one.
 `sensor_motion.project(sensor_motion.AXIS_TESTS)` makes the three single-axis tests of Several
 tests instead.
 
+## Mistakes in the DOFs
+
+A DOF labeled wrong makes a layout that no rigid sensors fit. When the first fit leaves more than
+5 % of the motion unexplained, it is looked into: the sensor that fits worst is released, each of
+its channels fitted on its own with nothing assumed from its node, and then the next worst, up to
+three. When the other sensors then fit, the released channels' own lines say what is wrong, and the
+sensors that were labeled right are placed as if nothing were wrong.
+
+| Mistake | What is said |
+|---|---|
+| Two axes of a tri-axial sensor exchanged, or one reversed | The sensor is named as a left-handed set. It is placed, and its row says "left-handed as labeled" |
+| A channel labeled at another sensor's node | The channel is named and left out of that node, with the sensor its line passes through |
+| A one-axis sensor labeled as an axis of another node | The channel is named and left out, as measuring somewhere else |
+
+A left-handed sensor has one axis reversed or two exchanged, and the data cannot say which, since
+every such correction gives a sensor that fits. Its arrows are drawn the way its channels read, so
+the three do not make a right-handed set in the view. The coordinate system it is given on Apply
+keeps its X and Y and has its Z reversed, which is one of the corrections and may not be the right
+one: correct the DOF with **Rename DOF** and run again.
+
+Some mistakes leave a layout that fits as well as the right one, and are not found:
+
+- the axes of a tri-axial sensor renamed in a cycle (X to Y, Y to Z, Z to X);
+- two axes of a tri-axial sensor both reversed;
+- the two axes of a two-axis sensor exchanged;
+- the polarity of a one-axis sensor.
+
+Each is the same sensor turned another way. A geometry that holds the node does not show these
+either, since only its position is compared.
+
+Releasing a sensor needs about twenty conditions left among the others, which three tri-axial
+sensors and one more give only just. With fewer the mistake is not named, and the reading says only
+that the motion is not explained by rigid sensors.
+
 ## Reading the result
 
 The motion not explained is what is left of the six measured directions after the best layout of
-rigid sensors is fitted to them. It is a fraction of a percent on the example. Above 5 % the reading
-warns, and the sensor with the largest value in the table is the place to look: a channel whose DOF
-names the wrong axis, a sensor on a part that moves on its own in the band, or a band that reaches
-into the bending.
+rigid sensors is fitted to them. It is a fraction of a percent on the example. When it stays above
+5 % after the DOFs were looked into, the reading warns. The cause is then something other than a
+label: a sensor on a part that moves on its own in the band, or a band that reaches into the
+bending.
 
 A set of sensors with fewer than about twenty conditions between them (three tri-axial sensors
 give eighteen) is fitted from random starting layouts instead of from a direct solution. When those

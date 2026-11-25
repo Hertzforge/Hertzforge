@@ -178,9 +178,19 @@ fn mimo_shock_the_picker_lists_the_builtins_first_and_states_their_failures() {
         .id;
     let listed = entries(&cat);
     let ids: Vec<&str> = listed.iter().map(|e| e.id.as_str()).collect();
-    assert_eq!(ids, ["inverse", "shape", "paired", id.as_str()]);
+    assert_eq!(
+        ids,
+        [
+            "inverse",
+            "shape",
+            "paired",
+            "followed",
+            "followed-hold",
+            id.as_str()
+        ]
+    );
     assert!(listed.iter().all(|e| e.world == LawWorld::ShockMimo));
-    assert!(listed[..3].iter().all(|e| e.builtin));
+    assert!(listed[..5].iter().all(|e| e.builtin));
 
     let shape = builtin_facts(BuiltinMimoShock::Shape);
     assert_eq!(shape.targets, vec![TargetKind::Srs]);
@@ -191,6 +201,20 @@ fn mimo_shock_the_picker_lists_the_builtins_first_and_states_their_failures() {
     assert!(shape.params.iter().any(|p| p.key == "anchor"));
     let paired = builtin_facts(BuiltinMimoShock::Paired);
     assert_eq!(paired.known_failures.len(), 16);
+    for (b, failures) in [
+        (BuiltinMimoShock::Followed, 4),
+        (BuiltinMimoShock::FollowedHold, 5),
+    ] {
+        let f = builtin_facts(b);
+        assert_eq!(f.targets, vec![TargetKind::Srs], "{}", b.id());
+        assert_eq!(f.known_failures.len(), failures, "{}", b.id());
+        assert!(f.summary.contains("simulator only"), "{}", b.id());
+        assert!(f.summary.contains("not run on a shaker"), "{}", b.id());
+    }
+    let hold = builtin_facts(BuiltinMimoShock::FollowedHold);
+    assert!(hold
+        .summary
+        .contains("cautious and often stops below full level"));
 
     // A law file's failures come from its check record.
     let failing = CaseVerdict {
