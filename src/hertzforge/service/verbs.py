@@ -87,6 +87,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',
     'plan_instrumentation': 'Plan Sensors', 'export_state_space': 'Export Model',
     'create_sensors': 'Fit Sensors',
+    'geometry_from_motion': 'Infer Geometry',
     'project_onto_channels': 'Project Channels', 'projection_overlay': 'Animate Projection',
     'merge': 'Merge', 'report_features': 'Features', 'report_requirement': 'Requirement',
     'report_finding': 'Finding', 'draft_finding_fact': 'Draft Fact',
@@ -154,6 +155,8 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'truncate_rattlesnake_file': ('signals',),
     'text_preview': ('signals',),
     'import_text': ('signals',),
+    # sensors placed by the rigid motion in a random, modal or system identification run
+    'geometry_from_motion': ('signals', 'sysid', 'random', 'modal'),
 }.items()}
 
 #: the part of a geometry in the tree each of these operations belongs to:

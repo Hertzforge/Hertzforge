@@ -271,9 +271,20 @@ describe('a form with a Preview button', () => {
 		expect(a.formOpen).toBe(true);
 		expect(runs.map((r) => [r.op, r.params?.keep])).toEqual([['project.create_sensors', false]]);
 		expect(a.reading?.title).toBe('Fit Sensors, preview');
+		// it asks nothing, so there is nothing a Preview button would draw differently
+		expect(a.previewButton).toBe(false);
 		a.closeForm();
 		await a.perform(row(meshSolids), column);
 		expect(runs.length).toBe(1);
+		expect(a.previewButton).toBe(true);
+		a.closeForm();
+		// one that opens on its preview and has a setting has the button, to draw it again
+		const inferGeometry = { ...fitSensors, id: 'project.geometry_from_motion', title: 'Infer Geometry', params: [...fitSensors.params, { name: 'mirror', label: 'The other mirror image', type: 'boolean', default: false }] } as unknown as OperationDescriptor;
+		app.catalog = { operations: [addBlock, meshSolids, fitSensors, inferGeometry] } as never;
+		await a.perform(row(inferGeometry), column);
+		expect(a.formParams.map((p) => p.name)).toEqual(['mirror']);
+		expect(a.previewButton).toBe(true);
+		a.closeForm();
 	});
 
 	it('Preview does nothing on a form without one', async () => {

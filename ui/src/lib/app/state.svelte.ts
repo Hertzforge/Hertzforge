@@ -216,6 +216,15 @@ class AnalyzeState {
 		return this.formRow?.live ? title.replace(/^Add /, 'Edit ') : title;
 	}
 
+	/**
+	 * Whether the form has a Preview button: an operation that waits to be told to go ahead,
+	 * unless it opened on its preview and asks nothing that could change it.
+	 */
+	get previewButton(): boolean {
+		const op = this.op;
+		return !!op?.commits && (!op.opens_previewed || this.formParams.length > 0);
+	}
+
 	get formParams(): ParamDescriptor[] {
 		const row = this.formRow;
 		const values = this.currentValues;

@@ -2229,6 +2229,163 @@ class Project(dict):
         added['notes'] = [*notes, *said]
         return added
 
+    def _motion_inputs(self, sources: Sequence[Any],
+                       records: Mapping[str, Sequence[int]] | None
+                       ) -> tuple[list[str], list[Any], list[Any], list[Any]]:
+        """The names, histories, picked records and frames `motion_sensors`
+        reads. A history of one capture with no averaging set is framed by
+        the detector `compute_psds` uses, without storing it: whole and
+        unwindowed, the lines of a resonance would leak into the low band
+        the rigid motion is read in."""
+        names = list(dict.fromkeys(self.name_of(each) for each in sources))
+        if not names:
+            raise ValueError('pick one or more time histories')
+        others = [name for name in names if not isinstance(self[name], TimeHistory)]
+        if others:
+            raise TypeError(f'{others[0]} is not a time history')
+        picked = {self.name_of(name): list(rows) for name, rows in (records or {}).items()}
+        stray = [name for name in picked if name not in names]
+        if stray:
+            raise ValueError(f'records are picked under {stray[0]}, which is not one of the '
+                             'histories read')
+        histories = [self[name] for name in names]
+        frames = [history.suggest_averaging()
+                  if history.averaging is None
+                  and max(history.records_per_channel.values(), default=0) <= 1 else None
+                  for history in histories]
+        return names, histories, [picked.get(name) for name in names], frames
+
+    def motion_sensors(self, *sources: Any, band: tuple[float, float] | None = None,
+                       records: Mapping[str, Sequence[int]] | None = None,
+                       known: Any = None, span: float | None = None,
+                       mirror: bool = False) -> Any:
+        """Where the sensors of one or several time histories are and how
+        they are turned, read from the rigid motion in their low band
+        (`core.motion_geometry`). Nothing is added to the project.
+
+        Below its first elastic mode a structure moves as a rigid body,
+        and that motion is different at every sensor in a way that
+        depends only on where the sensor is and which way it points. The
+        channels of one node are taken as one sensor, its axes at right
+        angles. All six rigid motions must be in the data; several
+        histories of the same sensors, each from a test that shook the
+        structure another way, are pooled.
+
+        The motion cannot give the size, which of two mirror images the
+        layout is, or where a sensor with one axis sits along that axis.
+        `known` or `span` gives the size; `known` gives the frame as well
+        with three shared nodes not in a line, the image with four not in
+        a plane, and a one-axis sensor's place when it holds its node.
+
+        Parameters
+        ----------
+        *sources : str or object
+            One or more time histories holding the same channels.
+        band : tuple of (float, float), optional
+            The band the rigid motion is read in, Hz. When omitted, the
+            lowest run of third-octave bands in which six motions stand
+            clear of the seventh.
+        records : mapping, optional
+            The records to read of a history, {name: indices from zero};
+            every record of a history it does not name.
+        known : str or object, optional
+            A geometry that already holds some of the sensors' nodes, by
+            number. Its length unit is the result's.
+        span : float, optional
+            The distance between the two sensors of two axes or more that
+            are farthest apart, in meters, for when no node is known.
+        mirror : bool, default False
+            Take the other mirror image.
+
+        Returns
+        -------
+        Recovered
+            The sensors (`core.motion_geometry.Recovered`): each one's
+            node, frame, position and misfit, with the band, the notes
+            and whether the size and the image were settled.
+
+        Raises
+        ------
+        TypeError
+            If a source is not a time history or `known` is not a
+            geometry.
+        ValueError
+            If the histories hold different channels, fewer than seven
+            read a translation, a channel does not move, fewer than six
+            rigid motions stand clear in the band, or `known`, `span` and
+            `mirror` cannot be used as given; the message says which.
+        """
+        from .core import motion_geometry
+
+        _names, histories, picked, frames = self._motion_inputs(sources, records)
+        recovered = motion_geometry.recover(histories, band, records=picked, averagings=frames)
+        if known is None:
+            return motion_geometry.place(recovered, span=span, mirror=mirror,
+                                         length_unit='m' if span is not None else None)
+        held = self[self.name_of(known)]
+        if not isinstance(held, Geometry):
+            raise TypeError(f'{self.name_of(known)} is not a geometry')
+        points = {int(node): xyz for node, xyz in zip(held.node_id, held.node_xyz, strict=True)}
+        return motion_geometry.place(recovered, span=span, known=points, mirror=mirror,
+                                     length_unit=held.length_unit)
+
+    def geometry_from_motion(self, *sources: Any, band: tuple[float, float] | None = None,
+                             records: Mapping[str, Sequence[int]] | None = None,
+                             known: Any = None, span: float | None = None,
+                             mirror: bool = False, name: str | None = None) -> str:
+        """Make a geometry of the sensors of one or several time
+        histories, placed and turned by the rigid motion in their low
+        band (Infer Geometry; `motion_sensors` reads them).
+
+        Each sensor is one node, numbered as its DOFs name it, with a
+        coordinate system of its own whose axes are the sensor's. The
+        geometry is linked with the histories where their group has no
+        geometry yet. With neither `known` nor `span` it has no length
+        unit and its two farthest sensors are one apart. It is not made
+        again when the histories change: call this again.
+
+        Parameters
+        ----------
+        *sources : str or object
+            One or more time histories holding the same channels.
+        band : tuple of (float, float), optional
+            The band the rigid motion is read in, Hz; chosen when omitted.
+        records : mapping, optional
+            The records to read of a history, {name: indices from zero}.
+        known : str or object, optional
+            A geometry that already holds some of the sensors' nodes.
+        span : float, optional
+            The distance between the two farthest sensors, in meters.
+        mirror : bool, default False
+            Take the other mirror image.
+        name : str, optional
+            What to call the geometry; the first history's name with
+            " Sensors" when omitted.
+
+        Returns
+        -------
+        str
+            The name the geometry was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        TypeError, ValueError
+            As `motion_sensors` raises them.
+        """
+        from .core import motion_geometry
+
+        names = list(dict.fromkeys(self.name_of(each) for each in sources))
+        recovered = self.motion_sensors(*sources, band=band, records=records, known=known,
+                                        span=span, mirror=mirror)
+        added = self.add(name or f'{names[0]} Sensors', motion_geometry.assemble(recovered))
+        try:
+            self.link(*names, added)
+        except ValueError:
+            # histories whose group already has a geometry keep it; the new one stands alone
+            pass
+        return added
+
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
         """(name, table) for the channel table linked with an object:
         the one lookup the overload check and the shape values share.
@@ -11116,6 +11273,23 @@ def _is_time(project, obj):
     return isinstance(obj, TimeHistory)
 
 
+def _reads_rigid_motion(project, obj):
+    """A time history with more translations of one quantity than a rigid
+    body has motions (`core.motion_geometry`): fewer cannot tell the six
+    from anything else."""
+    from .core.data import parse_dof
+    from .core.motion_geometry import MOTIONS, QUANTITIES
+
+    if not isinstance(obj, TimeHistory):
+        return False
+    counts: dict[str, set] = {}
+    for dof, dimension in zip(obj.response_dof, obj.ordinate_dim, strict=True):
+        node, direction = parse_dof(dof)
+        if dimension in QUANTITIES and node is not None and direction.rstrip('+-') in ('X', 'Y', 'Z'):
+            counts.setdefault(dimension, set()).add((node, direction.rstrip('+-')))
+    return any(len(found) > MOTIONS for found in counts.values())
+
+
 def _has_dims(obj, wanted):
     return isinstance(obj, TimeHistory) and bool(
         {obj.known_dim(i) for i in range(obj.num_records)} & wanted)
@@ -11305,6 +11479,8 @@ _VERB_APPLIES: tuple = (
     # points measured on accelerometers with a measuring arm, to make the
     # test geometry and channel table of (Brandon, 2026-11-16)
     ('create_sensors', _has_measured_points),
+    # sensors placed by the rigid motion they measured (Brandon, 2026-11-24)
+    ('geometry_from_motion', _reads_rigid_motion),
     # coincident nodes matter to connectivity, so a geometry of elements;
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
@@ -11664,6 +11840,7 @@ _JOURNALED_VERBS = (
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
     'element_shapes', 'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
+    'geometry_from_motion',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
