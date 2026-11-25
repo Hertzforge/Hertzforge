@@ -437,15 +437,133 @@ def test_a_band_is_checked_where_it_is_given(layout, history):
     assert few.band == (20.0, 28.0)
 
 
-def test_a_sensor_whose_axes_are_named_wrong_shows_in_its_misfit(layout, history):
-    """X and Y exchanged at one tri-axial sensor make it a left-handed
-    set, which no sensor is: the fit says so and the sensor stands out."""
-    dofs = list(history.response_dof)
-    dofs[3], dofs[4] = dofs[4], dofs[3]
-    found = mg.recover([_with(history, response_dof=dofs)], averagings=[FRAMES])
-    assert found.misfit > mg.POOR_MISFIT
+# ---- DOFs labeled wrong ---------------------------------------------------
+
+
+def _relabeled(history, change):
+    """`history` with the DOFs of `change` ({as it is: as it is labeled}) renamed."""
+    return _with(history, response_dof=[change.get(dof, dof) for dof in history.response_dof])
+
+
+def _as_the_data_has_it(layout, found):
+    """The worst angle, degrees, between the way a channel is said to read
+    and the way its sensor truly points, over the channels placed, once
+    four known nodes give the frame."""
+    found = mg.place(found, known=layout.known(FOUR))
+    true = layout.lines()[:, :3]
+    worst = 0.0
+    for row, channel in enumerate(found.motion.channels):
+        along = found.reads_along(channel)
+        if along is not None:
+            worst = max(worst, float(np.degrees(np.arccos(np.clip(along @ true[row], -1, 1)))))
+    return worst
+
+
+def _places_off(layout, found):
+    """The worst position error of the sensors of two axes or more, once
+    four known nodes give the frame."""
+    placed = mg.place(found, known=layout.known(FOUR))
+    return max(float(np.linalg.norm(one.position - layout.position[one.node]))
+               for one in placed.sensors if not one.slides)
+
+
+@pytest.mark.parametrize('change', [
+    {'20X+': '20Y+', '20Y+': '20X+'},
+    {'20Z+': '20Z-'},
+    {'20X+': '20X-'},
+    {'20Y+': '20Z+', '20Z+': '20Y+'},
+])
+def test_a_left_handed_sensor_is_named_and_the_others_are_not_moved(layout, history, change):
+    """Two axes exchanged, or one reversed, at a tri-axial sensor: it is a
+    left-handed set, which the fit names. The sensor is still placed, every
+    channel is drawn the way it truly reads, and the other sensors are where
+    they are with the labels right."""
+    found = mg.recover([_relabeled(history, change)], averagings=[FRAMES])
+    assert [note for note in found.notes if 'left-handed' in note] == [
+        'sensor 20: its X, Y and Z are a left-handed set as labeled, so one of them is reversed '
+        + 'or two are exchanged; the data cannot say which. It is placed, and the coordinate '
+        + 'system it is given has its Z reversed']
+    assert not any('not explained' in note for note in found.notes) and not found.left_out
+    flagged = {one.node: (one.reversed, one.note) for one in found.sensors if one.note}
+    assert flagged == {20: ((2,), 'left-handed as labeled')}
+    assert found.misfit < 0.01 and len(found.sensors) == 11
+    assert _places_off(layout, found) < 2e-3
+    assert _as_the_data_has_it(layout, found) < 0.25
+    # its frame is a right-handed one all the same, as a coordinate system must be: its X
+    # and Y as its channels read, and its Z against the way its Z channel reads
+    one = found.sensor(20)
+    np.testing.assert_allclose(np.linalg.det(one.frame), 1.0)
+    np.testing.assert_allclose(one.reads_along(0), one.frame[0])
+    np.testing.assert_allclose(one.reads_along(1), one.frame[1])
+    np.testing.assert_allclose(one.reads_along(2), -one.frame[2])
+    np.testing.assert_allclose(mg.assemble(found).cs_matrix[2, :3], one.frame)
+
+
+def test_two_left_handed_sensors_are_both_named(layout, history):
+    found = mg.recover([_relabeled(history, {'20Z+': '20Z-', '40X+': '40Y+', '40Y+': '40X+'})],
+                       averagings=[FRAMES])
+    assert {one.node for one in found.sensors if one.reversed} == {20, 40}
+    assert _places_off(layout, found) < 2e-3 and _as_the_data_has_it(layout, found) < 0.25
+
+
+def test_a_channel_on_the_wrong_node_is_left_out_and_said_where_it_measures(layout, history):
+    """The Z channels of two tri-axial sensors exchanged: each is left out of
+    the node it is labeled at and said to pass through the other sensor, and
+    both sensors are placed by the two channels that are theirs."""
+    found = mg.recover([_relabeled(history, {'20Z+': '40Z+', '40Z+': '20Z+'})],
+                       averagings=[FRAMES])
+    assert sorted(found.left_out) == ['20Z+', '40Z+']
+    assert [note for note in found.notes if 'does not measure' in note] == [
+        '20Z+ does not measure at node 20 with 20X+ and 20Y+: its line passes through sensor '
+        + '40. It is left out',
+        '40Z+ does not measure at node 40 with 40X+ and 40Y+: its line passes through sensor '
+        + '20. It is left out']
+    assert found.sensor(20).axes == (0, 1) and found.sensor(40).axes == (0, 1)
+    assert found.sensor(20).note == '20Z+ left out' and not found.sensor(30).note
+    assert sorted(channel.dof for channel in found.motion.channels
+                  if found.reads_along(channel) is None) == ['20Z+', '40Z+']
+    assert found.misfit < 0.01 and _places_off(layout, found) < 2e-3
+    assert _as_the_data_has_it(layout, found) < 0.25
+
+
+def test_a_one_axis_sensor_labeled_onto_another_node_is_left_out(layout, history):
+    found = mg.recover([_relabeled(history, {'90Z+': '60Z+'})], averagings=[FRAMES])
+    assert found.left_out == ('60Z+',)
+    assert [note for note in found.notes if 'does not measure' in note] == [
+        '60Z+ does not measure at node 60 with 60X+ and 60Y+: it measures somewhere else. It is '
+        + 'left out']
+    assert 90 not in [one.node for one in found.sensors] and found.sensor(60).axes == (0, 1)
+    assert _places_off(layout, found) < 2e-3
+
+
+@pytest.mark.parametrize('change', [
+    {'20X+': '20Y+', '20Y+': '20Z+', '20Z+': '20X+'},
+    {'20X+': '20X-', '20Y+': '20Y-'},
+    {'60X+': '60Y+', '60Y+': '60X+'},
+    {'90Z+': '90Z-'},
+])
+def test_labels_that_leave_a_layout_that_fits_are_not_found(layout, history, change):
+    """A cyclic exchange of a sensor's axes, two reversed axes, the axes of a
+    two-axis sensor exchanged, and a one-axis sensor's polarity: each is the
+    same sensor turned another way, so the fit is as good and nothing is said."""
+    found = mg.recover([_relabeled(history, change)], averagings=[FRAMES])
+    assert found.misfit < 0.01 and not found.notes and not found.left_out
+    assert not any(one.note or one.reversed for one in found.sensors)
+    assert _places_off(layout, found) < 2e-3
+
+
+def test_too_few_sensors_to_look_into_a_poor_fit_say_only_that_it_is_poor():
+    """Three tri-axial sensors and one of two axes give just the conditions a
+    linear start needs. With one sensor released there are too few, so its
+    wrong label is not named: the fit is said to be poor."""
+    layout = Layout(kinds=('XYZ', 'XYZ', 'XYZ', 'XY'), seed=2)
+    measured = layout.history()
+    assert mg.recover([measured], averagings=[FRAMES]).misfit < 0.01
+    found = mg.recover([_relabeled(measured, {'20X+': '20Y+', '20Y+': '20X+'})],
+                       averagings=[FRAMES])
+    assert found.misfit > mg.POOR_MISFIT and not found.left_out
+    assert [note for note in found.notes if 'left-handed' in note] == []
     assert any('not explained by rigid sensors' in note for note in found.notes)
-    assert max(found.sensors, key=lambda one: one.misfit).node == 20
 
 
 # ---- the geometry ---------------------------------------------------------
