@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelRow } from '$lib/protocol/types';
 import type { MimoMixedBandBody, MimoMixedReportItem, MimoMixedToneBody } from '$lib/protocol/mimoMixed';
-import { abortVpkOf, breakpointParamsOf, defaultMmixSetup, fitChannels, freeId, localErrors, mergeMmixSetup, mmixItemKey, mmixScheduleOf, mmixSectionOf, mmixTitle, newBand, refusalWhere, setControl, toMmixConfig } from './mmixSetup';
+import { abortVpkOf, breakpointParamsOf, defaultMmixSetup, fitChannels, freeId, localErrors, mergeMmixSetup, mmixItemKey, mmixScheduleOf, mmixSectionOf, mmixTitle, newBand, newControl, newDrive, refusalWhere, setControl, toMmixConfig } from './mmixSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -204,6 +204,18 @@ describe('where a finding goes', () => {
 });
 
 describe('what the editor says first', () => {
+	it("takes MIMO Sine's 24 controls and 12 drives, and names one more of either", () => {
+		const d = defaultMmixSetup();
+		d.controls = Array.from({ length: 24 }, (_, i) => newControl(i + 1));
+		d.drives = Array.from({ length: 12 }, (_, j) => newDrive(25 + j));
+		expect(localErrors(d)['channels.controls']).toBeUndefined();
+		expect(localErrors(d)['channels.drives']).toBeUndefined();
+		d.controls.push(newControl(37));
+		d.drives.push(newDrive(38));
+		expect(localErrors(d)['channels.controls']).toEqual(['At most 24 controls.']);
+		expect(localErrors(d)['channels.drives']).toEqual(['At most 12 drives.']);
+	});
+
 	it('asks for each drive its ceilings, with no default', () => {
 		const d = defaultMmixSetup();
 		fitChannels(d, TABLE);

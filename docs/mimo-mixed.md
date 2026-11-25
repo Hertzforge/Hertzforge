@@ -38,7 +38,7 @@ choices on the setup, not fixed.
   drive, in volts, and may have an rms abort of its own. There is no default for either ceiling:
   they are your amplifier's input.
 
-The first version runs up to 16 controls, 8 drives and 8 limit channels.
+The first version runs up to 24 controls, 12 drives and 8 limit channels, as MIMO Sine.
 
 ## What a Run Does
 

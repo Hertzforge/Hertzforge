@@ -30,10 +30,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fmt;
 
-/// The most control channels (design D17).
-pub const MAX_CONTROLS: usize = 16;
-/// The most drives (design D17).
-pub const MAX_DRIVES: usize = 8;
+/// The most control channels: MIMO Sine's, whose laws hold the tones (the
+/// service checks the two agree).
+pub const MAX_CONTROLS: usize = 24;
+/// The most drives: MIMO Sine's, as [`MAX_CONTROLS`].
+pub const MAX_DRIVES: usize = 12;
 /// The most limit channels (design D17).
 pub const MAX_LIMITS: usize = 8;
 /// The most tones (design D17; single-output Mixed Mode's).

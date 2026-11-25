@@ -57,6 +57,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use step::{StepShape, ToneCtl};
 
+// Each tone's law is a MIMO Sine law, built for the run's controls, drives
+// and limits: a run Mixed Mode takes is one MIMO Sine's laws take.
+const _: () = assert!(
+    crate::config::MAX_CONTROLS <= hertzforge_mimo_sine::MAX_CONTROLS
+        && crate::config::MAX_DRIVES <= hertzforge_mimo_sine::MAX_DRIVES
+        && crate::config::MAX_LIMITS <= hertzforge_mimo_sine::MAX_LIMITS
+);
+
 /// Engine ticks per bounded batch.
 pub const TICKS_PER_BATCH: u64 = 4;
 /// Station time per chunk, seconds.
