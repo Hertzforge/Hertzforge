@@ -6,8 +6,8 @@ themselves. It finds where each sensor is and how it is turned from the way the 
 low frequency, and makes a geometry with a node and a coordinate system for each sensor.
 
 This guide is written for the test engineer doing that. It covers what the data must hold, the
-preview and its settings, reading several tests together, what the data cannot give, and an example
-on the BARC whose answer is known.
+preview and its settings, reading several tests together, tests on a table that only translates,
+what the data cannot give, and an example on the BARC whose answer is known.
 
 ## How it works
 
@@ -38,6 +38,7 @@ global ones.
 - All six rigid motions. A free structure driven by several shakers that push different ways has
   them. A test that shakes along one axis usually does not, and is refused with how far the sixth
   motion is from standing clear; several such tests can be read together (see Several tests).
+  Three translations with no rotation turn the sensors without placing them (see Tests on a table).
 - A band below the first elastic mode in which the structure is excited.
 
 A channel that does not move in the band is refused by name, and so is a record that holds a sample
@@ -100,7 +101,81 @@ place the sensors as accurately as one test with every drive running.
 
 Three single-axis tests place the sensors only if the rotations are in the data as well as the
 translations. A free structure driven off its center of mass rotates. A structure on a slip table
-that only translates gives three motions, and no number of such tests gives six.
+that only translates gives three motions, and no number of such tests gives six. Those three
+still say how every sensor is turned.
+
+## Tests on a table
+
+A table that moves the structure along one axis gives every channel the same motion, scaled by how
+far the channel's direction is from that axis. Where the sensor sits makes no difference. Three
+such tests, one along each axis, hold the three translations and no rotation. A channel then reads
+d . a0(t) and nothing of r, so the data says how each sensor is turned and not where it is.
+
+Infer Geometry reads the data this way when six motions do not stand clear and three do. The
+preview says the sensors are turned and not placed. Its table gives the direction each channel
+reads along in place of a position, and the 3-D view draws each sensor's arrows. One such test is
+one motion, and two tests are two; both are refused as before.
+
+The band is the lowest run of third-octave bands in which the third strongest motion is at least
+five times the fourth. Tests with one drive each hold three motions at every frequency, the bending
+they drive included, so counting motions does not end the band below the first elastic mode. The
+band ends at the first third octave whose three motions are no longer the three it started with.
+
+A channel that does not read at right angles to the other channels of its node is not an axis of
+that sensor, whatever its DOF says. Left in, it spoils the fit of every sensor, so a fit that leaves
+more than 5 % unexplained is looked into as it is for sensors that are placed: the sensor that fits
+worst is released, and the channel that is not square to the others is left out and named. A
+channel labeled at another node that happens to be square to that node's axes is not found this
+way, since translations do not say where a channel is.
+
+The data leaves two things open. One turn of all the directions together reads the same, so with
+nothing else given the axes of the first tri-axial sensor are taken as the global ones. The mirror
+image of all the directions reads the same too. It is settled by taking the tri-axial sensors as
+right-handed sets, and stays open when there is none.
+
+### With a geometry that holds the nodes
+
+A geometry that holds some of the nodes gives what the data does not. The sensors at its nodes are
+drawn at their positions there. The directions are set in its frame: of all the turns, the one is
+taken under which the most channels read within 15 degrees of the direction the geometry gives
+them, through the coordinate system it measures each node in. The table then has a column for how
+far each sensor's channels read from those directions, and each channel further off than 15 degrees
+is named:
+
+| What is found | What is said |
+|---|---|
+| A channel reads against its direction | Its polarity is reversed |
+| A channel reads along another axis of its node | The axis it reads along, such as `30Z+` |
+| Anything else | How many degrees it is from its direction |
+
+This shows the mistakes that six rigid motions cannot (see Mistakes in the DOFs): the axes of a
+tri-axial sensor renamed in a cycle, two axes reversed, and the polarity of a one-axis sensor. A
+sensor mounted at an angle to its coordinate system shows as two or three channels the same number
+of degrees off.
+
+When fewer than half of the channels agree under any one turn, the reading says so, and the frame
+is not to be relied on. A geometry whose nodes are all measured in the global system, with sensors
+that are in fact turned every way, reads like this.
+
+**Apply** then makes a geometry of the sensors the known geometry holds, each at its node's
+position with a coordinate system whose axes are the ones the data gives. A sensor with one axis
+keeps the geometry's other two axes, turned the least that brings the measured axis into line.
+Without a geometry that holds the nodes there are no positions, and Apply is refused. The span and
+the other mirror image have nothing to act on here and are refused as well.
+
+### A table that rocks
+
+A table usually turns the structure a little as it moves it, in step with the translation. That
+rotation is not a fourth motion: it is read as part of the translation, and it tilts the directions
+read. The tilt is about the rotation's share of the motion across the sensors. Rocking that adds
+3 % to the motion 0.3 m from the middle tilts the axes by one or two degrees, and leaves about 2 %
+of the motion unexplained. The reading gives the motion not explained and the tilt that goes with
+it. Above 5 % it warns. Above 15 % the three motions are not taken as translations and the data is
+refused, which is also what happens to one free test that shakes along one axis and turns the
+structure about the other two.
+
+Rocking that is not in step with the translation is a motion of its own. When it stands clear on
+all three axes, the six motions are there and the sensors are placed as well.
 
 ## What the data cannot give
 
@@ -146,6 +221,10 @@ project = hertzforge.Project.open('test.hforge')
 found = project.motion_sensors('Run 1', 'Run 2', 'Run 3')      # the reading; adds nothing
 print(found.motion.band, found.misfit, found.notes)
 made = project.geometry_from_motion('Run 1', 'Run 2', 'Run 3', known='Some Nodes')
+
+# three tests on a table: turned, not placed, and compared with the geometry's coordinate systems
+turned = project.motion_sensors('Table X', 'Table Y', 'Table Z', known='Layout')
+print(turned.turned_only, turned.agree, turned.off['12Z+'], turned.notes)
 ```
 
 ## An example with a known answer
@@ -199,7 +278,9 @@ Some mistakes leave a layout that fits as well as the right one, and are not fou
 - the polarity of a one-axis sensor.
 
 Each is the same sensor turned another way. A geometry that holds the node does not show these
-either, since only its position is compared.
+when the sensors are placed by six motions, since only its position is compared. Tests that hold
+the three translations alone are compared with the coordinate systems of such a geometry, and do
+show them (see Tests on a table).
 
 Releasing a sensor needs about twenty conditions left among the others, which three tri-axial
 sensors and one more give only just. With fewer the mistake is not named, and the reading says only

@@ -261,3 +261,142 @@ def test_a_history_with_too_few_translations_says_why_not(project, measured):
     row = _offered(project, ['Few'])[OP.id]
     assert not row['ready']
     assert row['reason'] == 'It needs seven channels of translation with their units declared'
+
+
+# ---- tests on a table: the sensors are turned and not placed ----------------
+
+SOME = (10, 20, 30, 60, 90)
+TABLE = {'source': 'Table X', 'more': 'Table Y\nTable Z'}
+
+
+@pytest.fixture(scope='module')
+def on_table(layout):
+    return layout.table_tests()
+
+
+@pytest.fixture
+def table_project(layout, on_table):
+    out = Project()
+    for axis, one in zip('XYZ', on_table, strict=True):
+        out.add(f'Table {axis}', TimeHistory(one.abscissa, one.ordinate,
+                                             response_dof=list(one.response_dof),
+                                             ordinate_dim='acceleration', ordinate_unit='m/s**2'))
+    out.add('Layout', layout.geometry(SOME))
+    return out
+
+
+def test_table_tests_preview_the_sensors_turned_on_a_grid(table_project, validate):
+    journal = list(table_project.journal)
+    scene, motions, table, reading = run(table_project, **TABLE)
+    wire_views([scene, motions, table, reading], validate)
+    assert table_project.journal == journal and len(table_project) == 4
+    # no positions: the sensors are set out one apart, four to a row, in the order of the data
+    assert scene['title'] == ('Sensors of Table X, Table Y, Table Z as they are turned, set out '
+                              'on a grid')
+    assert scene['unit'] == 'undefined' and 'segments' not in scene
+    assert scene['nodes'][:5].tolist() == [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0], [0, -1, 0]]
+    assert scene['arrows']['labels'] == list(table_project['Table X'].response_dof)
+    # three motions are the measured ones, not six
+    assert [line['role'] for line in motions['series']] == ['measured'] * 3 + ['other'] * 5
+    assert table['columns'] == ['Node', 'Axes', 'X reads along', 'Y reads along',
+                                'Z reads along', 'Misfit [%]', 'Note']
+    # the frame is the first three-axis sensor's, and a one-axis sensor has one direction
+    assert table['rows'][0][:5] == ['10', 'X Y Z', '(1.000, 0.000, 0.000)',
+                                    '(0.000, 1.000, 0.000)', '(0.000, 0.000, 1.000)']
+    assert table['rows'][8][1:4] == ['Z', '', ''] and table['rows'][8][4].startswith('(')
+    said = _rows(reading)
+    assert said['Sensors'] == (('11 turned, not placed: 5 of three axes, 3 of two axes, 3 of '
+                                'one axis'), 'pass')
+    assert said['Band'][0].endswith('the lowest in which three motions stand 5 times above the '
+                                    'fourth and stay the same three')
+    assert said['Positions'] == (('not in the data, which holds three translations and no '
+                                  'rotation: a geometry that holds the nodes gives them'), 'warn')
+    assert said['Frame'] == (('not known: the axes of sensor 10 are taken as the global ones. '
+                              'A geometry that holds the nodes gives it'), 'warn')
+    assert said['Mirror image'] == ('settled', 'pass')
+    assert said['Motion not explained'][1] == 'pass'
+    assert said['Motion not explained'][0].endswith(' %: most directions are within about 0.0 '
+                                                    'degrees, and the worst about twice that')
+    assert said['Not created'] == (('Apply needs a geometry that holds the nodes: the data '
+                                    'does not place the sensors'), 'info')
+    assert 'Size' not in said and 'One-axis sensors' not in said
+
+
+def test_a_geometry_that_holds_the_nodes_places_them_and_shows_what_is_off(table_project, layout,
+                                                                           on_table):
+    scene, _motions, table, reading = run(table_project, known='Layout', **TABLE)
+    assert scene['title'].endswith('as they are turned, at their nodes in Layout')
+    assert scene['unit'] == 'm' and scene['node_ids'].tolist() == list(SOME)
+    np.testing.assert_allclose(scene['nodes'], [layout.position[node] for node in SOME], atol=1e-6)
+    assert scene['arrows']['labels'] == [dof for dof in layout.dofs if int(dof[:-2]) in SOME]
+    assert table['columns'][5:] == ['Misfit [%]', 'Off [deg]', 'Note']
+    off = {row[0]: row[6] for row in table['rows']}
+    assert all(float(off[str(node)]) < 0.25 for node in SOME) and off['40'] == ''
+    said = _rows(reading)
+    assert said['Positions'] == (('not in the data, which holds three translations and no '
+                                  'rotation: 5 of 11 sensors are at their nodes in Layout'), 'info')
+    assert said['Frame'] == (('fitted to Layout: 12 of 12 channels read within 15 degrees of '
+                              'their directions there'), 'pass')
+    assert said['Not created'] == (('Apply adds the geometry, of the sensors the known '
+                                    'geometry holds'), 'info')
+    # a one-axis sensor wired backwards fits as well as before, and the geometry shows it
+    for axis, one in zip('XYZ', on_table, strict=True):
+        dofs = ['90Z-' if dof == '90Z+' else dof for dof in one.response_dof]
+        table_project.add(f'Wired {axis}', TimeHistory(
+            one.abscissa, one.ordinate, response_dof=dofs, ordinate_dim='acceleration',
+            ordinate_unit='m/s**2'))
+    _scene, _motions, table, reading = run(table_project, source='Wired X',
+                                           more='Wired Y\nWired Z', known='Layout')
+    row = next(row for row in table['rows'] if row[0] == '90')
+    assert float(row[6]) > 179.0 and row[7] == 'Z reversed'
+    said = _rows(reading)
+    assert said['Sensors'][1] == 'warn' and said['Frame'][1] == 'warn'
+    assert said['Frame'][0].startswith('fitted to Layout: 11 of 12 channels')
+    assert ('90Z- reads opposite to its direction in the geometry: its polarity is reversed',
+            'warn') in [(row['value'], row['status']) for row in reading['rows']
+                        if row['label'] == 'Note']
+
+
+def test_a_channel_left_out_on_the_table_has_no_arrow_and_is_in_its_row(table_project, on_table):
+    for axis, one in zip('XYZ', on_table, strict=True):
+        swap = {'40Z+': '90Z+', '90Z+': '40Z+'}
+        table_project.add(f'Crossed {axis}', TimeHistory(
+            one.abscissa, one.ordinate, response_dof=[swap.get(dof, dof) for dof in one.response_dof],
+            ordinate_dim='acceleration', ordinate_unit='m/s**2'))
+    scene, _motions, table, reading = run(table_project, source='Crossed X',
+                                          more='Crossed Y\nCrossed Z')
+    assert '40Z+' not in scene['arrows']['labels'] and len(scene['arrows']['labels']) == 23
+    row = next(row for row in table['rows'] if row[0] == '40')
+    assert row[1] == 'X Y' and row[4] == '' and row[-1] == '40Z+ left out'
+    assert _rows(reading)['Sensors'][1] == 'warn'
+
+
+def test_rocking_with_the_table_is_said_as_degrees_and_the_axes_are_off_by_about_that(layout):
+    rocked = Project()
+    names = [rocked.add(f'Table {axis}', one)
+             for axis, one in zip('XYZ', layout.table_tests(rocking=0.03), strict=True)]
+    rocked.add('Layout', layout.geometry())
+    *_views, reading = run(rocked, known='Layout', **TABLE)
+    value, status = _rows(reading)['Motion not explained']
+    said = float(value.split('about ')[1].split(' degrees')[0])
+    off = sorted(rocked.motion_sensors(*names, known='Layout').off.values())
+    assert status == 'pass' and 0.8 < said < 1.5
+    # most within it, and the worst about twice it
+    assert off[len(off) // 2] < said < off[-1] < 3 * said
+
+
+def test_apply_on_table_tests_needs_the_geometry_and_makes_its_nodes(table_project, layout):
+    journal = list(table_project.journal)
+    with pytest.raises(ProtocolError, match='pick a geometry that holds the nodes'):
+        run(table_project, keep=True, **TABLE)
+    for given, why in (({'span': 0.5}, 'no layout for a span to size'),
+                       ({'mirror': True, 'known': 'Layout'}, 'no layout for Mirror to reflect')):
+        for keep in (False, True):
+            with pytest.raises(ProtocolError, match=why):
+                run(table_project, keep=keep, **given, **TABLE)
+    assert len(table_project) == 4 and table_project.journal == journal
+    *_views, reading = run(table_project, keep=True, known='Layout', **TABLE)
+    assert _rows(reading)['Created'] == ('Table X Sensors', 'pass')
+    made = table_project['Table X Sensors']
+    assert list(made.node_id) == list(SOME) and made.length_unit == 'm'
+    assert np.degrees(np.arccos(made.dof_direction('60X+') @ layout.frame[60][0])) < 0.25

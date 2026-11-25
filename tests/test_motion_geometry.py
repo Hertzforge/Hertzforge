@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from hertzforge import Project
+from hertzforge import Geometry, Project
 from hertzforge.core import motion_geometry as mg
 from hertzforge.core.averaging import Averaging
 from hertzforge.core.data import TimeHistory
@@ -71,6 +71,52 @@ class Layout:
         rows = rows + noise * rng.standard_normal(rows.shape)
         return TimeHistory(start + np.arange(count) / RATE, rows, response_dof=self.dofs,
                            ordinate_dim='acceleration', ordinate_unit='m/s**2')
+
+    def table_test(self, axis, rocking=0.0, seed=20, noise=1e-3, bending=1.0):
+        """A test on a table with one drive: it moves the body along
+        `axis`, 0 to 2, with 3 % of motion across it, and turns it in
+        step with that, so that the rotation's acceleration 0.3 m out is
+        `rocking` of the translation's. The drive bends the body in its
+        two modes as well, and noise is added."""
+        rng = np.random.default_rng(seed + axis)
+        count = int(SECONDS * RATE)
+        lines = self.lines()
+        freq = np.fft.rfftfreq(count, 1 / RATE)
+        drive = np.fft.rfft(rng.standard_normal(count))
+        along = np.eye(3)[axis]
+        across = np.cross(along, rng.standard_normal(3))
+        about = rng.standard_normal(3)
+        motion = np.concatenate([along + 0.03 * across / np.linalg.norm(across),
+                                 rocking / 0.3 * about / np.linalg.norm(about)])
+        spectrum = np.outer(lines @ motion, drive)
+        for natural in (310.0, 420.0):
+            shape = rng.standard_normal(len(lines))
+            gain = -freq ** 2 / (natural ** 2 - freq ** 2 + 0.02j * natural * freq)
+            spectrum = spectrum + bending * rng.standard_normal() * np.outer(shape, gain * drive)
+        rows = np.fft.irfft(spectrum, n=count, axis=1)
+        rows = rows + noise * rng.standard_normal(rows.shape)
+        return TimeHistory(np.arange(count) / RATE, rows, response_dof=self.dofs,
+                           ordinate_dim='acceleration', ordinate_unit='m/s**2')
+
+    def table_tests(self, rocking=0.0, **given):
+        """Three table tests, one along each axis."""
+        return [self.table_test(axis, rocking, **given) for axis in range(3)]
+
+    def geometry(self, nodes=None, frames=None):
+        """The sensors as a geometry: each at its place, measured in a
+        coordinate system of its own, the true one or `frames`' for it."""
+        nodes = list(self.nodes if nodes is None else nodes)
+        cs_matrix = np.zeros((len(nodes) + 1, 4, 3))
+        cs_matrix[0, :3] = np.eye(3)
+        for k, node in enumerate(nodes, start=1):
+            cs_matrix[k, :3] = (frames or {}).get(node, self.frame[node])
+            cs_matrix[k, 3] = self.position[node]
+        return Geometry(node_id=nodes, node_xyz=[self.position[node] for node in nodes],
+                        node_def_cs=np.ones(len(nodes), dtype=np.int64),
+                        node_disp_cs=np.arange(2, len(nodes) + 2),
+                        cs_id=np.arange(1, len(nodes) + 2), cs_name=[''] * (len(nodes) + 1),
+                        cs_type=np.zeros(len(nodes) + 1, dtype=np.int64), cs_matrix=cs_matrix,
+                        length_unit='m')
 
     def known(self, nodes):
         return {node: self.position[node] for node in nodes}
@@ -303,10 +349,12 @@ def test_tests_that_each_move_it_some_ways_are_pooled(layout):
     with pytest.raises(ValueError, match=r'six rigid motions do not stand clear .* to place '
                                          r'the sensors\.$'):
         mg.rigid_motion(along[:2], averagings=[FRAMES] * 2)
-    # translations alone, however many tests: the rotations are not in the data
+    # translations alone, however many tests: the rotations are not in the data, and it is
+    # read as three motions with why six were not
     slides = [layout.history(motions=(1.0, 0.8, 0.6, 0.0, 0.0, 0.0), seed=11 + k) for k in range(3)]
-    with pytest.raises(ValueError, match='six rigid motions do not stand clear'):
-        mg.rigid_motion(slides, averagings=[FRAMES] * 3)
+    three = mg.rigid_motion(slides, averagings=[FRAMES] * 3)
+    assert three.count == 3 and three.basis.shape == (len(layout.dofs), 3)
+    assert three.without_six.startswith('six rigid motions do not stand clear')
     pooled = mg.place(mg.recover(along, averagings=[FRAMES] * 3), known=layout.known(FOUR))
     point, line, angle = layout.errors(pooled)
     assert point < 2e-3 and line < 2e-3 and angle < 0.25
@@ -672,3 +720,305 @@ def test_it_is_offered_on_a_history_with_seven_translations_of_one_quantity(proj
     project.add('Forces', forces)
     assert 'geometry_from_motion' not in projects.verbs_of(project, 'Few')
     assert 'geometry_from_motion' not in projects.verbs_of(project, 'Forces')
+
+
+# ---- three translations: the sensors are turned and not placed -------------
+
+
+@pytest.fixture(scope='module')
+def on_table(layout):
+    return layout.table_tests()
+
+
+@pytest.fixture(scope='module')
+def turned(on_table):
+    return mg.recover(on_table, averagings=[FRAMES] * 3)
+
+
+def test_three_table_tests_turn_the_sensors_and_place_none(layout, turned):
+    """Each test alone is one motion and the three are the translations:
+    every sensor's axes come back under the default window, and no
+    position does."""
+    assert turned.turned_only and turned.motion.count == 3
+    assert not any(one.placed for one in turned.sensors)
+    assert turned.misfit < 0.002 and not turned.image_open and turned.length_unit is None
+    told = mg.turn(turned, frames=layout.frame)
+    assert told.agree == (len(layout.dofs), len(layout.dofs))
+    assert set(told.off) == set(layout.dofs) and max(told.off.values()) < 0.25
+    assert not told.notes and not any(one.note for one in told.sensors)
+    # the frame it comes in before any geometry is known is the first three-axis sensor's
+    assert np.allclose(turned.sensor(10).frame, np.eye(3), atol=1e-9)
+
+
+def test_one_table_test_and_two_are_refused(layout, on_table):
+    for some in (on_table[:1], on_table[:2]):
+        with pytest.raises(ValueError, match='six rigid motions do not stand clear'):
+            mg.recover(some, averagings=[FRAMES] * len(some))
+
+
+def test_a_test_that_turns_it_as_much_as_it_moves_it_is_not_read_as_translations(layout):
+    """One test along X with the two rotations it excites holds three
+    motions that stand clear, and they are not the translations: the
+    refusal is the six-motion one, with that said."""
+    one = layout.history(motions=(1.0, 0.0, 0.0, 0.0, 2.5, 2.0))
+    with pytest.raises(ValueError, match=r'^six rigid motions do not stand clear .* can be '
+                                         r'picked with this one\. Three motions do stand clear, '
+                                         r'but sensors that only translate leave \d+% of them '
+                                         r'unexplained, so they are not the three translations$'):
+        mg.recover([one], averagings=[FRAMES])
+
+
+def test_rocking_in_step_with_the_table_tilts_the_axes_by_about_what_is_left_unexplained(layout):
+    """A rotation each test has with its translation is read as part of
+    it: 3 % across the sensors tilts the axes by a degree or two and
+    leaves about 2 % unexplained; 10 % is warned of with the tilt; 30 %
+    is not three translations."""
+    some = mg.recover(layout.table_tests(rocking=0.03), averagings=[FRAMES] * 3)
+    worst = max(mg.turn(some, frames=layout.frame).off.values())
+    assert 0.01 < some.misfit < 0.03 and 0.5 < worst < 3.0 and not some.notes
+    # every sensor is tilted its own way, and the frame is fitted to them all, not to the
+    # sensor it was first tried from: no further turn brings the directions nearer
+    told = mg.turn(some, frames=layout.frame)
+    reads = np.array([told.reads_along(channel) for channel in told.motion.channels])
+    truth = np.array([channel.sign * layout.frame[channel.node][channel.axis]
+                      for channel in told.motion.channels])
+    further = Rotation.from_matrix(mg._turn_onto(reads, truth, True)).magnitude()
+    assert np.degrees(further) < 0.01
+    more = mg.recover(layout.table_tests(rocking=0.10), averagings=[FRAMES] * 3)
+    worst = max(mg.turn(more, frames=layout.frame).off.values())
+    assert mg.POOR_MISFIT < more.misfit < 0.10 and 3.0 < worst < 9.0
+    (note,) = more.notes
+    assert note.startswith(f'{more.misfit:.0%} of the motion is not explained by sensors that '
+                           'only translate') and 'by about 4 degrees' in note
+    with pytest.raises(ValueError, match='leave 1[5-9]% of them unexplained'):
+        mg.recover(layout.table_tests(rocking=0.30), averagings=[FRAMES] * 3)
+
+
+def test_the_band_ends_where_the_three_motions_stop_being_the_same(layout, turned):
+    """Three tests of one drive each hold three motions at every
+    frequency, the bending they drive included, so counting motions does
+    not end the band below the modes at 310 and 420 Hz. That the motions
+    change does: with the bending the band stops well under the first
+    mode, and without it the band runs on."""
+    assert turned.motion.band[1] < 110.0
+    stiff = mg.rigid_motion(layout.table_tests(bending=0.0), averagings=[FRAMES] * 3)
+    assert stiff.count == 3 and stiff.band[1] > 200.0
+
+
+def test_the_run_of_translating_bands_starts_where_the_data_moves_and_ends_at_a_change():
+    edges = np.geomspace(8.0, 8.0 * mg.BAND_STEP ** 6, 7)
+    three, noise = [10.0] * 3 + [1.0] * 5, [1.0] * 8
+    same = np.eye(8)[:, :3]
+    tilted = same.copy()
+    tilted[:, 0] = np.cos(0.3) * same[:, 0] + np.sin(0.3) * np.eye(8)[:, 5]
+    values = np.array([noise, three, three, three, three, three])
+    band = mg._translating_band(edges, values, [same, same, same, same, tilted, same])
+    assert band == pytest.approx((edges[1], edges[4]))
+    # under the limit the motions are the same ones
+    tilted[:, 0] = np.cos(0.05) * same[:, 0] + np.sin(0.05) * np.eye(8)[:, 5]
+    band = mg._translating_band(edges, values, [same, same, same, same, tilted, same])
+    assert band == pytest.approx((edges[1], edges[6]))
+    # three that stand clear only higher up than the data starts to move are not taken
+    one = [10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    values = np.array([one, one, one, one, one, three])
+    assert mg._translating_band(edges, values, [same] * 6) is None
+    assert mg._translating_band(edges, np.array([noise] * 6), [same] * 6) is None
+
+
+def test_a_band_that_is_given_is_read_as_three_motions_where_three_stand(layout, on_table):
+    found = mg.recover(on_table, (10.0, 40.0), averagings=[FRAMES] * 3)
+    assert found.turned_only and found.motion.band == (10.0, 40.0)
+    assert max(mg.turn(found, frames=layout.frame).off.values()) < 0.25
+    with pytest.raises(ValueError, match='six rigid motions do not stand clear in 10 to 40 Hz'):
+        mg.recover(on_table[:2], (10.0, 40.0), averagings=[FRAMES] * 2)
+
+
+def test_a_left_handed_sensor_on_the_table_is_named_and_drawn_as_it_reads(layout, on_table):
+    change = {'20X+': '20Y+', '20Y+': '20X+'}
+    found = mg.recover([_relabeled(one, change) for one in on_table], averagings=[FRAMES] * 3)
+    odd = found.sensor(20)
+    assert odd.note == 'left-handed as labeled' and odd.reversed == (2,)
+    assert [one.node for one in found.sensors if one.note] == [20]
+    (note,) = found.notes
+    assert note.startswith('sensor 20: its X, Y and Z are a left-handed set as labeled')
+    assert 'As many sensors' not in note
+    told = mg.turn(found, frames=layout.frame)
+    # its X and Y read along each other's true axes, and its Z as it was
+    assert told.off['20Z+'] < 0.5
+    assert '20X+ reads along 20Y+ of the geometry' in told.notes
+    assert '20Y+ reads along 20X+ of the geometry' in told.notes
+    assert told.agree == (len(layout.dofs) - 2, len(layout.dofs))
+
+
+def test_two_sensors_of_opposite_hands_say_the_data_cannot_choose():
+    pair = Layout(kinds=('XYZ', 'XYZ', 'XY', 'YZ', 'XZ', 'Z'), seed=4)
+    tests = [_relabeled(one, {'20X+': '20Y+', '20Y+': '20X+'}) for one in pair.table_tests()]
+    found = mg.recover(tests, averagings=[FRAMES] * 3)
+    (note,) = found.notes
+    assert note.startswith('sensor 20: its X, Y and Z are a left-handed set')
+    assert note.endswith('As many sensors are of each hand, and the first is taken as '
+                         'right-handed')
+
+
+def test_a_channel_that_is_not_square_to_its_node_is_left_out_and_the_rest_fit(layout, on_table):
+    """A one-axis sensor's channel labeled as the Z of a three-axis one is
+    not at right angles to its X and Y. Left in, it spoils every sensor's
+    fit; it is found by releasing the worst sensor, left out and said,
+    and the others come back as if nothing were wrong."""
+    change = {'40Z+': '90Z+', '90Z+': '40Z+'}
+    found = mg.recover([_relabeled(one, change) for one in on_table], averagings=[FRAMES] * 3)
+    assert found.left_out == ('40Z+',) and found.misfit < 0.005
+    odd = found.sensor(40)
+    assert odd.axes == (0, 1) and odd.note == '40Z+ left out'
+    off = np.degrees(np.arcsin(abs(layout.frame[90][2] @ layout.frame[40][0])))
+    off = max(off, np.degrees(np.arcsin(abs(layout.frame[90][2] @ layout.frame[40][1]))))
+    (note,) = found.notes
+    assert note == (f'40Z+ does not read at right angles to 40X+ and 40Y+: it is {off:.0f} '
+                    'degrees off square. It is left out')
+    assert found.reads_along(next(c for c in found.motion.channels if c.dof == '40Z+')) is None
+    told = mg.turn(found, frames=layout.frame)
+    # the channel left out is not compared; the one that took its place at node 90 is off
+    assert '40Z+' not in told.off and told.agree == (len(layout.dofs) - 2, len(layout.dofs) - 1)
+    assert max(angle for dof, angle in told.off.items() if dof != '90Z+') < 0.25
+    # two channels of a two-axis sensor that are not square are not one sensor
+    pair = {'70Y+': '100X+', '100X+': '70Y+'}
+    found = mg.recover([_relabeled(one, pair) for one in on_table], averagings=[FRAMES] * 3)
+    assert set(found.left_out) == {'70Y+', '70Z+'} and found.misfit < 0.005
+    assert 70 not in [one.node for one in found.sensors]
+    (note,) = found.notes
+    assert note.startswith('sensor 70: 70Z+ and 70Y+ do not read at right angles to each other, ')
+    assert note.endswith('degrees off square, so they are not one sensor. It is left out')
+
+
+def test_a_known_geometry_shows_the_mistakes_that_leave_a_sensor_that_fits(layout, on_table):
+    """A cyclic exchange of a sensor's axes, the polarity of a one-axis
+    sensor and a sensor mounted turned all leave sensors that fit, so
+    nothing is said until a geometry gives the directions they should
+    read along."""
+    change = {'30X+': '30Y+', '30Y+': '30Z+', '30Z+': '30X+', '90Z+': '90Z-'}
+    found = mg.recover([_relabeled(one, change) for one in on_table], averagings=[FRAMES] * 3)
+    assert not found.notes and found.misfit < 0.002
+    spun = Rotation.from_rotvec(np.radians(40.0) * layout.frame[50][2]).as_matrix()
+    frames = {**layout.frame, 50: layout.frame[50] @ spun.T}
+    told = mg.turn(found, frames=frames)
+    assert told.agree == (len(layout.dofs) - 6, len(layout.dofs))
+    assert set(told.notes) == {
+        '30X+ reads along 30Z+ of the geometry', '30Y+ reads along 30X+ of the geometry',
+        '30Z+ reads along 30Y+ of the geometry',
+        '90Z- reads opposite to its direction in the geometry: its polarity is reversed',
+        '50X+ reads 40 degrees from its direction in the geometry',
+        '50Y+ reads 40 degrees from its direction in the geometry'}
+    assert told.sensor(90).note == 'Z reversed'
+    assert told.sensor(30).note == 'X reads along Z+; Y reads along X+; Z reads along Y+'
+    assert told.sensor(50).note == 'X 40 degrees off; Y 40 degrees off'
+    assert told.off['90Z-'] > 179.0 and told.off['50Z+'] < 0.5
+    assert max(angle for dof, angle in told.off.items() if dof[:2] in ('10', '20', '40')) < 0.25
+
+
+def test_the_frame_is_the_one_most_channels_agree_under(layout, turned):
+    """Three sensors whose coordinate systems in the geometry are wrong do
+    not move the frame the others set; a geometry that has every node in
+    the global system agrees with few channels under any turn, and that
+    is said."""
+    rng = np.random.default_rng(3)
+    wrong = {node: Rotation.random(random_state=rng).as_matrix() for node in (10, 30, 60)}
+    told = mg.turn(turned, frames={**layout.frame, **wrong})
+    right = [angle for dof, angle in told.off.items() if int(dof[:-2]) not in wrong]
+    assert max(right) < 0.25 and told.agree[0] >= len(right)
+    bare = mg.turn(turned, frames={node: np.eye(3) for node in layout.nodes})
+    agreeing, compared = bare.agree
+    assert compared == len(layout.dofs) and agreeing < compared / 2
+    assert any(note.startswith(f'only {agreeing} of {compared} channels read within 15 degrees')
+               for note in bare.notes)
+
+
+def test_positions_come_from_the_known_nodes_and_the_rest_have_none(layout, turned):
+    some = (10, 20, 60, 90)
+    told = mg.turn(turned, frames={node: layout.frame[node] for node in some},
+                   positions=layout.known(some), length_unit='m')
+    assert told.length_unit == 'm'
+    assert [one.node for one in told.sensors if one.placed] == list(some)
+    assert all(np.array_equal(told.sensor(node).position, layout.position[node]) for node in some)
+    assert told.notes[-1] == ('30, 40, 50, 70, 80, 100 and others: not in the known geometry, so '
+                              'turned and left without a place')
+    # compared on the known nodes alone, and the others are in its frame all the same
+    assert told.agree == (9, 9)
+    for one in told.sensors:
+        for axis in one.axes:
+            assert np.degrees(np.arccos(one.frame[axis] @ layout.frame[one.node][axis])) < 0.25
+    made = mg.assemble(told)
+    assert list(made.node_id) == list(some) and made.length_unit == 'm'
+    assert np.allclose(made.dof_direction('60Y+'), told.sensor(60).frame[1])
+
+
+def test_a_one_axis_sensor_keeps_the_other_axes_the_geometry_gives_it(layout, turned):
+    told = mg.turn(turned, frames=layout.frame)
+    for node in (90, 100, 110):
+        assert np.allclose(told.sensor(node).frame, layout.frame[node], atol=5e-3)
+    # with no geometry they are any two that complete the frame
+    assert not np.allclose(turned.sensor(90).frame @ turned.sensor(10).frame.T
+                           @ layout.frame[10], layout.frame[90], atol=5e-3)
+
+
+def test_without_a_three_axis_sensor_the_image_is_open_until_a_geometry_settles_it():
+    flat = Layout(kinds=('XY', 'YZ', 'XZ', 'XY', 'YZ', 'Z', 'X', 'Y'), seed=5)
+    found = mg.recover(flat.table_tests(), averagings=[FRAMES] * 3)
+    assert found.turned_only and found.image_open
+    told = mg.turn(found, frames=flat.frame)
+    assert not told.image_open and max(told.off.values()) < 0.25
+    # directions in one plane fit both images, so they do not choose
+    level = {node: np.eye(3) for node in flat.nodes}
+    planar = mg.turn(found, frames={node: level[node] for node in (10, 40)})
+    assert planar.image_open
+
+
+def test_turned_sensors_are_not_sized_moved_or_made_without_positions(layout, turned, recovered):
+    with pytest.raises(ValueError, match='turned by three translations and not placed'):
+        mg.place(turned, span=1.0)
+    with pytest.raises(ValueError, match='pick a geometry that holds the nodes'):
+        mg.assemble(turned)
+    with pytest.raises(ValueError, match='gives the direction of 1 channel that are not '
+                                         'parallel; two are needed'):
+        mg.turn(turned, frames={90: layout.frame[90]})
+    with pytest.raises(ValueError, match='gives the direction of 0 channels'):
+        mg.turn(turned, frames={})
+    with pytest.raises(ValueError, match='were placed by six rigid motions'):
+        mg.turn(recovered, frames=layout.frame)
+
+
+def test_the_project_turns_table_tests_against_a_geometry_that_holds_the_nodes(layout, on_table):
+    project = Project()
+    names = [project.add(f'Table {"XYZ"[k]}', one) for k, one in enumerate(on_table)]
+    bare = project.motion_sensors(*names)
+    assert bare.turned_only and not any(one.placed for one in bare.sensors) and not bare.off
+    some = (10, 20, 30, 60, 90)
+    project.add('Layout', layout.geometry(some))
+    told = project.motion_sensors(*names, known='Layout')
+    assert told.agree == (12, 12) and max(told.off.values()) < 0.25
+    assert [one.node for one in told.sensors if one.placed] == list(some)
+    before = list(project)
+    with pytest.raises(ValueError, match='turned and not placed: there is no layout for a span '
+                                         'to size'):
+        project.motion_sensors(*names, span=0.5)
+    with pytest.raises(ValueError, match='there is no layout for Mirror to reflect'):
+        project.motion_sensors(*names, known='Layout', mirror=True)
+    with pytest.raises(ValueError, match='pick a geometry that holds the nodes'):
+        project.geometry_from_motion(*names)
+    with pytest.raises(TypeError, match='Table X is not a geometry'):
+        project.motion_sensors(*names, known='Table X')
+    assert list(project) == before
+    made = project.geometry_from_motion(*names, known='Layout')
+    assert made == 'Table X Sensors' and list(project[made].node_id) == list(some)
+    assert np.allclose(project[made].node_xyz, [layout.position[node] for node in some])
+    assert np.degrees(np.arccos(project[made].dof_direction('30Z+') @ layout.frame[30][2])) < 0.25
+
+
+def test_a_node_in_a_cylindrical_system_is_placed_and_not_compared(layout, on_table):
+    project = Project()
+    names = [project.add(f'Table {"XYZ"[k]}', one) for k, one in enumerate(on_table)]
+    held = layout.geometry((10, 20, 30))
+    held.cs_type = np.array([0, 0, 1, 0])
+    project.add('Layout', held)
+    told = project.motion_sensors(*names, known='Layout')
+    assert told.agree == (6, 6) and not any(dof.startswith('20') for dof in told.off)
+    assert told.sensor(20).placed
