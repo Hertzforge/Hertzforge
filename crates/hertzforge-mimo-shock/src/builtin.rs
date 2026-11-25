@@ -1,6 +1,7 @@
-//! The native built-in laws: `inverse`, `shape` and `paired`, each a thin
-//! adapter from the contract types ([`crate::Setup`], [`crate::PulseInputs`],
-//! [`crate::PulseOutputs`]) to the law mathematics in
+//! The native built-in laws: `inverse`, `shape`, `paired`, `followed` and
+//! `followed-hold`, each a thin adapter from the contract types
+//! ([`crate::Setup`], [`crate::PulseInputs`], [`crate::PulseOutputs`]) to the
+//! law mathematics in
 //! `hertzforge-mimo-shock-law-math`. No mathematics of their own: the adapters
 //! only reshape records (flat, channel after channel, to rows and back), turn
 //! the iteration count into the math's pulse index, and name the values.
@@ -14,7 +15,8 @@ use crate::law::{LawManifest, MimoShockLaw, MimoShockLawFactory};
 use crate::pulse::{PulseInputs, PulseOutputs};
 use crate::setup::{Setup, Target, TargetKind};
 use hertzforge_law_sdk::shock_mimo::builtin::{
-    InverseConfig, ModelChoice, ModelOptions, ShapeConfig, INVERSE, SHAPE,
+    FollowedConfig, InverseConfig, ModelChoice, ModelOptions, ShapeConfig, FOLLOWED, FOLLOWED_HOLD,
+    INVERSE, SHAPE,
 };
 use hertzforge_mimo_shock_law_math as math;
 use hertzforge_mimo_shock_law_math::delay::LeastEffort;
@@ -26,7 +28,7 @@ use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, LawValue};
 use serde_json::{json, Map, Value};
 
 /// The built-in laws' names.
-pub const BUILTIN_NAMES: [&str; 3] = ["inverse", "shape", "paired"];
+pub const BUILTIN_NAMES: [&str; 5] = ["inverse", "shape", "paired", "followed", "followed-hold"];
 
 /// The factory of the built-in law `name` at its default parameters, `None`
 /// for any other name.
@@ -35,6 +37,8 @@ pub fn builtin_factory(name: &str) -> Option<Box<dyn MimoShockLawFactory>> {
         "inverse" => Some(Box::new(InverseFactory::default())),
         "shape" => Some(Box::new(ShapeFactory::default())),
         "paired" => Some(Box::new(PairedFactory::default())),
+        "followed" => Some(Box::new(FollowedFactory::default())),
+        "followed-hold" => Some(Box::new(FollowedHoldFactory::default())),
         _ => None,
     }
 }
@@ -537,6 +541,158 @@ impl MimoShockLawFactory for PairedFactory {
         LawManifest {
             targets: TargetKind::ALL.to_vec(),
             values: keys(&["drive_rms_full_level"]),
+        }
+    }
+}
+
+/// `followed`: `shape` through a model that follows a structure that softens
+/// with level, the softening held under a ceiling (SRS targets only). Built
+/// by the same constructor as its law file ([`FollowedConfig::build`]).
+#[derive(Debug, Clone)]
+pub struct FollowedFactory {
+    /// The largest drop assumed in any band, a fraction.
+    pub ceiling: f64,
+}
+
+impl Default for FollowedFactory {
+    /// The declared defaults.
+    fn default() -> Self {
+        FollowedFactory {
+            ceiling: FollowedConfig::followed().options.ceiling,
+        }
+    }
+}
+
+impl FollowedFactory {
+    /// The factory at the defaults with the keys of `params` set.
+    pub fn from_params(params: &Value) -> Result<Self, String> {
+        let mut f = FollowedFactory::default();
+        read_params(params, |k, v| {
+            Some(match k {
+                "ceiling" => num(v).map(|x| f.ceiling = x),
+                _ => return None,
+            })
+        })?;
+        Ok(f)
+    }
+
+    /// The configuration the law is built from.
+    pub fn config(&self) -> FollowedConfig {
+        let mut c = FollowedConfig::followed();
+        c.options.ceiling = self.ceiling;
+        c
+    }
+}
+
+impl MimoShockLawFactory for FollowedFactory {
+    fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
+        let law = self
+            .config()
+            .build(math_setup(setup), &setup.ladder_db)
+            .map_err(LawFault::Failed)?;
+        Ok(adapter("followed", setup, law))
+    }
+
+    fn describe(&self) -> LawDescriptor {
+        descriptor("followed", json!({ "ceiling": self.ceiling }))
+    }
+
+    fn manifest(&self) -> LawManifest {
+        LawManifest {
+            targets: vec![TargetKind::Srs],
+            values: values_of(&FOLLOWED),
+        }
+    }
+}
+
+/// `followed-hold`: `followed` with no ceiling, and the probe check, the power
+/// bound and the hold, each a setting (SRS targets only). Built by the same
+/// constructor as its law file ([`FollowedConfig::build`]).
+#[derive(Debug, Clone)]
+pub struct FollowedHoldFactory {
+    /// Whether each probe is checked before it is played.
+    pub probe_check: bool,
+    /// The largest predicted over-test of a probe, with the margin, dB.
+    pub probe_limit_db: f64,
+    /// Whether the softening is carried with the measured power, rounded up.
+    pub power_bound: bool,
+    /// Whether a repeat pulse inside the hold tolerance plays again.
+    pub hold: bool,
+    /// The hold tolerance, dB.
+    pub hold_db: f64,
+}
+
+impl Default for FollowedHoldFactory {
+    /// The declared defaults.
+    fn default() -> Self {
+        let o = FollowedConfig::followed_hold().options;
+        FollowedHoldFactory {
+            probe_check: o.probe_check.is_some(),
+            probe_limit_db: o.probe_check.map_or(3.0, |c| c.limit_db),
+            power_bound: o.resolved_power_gate.is_some(),
+            hold: o.hold_db.is_some(),
+            hold_db: o.hold_db.unwrap_or(3.0),
+        }
+    }
+}
+
+impl FollowedHoldFactory {
+    /// The factory at the defaults with the keys of `params` set.
+    pub fn from_params(params: &Value) -> Result<Self, String> {
+        let mut f = FollowedHoldFactory::default();
+        read_params(params, |k, v| {
+            Some(match k {
+                "probe_check" => flag(v).map(|x| f.probe_check = x),
+                "probe_limit_db" => num(v).map(|x| f.probe_limit_db = x),
+                "power_bound" => flag(v).map(|x| f.power_bound = x),
+                "hold" => flag(v).map(|x| f.hold = x),
+                "hold_db" => num(v).map(|x| f.hold_db = x),
+                _ => return None,
+            })
+        })?;
+        Ok(f)
+    }
+
+    /// The configuration the law is built from.
+    pub fn config(&self) -> FollowedConfig {
+        let mut c = FollowedConfig::followed_hold();
+        let o = &mut c.options;
+        if !self.power_bound {
+            o.resolved_power_gate = None;
+        }
+        o.hold_db = self.hold.then_some(self.hold_db);
+        if !self.probe_check {
+            o.probe_check = None;
+        } else if let Some(p) = o.probe_check.as_mut() {
+            p.limit_db = self.probe_limit_db;
+        }
+        c
+    }
+}
+
+impl MimoShockLawFactory for FollowedHoldFactory {
+    fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
+        let law = self
+            .config()
+            .build(math_setup(setup), &setup.ladder_db)
+            .map_err(LawFault::Failed)?;
+        Ok(adapter("followed-hold", setup, law))
+    }
+
+    fn describe(&self) -> LawDescriptor {
+        descriptor(
+            "followed-hold",
+            json!({
+                "probe_check": self.probe_check, "probe_limit_db": self.probe_limit_db,
+                "power_bound": self.power_bound, "hold": self.hold, "hold_db": self.hold_db,
+            }),
+        )
+    }
+
+    fn manifest(&self) -> LawManifest {
+        LawManifest {
+            targets: vec![TargetKind::Srs],
+            values: values_of(&FOLLOWED_HOLD),
         }
     }
 }

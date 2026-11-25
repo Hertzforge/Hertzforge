@@ -370,9 +370,28 @@ async fn mimo_shock_the_law_list_names_the_builtins_first_with_their_targets() {
     let r = c.ok("laws.list", json!({"world": "shock_mimo"})).await;
     let laws = r["laws"].as_array().unwrap();
     let ids: Vec<&str> = laws.iter().map(|l| l["id"].as_str().unwrap()).collect();
-    assert_eq!(&ids[..3], ["inverse", "shape", "paired"]);
+    assert_eq!(
+        &ids[..5],
+        ["inverse", "shape", "paired", "followed", "followed-hold"]
+    );
     assert!(laws.iter().all(|l| l["world"] == "shock_mimo"));
     assert_eq!(laws[1]["targets"], json!(["srs"]));
+    for l in &laws[3..5] {
+        assert_eq!(l["targets"], json!(["srs"]), "{}", l["id"]);
+        assert_eq!(l["builtin"], true, "{}", l["id"]);
+        assert_eq!(l["default_for"], json!([]), "{}", l["id"]);
+    }
+    // followed-hold opens with its three protections on.
+    for key in ["probe_check", "power_bound", "hold"] {
+        assert!(
+            laws[4]["params"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["key"] == key && p["default"] == true),
+            "{key}"
+        );
+    }
     assert_eq!(laws[0]["targets"], json!(["waveform", "srs"]));
     assert!(laws[0]["params"]
         .as_array()

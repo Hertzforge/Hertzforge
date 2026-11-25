@@ -20,6 +20,11 @@
 //! - [`paired`]: each control paired with one drive, that drive's spectrum
 //!   scaled by the ratio of wanted to measured magnitude. No cross-path model.
 //!   The shortest law, written as the template a contributor copies.
+//! - [`followed`]: `shape` through a model that follows a structure that
+//!   softens with level (the identification and copies of it warped down in
+//!   frequency per octave band by a softening fitted from the run's pulses),
+//!   as `followed`, and as `followed-hold` with no ceiling, the probe check,
+//!   the power bound and the hold.
 //! - [`refresh`]: the model moved the least amount that makes it reproduce the
 //!   last pulse.
 //! - [`delay`]: delay estimation by cross-correlation, a delay applied as a

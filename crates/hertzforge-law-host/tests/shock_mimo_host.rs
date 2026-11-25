@@ -128,6 +128,11 @@ fn mimo_shock_law_files_load_as_their_world_and_state_their_targets() {
         ("hertzforge_law_mimo_shock_paired", both.clone()),
         ("hertzforge_law_mimo_shock_inverse", both.clone()),
         ("hertzforge_law_mimo_shock_shape", vec![TargetKind::Srs]),
+        ("hertzforge_law_mimo_shock_followed", vec![TargetKind::Srs]),
+        (
+            "hertzforge_law_mimo_shock_followed_hold",
+            vec![TargetKind::Srs],
+        ),
         ("law_fixture_shock_mimo_minimal", both.clone()),
     ] {
         match host.load_any(&law_bytes(name)) {

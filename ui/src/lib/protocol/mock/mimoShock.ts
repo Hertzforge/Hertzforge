@@ -177,6 +177,47 @@ const LAWS: MimoShockLawEntry[] = [
 		[
 			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null}
 		]
+	),
+	builtIn(
+		'followed',
+		'followed',
+		"Shapes each control's target by its SRS ratio through a model that follows a structure that softens with level. On the simulator it ended in tolerance in about three runs in four; weakest on strongly nonlinear structures and SRS targets. Simulator only; it has not run on a shaker.",
+		["srs"],
+		[],
+		[
+			{"key": "ceiling_pct", "label": "Softening ceiling", "help": "The largest drop in frequency the model assumes in any band. Larger lets it follow a structure that softens more, and risks an over-test where the fit is wrong.", "kind": "number", "unit": "%", "min": 1, "max": 50, "step": 0.5, "default": 12}
+		],
+		[
+			{"key": "worst_srs_error_db", "label": "Worst SRS error", "unit": "dB", "help": "The largest SRS deviation over every control and frequency.", "layout": null},
+			{"key": "weight", "label": "Weight", "unit": "", "help": "The weight on the SRS ratio at the level just played.", "layout": null},
+			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null},
+			{"key": "model_source", "label": "Model source", "unit": "", "help": "Where the next pulse's model came from: 0 the identification, 1 learned at this level, 2 predicted for a new level, 3 the secant model after the tracked one predicted worse.", "layout": null},
+			{"key": "model_prediction_residual", "label": "Model prediction error", "unit": "", "help": "How far the model that built the last pulse missed its measured response, relative, over the band.", "layout": null}
+		]
+	),
+	builtIn(
+		'followed-hold',
+		'followed-hold',
+		"followed with no ceiling, a check before each probe, a power bound and a hold. Cautious: it kept 98 runs in 100 within 3 dB of the full-level target but often stops below full level and ended in tolerance in about half the runs. Simulator only; it has not run on a shaker.",
+		["srs"],
+		[],
+		[
+			{"key": "probe_check", "label": "Probe check", "help": "Before each of the ladder's first two levels, predict the pulse's SRS and scale the pulse down when it is predicted over the probe limit.", "kind": "toggle", "default": true},
+			{"key": "probe_limit_db", "label": "Probe limit", "help": "The largest predicted SRS excess over a probe's target, with the margin, before the probe is scaled down.", "kind": "number", "unit": "dB", "min": 0.5, "max": 6, "step": 0.5, "default": 3},
+			{"key": "power_bound", "label": "Power bound", "help": "Carry the fitted softening up the ladder with the measured power of the amplitude, rounded up, instead of the largest power.", "kind": "toggle", "default": true},
+			{"key": "hold", "label": "Hold", "help": "On a repeat pulse whose every SRS point is within the hold tolerance, play the same drive again.", "kind": "toggle", "default": true},
+			{"key": "hold_db", "label": "Hold tolerance", "help": "How close to its target every SRS point must be for the hold.", "kind": "number", "unit": "dB", "min": 0.5, "max": 6, "step": 0.5, "default": 3}
+		],
+		[
+			{"key": "worst_srs_error_db", "label": "Worst SRS error", "unit": "dB", "help": "The largest SRS deviation over every control and frequency.", "layout": null},
+			{"key": "weight", "label": "Weight", "unit": "", "help": "The weight on the SRS ratio at the level just played.", "layout": null},
+			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null},
+			{"key": "model_source", "label": "Model source", "unit": "", "help": "Where the next pulse's model came from: 0 the identification, 1 learned at this level, 2 predicted for a new level, 3 the secant model after the tracked one predicted worse.", "layout": null},
+			{"key": "model_prediction_residual", "label": "Model prediction error", "unit": "", "help": "How far the model that built the last pulse missed its measured response, relative, over the band.", "layout": null},
+			{"key": "held", "label": "Held", "unit": "", "help": "1 when the last pulse's drive is played again unchanged.", "layout": null},
+			{"key": "probe_predicted_over_db", "label": "Probe predicted excess", "unit": "dB", "help": "The probe's largest SRS excess over its target as predicted before it was played.", "layout": null},
+			{"key": "probe_scale_db", "label": "Probe scale", "unit": "dB", "help": "How far the probe check scaled the probe; zero when it did not.", "layout": null}
+		]
 	)
 ];
 

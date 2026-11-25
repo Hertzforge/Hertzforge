@@ -58,9 +58,15 @@
 mod support;
 
 use hertzforge_hal_sim::plants::ShockPlant;
-use hertzforge_mimo_shock::builtin::{InverseFactory, ShapeFactory};
-use hertzforge_mimo_shock::{EndOutcome, HoldTiming, LadderPlan, MimoShockEngine, Timing};
+use hertzforge_mimo_shock::builtin::{math_setup, FollowedFactory, InverseFactory, ShapeFactory};
+use hertzforge_mimo_shock::records::replay;
+use hertzforge_mimo_shock::{
+    EndOutcome, HoldTiming, LadderPlan, LawManifest, MimoShockEngine, MimoShockLaw,
+    MimoShockLawFactory, PulseInputs, PulseOutputs, Setup, Target, Timing,
+};
+use hertzforge_mimo_shock_law_math::{self as math, LawSteps};
 use hertzforge_module_abi::StationClass;
+use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault};
 use std::sync::Arc;
 use support::*;
 
@@ -363,4 +369,94 @@ fn mimo_shock_engine_r8_the_run_is_at_the_rate_asked_not_the_caps_rate() {
     assert_eq!(e.df_hz(), FS / LEN_CLASSICAL as f64);
     e.identify().unwrap();
     assert_eq!(e.identification().unwrap().fs_hz, FS);
+}
+
+/// The law mathematics' own `FollowedLaw`, built by its constructors with no
+/// declaration, configuration or adapter of the product in between: the
+/// reference a recorded run of the built-in is replayed against.
+struct LawMath(fn(math::Setup) -> Result<math::followed::FollowedLaw, String>);
+
+struct LawMathRun {
+    law: math::followed::FollowedLaw,
+    record_len: usize,
+    srs_freqs: usize,
+}
+
+impl MimoShockLaw for LawMathRun {
+    fn name(&self) -> &str {
+        "law math"
+    }
+
+    fn seed(&mut self, level_db: f64) -> Result<PulseOutputs, LawFault> {
+        self.law.seed(level_db).map(out).map_err(LawFault::Failed)
+    }
+
+    fn iterate(&mut self, i: &PulseInputs) -> Result<PulseOutputs, LawFault> {
+        let rows = |x: &[f64], n: usize| -> Vec<Vec<f64>> {
+            x.chunks(n.max(1)).map(<[f64]>::to_vec).collect()
+        };
+        let m = math::PulseInputs {
+            pulse_index: i.pulse_index.saturating_sub(1) as usize,
+            level_db: i.level_db,
+            next_level_db: i.next_level_db,
+            drives: rows(&i.drives, self.record_len),
+            responses: rows(&i.responses, self.record_len),
+            srs: i.srs.as_ref().map(|s| rows(s, self.srs_freqs)),
+        };
+        self.law.iterate(&m).map(out).map_err(LawFault::Failed)
+    }
+}
+
+fn out(o: math::PulseOutputs) -> PulseOutputs {
+    PulseOutputs {
+        drives: o.drives.concat(),
+        delays_s: o.delays_s,
+        values: Vec::new(),
+    }
+}
+
+impl MimoShockLawFactory for LawMath {
+    fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
+        let law = (self.0)(math_setup(setup)).map_err(LawFault::Failed)?;
+        let srs_freqs = match &setup.target {
+            Target::Srs(t) => t.natural_hz.len(),
+            Target::Waveform(_) => 0,
+        };
+        Ok(Box::new(LawMathRun {
+            law,
+            record_len: setup.record_len,
+            srs_freqs,
+        }))
+    }
+
+    fn describe(&self) -> LawDescriptor {
+        FollowedFactory::default().describe()
+    }
+
+    fn manifest(&self) -> LawManifest {
+        FollowedFactory::default().manifest()
+    }
+}
+
+#[test]
+fn mimo_shock_engine_a_followed_run_replays_to_the_law_maths_drives() {
+    let cfg = config(4, 0, 4, LEN_SRS);
+    let (mut e, _) = ready(
+        ShockPlant::Linear4x4,
+        cfg,
+        srs(&[20.0, 16.0, 20.0, 16.0]),
+        Arc::new(FollowedFactory::default()),
+    );
+    let end = e.run_to_end(None).unwrap();
+    println!("{}", trace(&e));
+    let rec = e.records().clone();
+    assert!(rec.law_calls.len() >= 2, "{end:?}");
+    let r = replay(&rec, &LawMath(math::followed::FollowedLaw::followed)).unwrap();
+    println!(
+        "followed, recorded run against FollowedLaw::followed: {} of {} calls compared, worst \
+         {:e} of the drive peak; the run ended {:?} ({})",
+        r.compared, r.calls, r.worst_relative, end.outcome, end.reason
+    );
+    assert_eq!(r.compared, rec.law_calls.len());
+    assert!(r.reproduced() && r.worst_relative <= 1e-12, "{r:?}");
 }

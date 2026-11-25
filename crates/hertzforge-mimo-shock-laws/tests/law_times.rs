@@ -127,6 +127,8 @@ fn mimo_shock_x_law_call_times() {
         ("inverse", "frozen"),
         ("inverse", "track"),
         ("inverse", "track_secant, step"),
+        ("followed", "defaults"),
+        ("followed-hold", "defaults"),
     ];
     println!(
         "| plant | law | model | native seed s | native pulse s | file seed s | file pulse s |"
@@ -135,10 +137,13 @@ fn mimo_shock_x_law_call_times() {
     for (pname, plant) in &plants {
         for (law, label) in cases {
             let model = label.split(',').next().unwrap().trim();
-            let mut params = vec![Param {
-                key: "model".into(),
-                value: ParamValue::Choice(model.into()),
-            }];
+            let mut params = Vec::new();
+            if label != "defaults" {
+                params.push(Param {
+                    key: "model".into(),
+                    value: ParamValue::Choice(model.into()),
+                });
+            }
             if label.contains("clamp") {
                 params.push(Param {
                     key: "gain_clamp_db".into(),
@@ -151,12 +156,15 @@ fn mimo_shock_x_law_call_times() {
                     value: ParamValue::Toggle(true),
                 });
             }
-            let s = setup(plant, law == "shape");
+            let s = setup(plant, law != "inverse");
             let native = resolve_builtin_with(law, &params).unwrap();
             let (ns, ni) = time(native.as_ref(), &s, plant);
             let loaded = load_law_file(
                 &host,
-                &law_file(&format!("hertzforge_law_mimo_shock_{law}")),
+                &law_file(&format!(
+                    "hertzforge_law_mimo_shock_{}",
+                    law.replace('-', "_")
+                )),
             )
             .unwrap();
             let file = WasmMimoShockLawFactory::new(loaded, params, Duration::from_secs(600));

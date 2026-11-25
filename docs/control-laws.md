@@ -897,9 +897,39 @@ control. No cross path of the plant is used, so on a coupled structure the pairs
 other; it is there to show that, and as the template. Parameters `weight` (the power on the ratio,
 default 0.8), `smooth_lines` (default 15) and `max_step_db` (default 6 dB).
 
+**`followed`** (SRS only). `shape` through a model that follows a structure that softens with
+level: the family inverse over the identification and copies of it warped down in frequency per
+octave band, by a softening fitted from the run's pulses at each level and carried to the next as a
+bounded power of the amplitude (margin 1.5, power at most 1, only ever widened). The ladder's first
+two levels are its probes, played on the identification. Known weakness: the ceiling is a number
+for the structure; without one a strongly softening structure is played 8 to 11 dB over at full
+level. On the simulator it ended in tolerance in 0.761 of 1,140 runs, 0.28 to 0.30 on the most
+nonlinear frames and 0.534 on SRS targets.
+
+| Key | What it does |
+|---|---|
+| `ceiling_pct` | The largest drop in frequency the model assumes in any band (default 12 %) |
+
+**`followed-hold`** (SRS only). `followed` with no ceiling and three protections, each a setting.
+Known weakness: it is cautious and often stops below full level; it kept 0.981 of 1,140 runs within
+3 dB of the full-level target but ended in tolerance in 0.530 (0.147 on SRS targets), most misses
+at its probes. Once it holds it stops correcting, and the probe check can stall a structure that
+does not soften under measurement noise.
+
+| Key | What it does |
+|---|---|
+| `probe_check` | Before each of the ladder's first two levels, predict the probe's SRS through the identification, add the measured prediction error carried in amplitude, and scale the probe down when that is over the limit (default on) |
+| `probe_limit_db` | The probe check's limit (default 3 dB) |
+| `power_bound` | Carry the softening with the measured power of the amplitude rounded up by the fit's resolution, where the fitted drop is at least 0.5 %, instead of the largest power (default on) |
+| `hold` | On a repeat pulse at one level whose every SRS point of every control is within `hold_db` of its target, keep the gains and delays, so the same drive plays again (default on) |
+| `hold_db` | The hold's tolerance (default 3 dB) |
+
+Every number for these two was measured on the simulator; neither has run on a shaker.
+
 Each runs natively and as a law file (`laws/mimo-shock-inverse`, `laws/mimo-shock-shape`,
-`laws/mimo-shock-paired`), from the same mathematics and the same constructor; the law file's
-drives match the native law's within 1e-12 of each record's peak, for every option.
+`laws/mimo-shock-paired`, `laws/mimo-shock-followed`, `laws/mimo-shock-followed-hold`), from the
+same mathematics and the same constructor; the law file's drives match the native law's within
+1e-12 of each record's peak, for every option.
 
 **Time.** A law is built and seeded before the first pulse, under `control.seed_budget_s` (60 s by
 default): that is where `track` fits its modal model. Each pulse's call has the call budget, a
