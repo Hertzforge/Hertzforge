@@ -42,7 +42,7 @@ use crate::spec::{DiagDecl, DiagKind, LawSpec, ParamDecl, ParamKindDecl, ParamVa
 use crate::support::{diag_correction, largest_change_db, workers};
 use crate::BuiltinMimoLaw;
 use hertzforge_law_band_average_math::{
-    BandAverage, Frame, KappaRule, Params, Regularization, TfUpdateBlend,
+    band_line_ranges, BandAverage, Frame, KappaRule, Params, Regularization, TfUpdateBlend,
 };
 use hertzforge_sdm::law::{
     DiagnosticData, DiagnosticValue, LawError, MimoControlLaw, MimoInput, MimoLoopInputs,
@@ -76,6 +76,8 @@ pub struct BandAverageLaw {
     use_tf_update: bool,
     uses_coherence: bool,
     cross: CrossTerms,
+    /// Each band's lines inside the controlled band, for the core's judgement.
+    band_lines: Vec<(usize, usize)>,
     /// The drive last returned, for the largest change.
     last: Option<HermitianStack>,
 }
@@ -233,6 +235,10 @@ impl MimoControlLaw for BandAverageLaw {
             })
             .map_err(LawError)?;
         Ok(self.outputs(&drive))
+    }
+
+    fn control_bands(&self) -> Option<Vec<(usize, usize)>> {
+        Some(self.band_lines.clone())
     }
 }
 
@@ -602,6 +608,11 @@ impl BuiltinMimoLaw for BandAverageLaw {
         };
         p.control_to_cross_terms = cross != CrossTerms::Off;
         let (use_tf_update, uses_coherence) = (p.use_tf_update, p.min_coherence.is_some());
+        let band_lines = band_line_ranges(setup.df_hz, p.oct_order, setup.lines)
+            .into_iter()
+            .map(|(first, end)| (first.max(setup.band.0), end.min(setup.band.1)))
+            .filter(|(first, end)| first < end)
+            .collect();
         let mut law = BandAverage::new(p, setup.lines, setup.controls, setup.drives);
         law.set_threads(workers());
         Ok(BandAverageLaw {
@@ -615,6 +626,7 @@ impl BuiltinMimoLaw for BandAverageLaw {
             band: setup.band,
             estimate_frames,
             cross,
+            band_lines,
             last: None,
         })
     }

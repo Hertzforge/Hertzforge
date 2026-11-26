@@ -209,6 +209,10 @@ pub struct MimoRandomService {
     law_clock: Arc<dyn LawClock>,
     law: Option<Box<dyn MimoControlLaw + Send>>,
     law_needs: Vec<MimoInput>,
+    /// The bands the run's law declared (`MimoControlLaw::control_bands`), kept to
+    /// the controlled band: the core's divergence judgement reads each control's
+    /// band error over them. `None` for a law that controls every line.
+    law_bands: Option<Vec<(usize, usize)>>,
     law_line: Option<LawLine>,
     law_stats: LawStats,
     law_misses: u32,
@@ -477,6 +481,7 @@ impl MimoRandomService {
             law_clock: Arc::new(MonotonicClock::new()),
             law: None,
             law_needs: Vec::new(),
+            law_bands: None,
             law_line: None,
             law_stats: LawStats::default(),
             law_misses: 0,
@@ -1963,6 +1968,9 @@ impl MimoRandomService {
             )));
         }
         self.law_needs = law.needs().to_vec();
+        self.law_bands = law
+            .control_bands()
+            .and_then(|bands| checked_bands(&bands, self.band));
         let id = factory.identity();
         self.law_line = Some(LawLine {
             id: self.cfg.law.id.clone(),
@@ -2576,6 +2584,52 @@ impl MimoRandomService {
         (rms, worst, lines)
     }
 
+    /// Per-control band error of a control-space response at full level, for a
+    /// law that declares its bands: for each band, the dB of the response summed
+    /// over the band's lines against the target summed over the same lines, then
+    /// the rms over the bands. Power is summed before the dB, as a band law treats
+    /// a band. `achievable` is as in [`Self::errors_of`].
+    fn band_errors_of(
+        &self,
+        resp: &HermitianStack,
+        achievable: bool,
+        bands: &[(usize, usize)],
+    ) -> Vec<f64> {
+        let n = self.n_r;
+        let target = if achievable {
+            &self.achievable_diag
+        } else {
+            &self.ref_diag
+        };
+        let mut rms = vec![0.0; n];
+        let mut count = vec![0usize; n];
+        for &(first, end) in bands {
+            for i in 0..n {
+                let (mut r, mut m) = (0.0, 0.0);
+                for line in first..end {
+                    let (t, v) = (target[line * n + i], resp.get(line, i, i).re);
+                    if t > 0.0 && v > 0.0 {
+                        r += t;
+                        m += v;
+                    }
+                }
+                if r > 0.0 && m > 0.0 {
+                    let e = 10.0 * (m / r).log10();
+                    rms[i] += e * e;
+                    count[i] += 1;
+                }
+            }
+        }
+        for i in 0..n {
+            rms[i] = if count[i] > 0 {
+                (rms[i] / count[i] as f64).sqrt()
+            } else {
+                f64::NAN
+            };
+        }
+        rms
+    }
+
     /// The envelope on each control's PSD (D11). Returns `false` when it aborted.
     fn check_envelope(&mut self, resp: &HermitianStack, dof: f64) -> bool {
         if dof < MIN_ENVELOPE_DOF {
@@ -2629,9 +2683,9 @@ impl MimoRandomService {
 
     /// The core's own divergence judgement (design 8.4): a control whose error
     /// against what the plant can reach stays at or above the floor without
-    /// improving for `divergence_loops` judged loops. Returns `false` when it
-    /// aborted.
-    fn check_divergence(&mut self, err_ach: &[f64]) -> bool {
+    /// improving for `divergence_loops` judged loops. `measure` says which error
+    /// `err_ach` holds. Returns `false` when it aborted.
+    fn check_divergence(&mut self, err_ach: &[f64], measure: DivergenceMeasure) -> bool {
         let p = self.cfg.protections;
         for (i, &e) in err_ach.iter().enumerate() {
             if !e.is_finite() || e < p.divergence_floor_db {
@@ -2650,6 +2704,7 @@ impl MimoRandomService {
                     control: i,
                     consecutive_loops: self.ls.div_streak[i],
                     error_db: e,
+                    measure,
                 });
                 return false;
             }
@@ -2788,8 +2843,21 @@ impl MimoRandomService {
             .to_control(&raw.g_cc)
             .map_err(|e| MimoError::Law(e.to_string()))?;
         let _ = raw_resp.scale_lines(&vec![to_full; self.lines]);
-        let (err_ach, _, _) = self.errors_of(&raw_resp, self.n_r > self.n_u);
-        if !self.check_divergence(&err_ach) {
+        // A law that sets band levels is judged on band error: its line error
+        // holds the structure's peaks and valleys inside each band, which it does
+        // not try to remove. The envelope above judged every line.
+        let achievable = self.n_r > self.n_u;
+        let (err_ach, measure) = match self.law_bands.as_deref() {
+            Some(bands) => (
+                self.band_errors_of(&raw_resp, achievable, bands),
+                DivergenceMeasure::Bands,
+            ),
+            None => (
+                self.errors_of(&raw_resp, achievable).0,
+                DivergenceMeasure::Lines,
+            ),
+        };
+        if !self.check_divergence(&err_ach, measure) {
             return Ok(false);
         }
         // 6. The FRF the law sees.
@@ -3251,5 +3319,66 @@ fn cap_window(loops: u32) -> u32 {
         u32::MAX
     } else {
         (1u32 << bits) - 1
+    }
+}
+
+/// A law's declared bands as the divergence judgement uses them: kept to the
+/// controlled band, a band left with no line dropped. A declaration that is not
+/// half-open ranges in line order, none overlapping, is not used, and neither is
+/// one with no line in the band: the law is then judged line by line, the
+/// stricter measure for a law that leaves lines inside a band alone.
+fn checked_bands(bands: &[(usize, usize)], band: (usize, usize)) -> Option<Vec<(usize, usize)>> {
+    let ordered =
+        bands.iter().all(|&(first, end)| first < end) && bands.windows(2).all(|w| w[0].1 <= w[1].0);
+    if !ordered {
+        return None;
+    }
+    let kept: Vec<(usize, usize)> = bands
+        .iter()
+        .map(|&(first, end)| (first.max(band.0), end.min(band.1)))
+        .filter(|&(first, end)| first < end)
+        .collect();
+    (!kept.is_empty()).then_some(kept)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::checked_bands;
+
+    #[test]
+    fn declared_bands_are_kept_to_the_controlled_band() {
+        let band = (10, 40);
+        assert_eq!(
+            checked_bands(&[(0, 8), (8, 16), (16, 32), (32, 64)], band),
+            Some(vec![(10, 16), (16, 32), (32, 40)])
+        );
+        // A gap between bands is allowed; its lines are in no band.
+        assert_eq!(
+            checked_bands(&[(12, 14), (20, 30)], band),
+            Some(vec![(12, 14), (20, 30)])
+        );
+    }
+
+    #[test]
+    fn a_malformed_declaration_is_not_used() {
+        let band = (10, 40);
+        assert_eq!(checked_bands(&[(16, 16)], band), None, "an empty band");
+        assert_eq!(checked_bands(&[(20, 12)], band), None, "a reversed band");
+        assert_eq!(
+            checked_bands(&[(10, 20), (18, 30)], band),
+            None,
+            "overlapping"
+        );
+        assert_eq!(
+            checked_bands(&[(20, 30), (10, 20)], band),
+            None,
+            "out of order"
+        );
+        assert_eq!(
+            checked_bands(&[(0, 10), (40, 50)], band),
+            None,
+            "none in the band"
+        );
+        assert_eq!(checked_bands(&[], band), None);
     }
 }
