@@ -17,7 +17,7 @@ follow it.
 
 ```text
 cargo build --release -p sds-control --example msnb_run
-msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record] [--no-true-modes]
+msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record] [--no-true-modes] [--whole-history]
 ```
 
 - `<problem-root>`: the folder every path in the case is relative to (for the benchmark, the
@@ -32,6 +32,8 @@ msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--reco
 - `--no-true-modes`: do not follow the modes' frequencies (`true_modes.tracked` is false). On
   a 6x6 realistic structure, 1 octave a minute over 20 to 2000 Hz, following them took 24 % of
   the run's processor time (MSNB-A-E7).
+- `--whole-history`: a stepped sine or a dwell keeps every update (see "Thinning" under
+  `history`); a sweep is thinned as always. For a diagnosis, not for the study.
 
 One run uses one core: the program starts no thread of its own and does no network or screen
 work.
@@ -193,7 +195,7 @@ per-limit `(points, limits)`.
 | `case_sha256` | common | SHA-256 of the case file's bytes |
 | `runner_sha256` | engine | SHA-256 of the running program's file |
 | `code_commit` | engine | The commit the program was built from (`HF_BUILD_COMMIT` at build time), or `"unstated build"` |
-| `options` | common | `{"ideal_frf", "record", "true_modes"}`, booleans |
+| `options` | common | `{"ideal_frf", "record", "true_modes", "whole_history"}`, booleans |
 | `structure` | common | `file` (as in the case), `sha256`, `structure_id`, `variant`, `seed`, `controls`, `limits` and `drives` (names), `n_modes`, `fs_hz` (as configured), `tick_s` (as rounded to whole samples), `tick_frames` |
 | `law` | common: `id`, `params`, `phase_specified`; engine: `name`, `version`, `amplitude_only` | `params` as given; `amplitude_only` the manifest's; `phase_specified` as run |
 | `test` | common | The test as run: `type`, and `band_hz`, `rate_oct_per_min`, `direction`, `start_hz`, `sweeps` (sweep); `band_hz`, `steps_per_octave`, `spacing`, `step_s` (stepped); `freq_hz`, `dwell_s` (dwell) |
@@ -203,7 +205,7 @@ per-limit `(points, limits)`.
 | `outcome` | below | |
 | `events` | engine | The engine's timeline, below |
 | `events_dropped` | engine | Counts by kind of events not kept |
-| `history` | below | The updates, thinned in a sweep |
+| `history` | below | The updates, thinned (below) |
 | `true_modes` | below | The simulator's mode frequencies along the run |
 | `summary` | common: `updates`, `judged_updates`, `largest_drive_vpk`; engine: `records_dropped` (0 expected), `largest_sample_v`, `over_ceiling_samples`, `drive_is_zero` (at the end) | |
 | `record` | engine | With `--record`: `drive_frames`, `input_frames`, `channels`, `drives` |
@@ -287,7 +289,18 @@ answer was not refused (`miss` null), and it is at the last level of the ladder
 (`hertzforge_mimo_sine_laws::check`). The update on which a guard ended the run is judged by the
 same rule (its readings are real; the law was not called on it).
 
-**Thinning.** A stepped sine or a dwell keeps every update (`decimation` `"every update"`). A
+**Thinning.** A stepped sine or a dwell (`decimation` `"every judged update"`) keeps every judged
+update as a point standing for itself. Of the updates that are not judged it keeps the first and
+the last of each run of consecutive updates with the same key (the level rounded to 1e-6 dB, the
+frequency, `settling`, `miss`); a point stands for the updates from it up to the next point.
+Every update a scorer selects is judged, so it reads a stepped test's judged updates whole; the
+other updates are read through their counts (`bin_updates`) and the drive and mode extremes of
+each point's span (`bin_drive_vpk_max`, `bin_drive_norm_max`, `true_modes.frequency_hz_min` and
+`_max`), each null where the point stands for one update (its own values are its extremes). With `--whole-history`
+a stepped sine or a dwell keeps every update (`decimation` `"every update"`, no `bin_` fields, as
+before the thinning; for a diagnosis). Measured on the pilot's 27 stepped-sine and 45 dwell cases
+(MSNB-I-E2): the thinned files are 33.5 % of the whole ones' bytes on a stepped sine and 47.1 % on a
+dwell, and every reading of the suite's scorer is the same. A
 sweep (`decimation` `"1/48 octave"`) keeps one point per bin and level: with `lo` the band's
 lower edge, an update's bin is `floor(48 log2(f / lo) + 1e-9)`; its key is (its level rounded to
 1e-6 dB, its bin); a point is the first update of each run of consecutive updates with the same
@@ -298,7 +311,7 @@ up or down.
 
 | Key | Kind | What |
 |---|---|---|
-| `decimation` | common | `"1/48 octave"` (sweep) or `"every update"` (stepped sine, dwell) |
+| `decimation` | common | `"1/48 octave"` (sweep), `"every judged update"` (stepped sine, dwell), or `"every update"` (stepped sine, dwell, with `--whole-history`) |
 | `points` | common | How many points |
 | `index` | common | The update's index (0 at engage) |
 | `time_s` | common | Seconds since engage at the end of the update |
@@ -314,9 +327,11 @@ up or down.
 | `drive_re`, `drive_im` | common | Each drive played from the next interval on, after every guard, V peak |
 | `limit_re`, `limit_im`, `limit_bound` | common, with limit channels only | Each limit channel's tracked value and its bound here, m/s^2 peak |
 | `notch_depth`, `ceiling_scale`, `cap_bound`, `opposition_ratio` | engine | The engine's readings of the update |
-| `bin_updates` | common, sweep only | How many updates the point stands for |
-| `bin_judged` | common, sweep only | How many of those are judged |
+| `bin_updates` | common, thinned | How many updates the point stands for |
+| `bin_judged` | common, thinned | How many of those are judged |
 | `bin_error_db_min`, `bin_error_db_max` | common, sweep only | Each control's smallest and largest error over the judged updates the point stands for (`(points, controls)`; null where none is judged) |
+| `bin_drive_vpk_max` | common, stepped sine and dwell thinned | Each drive's largest size over the updates the point stands for, V peak (`(points, drives)`), from the drive as written (nine digits); null where the point stands for one update |
+| `bin_drive_norm_max` | common, stepped sine and dwell thinned | The drive vector's largest norm over those updates, V peak; null where the point stands for one update |
 
 #### `true_modes` (common; `resolution_samples` and `configures_seen` engine)
 
@@ -328,6 +343,7 @@ point: the structure's state as tested.
 | `tracked` | Whether the modes were followed (false for a structure with no level rule, whose modes do not move, and with `--no-true-modes`) |
 | `modes` | The modes followed: `index` (in `structure.json`), `f0_hz` (small-signal) |
 | `frequency_hz` | `(points, modes)`: each mode's frequency at the point |
+| `frequency_hz_min`, `frequency_hz_max` | A stepped sine or a dwell thinned, tracked: `(points, modes)`, each mode's smallest and largest frequency over the updates the point stands for; a null row where the point stands for one update |
 | `resolution_samples` | The envelope is read at the end of each block the station is read in (256 samples at the simulator's block); a point takes the last read at or before round(`time_s` x fs) samples from the engaged start |
 | `configures_seen` | The station's configures seen (2: the identification's, the engaged run's) |
 

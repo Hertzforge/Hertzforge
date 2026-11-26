@@ -72,7 +72,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-const USAGE: &str = "usage: msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record] [--no-true-modes]";
+const USAGE: &str = "usage: msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--record] [--no-true-modes] [--whole-history]";
 
 /// The code this program was built from: `HF_BUILD_COMMIT` at build time.
 const COMMIT: &str = match option_env!("HF_BUILD_COMMIT") {
@@ -1180,8 +1180,15 @@ fn n9(x: f64) -> Value {
     if x == 0.0 {
         return json!(0.0);
     }
-    let r: f64 = format!("{x:.8e}").parse().expect("a formatted number");
-    json!(r)
+    json!(n9f(x))
+}
+
+/// `x` rounded to nine significant digits, as `n9` writes it.
+fn n9f(x: f64) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    format!("{x:.8e}").parse().expect("a formatted number")
 }
 fn n9s(xs: impl IntoIterator<Item = f64>) -> Value {
     Value::Array(xs.into_iter().map(n9).collect())
@@ -1217,6 +1224,26 @@ fn sweep_points(ticks: &[TickRecord], lo: f64) -> Vec<(usize, usize)> {
         }
     }
     out
+}
+
+/// Which history points a stepped sine or a dwell keeps: every judged update, standing for
+/// itself; of the updates that are not judged, the first and the last of each run of
+/// consecutive updates with the same key (the level rounded to 1e-6 dB, the frequency, the
+/// settle window, the law's miss), each standing for the updates from it up to the next
+/// point. `judged[i]` is the update's judged flag. Returns, for each kept update, the range
+/// of updates it stands for.
+fn stepped_points(ticks: &[TickRecord], judged: &[bool]) -> Vec<(usize, usize)> {
+    let n = ticks.len();
+    let key = |t: &TickRecord| ((t.level_db * 1e6).round() as i64, t.frequency_hz.to_bits(), t.settling, t.miss);
+    let same = |i: usize, j: usize| !judged[i] && !judged[j] && key(&ticks[i]) == key(&ticks[j]);
+    let starts: Vec<usize> = (0..n)
+        .filter(|&i| i == 0 || i + 1 == n || !same(i - 1, i) || !same(i, i + 1))
+        .collect();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(j, &s)| (s, starts.get(j + 1).copied().unwrap_or(n)))
+        .collect()
 }
 
 /// How the measured identification compares with the small-signal response handed to the
@@ -1353,13 +1380,15 @@ struct Args {
     ideal_frf: bool,
     record: bool,
     true_modes: bool,
+    /// A stepped sine or a dwell keeps every update (FORMAT_RUN.md, "Thinning").
+    whole_history: bool,
 }
 
 fn args() -> Args {
     let mut it = std::env::args().skip(1);
     let case = it.next().unwrap_or_else(|| refuse(USAGE));
-    let (mut root, mut out, mut ideal_frf, mut record, mut true_modes) =
-        (None, None, false, false, true);
+    let (mut root, mut out, mut ideal_frf, mut record, mut true_modes, mut whole_history) =
+        (None, None, false, false, true, false);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--root" => root = it.next(),
@@ -1367,6 +1396,7 @@ fn args() -> Args {
             "--ideal-frf" => ideal_frf = true,
             "--record" => record = true,
             "--no-true-modes" => true_modes = false,
+            "--whole-history" => whole_history = true,
             _ => refuse(format!("unknown argument {a}\n{USAGE}")),
         }
     }
@@ -1377,6 +1407,7 @@ fn args() -> Args {
         ideal_frf,
         record,
         true_modes,
+        whole_history,
     }
 }
 
@@ -1839,7 +1870,8 @@ fn main() {
         "runner_sha256": runner_sha,
         "code_commit": COMMIT,
         "producer": {"program": "msnb_run", "engine": "hertzforge-mimo-sine", "simulator": "hertzforge-hal-sim"},
-        "options": {"ideal_frf": a.ideal_frf, "record": a.record, "true_modes": a.true_modes},
+        "options": {"ideal_frf": a.ideal_frf, "record": a.record, "true_modes": a.true_modes,
+            "whole_history": a.whole_history},
         "structure": {
             "file": case.structure_file.to_string_lossy(),
             "sha256": st_sha,
@@ -2145,8 +2177,14 @@ fn main() {
     // The law check's rule (`hertzforge_mimo_sine_laws::check`).
     let judged = |t: &TickRecord| !t.settling && t.miss.is_none() && at_top(t);
     let is_sweep = matches!(case.test, TestSpec::Sweep { .. });
+    // A stepped sine or a dwell, thinned (FORMAT_RUN.md, "Thinning"); `--whole-history` keeps
+    // every update.
+    let thin_stepped = !is_sweep && !a.whole_history;
     let spans: Vec<(usize, usize)> = if is_sweep {
         sweep_points(&ticks, band.0)
+    } else if thin_stepped {
+        let flags: Vec<bool> = ticks.iter().map(|t| judged(t)).collect();
+        stepped_points(&ticks, &flags)
     } else {
         (0..ticks.len()).map(|i| (i, i + 1)).collect()
     };
@@ -2165,7 +2203,7 @@ fn main() {
     let (r_re, r_im) = cplx(&|t| t.reference[..nc].to_vec(), true);
     let (d_re, d_im) = cplx(&|t| t.drive[..nd].to_vec(), false);
     let mut hist = json!({
-        "decimation": if is_sweep { "1/48 octave" } else { "every update" },
+        "decimation": if is_sweep { "1/48 octave" } else if thin_stepped { "every judged update" } else { "every update" },
         "points": pts.len(),
         "index": pts.iter().map(|t| t.index).collect::<Vec<_>>(),
         "time_s": n9s(pts.iter().map(|t| t.time_s)),
@@ -2196,7 +2234,7 @@ fn main() {
                 .collect(),
         );
     }
-    if is_sweep {
+    if is_sweep || thin_stepped {
         let mut upd = Vec::new();
         let mut jud = Vec::new();
         let mut emin = Vec::new();
@@ -2216,8 +2254,38 @@ fn main() {
         }
         hist["bin_updates"] = json!(upd);
         hist["bin_judged"] = json!(jud);
-        hist["bin_error_db_min"] = Value::Array(emin);
-        hist["bin_error_db_max"] = Value::Array(emax);
+        if is_sweep {
+            // A stepped test's judged updates are points of their own: nothing lies between them.
+            hist["bin_error_db_min"] = Value::Array(emin);
+            hist["bin_error_db_max"] = Value::Array(emax);
+        }
+    }
+    if thin_stepped {
+        // The drive's extremes over the updates a point stands for, from the values as written
+        // (nine digits), so a reader finds the same largest drive as in the whole history; null
+        // where the point stands for itself alone (its own drive is its extreme).
+        let mut vmax = Vec::new();
+        let mut nmax = Vec::new();
+        for &(s, e) in &spans {
+            if e - s == 1 {
+                vmax.push(Value::Null);
+                nmax.push(Value::Null);
+                continue;
+            }
+            let mut per = vec![f64::NEG_INFINITY; nd];
+            let mut nrm = f64::NEG_INFINITY;
+            for t in &ticks[s..e.min(ticks.len())] {
+                let mags: Vec<f64> = t.drive[..nd].iter().map(|d| C64::new(n9f(d.re), n9f(d.im)).norm()).collect();
+                for (p, m) in per.iter_mut().zip(&mags) {
+                    *p = p.max(*m);
+                }
+                nrm = nrm.max(mags.iter().map(|m| m * m).sum::<f64>().sqrt());
+            }
+            vmax.push(n9s(per));
+            nmax.push(n9(nrm));
+        }
+        hist["bin_drive_vpk_max"] = Value::Array(vmax);
+        hist["bin_drive_norm_max"] = Value::Array(nmax);
     }
     run["history"] = hist;
 
@@ -2225,12 +2293,31 @@ fn main() {
     let tap = shared.lock().expect("tap");
     let tracked = follow_plant.is_some() && tap.configures == 2 && !tap.envelopes.is_empty();
     let mut true_freqs = Vec::new();
+    let (mut true_min, mut true_max) = (Vec::new(), Vec::new());
     if let (true, Some(fp)) = (tracked, follow_plant.as_ref()) {
-        for t in &pts {
+        let modes_at = |t: &TickRecord| -> Vec<f64> {
             let at = (t.time_s * fs).round() as u64;
             let k = tap.envelopes.partition_point(|(s, _)| *s <= at);
             let env = &tap.envelopes[k.saturating_sub(1)].1;
-            true_freqs.push(n9s(fp.modes_at_envelope(env).iter().map(|m| m.0)));
+            fp.modes_at_envelope(env).iter().map(|m| m.0).collect()
+        };
+        for t in &pts {
+            true_freqs.push(n9s(modes_at(t)));
+        }
+        if thin_stepped {
+            // Each followed mode's extremes over the updates a point stands for; null where the
+            // point stands for itself alone.
+            for &(s, e) in &spans {
+                if e - s == 1 {
+                    true_min.push(Value::Null);
+                    true_max.push(Value::Null);
+                    continue;
+                }
+                let rows: Vec<Vec<f64>> = ticks[s..e.min(ticks.len())].iter().map(|t| modes_at(t)).collect();
+                let m = rows[0].len();
+                true_min.push(n9s((0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::INFINITY, f64::min))));
+                true_max.push(n9s((0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::NEG_INFINITY, f64::max))));
+            }
         }
     }
     run["true_modes"] = json!({
@@ -2240,6 +2327,10 @@ fn main() {
         "resolution_samples": hertzforge_mimo_sine::service::SIM_BLOCK_FRAMES,
         "configures_seen": tap.configures,
     });
+    if thin_stepped && tracked {
+        run["true_modes"]["frequency_hz_min"] = Value::Array(true_min);
+        run["true_modes"]["frequency_hz_max"] = Value::Array(true_max);
+    }
     let largest_drive = ticks
         .iter()
         .flat_map(|t| t.drive[..nd].iter().map(|d| d.norm()).collect::<Vec<_>>())
@@ -2403,6 +2494,46 @@ mod tests {
         ticks.reverse();
         let q = sweep_points(&ticks, 20.0);
         assert!((q.len() as i64 - 241).abs() <= 1);
+    }
+
+    #[test]
+    fn msnb_stepped_points_keep_every_judged_update_and_each_spans_ends() {
+        // Two steps: 5 settling updates then 4 judged ones each, a miss inside the second's
+        // judged run, then 3 settling updates at a lower level.
+        let mut ticks = Vec::new();
+        let mut judged = Vec::new();
+        for (f, lv, settling, miss, j) in [(100.0, 0.0, true, None, false); 5]
+            .into_iter()
+            .chain([(100.0, 0.0, false, None, true); 4])
+            .chain([(110.0, 0.0, true, None, false); 5])
+            .chain([(110.0, 0.0, false, None, true); 2])
+            .chain([(110.0, 0.0, false, Some("late"), false); 3])
+            .chain([(110.0, 0.0, false, None, true); 2])
+            .chain([(110.0, -3.0, true, None, false); 3])
+        {
+            let mut t = TickRecord::empty(1, 1, 0);
+            t.index = ticks.len() as u64;
+            t.frequency_hz = f;
+            t.level_db = lv;
+            t.settling = settling;
+            t.miss = miss;
+            ticks.push(t);
+            judged.push(j);
+        }
+        let p = stepped_points(&ticks, &judged);
+        // Every update is stood for once, in order.
+        assert_eq!(p.iter().map(|(s, e)| e - s).sum::<usize>(), ticks.len());
+        assert!(p.windows(2).all(|w| w[0].1 == w[1].0));
+        // Every judged update is a point standing for itself.
+        for (i, &j) in judged.iter().enumerate() {
+            if j {
+                assert!(p.contains(&(i, i + 1)), "judged update {i}");
+            }
+        }
+        // The spans that are not judged: first and last of each run of the same key.
+        let starts: Vec<usize> = p.iter().map(|x| x.0).collect();
+        assert_eq!(starts, vec![0, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 18, 19, 20, 21, 23]);
+        assert_eq!(p.last().copied(), Some((23, 24)));
     }
 
     #[test]

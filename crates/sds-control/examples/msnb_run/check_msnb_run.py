@@ -30,6 +30,17 @@ must fail there: a check that cannot fail checks nothing.
    volts) and the ceiling 6 dB over it, completes within the alarm band with the drive near 1 V;
    the run file states the gain. Broken case: the same dwell with no gain (the drive held at its
    9 V ceiling, the controls under).
+8. The thinning of a stepped sine and a dwell (FORMAT_RUN.md, "Thinning"): the same case run
+   thinned (the default) and with --whole-history; the thinned file is the whole one thinned by
+   the rule as FORMAT_RUN.md states it, restated here: every judged update a point of its own with
+   the whole file's values, the other updates' spans ending where their key changes, the counts,
+   and each span's drive and mode extremes (null on a point standing for one update); everything
+   outside the history the same. Broken cases: a judged update dropped; each span's largest drive
+   1e-3 low; a drive extreme written on a point standing for one update; each span's mode maximum
+   1e-6 low.
+
+Checks 1 and 2 read the recorded dwell update by update, so it runs with --whole-history; the
+other runs are thinned as the runner writes by default.
 
 The structures are read from MSNB_PROBLEMS and never written. reference_model.py is the one in
 the problem's own folder.
@@ -245,6 +256,105 @@ def ends_as_the_engine_says(out, ceiling=9.0):
     return bad
 
 
+def n9(x):
+    return float(f'{x:.8e}')
+
+
+def thin_spans(h):
+    """FORMAT_RUN.md's stepped and dwell thinning, restated from the text: every judged update a point standing for
+    itself; of the others, the first and the last update of each run of consecutive updates with the same key (level
+    rounded to 1e-6 dB, frequency, settling, miss); a point stands for the updates up to the next point."""
+    n = len(h['index'])
+    key = [(round(h['level_db'][i] * 1e6), h['frequency_hz'][i], h['settling'][i], h['miss'][i]) for i in range(n)]
+    j = h['judged']
+
+    def same(a, b):
+        return not j[a] and not j[b] and key[a] == key[b]
+    pts = [i for i in range(n) if i == 0 or i == n - 1 or not same(i - 1, i) or not same(i, i + 1)]
+    return list(zip(pts, pts[1:] + [n]))
+
+
+def thinned_as_stated(whole, thin, rel=1e-8):
+    """The thinned run file `thin` (a dict) against the whole one: a list of what differs. The drive extremes are
+    magnitudes written to nine digits, so they are compared within 1e-8 of themselves."""
+    bad = []
+    hw, ht = whole['history'], thin['history']
+    if hw['decimation'] != 'every update' or ht['decimation'] != 'every judged update':
+        return [f'decimation {hw["decimation"]!r} and {ht["decimation"]!r}']
+    spans = thin_spans(hw)
+    if ht['index'] != [hw['index'][s] for s, _ in spans] or ht['points'] != len(spans):
+        return [f'{ht["points"]} points against the rule\'s {len(spans)}']
+    for k, v in hw.items():
+        if isinstance(v, list) and len(v) == hw['points'] and ht.get(k) != [v[s] for s, _ in spans]:
+            bad.append(f'history {k} is not the whole file\'s at the points')
+    if ht['bin_updates'] != [e - s for s, e in spans]:
+        bad.append('bin_updates')
+    if ht['bin_judged'] != [sum(hw['judged'][s:e]) for s, e in spans]:
+        bad.append('bin_judged')
+    if 'bin_error_db_min' in ht:
+        bad.append('a stepped test carries error extremes')
+    d = np.array(hw['drive_re']) + 1j * np.array(hw['drive_im'])
+    many = [i for i, (s, e) in enumerate(spans) if e - s > 1]
+    if any(ht['bin_drive_vpk_max'][i] is not None or ht['bin_drive_norm_max'][i] is not None
+           for i, (s, e) in enumerate(spans) if e - s == 1):
+        bad.append('a drive extreme where the point stands for one update')
+    vmax = np.array([np.abs(d[s:e]).max(0) for s, e in spans])[many]
+    nmax = np.array([np.sqrt((np.abs(d[s:e]) ** 2).sum(1)).max() for s, e in spans])[many]
+    got_v = np.array([ht['bin_drive_vpk_max'][i] for i in many], float).reshape(vmax.shape)
+    got_n = np.array([ht['bin_drive_norm_max'][i] for i in many], float)
+    if not np.allclose(got_v, vmax, rtol=rel, atol=0):
+        bad.append('bin_drive_vpk_max is not each span\'s largest drive')
+    if not np.allclose(got_n, nmax, rtol=rel, atol=0):
+        bad.append('bin_drive_norm_max is not each span\'s largest norm')
+    tw, tt = whole['true_modes'], thin['true_modes']
+    if tw['tracked']:
+        F = np.array(tw['frequency_hz'], float)
+        if tt['frequency_hz'] != [tw['frequency_hz'][s] for s, _ in spans]:
+            bad.append('true_modes frequency_hz')
+        for key, f in (('frequency_hz_min', np.min), ('frequency_hz_max', np.max)):
+            want = [None if e - s == 1 else [float(x) for x in f(F[s:e], 0)] for s, e in spans]
+            if tt[key] != want:
+                bad.append(f'true_modes {key}')
+    for k in set(whole) | set(thin):
+        if k in ('history', 'true_modes', 'options'):
+            continue
+        if whole.get(k) != thin.get(k):
+            bad.append(f'{k} differs')
+    if {**whole['options'], 'whole_history': None} != {**thin['options'], 'whole_history': None}:
+        bad.append('options differ beyond whole_history')
+    return bad
+
+
+def broken_thinnings(thin):
+    """Copies of a thinned run file built to break the thinning check, each with what was broken."""
+    import copy
+    h = thin['history']
+    out = []
+    a = copy.deepcopy(thin)
+    k = h['judged'].index(True)
+    for key, v in a['history'].items():
+        if isinstance(v, list) and len(v) == h['points']:
+            del v[k]
+    a['history']['points'] -= 1
+    out.append(('a judged update dropped', a))
+    spans = [i for i, n in enumerate(h['bin_updates']) if n > 1]
+    b = copy.deepcopy(thin)
+    for i in spans:
+        b['history']['bin_drive_vpk_max'][i] = [n9(x * 0.999) for x in h['bin_drive_vpk_max'][i]]
+    out.append(('each span\'s largest drive 1e-3 low', b))
+    b = copy.deepcopy(thin)
+    k = h['bin_updates'].index(1)
+    b['history']['bin_drive_vpk_max'][k] = [n9(abs(complex(x, y))) for x, y in zip(h['drive_re'][k], h['drive_im'][k])]
+    b['history']['bin_drive_norm_max'][k] = 0.0
+    out.append(('a drive extreme on a point standing for one update', b))
+    if thin['true_modes']['tracked']:
+        c = copy.deepcopy(thin)
+        for i in spans:
+            c['true_modes']['frequency_hz_max'][i] = [n9(x * (1 - 1e-6)) for x in c['true_modes']['frequency_hz_max'][i]]
+        out.append(('each span\'s mode maximum 1e-6 low', c))
+    return out
+
+
 @unittest.skipUnless(RUN and PLAY and PROBLEMS, 'set MSNB_RUN, OBS_PLAY and MSNB_PROBLEMS')
 class MsnbRun(unittest.TestCase):
     @classmethod
@@ -253,9 +363,10 @@ class MsnbRun(unittest.TestCase):
         dwell = {'type': 'dwell', 'freq_hz': 150.0, 'dwell_s': 6.0}
         rec = case(REALISTIC, dwell, 10.0, protective='widened')
         jobs = {
-            'rec_a': (rec, ['--record']),
-            'rec_b': (rec, ['--record']),
-            'rec_seed': (dict(rec, identification_seed=7), ['--record']),
+            'rec_a': (rec, ['--record', '--whole-history']),
+            'rec_b': (rec, ['--record', '--whole-history']),
+            'rec_seed': (dict(rec, identification_seed=7), ['--record', '--whole-history']),
+            'thin_dwell': (rec, ['--record']),
             'ideal': (case(LINEAR, {'type': 'dwell', 'freq_hz': 150.0, 'dwell_s': 5.0}, 10.0), ['--ideal-frf']),
             'far': (case(LINEAR, {'type': 'dwell', 'freq_hz': 150.0, 'dwell_s': 5.0}, 1e5), []),
             'down': (case(LINEAR, {'type': 'sweep', 'band_hz': [200.0, 400.0], 'rate_oct_per_min': 4.0,
@@ -268,6 +379,10 @@ class MsnbRun(unittest.TestCase):
         cls.ceiling = float(f'{10 ** (6 / 20):.9g}')
         jobs['gain'] = (case(LINEAR, lin, amp, drives={'gain': cls.gain, 'ceiling_vpk': cls.ceiling}), ['--ideal-frf'])
         jobs['no_gain'] = (case(LINEAR, lin, amp), ['--ideal-frf'])
+        step = case(REALISTIC, {'type': 'stepped', 'band_hz': [100.0, 200.0], 'steps_per_octave': 6, 'step_s': 0.5},
+                    10.0, protective='widened')
+        jobs['step_whole'] = (step, ['--whole-history'])
+        jobs['step_thin'] = (step, [])
         with cf.ThreadPoolExecutor(4) as ex:
             futs = {k: ex.submit(run, cls.tmp, k, c, *fl) for k, (c, fl) in jobs.items()}
             cls.res = {k: f.result() for k, f in futs.items()}
@@ -330,6 +445,17 @@ class MsnbRun(unittest.TestCase):
         self.assertGreater(self.gain, 10.0)
         self.assertEqual(gain_met(self.out('gain'), self.gain, self.ceiling), [])
         self.assertNotEqual(gain_met(self.out('no_gain'), self.gain, self.ceiling), [], 'the check cannot fail')
+
+    def test_8_a_stepped_sine_and_a_dwell_are_thinned_as_stated(self):
+        for whole, thin in (('rec_a', 'thin_dwell'), ('step_whole', 'step_thin')):
+            w, t = load(self.out(whole)), load(self.out(thin))
+            self.assertGreater(sum(w['history']['judged']), 10, whole)
+            self.assertLess(t['history']['points'], w['history']['points'], f'{thin} kept every update')
+            self.assertEqual(thinned_as_stated(w, t), [], thin)
+            broken = broken_thinnings(t)
+            self.assertEqual(len(broken), 4 if t['true_modes']['tracked'] else 3)
+            for what, b in broken:
+                self.assertNotEqual(thinned_as_stated(w, b), [], f'{thin}, {what}: the check cannot fail')
 
     def test_6_a_down_sweep_starts_at_the_top_and_falls(self):
         r = load(self.out('down'))
