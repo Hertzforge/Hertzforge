@@ -100,20 +100,50 @@ impl RandomRun {
             }
         }
         let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
-        ramp.is_some_and(|r| r.request_stop().is_some())
+        let started = ramp.is_some_and(|r| r.request_stop().is_some());
+        if started {
+            // The run thread publishes the stop only once the control loop in
+            // progress ends; send the state now, through `shown`.
+            let _ = self.shared.notify.send((self.id.clone(), self.view()));
+        }
+        started
     }
 
-    /// `view` for the live display: while the loop drives, its level and drive
-    /// are the ones the drive level ramp has reached now, block by block, not the
-    /// last control loop's.
-    pub fn live_view(&self, view: Arc<RunView>) -> Arc<RunView> {
-        let driving = matches!(view.state, view::State::Running | view::State::Stopping)
-            && matches!(view.phase, "engaged" | "full_level" | "ramping_down");
+    /// `view` as the run is shown (`random.state` and the live display): once the
+    /// drive level ramp has a controlled stop, the run is stopping, ramping down
+    /// to the ramp's target, though the run thread takes the stop request only
+    /// when the control loop in progress ends, which can be many seconds later.
+    pub fn shown(&self, view: Arc<RunView>) -> Arc<RunView> {
+        if view.state != view::State::Running || !matches!(view.phase, "engaged" | "full_level") {
+            return view;
+        }
         let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
-        let (true, Some(ramp)) = (driving, ramp) else {
+        let Some(ramp) = ramp.filter(|r| r.stop_requested().is_some()) else {
             return view;
         };
-        let now = ramp.level_db();
+        let mut v = (*view).clone();
+        v.state = view::State::Stopping;
+        v.phase = "ramping_down";
+        // Where the ramp-down is headed: the commanded level the run thread sets
+        // when it takes the request.
+        v.level_db = Some(ramp.target_db());
+        Arc::new(v)
+    }
+
+    /// `view` for the live display: shown as `shown` says, and while the loop
+    /// drives, its level and drive are the ones the drive level ramp has reached
+    /// now, block by block, not the last control loop's.
+    pub fn live_view(&self, view: Arc<RunView>) -> Arc<RunView> {
+        let ramp = self.shared.ramp.lock().ok().and_then(|r| r.clone());
+        // The level before `shown` looks for a stop: a level the stop has already
+        // walked down is then never shown as running.
+        let now = ramp.map(|r| r.level_db());
+        let view = self.shown(view);
+        let driving = matches!(view.state, view::State::Running | view::State::Stopping)
+            && matches!(view.phase, "engaged" | "full_level" | "ramping_down");
+        let (true, Some(now)) = (driving, now) else {
+            return view;
+        };
         let mut v = (*view).clone();
         v.drive_now_db = Some(now);
         if let Some(base) = v.drive_level_db {

@@ -1319,7 +1319,7 @@ impl Service {
             let svc = self.clone();
             tokio::spawn(async move {
                 while let Some((run_id, view)) = notices.recv().await {
-                    svc.run_changed(&run_id, &view).await;
+                    svc.run_changed(&run_id, view).await;
                 }
             });
         }
@@ -1460,7 +1460,7 @@ impl Service {
 
     /// A run published `v`: send `random.state` if what it shows changed, and the
     /// run's new log entries.
-    async fn run_changed(&self, run_id: &str, v: &RunView) {
+    async fn run_changed(&self, run_id: &str, v: Arc<RunView>) {
         let mut inner = self.inner.lock().await;
         let Some(run) = inner.random.clone() else {
             return;
@@ -1468,10 +1468,11 @@ impl Service {
         if run.id != run_id {
             return;
         }
-        let key = view::state_key(Some(v));
+        let v = run.shown(v);
+        let key = view::state_key(Some(&v));
         if key != inner.state_key {
             inner.state_key = key;
-            self.emit("random.state", view::state_json(Some(v)));
+            self.emit("random.state", view::state_json(Some(&v)));
         }
         let since = if inner.log_sent.0 == run.id {
             inner.log_sent.1
@@ -2135,7 +2136,7 @@ impl Service {
     /// The `random.state` object now.
     async fn state_now(&self) -> Value {
         let inner = self.inner.lock().await;
-        let v = inner.random.as_ref().map(|r| r.view());
+        let v = inner.random.as_ref().map(|r| r.shown(r.view()));
         view::state_json(v.as_deref())
     }
 
@@ -3265,7 +3266,7 @@ impl Service {
         } else {
             stop_run(&run, "operator_stop", by, true).await;
         }
-        Ok(view::state_json(Some(&run.view())))
+        Ok(view::state_json(Some(&run.shown(run.view()))))
     }
 
     async fn random_reset(&self, conn: &Conn) -> Result<Value, MethodError> {

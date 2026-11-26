@@ -140,6 +140,7 @@ sds-control  test:random_protocol  random_on_the_simulator_runs_end_to_end_throu
 sds-control  test:random_protocol  manual_levels_mode_and_the_controlled_stop
 sds-control  test:random_protocol  the_controlled_stop_starts_at_once_and_walks_down_smoothly
 sds-control  test:random_protocol  the_end_gives_the_level_where_the_stop_began
+sds-control  test:random_protocol  the_stop_is_shown_from_the_request_not_the_end_of_the_loop
 sds-control  test:random_protocol  a_table_with_the_drive_row_first_controls_the_control_row
 sds-control  test:random_protocol  two_averages_run_the_ladder_without_an_envelope_trip
 sds-control  test:random_protocol  an_observer_aborts_and_the_answer_comes_when_the_loop_has_ended
