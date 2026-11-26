@@ -450,9 +450,9 @@ async fn manual_levels_mode_and_the_controlled_stop() {
 
 /// The controlled stop starts at the next output block, not the next control
 /// loop, and walks down smoothly (2026-11-01, bench finding 2). In real time,
-/// with a one-second control loop and a 2 s, 40 dB ramp, the live level is
-/// below the stop level within 0.6 s of the request and falls in many small
-/// steps. Red before the fix: the level held for the rest of the loop in
+/// with a one-second control loop and a 2 s, 40 dB ramp, a stop sent just after
+/// a loop has ended takes the live level below the stop level within 0.6 s of
+/// the request, and it falls in many small steps. Red before the fix: the level held for the rest of the loop in
 /// progress and the next one, then fell 26 dB per loop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
@@ -471,31 +471,37 @@ async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
     configured(&mut c, config).await;
     c.ok("random.start", json!({})).await;
     c.wait_phase("engaged", LONG).await;
-    c.pump(Duration::from_millis(2300)).await; // two loops at -6 dB, then mid-loop
+    c.pump(Duration::from_millis(1500)).await; // a loop or more at -6 dB
+                                               // Stop just after a control loop has ended, the worst place for it: the run
+                                               // thread takes the request only between loops, most of a second later, so
+                                               // the drive is down within 0.6 s only if the stop starts at the next block.
+    let done = |e: &support::Event| {
+        (e.topic() == "random.live").then(|| e.data()["loop"].as_u64().unwrap_or(0))
+    };
+    let loops = c.events.iter().filter_map(done).max().unwrap_or(0);
+    c.wait_for("the end of a control loop", LONG, |e| {
+        done(e).is_some_and(|n| n > loops)
+    })
+    .await;
 
     let t0 = Instant::now();
     let stopping = c.ok("random.stop", json!({})).await;
     assert_eq!(stopping["state"], "stopping", "{stopping}");
-    let mut seen: Vec<(f64, f64)> = Vec::new();
-    let deadline = t0 + LONG;
-    loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        let Some(m) = c.read(left).await else {
-            panic!("the stop did not finish");
-        };
-        if m["type"] == "event" && m["topic"] == "random.state" && m["data"]["state"] == "finished"
-        {
-            break;
-        }
-        if let Some(e) = c.events.last() {
-            if e.topic() == "random.live" && e.data()["state"] == "stopping" {
-                if let Some(l) = e.data()["level_db"].as_f64() {
-                    seen.push((t0.elapsed().as_secs_f64(), l));
-                }
-            }
-        }
-    }
-    println!("live levels while stopping: {seen:?}");
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+    // Every live frame after the request, whenever it was read. The run thread
+    // takes the stop between control loops, so the answer, and the state
+    // `stopping`, can come most of a loop after the drive has started down; the
+    // frames before it are read inside the request's call and say `running`.
+    let seen: Vec<(f64, f64)> = c
+        .of_topic("random.live")
+        .into_iter()
+        .filter(|e| {
+            e.at >= t0 && matches!(e.data()["state"].as_str(), Some("running" | "stopping"))
+        })
+        .filter_map(|e| Some(((e.at - t0).as_secs_f64(), e.data()["level_db"].as_f64()?)))
+        .collect();
+    println!("live levels after the stop: {seen:?}");
     let first_down = seen.iter().find(|(_, l)| *l < -6.5).map(|(t, _)| *t);
     assert!(
         first_down.is_some_and(|t| t < 0.6),
@@ -513,8 +519,6 @@ async fn the_controlled_stop_starts_at_once_and_walks_down_smoothly() {
         .map(|w| w[0] - w[1])
         .fold(0.0f64, f64::max);
     assert!(worst < 10.0, "a {worst:.1} dB step between two live frames");
-    let end = c.wait_state("finished", LONG).await;
-    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
 }
 
 /// The end of an AUTO schedule takes the shutdown ramp, as Stop does
