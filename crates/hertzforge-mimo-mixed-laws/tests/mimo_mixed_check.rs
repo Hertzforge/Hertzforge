@@ -1,21 +1,61 @@
 //! The MIMO Mixed check: the built-in pair passes each of the nine required
 //! cases, each on the simulator's existing structure its own facts name, and
 //! the whole check's record clears the built-in in each role; a tone law
-//! that misses its level and a floor law that overdrives fail.
+//! that misses its level and a floor law that overdrives fail. A check run
+//! times its laws' calls on the clocks it is handed.
 
 use hertzforge_hal_sim::plants::SineStructure;
 use hertzforge_hal_sim::SimConfig;
 use hertzforge_mimo_mixed::service::MimoMixedLaws;
 use hertzforge_mimo_mixed_laws::{
     mimo_mixed_check_config, mimo_mixed_check_record, mimo_mixed_check_station, role_record_clears,
-    run_mimo_mixed_check_case, LawRole, MimoMixedCheckCase,
+    run_mimo_mixed_check_case, run_mimo_mixed_check_case_with, LawRole, MimoMixedCheckCase,
+    MimoMixedCheckClocks,
 };
 use hertzforge_mimo_sine::law::{
     LawDescriptor, LawManifest, LawSetup, LawValues, MimoSineLaw, MimoSineLawFactory,
 };
 use hertzforge_mimo_sine::tick::{LawFault, TickInputs, TickOutputs};
 use hertzforge_random_laws::CheckStatus;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+/// A clock that stands still, as the simulator's time does while a law
+/// computes: a test's verdict then does not rest on how busy the machine is.
+struct StoppedClock;
+
+impl hertzforge_random::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+impl hertzforge_sine::law::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+fn stopped() -> MimoMixedCheckClocks {
+    MimoMixedCheckClocks {
+        floor: Arc::new(StoppedClock),
+        tones: Arc::new(StoppedClock),
+    }
+}
+
+/// A tone clock read 1 s late once, at the end of the first tone call (t1's
+/// engage): what a loaded machine did to a check run on the wall clock.
+struct LateAtFirstEngage(AtomicUsize);
+
+impl hertzforge_sine::law::LawClock for LateAtFirstEngage {
+    fn now_s(&self) -> f64 {
+        if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+            0.0
+        } else {
+            1.0
+        }
+    }
+}
 
 fn station(case: MimoMixedCheckCase) -> Box<dyn hertzforge_hal::Backend> {
     let st = mimo_mixed_check_station(case);
@@ -103,7 +143,13 @@ fn mimo_mixed_the_built_in_laws_pass_the_whole_required_check_in_each_role() {
     let cases: Vec<_> = MimoMixedCheckCase::ALL
         .into_iter()
         .map(|case| {
-            let r = run_mimo_mixed_check_case(case, &builtin(case), station(case)).expect("run");
+            let r = run_mimo_mixed_check_case_with(
+                case,
+                &builtin(case),
+                station(case),
+                Some(&stopped()),
+            )
+            .expect("run");
             eprintln!(
                 "{} {}: {}",
                 if r.passed { "PASS" } else { "FAIL" },
@@ -139,6 +185,30 @@ fn mimo_mixed_the_built_in_laws_pass_the_whole_required_check_in_each_role() {
             hertzforge_mimo_mixed_laws::mimo_mixed_check_name(role)
         );
     }
+}
+
+/// Requirement: a check run times its laws' calls on the clocks it is handed,
+/// against the run's own budget. One late reading at t1's engage, where one
+/// late call stops the run, ends the fixed-tones case on t1's law fault, as a
+/// loaded machine did on the wall clock; the whole check above passes on a
+/// stopped clock.
+#[test]
+fn mimo_mixed_the_check_times_its_laws_on_the_clocks_it_is_handed() {
+    let case = MimoMixedCheckCase::FixedTonesOnFloor;
+    let late = MimoMixedCheckClocks {
+        tones: Arc::new(LateAtFirstEngage(AtomicUsize::new(0))),
+        ..stopped()
+    };
+    let r = run_mimo_mixed_check_case_with(case, &builtin(case), station(case), Some(&late))
+        .expect("run");
+    eprintln!("{}: {}", r.name, r.detail);
+    assert!(!r.passed, "{}", r.detail);
+    assert!(
+        r.detail
+            .contains("ended law_fault (the tone law of t1 faulted: over_budget"),
+        "{}",
+        r.detail
+    );
 }
 
 /// A tone law that answers as the built-in, then sends half its drive (6 dB

@@ -1354,6 +1354,7 @@ dependencies = [
  "hertzforge-random-laws",
  "hertzforge-reference",
  "hertzforge-sdm",
+ "hertzforge-sine",
 ]
 
 [[package]]

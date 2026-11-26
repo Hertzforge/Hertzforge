@@ -16,8 +16,9 @@ mod record;
 
 pub use check::{
     mimo_mixed_check_config, mimo_mixed_check_run_s, mimo_mixed_check_station,
-    mimo_mixed_check_table, run_mimo_mixed_check_case, MimoMixedCheckCase, MimoMixedCheckStation,
-    MIMO_MIXED_CHECK_DELAY_FRAMES, MIMO_MIXED_CHECK_FS_HZ,
+    mimo_mixed_check_table, run_mimo_mixed_check_case, run_mimo_mixed_check_case_with,
+    MimoMixedCheckCase, MimoMixedCheckClocks, MimoMixedCheckStation, MIMO_MIXED_CHECK_DELAY_FRAMES,
+    MIMO_MIXED_CHECK_FS_HZ,
 };
 pub use hertzforge_mimo_mixed::service::LawRole;
 pub use record::{
