@@ -155,6 +155,21 @@ fn parity_within(
     test_type: TestType,
     tol: f64,
 ) -> usize {
+    let values = if tol > ROUNDING { 1e-3 } else { 1e-9 };
+    parity_bounded(d, p, st, setup, schedule, test_type, (tol, values))
+}
+
+/// [`parity_within`] with the drives held to `tol` and each reported value to
+/// `values` (relative, or absolute under one).
+fn parity_bounded(
+    d: &'static LawDecl,
+    p: &[(&str, ParamValue)],
+    st: &ModalStructure,
+    setup: &Setup,
+    schedule: Schedule,
+    test_type: TestType,
+    (tol, values): (f64, f64),
+) -> usize {
     let params = sdk_params(d, p);
     let Recording {
         setup: law_setup,
@@ -201,7 +216,7 @@ fn parity_within(
         r.worst_update
     );
     assert!(
-        r.worst_value <= if tol > ROUNDING { 1e-3 } else { 1e-9 },
+        r.worst_value <= values,
         "{}: values {:e}",
         d.id,
         r.worst_value
@@ -430,14 +445,29 @@ fn mimo_sine_parity_paired_steepest_secant_and_ratio() {
     );
 }
 
+/// `followed_poles` with its modal fit and its refits of the poles. The fit is
+/// read from orders far above the structure's three modes, which on this
+/// exact identification are made of rounding, and the refits every second
+/// update compound what is left: changed by 1e-15 of itself, the
+/// identification moves the native law's own drives by up to 3.3e-7 of the
+/// update's largest at the first update and 2.7e-6 over the run with the
+/// gate off and a window of 10, and a reported value by up to 3.2e-3, with
+/// the same modes, the same modes near the tone and the same gate at every
+/// update (ten changes a sweep, on a Mac and on x86-64 Linux). The law file
+/// against the native law measured 5.1e-8 and 3.2e-4 on a Mac, 1.4e-6 and
+/// 1.7e-3 on x86-64 Linux, both the window of 10. So the drives are held to
+/// `matrix`'s modal fit bound, [`MODAL_FIT`], and the values to
+/// [`FOLLOWED_VALUES`]. A mode kept once on one platform and twice on the
+/// other moved the drives 1.4e-4 at the first update and a count by 1; a
+/// native law refitting with three Gauss-Newton steps against a law file with
+/// two moves them 1.6e-2 with the gate off.
+const FOLLOWED_VALUES: f64 = 1e-2;
+
 /// `followed_poles` on sweeps over a square, a tall and a wide structure, and
 /// with its gate off and a short window, so the poles are refitted many times
 /// over the run. The structure's identification holds no delay, so the law is
-/// told a station delay of one step of its parameter. Its modal fit and its
-/// refits of the poles move with the platforms' rounding as `matrix`'s fit
-/// does: measured on a Mac, the drives to 5.1e-8 of the update's largest and
-/// the values to 3.2e-4 (both the window of 10). The drives are held to
-/// 1e-6, and the values to `matrix`'s 1e-3.
+/// told a station delay of one step of its parameter. Bounds: see
+/// [`FOLLOWED_VALUES`].
 #[test]
 fn mimo_sine_parity_followed_poles_sweeps_square_tall_and_wide() {
     let d = &builtin::FOLLOWED_POLES;
@@ -446,18 +476,18 @@ fn mimo_sine_parity_followed_poles_sweeps_square_tall_and_wide() {
     for (c, m) in [(3, 3), (3, 2), (2, 3)] {
         let st = structure(c, m);
         let s = setup_of(&st);
-        n += parity_within(
+        n += parity_bounded(
             d,
             std::slice::from_ref(&told),
             &st,
             &s,
             SWEEP,
             TestType::Sweep,
-            1e-6,
+            (MODAL_FIT, FOLLOWED_VALUES),
         );
     }
     let st = structure(3, 3);
-    n += parity_within(
+    n += parity_bounded(
         d,
         &[
             told,
@@ -468,7 +498,7 @@ fn mimo_sine_parity_followed_poles_sweeps_square_tall_and_wide() {
         &setup_of(&st),
         SWEEP,
         TestType::Sweep,
-        1e-6,
+        (MODAL_FIT, FOLLOWED_VALUES),
     );
     assert!(n > 3000, "{n} updates");
 }

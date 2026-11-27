@@ -21,7 +21,10 @@
 //!    clustered over the orders, highest first (within 1 % in frequency, 25 %
 //!    in damping, participation MAC 0.8, one member an order), each cluster
 //!    kept when it holds at least half the orders, its member of median
-//!    frequency taken. A range keeps the poles in its own central part.
+//!    frequency taken. Two kept poles closer than a tenth of their decay rate,
+//!    with the participation MAC, are one pole kept twice (a mode split over
+//!    two clusters), and only the one held by more orders is kept. A range
+//!    keeps the poles in its own central part.
 //! 3. **Shapes.** With the poles and the participations (made real) held, each
 //!    control's shape and a background of `1`, `(fc/f)^2` and `(f/fc)^2` are
 //!    solved by linear least squares over the band (`fc` the band's geometric
@@ -76,6 +79,9 @@ pub struct Clustering {
     pub share: f64,
     /// Poles with damping at or above this are not clustered.
     pub zmax: f64,
+    /// Two kept poles closer than this share of their decay rate (`|Re s|`),
+    /// with the participation MAC, are one pole kept twice.
+    pub same: f64,
 }
 
 impl Default for Clustering {
@@ -86,6 +92,7 @@ impl Default for Clustering {
             mac: 0.8,
             share: 0.5,
             zmax: 0.2,
+            same: 0.1,
         }
     }
 }
@@ -346,8 +353,9 @@ pub fn cluster_orders(poles: &[OrderPoles], m: usize, c: Clustering) -> (Vec<C64
         }
     }
     let total = orders.len() as f64;
-    let mut lam_out = Vec::new();
-    let mut l_out = Vec::new();
+    // The kept clusters' representatives: the orders held, the pole and its
+    // participation.
+    let mut kept: Vec<(usize, C64, &[C64])> = Vec::new();
     for cl in &clusters {
         let mut held: Vec<usize> = cl.members.iter().map(|(o, _, _)| *o).collect();
         held.sort_unstable();
@@ -356,9 +364,38 @@ pub fn cluster_orders(poles: &[OrderPoles], m: usize, c: Clustering) -> (Vec<C64
             let mut idx: Vec<usize> = (0..cl.members.len()).collect();
             idx.sort_by(|&a, &b| cl.members[a].1.im.total_cmp(&cl.members[b].1.im));
             let k = idx[idx.len() / 2];
-            lam_out.push(cl.members[k].1);
-            l_out.extend_from_slice(&cl.members[k].2);
+            kept.push((held.len(), cl.members[k].1, &cl.members[k].2));
         }
+    }
+    // One pole kept twice. A cluster takes one pole an order, so where a
+    // spurious pole near a mode reaches the mode's cluster first at some
+    // order, the mode's own pole there starts a second cluster at the same
+    // frequency; which of the two each later order joins then turns on
+    // rounding, and both can be held by enough orders to be kept. Two kept
+    // poles closer than `same` of their decay rate, with the participation
+    // MAC, are that one pole: the one held by more orders is kept (the
+    // earlier cluster on a tie). Two modes of a close pair are a good part of
+    // a bandwidth apart, so stay two.
+    let same_pole = |a: &(usize, C64, &[C64]), b: &(usize, C64, &[C64])| {
+        (a.1 - b.1).norm() < c.same * a.1.re.abs().min(b.1.re.abs()) && mac(a.2, b.2) >= c.mac
+    };
+    let mut out: Vec<usize> = Vec::new();
+    for k in 0..kept.len() {
+        match out.iter().position(|&j| same_pole(&kept[j], &kept[k])) {
+            None => out.push(k),
+            Some(q) => {
+                if kept[k].0 > kept[out[q]].0 {
+                    out[q] = k;
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    let mut lam_out = Vec::new();
+    let mut l_out = Vec::new();
+    for &k in &out {
+        lam_out.push(kept[k].1);
+        l_out.extend_from_slice(kept[k].2);
     }
     (lam_out, l_out)
 }

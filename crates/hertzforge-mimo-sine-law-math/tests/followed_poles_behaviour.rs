@@ -1,7 +1,10 @@
-//! `followed_poles` and its modal fit: the delay they are told, and the
-//! refusal without it. Each check is shown to fail on a case built to break it.
+//! `followed_poles` and its modal fit: the delay they are told, the refusal
+//! without it, and a fit that keeps each mode once whatever the rounding. Each
+//! check is shown to fail on a case built to break it.
 use hertzforge_mimo_sine_law_math::followed::{FollowedLaw, FollowedParams};
-use hertzforge_mimo_sine_law_math::modal_fit::fit_known_delay;
+use hertzforge_mimo_sine_law_math::modal_fit::{
+    cluster_orders, fit_known_delay, Clustering, OrderPoles,
+};
 use hertzforge_mimo_sine_law_math::reference_structure::ModalStructure;
 use hertzforge_mimo_sine_law_math::{Setup, C64};
 use std::f64::consts::TAU;
@@ -128,4 +131,115 @@ fn the_law_is_refused_without_the_station_delay() {
         ..Default::default()
     };
     assert!(FollowedLaw::new(&s, p).is_ok());
+}
+
+/// A pole at `f_hz` with damping ratio `zeta`.
+fn pole(f_hz: f64, zeta: f64) -> C64 {
+    let w = TAU * f_hz / (1.0 - zeta * zeta).sqrt();
+    C64::new(-zeta * w, TAU * f_hz)
+}
+
+/// Orders 24 down to 12, each holding `poles(order)` with one participation
+/// vector for all.
+fn orders_of(poles: impl Fn(usize) -> Vec<C64>) -> Vec<OrderPoles> {
+    let l = [C64::new(1.0, 0.0), C64::new(0.5, 0.0)];
+    (12..=24)
+        .rev()
+        .map(|p| {
+            let poles = poles(p);
+            let participation = poles.iter().flat_map(|_| l).collect();
+            OrderPoles {
+                order: p,
+                poles,
+                participation,
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn a_mode_split_over_two_clusters_is_kept_once() {
+    // A mode at 42 Hz at every order; at order 20 a spurious pole 0.5 % above
+    // it comes first and takes the mode's place in its cluster, so the mode's
+    // own pole there starts a second cluster 1e-6 above the first. Orders 19
+    // and 18 lie on the first, 17 to 12 on the second: each holds 7 of the 13
+    // orders, enough to be kept. The same mode is one pole.
+    let orders = orders_of(|p| match p {
+        20 => vec![pole(42.21, 0.03), pole(42.0 * (1.0 + 1e-6), 0.03)],
+        18..=24 => vec![pole(42.0, 0.03)],
+        _ => vec![pole(42.0 * (1.0 + 1e-6), 0.03)],
+    });
+    let (lam, _) = cluster_orders(&orders, 2, Clustering::default());
+    let f: Vec<f64> = lam.iter().map(|l| l.im / TAU).collect();
+    assert_eq!(f.len(), 1, "the mode kept {} times: {f:?}", f.len());
+    assert!((f[0] - 42.0).abs() < 1e-4, "{f:?}");
+}
+
+#[test]
+fn a_close_pair_stays_two_modes() {
+    // The pair of the research fixture: 0.78 % apart (inside the clustering's
+    // 1 %), the same damping and here the same participation. Half a
+    // bandwidth apart, they are two modes, kept both.
+    let orders = orders_of(|_| vec![pole(90.0, 0.008), pole(90.7, 0.008)]);
+    let (lam, _) = cluster_orders(&orders, 2, Clustering::default());
+    let f: Vec<f64> = lam.iter().map(|l| l.im / TAU).collect();
+    assert_eq!(f.len(), 2, "{f:?}");
+}
+
+#[test]
+fn the_fit_keeps_each_mode_once_whatever_the_rounding() {
+    // The law file parity suite's wide structure (2 controls, 3 drives), its
+    // identification exact, so the orders above the three modes' are made of
+    // rounding. Changed in the last bits, as another platform's arithmetic
+    // changes it, the fit keeps the same three modes, moved by rounding only.
+    // Before each mode was kept once, this found a mode kept twice on a few
+    // of every hundred.
+    let shape = |k: usize, n: usize| -> Vec<f64> {
+        (0..k * n)
+            .map(|i| {
+                let (r, c) = (i / n, i % n);
+                (1.3 * r as f64 + 0.7 * c as f64 + 0.4).sin() + if r == c { 1.5 } else { 0.0 }
+            })
+            .collect()
+    };
+    let st = ModalStructure {
+        f_hz: vec![42.0, 63.0, 91.0],
+        zeta: vec![0.03, 0.02, 0.04],
+        drive_shape: shape(3, 3),
+        output_shape: shape(3, 2),
+        drives: 3,
+        controls: 2,
+    };
+    let s = st.setup((30.0, 120.0), false);
+    let (band, tau) = ((30.0, 120.0), 1e-6);
+    let base = fit_known_delay(&s.identification, band, tau).expect("fit");
+    assert_eq!(base.f_hz.len(), 3, "{:?}", base.f_hz);
+    let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut jitter = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+    };
+    let mut moved: f64 = 0.0;
+    for eps in [1e-15, 1e-13] {
+        for t in 0..50 {
+            let mut id = s.identification.clone();
+            for v in id.response.data_mut() {
+                *v *= C64::new(1.0 + eps * jitter(), eps * jitter());
+            }
+            let fit = fit_known_delay(&id, band, tau).expect("fit");
+            assert_eq!(
+                fit.f_hz.len(),
+                3,
+                "changed by {eps:e} (trial {t}): {:?}",
+                fit.f_hz
+            );
+            for (a, b) in fit.f_hz.iter().zip(&base.f_hz) {
+                moved = moved.max((a - b).abs() / b);
+            }
+        }
+    }
+    eprintln!("100 changed identifications: 3 modes each, frequencies moved {moved:.2e}");
+    assert!(moved < 1e-6, "{moved:e}");
 }
