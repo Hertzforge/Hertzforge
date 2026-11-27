@@ -4291,8 +4291,9 @@ noise, stepped and ladder cases on `sine-weak-4x4`, and each such case's `struct
 (every scored case passed), `recorded`, `tool_version` and `cases`, each `{"case","structure",
 "scored","passed","failed","number","detail"}`. A law file's scored verdicts are recorded against
 its exact file; a built-in law's are not. An imported law without a passed check for its exact
-file is refused `law_not_checked` by `mimo_sine.arm` and `mimo_sine.start` on a hardware station;
-the simulator takes any law.
+file is refused `law_not_checked` by `mimo_sine.arm` and `mimo_sine.start` on a hardware station,
+and so is the built-in `followed_poles`, which does not pass the check; the simulator takes any
+law.
 
 ### MIMO Sine Configuration
 
@@ -7795,8 +7796,9 @@ folder.
   `test_types` (`sweep`, `dwell`, `stepped`: the test types it accepts) and `amplitude_only`
   (whether it accepts an amplitude-only reference); `needs` is null. The world has no built-in law
   in the catalog yet.
-- `check.hardware` says whether the law may drive hardware: a built-in law always may; an
-  imported law only with a passing check record for its exact file. Any law runs on the
+- `check.hardware` says whether the law may drive hardware: a built-in law may, but MIMO Sine's
+  `followed_poles`, which runs on the simulator only; an imported law only with a passing check
+  record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.
 - `problems` lists files in the laws folder that are not in the catalog, and why.
 - **`laws.import`** reads the law file at `path` (an absolute path on the computer that runs the

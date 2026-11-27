@@ -177,6 +177,14 @@ way.
   Golub and V. Pereyra**, "The Differentiation of Pseudo-Inverses and Nonlinear Least Squares
   Problems Whose Variables Separate", SIAM Journal on Numerical Analysis, 1973: the modal fit of the
   identified system that the laws' tracked model option starts from.
+- **B. Peeters, H. Van der Auweraer, P. Guillaume and J. Leuridan**, "The PolyMAX
+  Frequency-Domain Method: A New Standard for Modal Parameter Estimation?", Shock and Vibration 11,
+  2004, and **P. Guillaume, P. Verboven, S. Vanlanduit, H. Van der Auweraer and B. Peeters**, "A
+  Poly-Reference Implementation of the Least-Squares Complex Frequency-Domain Estimator", IMAC
+  XXI, 2003: the poly-reference least-squares complex frequency-domain estimate of the poles
+  (pLSCF) that the `followed_poles` law's modal fit starts from; and **D. J. Ewins**, *Modal
+  Testing: Theory, Practice and Application*, 2000: the least-squares frequency-domain fit of the
+  mode shapes to those poles (LSFD).
 - **M. W. Trethewey and J. A. Cafeo**, "Tutorial: Signal Processing Aspects of Structural Impact
   Testing", International Journal of Analytical and Experimental Modal Analysis, 1992, **W. A.
   Fladung**, "Windows Used for Impact Testing", Proceedings of IMAC XV, 1997, and **P. Avitabile**,

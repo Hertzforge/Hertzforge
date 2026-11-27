@@ -120,7 +120,7 @@ moving masses for the feasibility check and the kinematic monitor.
 
 ## The Control Laws
 
-Five laws are built in. Each states which test types it accepts, and the controller refuses a
+Six laws are built in. Each states which test types it accepts, and the controller refuses a
 setup that asks a law for one it does not.
 
 | Law | Accepts | What it does |
@@ -130,6 +130,7 @@ setup that asks a law for one it does not.
 | `steepest_descent` | dwell | Moves the drive down the gradient of the control error through the identification |
 | `secant` | dwell | Finds a gain per control from two successive drives and their responses |
 | `ratio` | dwell, stepped sine | Multiplies each drive by a compressed ratio of wanted to measured amplitude on its paired control |
+| `followed_poles` | sweep | As `matrix`, on a modal model whose resonances it refits to the readings as the sweep moves them. Needs the station's delay; the simulator only |
 
 ### `matrix`
 
@@ -171,6 +172,27 @@ on a linear 4 by 4 structure:
 - `ratio` held every dwell and every stepped sine with the reference pairing, one dwell in five
   with the drive pairing, and three sweeps in twenty. Its parameter **Pairing** pairs each drive
   with a control by the reference (the default) or by the drive.
+
+### `followed_poles`
+
+A research law, on the simulator only: a hardware station refuses it. It carries and corrects the
+drive as `matrix` does, but on a modal model of the structure whose resonances it follows: every
+second update it refits the frequency and damping of the modes near the tone to the last 40
+readings, held to the identification's by a prior, and moves a mode only where the readings show
+it. While the followed model predicts the readings worse than the identification's own, it uses
+the identification's inverse.
+
+Its model's modes are fitted with the station's delay taken out, so it needs **Station delay**
+(`station_delay_s`) set: the delay from the controller's writing a drive sample to its reading the
+response, the structure's own response left out (the controller's output queue, the identification's
+frames ahead plus one block, the output and acquisition chain and any transport delay). Without it
+the law is refused. On the simulator's sine structures it is 266 samples, 16.2 ms at 16384 Hz.
+
+Its limits, from the research benchmark's screen of its research version against `matrix` on
+simulated frames: on the nonlinear frames it completed more sweeps on 5 of 6 groups and had the
+lower 95th-percentile error on 30 of 33 structures, but no sweep of either law ended within
+tolerance; on the strongly nonlinear frames it drove harder and over-tested by more, 0.4 to 7.2 dB
+in the paired medians. In the law check it over-tests a steep reference by 2.59 dB.
 
 ### Choosing a Law
 
