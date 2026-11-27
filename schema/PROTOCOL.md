@@ -1124,7 +1124,9 @@ An operation reports its progress while it runs, as event topic `op.progress`,
 `{"op","done","total"}`: a solve, a mesh, a signal generated, a sine extracted. `total` is -1 for a
 stage that cannot count itself, such as one long call into a library, which the shell shows as a
 moving bar. They come at most ten a second, always when the stage or its total changes, and always
-the last one. `op.cancel` (`{}`, answering `{"op"}`, the operation running or null) stops the
+the last one. While an operation runs, its last one is sent again whenever 10 s pass without one
+(`{"done": 0, "total": -1}` before it has reported), so a client can wait on `op.run` for as long
+as these come and time it out only after a stretch with no word. `op.cancel` (`{}`, answering `{"op"}`, the operation running or null) stops the
 operation at its next report: it is refused, saying it was cancelled, and the project is as it was.
 A stage that cannot count itself is not interrupted; the cancel takes effect when it returns.
 

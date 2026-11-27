@@ -75,6 +75,39 @@ describe('ServiceClient over the mock transport', () => {
 		c.close();
 	});
 
+	// A modal solve of a large mesh runs for minutes; the service says it is still running with
+	// `op.progress` every few seconds. RED-MUTATION: start the wait again on no event, or on any
+	// event, and one of the three requests below ends the wrong way.
+	it('waits on a request for as long as its alive topic keeps coming, and no longer', async () => {
+		const server: MockServer = {
+			hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: 't' },
+			methods: {
+				'long.op': (params, conn) =>
+					new Promise((resolve) => {
+						const topic = params.topic as string;
+						let beats = 0;
+						const beat = setInterval(() => {
+							conn.emit(topic, { op: 'long.op', done: beats, total: -1 });
+							if (++beats === 8) {
+								clearInterval(beat);
+								resolve({ beats });
+							}
+						}, 25);
+					})
+			}
+		};
+		const c = new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1) });
+		c.connect();
+		await c.whenOpen();
+		// 8 beats 25 ms apart is 200 ms of work, four times the 50 ms allowed between words
+		await expect(c.request('long.op', { topic: 'op.progress' }, { timeoutMs: 50, aliveOn: 'op.progress' })).resolves.toEqual({ beats: 8 });
+		const otherTopic = await c.request('long.op', { topic: 'project.progress' }, { timeoutMs: 50, aliveOn: 'op.progress' }).catch((e) => e);
+		expect(otherTopic).toMatchObject({ code: 'timeout' });
+		expect(otherTopic.message).toBe('long.op heard nothing from the analysis service for 0 s.');
+		await expect(c.request('long.op', { topic: 'op.progress' }, { timeoutMs: 50 })).rejects.toMatchObject({ code: 'timeout' });
+		c.close();
+	});
+
 	// A request that arms the station waits for the station's arm, which on hardware settles
 	// every IEPE input first. RED-MUTATION: give `.arm` and `.start` the ordinary timeout and a
 	// 15 s settle refusal reads as "no response within 10 s".

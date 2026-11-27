@@ -10,6 +10,7 @@ from websockets.asyncio.client import connect
 
 from hertzforge.core.progress import BUSY
 from hertzforge.service import frames, op_progress
+from hertzforge.service import server as server_module
 from hertzforge.service.descriptors import Operation
 from hertzforge.service.server import OPERATIONS, Service, start
 
@@ -118,3 +119,70 @@ def test_solve_modes_reports_to_the_running_operation():
                              values)
     assert seen, 'the solve reported its progress'
     assert op_progress.hook() is None, 'and only while it ran'
+
+
+def _quiet(project, params):
+    """Works for 0.4 s in one stage that reports nothing, as one long library call does."""
+    time.sleep(0.4)
+    return []
+
+
+def _once(project, params):
+    """Reports 3 of 10 once, then works 0.4 s without another word."""
+    op_progress.hook()(3, 10)
+    time.sleep(0.4)
+    return []
+
+
+QUIET = Operation(id='project.test_quiet', title='Quiet Thing', workspace='signals',
+                  summary='A test operation that reports nothing.', params=(), outputs=(),
+                  run=_quiet)
+ONCE = Operation(id='project.test_once', title='Once Thing', workspace='signals',
+                 summary='A test operation that reports once.', params=(), outputs=(),
+                 run=_once)
+
+
+async def _heard(op):
+    """The op.progress events while `op` runs and for 0.3 s after its response."""
+    service = Service((*OPERATIONS, op))
+    server = await start(service, port=0)
+    port = server.sockets[0].getsockname()[1]
+    before, after = [], []
+    try:
+        async with connect(f'ws://127.0.0.1:{port}', max_size=None) as socket:
+            frames.decode(await socket.recv())
+            await socket.send(frames.encode_text({'type': 'request', 'id': 1, 'method': 'op.run',
+                                                  'params': {'op': op.id, 'params': {}}}))
+            heard, ends = before, asyncio.get_running_loop().time() + 15
+            while (left := ends - asyncio.get_running_loop().time()) > 0:
+                try:
+                    message = frames.decode(await asyncio.wait_for(socket.recv(), left))
+                except TimeoutError:
+                    break
+                if message['type'] == 'response' and message['id'] == 1:
+                    heard, ends = after, asyncio.get_running_loop().time() + 0.3
+                elif message.get('topic') == 'op.progress':
+                    heard.append(message['data'])
+    finally:
+        server.close()
+        await server.wait_closed()
+        service.close()
+    return before, after
+
+
+def test_an_operation_that_reports_nothing_still_says_it_is_running(monkeypatch):
+    """A long stage with no report of its own, a factorization say, is not a silent service:
+    the shell waits on an operation for as long as `op.progress` keeps coming."""
+    monkeypatch.setattr(server_module, 'HEARTBEAT_S', 0.05)
+    before, after = asyncio.run(_heard(QUIET))
+    assert len(before) >= 3
+    assert all(d == {'op': QUIET.id, 'done': 0, 'total': -1} for d in before)
+    assert after == [], 'the heartbeat stops with the operation'
+
+
+def test_the_heartbeat_repeats_the_last_progress_reported(monkeypatch):
+    monkeypatch.setattr(server_module, 'HEARTBEAT_S', 0.05)
+    before, after = asyncio.run(_heard(ONCE))
+    assert before[0] == {'op': ONCE.id, 'done': 3, 'total': 10}
+    assert len(before) >= 3 and all(d == before[0] for d in before)
+    assert after == []

@@ -434,7 +434,7 @@ class AnalyzeState {
 		// a field being typed in keeps its own text; let go of it, so it shows what the drag stores
 		if (typeof document !== 'undefined' && document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, RUN_WAIT);
 			// the plot is the same records: only the frames over it are drawn again, below
 			if (res.project) this.app.project.apply(res.project, !this.averagingDraft);
 		} catch (err) {
@@ -622,7 +622,7 @@ class AnalyzeState {
 		const before = new Set(ids());
 		this.runError = null;
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: row.id, params: row.fill ?? {} }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: row.id, params: row.fill ?? {} }, RUN_WAIT);
 			if (res.project) p.apply(res.project);
 			await p.loadChildren(geometry);
 		} catch (err) {
@@ -835,7 +835,7 @@ class AnalyzeState {
 	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, RUN_WAIT);
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			// a form that applies as it goes holds what the gimbal left
@@ -857,7 +857,7 @@ class AnalyzeState {
 	async dragOnSelection(act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		this.runError = null;
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: act.op, params: { ...act.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: act.op, params: { ...act.params, ...patch } }, RUN_WAIT);
 			if (res.project) this.app.project.apply(res.project);
 			const geometry = act.params.geometry;
 			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
@@ -928,7 +928,7 @@ class AnalyzeState {
 		this.stopPreview();
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, RUN_WAIT);
 			// an averaging stored from the history's own plot leaves the plot as it is: only its frames are drawn again
 			const sameplot = !preview && op.id === 'project.set_averaging' && !!this.shown && this.app.project.selection.objects.length === 1 && params.source === this.app.project.selection.objects[0];
 			if (res.project) this.app.project.apply(res.project, !sameplot);
@@ -1011,7 +1011,7 @@ class AnalyzeState {
 	/** Rows of a table of entities deleted (`edit.remove`): the project, the tree's counts and the tables follow. */
 	async removeShownRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, RUN_WAIT);
 			if (res.project) this.app.project.apply(res.project);
 			const geometry = remove.params.geometry;
 			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
@@ -1034,7 +1034,7 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
 				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
-				{ timeoutMs: RUN_TIMEOUT_MS }
+				RUN_WAIT
 			);
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
@@ -1051,7 +1051,7 @@ class AnalyzeState {
 	async removeReadingRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, RUN_WAIT);
 			if (res.project) this.app.project.apply(res.project);
 			// a deletion may answer with a reading of what it kept: the drawn views and the table are what is edited
 			this.reading = { title, views: res.views.filter((v) => v.view !== 'reading') };
@@ -1073,7 +1073,7 @@ class AnalyzeState {
 		if (!was) return;
 		const number = Number(id);
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, RUN_WAIT);
 			if (this.reading !== was) return;
 			const others = res.views.filter((v) => v.view !== 'table');
 			let k = 0;
@@ -1089,7 +1089,7 @@ class AnalyzeState {
 		if (!was) return;
 		const number = Number(id);
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, RUN_WAIT);
 			if (this.shown !== was) return;
 			const others = res.views.filter((v) => v.view !== 'table');
 			let k = 0;
@@ -1105,7 +1105,7 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
 				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
-				{ timeoutMs: RUN_TIMEOUT_MS }
+				RUN_WAIT
 			);
 			if (res.project) this.app.project.apply(res.project);
 			const table = res.views.find((v) => v.view === 'table');
@@ -1152,6 +1152,12 @@ const PART_DELETES: Record<string, { op: string; param: string; words: string }>
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
+/**
+ * How an operation is waited on: for as long as the service says it is still running
+ * (`op.progress`, sent at least every 10 s while it runs), and for `RUN_TIMEOUT_MS` after the
+ * last word, since a modal solve of a large mesh can run for many minutes.
+ */
+const RUN_WAIT = { timeoutMs: RUN_TIMEOUT_MS, aliveOn: 'op.progress' };
 /** How long a file dialog the service shows may stay open: it waits on the person, not on work. */
 const DIALOG_TIMEOUT_MS = 3_600_000;
 

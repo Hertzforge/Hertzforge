@@ -298,6 +298,10 @@ def _only(params: Any, allowed: Sequence[str], method: str) -> None:
 #: the shortest gap between two `project.progress` events of one file
 PROGRESS_INTERVAL_S = 0.1
 
+#: the longest an operation goes without an `op.progress` event: its last one is sent again,
+#: so the shell knows it is still running through a stage that cannot count itself
+HEARTBEAT_S = 10.0
+
 
 class Connection:
     """One client: its project, its requests in flight, and the lock that
@@ -325,6 +329,8 @@ class Connection:
         #: the operation running on the project, which `op.cancel` stops, and whether it was asked to
         self.running_op: str | None = None
         self.cancel_asked: bool = False
+        #: the last `op.progress` event sent: its operation, when (monotonic) and its data
+        self.progress_sent: tuple[str, float, dict[str, Any]] | None = None
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
         #: the files a browser sent by their contents (`project.upload`), until it goes
@@ -380,8 +386,25 @@ class Connection:
                 return
             last[0], last[1] = now, total
             data = {'op': op_id, 'done': int(done), 'total': int(total)}
+            self.progress_sent = (op_id, now, data)
             asyncio.run_coroutine_threadsafe(self.event('op.progress', data), loop)
         return report
+
+    async def heartbeat(self, op_id: str) -> None:
+        """Until cancelled, send `op_id`'s last `op.progress` event again whenever HEARTBEAT_S
+        pass without one, or a stage that cannot count itself (`total` -1) when it has sent
+        none: the shell waits on an operation for as long as these come."""
+        while True:
+            await asyncio.sleep(HEARTBEAT_S)
+            sent = self.progress_sent
+            if sent is not None and sent[0] == op_id:
+                if time.monotonic() - sent[1] < HEARTBEAT_S:
+                    continue
+                data = sent[2]
+            else:
+                data = {'op': op_id, 'done': 0, 'total': -1}
+            self.progress_sent = (op_id, time.monotonic(), data)
+            await self.event('op.progress', data)
 
     def cancel_op(self, params: Any) -> dict[str, Any]:
         """`op.cancel`: stop the operation running on the project at its next report of
@@ -590,6 +613,7 @@ class Connection:
         which an operation's verb reports to, and `span` the part of x a zoomed plot shows."""
         from hertzforge.core.progress import Cancelled
 
+        beat = asyncio.create_task(self.heartbeat(op.id))
         try:
             views, thinned = await self.service.in_worker(
                 zoom.drawn, span, op_progress.running_with, report,
@@ -601,6 +625,8 @@ class Connection:
                 error.message = display_units.lengths_in_words(error.message, self.units)
                 error.args = (error.message,)
             raise
+        finally:
+            beat.cancel()
         if op.says_lengths:
             display_units.say_lengths(views, self.units)
         return views, thinned
