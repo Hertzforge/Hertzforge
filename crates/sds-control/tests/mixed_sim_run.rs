@@ -308,13 +308,28 @@ async fn the_level_hold_and_a_part_switched_live_reach_the_core() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_band_switched_off_live_ramps_out_and_back() {
-    let addr = serve(service(Duration::from_secs(30))).await;
-    let mut c = Client::connect(addr).await;
-    controller(&mut c).await;
+/// Band `b1`'s row in a `mixed.state` event.
+fn b1_row(e: &support::Event) -> Option<&Value> {
+    if e.topic() != "mixed.state" {
+        return None;
+    }
+    e.data()["parts"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["id"] == "b1"))
+}
+
+/// Whether the row shows the band switched on and playing, or switched off
+/// and ramped out.
+fn b1_is(row: &Value, on: bool) -> bool {
+    let scale = row["scale"].as_f64().unwrap_or(f64::NAN);
+    row["enabled"] == on && row["on"] == on && if on { scale > 0.0 } else { scale == 0.0 }
+}
+
+/// A floor and one fixed band, engaged, with the band playing.
+async fn band_playing(c: &mut Client) {
+    controller(c).await;
     run_to_engaged(
-        &mut c,
+        c,
         config(
             vec![
                 floor(),
@@ -324,22 +339,94 @@ async fn a_band_switched_off_live_ramps_out_and_back() {
         ),
     )
     .await;
-    let band_on = |want: bool| {
-        move |e: &support::Event| {
-            e.topic() == "mixed.state"
-                && e.data()["parts"]
-                    .as_array()
-                    .and_then(|ps| ps.iter().find(|p| p["id"] == "b1"))
-                    .is_some_and(|p| p["on"] == want)
-        }
-    };
+    // The band comes in a second of station time after the loop engages.
+    c.wait_for("b1 playing", LONG, |e| {
+        b1_row(e).is_some_and(|r| b1_is(r, true))
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_band_switched_off_live_ramps_out_and_back() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    band_playing(&mut c).await;
     let r = c.ok("mixed.part", json!({"id": "b1", "on": false})).await;
     assert_eq!(r["on"], false);
-    // A band's samples are synthesized ahead, so its switch lands about a quarter
-    // second of station time late: the wait allows for it.
-    c.wait_for("b1 off", LONG, band_on(false)).await;
-    c.ok("mixed.part", json!({"id": "b1", "on": true})).await;
-    c.wait_for("b1 on again", LONG, band_on(true)).await;
+    // Off: the row shows the switch and the band ramped all the way out. (A
+    // row that shows the switch off cannot be from before the command.)
+    let i = c
+        .wait_for("b1 off and ramped out", LONG, |e| {
+            b1_row(e).is_some_and(|r| b1_is(r, false))
+        })
+        .await;
+    let off_at = c.events[i].at;
+    let r = c.ok("mixed.part", json!({"id": "b1", "on": true})).await;
+    assert_eq!(r["on"], true);
+    // On again: an event read after the one that showed it off.
+    c.wait_for("b1 on again", LONG, move |e| {
+        e.at > off_at && b1_row(e).is_some_and(|r| b1_is(r, true))
+    })
+    .await;
+    c.ok("mixed.stop", json!({})).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+}
+
+/// A part switched off and straight back on, the "on" reaching the run before
+/// it has run a chunk on the "off".
+///
+/// The run takes up every command waiting for it before its next chunk, and the
+/// status it shows is as new as its last chunk. So the "on" here is judged
+/// while the status still shows the part on. Judged on that status it was
+/// taken for nothing to do, the "off" then went through alone, and the part
+/// stayed off with the client told it was on (the fault this test is for; it
+/// showed on a loaded runner, where the run's thread is slow to its next
+/// chunk). To hold the run's thread there, each "off" is followed by a train of
+/// commands that change nothing (`mixed.mode` to the mode in force), on a
+/// simulator paced so the train is waiting when the thread looks.
+///
+/// Mutation: in `part_cmd`, decide on the status row's `enabled` in place of
+/// the core's `part_switch`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_part_switched_off_and_straight_back_on_stays_on() {
+    const TRAIN: usize = 800;
+    let addr = serve(paced(Duration::from_secs(30), 4.0)).await;
+    let mut c = Client::connect(addr).await;
+    band_playing(&mut c).await;
+    for cycle in 0..4 {
+        let off = c.send("mixed.part", json!({"id": "b1", "on": false})).await;
+        for _ in 0..TRAIN {
+            c.send("mixed.mode", json!({"mode": "manual"})).await;
+        }
+        let r = c.answer(off).await;
+        assert_eq!(r["result"]["on"], false, "{r}");
+        // Strictly after the "off" was answered.
+        let r = c.ok("mixed.part", json!({"id": "b1", "on": true})).await;
+        assert_eq!(r["on"], true);
+        // Three seconds of station time on (the part ramp is one), the band is
+        // on and at its level.
+        let t0 = c.ok("mixed.state", json!({})).await["t_s"]
+            .as_f64()
+            .expect("station time");
+        let row = loop {
+            let s = c.ok("mixed.state", json!({})).await;
+            assert_eq!(s["state"], "running", "cycle {cycle}: {s}");
+            if s["t_s"].as_f64().is_some_and(|t| t >= t0 + 3.0) {
+                let parts = s["parts"].as_array().expect("parts").clone();
+                break parts.into_iter().find(|p| p["id"] == "b1").expect("b1");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        assert!(
+            row["enabled"] == true && row["on"] == true && row["scale"].as_f64() == Some(1.0),
+            "cycle {cycle}: switched off and straight back on, the band is left enabled {} on {} \
+             at scale {}",
+            row["enabled"],
+            row["on"],
+            row["scale"]
+        );
+    }
     c.ok("mixed.stop", json!({})).await;
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");

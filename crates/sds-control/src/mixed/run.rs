@@ -1183,10 +1183,11 @@ impl Actor {
             )
             .with_detail(json!({"mode": "auto"})));
         }
-        let now = svc.live_status().level_db;
         let levels = &self.view.levels_db;
         let r = match target {
-            LevelTarget::Delta(d) => svc.step_level(d).map(|_| now + d),
+            // The core steps from the level the run is going to, so two steps
+            // asked for before the next chunk add up, and it says what it took.
+            LevelTarget::Delta(d) => svc.step_level(d),
             LevelTarget::To(t) => match levels.iter().position(|l| (l - t).abs() < 1e-9) {
                 Some(i) => svc.jump_to_level(i).map(|_| t),
                 None => {
@@ -1268,15 +1269,23 @@ impl Actor {
         {
             return Err(wrong_state(&self.view, "Switching a part"));
         }
+        let svc = self
+            .svc
+            .as_ref()
+            .ok_or_else(|| wrong_state(&self.view, "Switching a part"))?;
+        // Nothing to do when the part's switch already stands as asked. The
+        // switch is the core's, with the switches it has queued counted: the
+        // status row is only as new as the last chunk, and a second switch
+        // judged on it before the next chunk would be dropped.
+        if svc.part_switch(id) == Some(on) {
+            return Ok(on);
+        }
         let row = self
             .view
             .status
             .as_ref()
             .and_then(|s| s.parts.iter().find(|r| r.id == id).cloned());
         if let Some(r) = &row {
-            if r.enabled == on {
-                return Ok(on);
-            }
             if on && r.done {
                 let parts_s = self.view.parts_s.unwrap_or(0.0);
                 let closed = p.window.off_s.is_some_and(|off| parts_s >= off);
@@ -1295,10 +1304,6 @@ impl Actor {
                 });
             }
         }
-        let svc = self
-            .svc
-            .as_ref()
-            .ok_or_else(|| wrong_state(&self.view, "Switching a part"))?;
         svc.set_part_enabled(id, on)
             .map_err(|e| refuse("wrong_state", e.to_string()))?;
         self.shared.add_log_data(

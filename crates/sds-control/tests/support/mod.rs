@@ -213,6 +213,33 @@ impl Client {
         }
     }
 
+    /// Send a request without waiting for its answer; returns its id for
+    /// [`Self::answer`]. For requests that must reach the server together.
+    pub async fn send(&mut self, method: &str, params: Value) -> i64 {
+        let id = self.next_id;
+        self.last_id = id;
+        self.next_id += 1;
+        let req = json!({"type": "request", "id": id, "method": method, "params": params});
+        self.ws.send(Message::Text(req.to_string())).await.unwrap();
+        id
+    }
+
+    /// The answer to the request `id` sent with [`Self::send`]. Read it before
+    /// any later call's: a call skips the answers it is not waiting for.
+    pub async fn answer(&mut self, id: i64) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let m = self
+                .read(left)
+                .await
+                .unwrap_or_else(|| panic!("no answer to request {id} within 60 s"));
+            if m["type"] == "response" && m["id"] == id {
+                return m;
+            }
+        }
+    }
+
     /// The result, or a panic naming the error.
     pub async fn ok(&mut self, method: &str, params: Value) -> Value {
         let r = self.call(method, params).await;
