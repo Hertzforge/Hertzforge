@@ -75,10 +75,12 @@ describe('ServiceClient over the mock transport', () => {
 		c.close();
 	});
 
-	// A modal solve of a large mesh runs for minutes; the service says it is still running with
-	// `op.progress` every few seconds. RED-MUTATION: start the wait again on no event, or on any
-	// event, and one of the three requests below ends the wrong way.
-	it('waits on a request for as long as its alive topic keeps coming, and no longer', async () => {
+	// A modal solve of a large mesh runs for minutes, and the service says it is still running with
+	// `op.progress` at least every 10 s. Every request queued behind it (an operation, and the view
+	// a click asks for) waits for as long as that word comes. RED-MUTATION: start the waits again on
+	// no event, or on any event, or for less than the busy wait, and one of the cases below ends
+	// the wrong way.
+	it('waits on every request for as long as the service says it is busy, and no longer', async () => {
 		const server: MockServer = {
 			hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: 't' },
 			methods: {
@@ -86,25 +88,59 @@ describe('ServiceClient over the mock transport', () => {
 					new Promise((resolve) => {
 						const topic = params.topic as string;
 						let beats = 0;
-						const beat = setInterval(() => {
+						const tick = () => {
 							conn.emit(topic, { op: 'long.op', done: beats, total: -1 });
 							if (++beats === 8) {
 								clearInterval(beat);
 								resolve({ beats });
 							}
-						}, 25);
+						};
+						const beat = setInterval(tick, 60);
+						tick();
+					}),
+				// a view queued behind the operation: answered 80 ms after the operation's last beat
+				'queued.view': () => new Promise((resolve) => setTimeout(() => resolve({ drawn: true }), 500))
+			}
+		};
+		const client = (busyOn?: string) =>
+			new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1), busyOn, busyWaitMs: 200 });
+		const c = client('op.progress');
+		c.connect();
+		await c.whenOpen();
+		// 8 beats 60 ms apart, the first at once, is 420 ms of work, against 40 ms allowed before the
+		// first word and 200 ms (the busy wait, more than the 60 ms between beats) after each
+		const [ran, shown] = await Promise.all([
+			c.request('long.op', { topic: 'op.progress' }, { timeoutMs: 40 }),
+			c.request('queued.view', {}, { timeoutMs: 40 })
+		]);
+		expect(ran).toEqual({ beats: 8 });
+		expect(shown).toEqual({ drawn: true });
+		const otherTopic = await c.request('long.op', { topic: 'project.progress' }, { timeoutMs: 40 }).catch((e) => e);
+		expect(otherTopic).toMatchObject({ code: 'timeout' });
+		expect(otherTopic.message).toBe('long.op got no response within 0 s.');
+		c.close();
+		const deaf = client();
+		deaf.connect();
+		await deaf.whenOpen();
+		await expect(deaf.request('long.op', { topic: 'op.progress' }, { timeoutMs: 40 })).rejects.toMatchObject({ code: 'timeout' });
+		deaf.close();
+	});
+
+	it('says how long it heard nothing once the service had said it was busy', async () => {
+		const server: MockServer = {
+			hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: 't' },
+			methods: {
+				'stops.talking': (_params, conn) =>
+					new Promise(() => {
+						conn.emit('op.progress', { op: 'stops.talking', done: 0, total: -1 });
 					})
 			}
 		};
-		const c = new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1) });
+		const c = new ServiceClient({ service: 'analysis', url: 'ws://t/', socketFactory: mockSocketFactory(server, 1), busyOn: 'op.progress', busyWaitMs: 1000 });
 		c.connect();
 		await c.whenOpen();
-		// 8 beats 25 ms apart is 200 ms of work, four times the 50 ms allowed between words
-		await expect(c.request('long.op', { topic: 'op.progress' }, { timeoutMs: 50, aliveOn: 'op.progress' })).resolves.toEqual({ beats: 8 });
-		const otherTopic = await c.request('long.op', { topic: 'project.progress' }, { timeoutMs: 50, aliveOn: 'op.progress' }).catch((e) => e);
-		expect(otherTopic).toMatchObject({ code: 'timeout' });
-		expect(otherTopic.message).toBe('long.op heard nothing from the analysis service for 0 s.');
-		await expect(c.request('long.op', { topic: 'op.progress' }, { timeoutMs: 50 })).rejects.toMatchObject({ code: 'timeout' });
+		const err = await c.request('stops.talking', {}, { timeoutMs: 20 }).catch((e) => e);
+		expect(err.message).toBe('stops.talking heard nothing from the analysis service for 1 s.');
 		c.close();
 	});
 

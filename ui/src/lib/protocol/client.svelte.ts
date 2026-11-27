@@ -74,7 +74,22 @@ export interface ClientOptions {
 	helloTimeoutMs?: number;
 	backoffInitialMs?: number;
 	backoffMaxMs?: number;
+	/**
+	 * The event topic that says the service is still at work on something, such as an operation's
+	 * `op.progress`. Each one starts every pending request's wait again (at least `BUSY_WAIT_MS`),
+	 * since a request may be queued behind that work for as long as it runs.
+	 */
+	busyOn?: string;
+	/** The least a request waits after a `busyOn` event; `BUSY_WAIT_MS` unless a test shortens it. */
+	busyWaitMs?: number;
 }
+
+/**
+ * The least a pending request is given after word that the service is busy: three of the analysis
+ * service's heartbeats (one every 10 s while an operation runs), so a request whose own timeout is
+ * shorter than the gap between two of them does not expire between them.
+ */
+export const BUSY_WAIT_MS = 30_000;
 
 /**
  * How long a request that arms the station may take to answer. Every module's `<module>.arm`
@@ -98,9 +113,7 @@ interface Pending {
 	resolve: (result: unknown) => void;
 	reject: (err: RequestError) => void;
 	timer: ReturnType<typeof setTimeout>;
-	/** The event topic that says the request is still being worked on, and starts its wait again. */
-	aliveOn?: string;
-	/** Start the wait again from now. */
+	/** Start the wait again from now, for at least `BUSY_WAIT_MS`. */
 	rearm: () => void;
 }
 
@@ -122,6 +135,8 @@ export class ServiceClient {
 	private readonly helloTimeoutMs: number;
 	private readonly backoffInitialMs: number;
 	private readonly backoffMaxMs: number;
+	private readonly busyOn: string | undefined;
+	private readonly busyWaitMs: number;
 
 	private socket: SocketLike | null = null;
 	private nextId = 1;
@@ -143,6 +158,8 @@ export class ServiceClient {
 		this.helloTimeoutMs = options.helloTimeoutMs ?? 3_000;
 		this.backoffInitialMs = options.backoffInitialMs ?? 500;
 		this.backoffMaxMs = options.backoffMaxMs ?? 8_000;
+		this.busyOn = options.busyOn;
+		this.busyWaitMs = options.busyWaitMs ?? BUSY_WAIT_MS;
 		this.backoffMs = this.backoffInitialMs;
 	}
 
@@ -182,14 +199,14 @@ export class ServiceClient {
 
 	/**
 	 * Send a request and wait for its response. If the service is not connected yet the request
-	 * waits for the connection, within the same timeout. With `aliveOn`, an event of that topic
-	 * says the service is still working on it, and the wait starts again: the request times out
-	 * only after `timeoutMs` with no word, however long the work takes.
+	 * waits for the connection, within the same timeout. While the service says it is busy (the
+	 * client's `busyOn` events) the wait starts again with each word, so a request queued behind a
+	 * long operation times out only after that long with no word, however long the work takes.
 	 */
 	async request<R = Record<string, unknown>>(
 		method: string,
 		params: Record<string, unknown> = {},
-		options: { timeoutMs?: number; aliveOn?: string } = {}
+		options: { timeoutMs?: number } = {}
 	): Promise<R> {
 		const timeoutMs = options.timeoutMs ?? requestTimeoutFor(method, this.requestTimeoutMs);
 		const deadline = Date.now() + timeoutMs;
@@ -217,15 +234,16 @@ export class ServiceClient {
 		const remaining = Math.max(1, deadline - Date.now());
 		const id = this.nextId++;
 		return new Promise<R>((resolve, reject) => {
-			const seconds = Math.round(timeoutMs / 1000);
+			const busyMs = Math.max(timeoutMs, this.busyWaitMs);
+			let heard = false;
 			const expire = () => {
 				this.pending.delete(id);
 				reject(
 					new RequestError(
 						'timeout',
-						options.aliveOn
-							? `${method} heard nothing from the ${this.service} service for ${seconds} s.`
-							: `${method} got no response within ${seconds} s.`,
+						heard
+							? `${method} heard nothing from the ${this.service} service for ${Math.round(busyMs / 1000)} s.`
+							: `${method} got no response within ${Math.round(timeoutMs / 1000)} s.`,
 						method
 					)
 				);
@@ -235,10 +253,10 @@ export class ServiceClient {
 				resolve: resolve as (r: unknown) => void,
 				reject,
 				timer: setTimeout(expire, remaining),
-				aliveOn: options.aliveOn,
 				rearm: () => {
+					heard = true;
 					clearTimeout(entry.timer);
-					entry.timer = setTimeout(expire, timeoutMs);
+					entry.timer = setTimeout(expire, busyMs);
 				}
 			};
 			this.pending.set(id, entry);
@@ -352,7 +370,7 @@ export class ServiceClient {
 		}
 
 		if (message.type === 'event') {
-			for (const p of this.pending.values()) if (p.aliveOn === message.topic) p.rearm();
+			if (message.topic === this.busyOn) for (const p of this.pending.values()) p.rearm();
 			const set = this.handlers.get(message.topic);
 			if (!set) return;
 			for (const handler of [...set]) {
