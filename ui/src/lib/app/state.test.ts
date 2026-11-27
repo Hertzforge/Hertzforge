@@ -987,3 +987,13 @@ describe('a row picked in a table the selection shows', () => {
 		expect(views[1].rows).toEqual([['1'], ['2']]);
 	});
 });
+
+// A view a click asks for while a long operation runs is queued behind it in the service. RED-MUTATION:
+// leave `busyOn` off the analysis client and the view times out after 10 s while the solve goes on.
+describe('the analysis client', () => {
+	it('waits on every request while an operation says it is running, and the control client does not', () => {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		expect((app.analysis as unknown as { busyOn?: string }).busyOn).toBe('op.progress');
+		expect((app.control as unknown as { busyOn?: string }).busyOn).toBeUndefined();
+	});
+});
