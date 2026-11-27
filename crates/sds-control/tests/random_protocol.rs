@@ -618,6 +618,107 @@ async fn the_end_gives_the_level_where_the_stop_began() {
     }
 }
 
+/// The stop is shown as soon as the drive starts down: from the request on, the
+/// live frames and `random.state` say `stopping` / `ramping_down`, though the run
+/// thread takes the request only when the control loop in progress ends. With a
+/// one-second loop and the stop sent just after a loop has ended, the answer
+/// comes most of a second later. Red before the fix: the live frames of that
+/// second said `running` / `engaged` with the level already falling, and
+/// `random.state` said `stopping` only with the answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_stop_is_shown_from_the_request_not_the_end_of_the_loop() {
+    let svc = Service::with_options(options(
+        no_driver(),
+        1.0,
+        Duration::from_secs(30),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    let mut config = sim_config("manual", json!([{"db": -6, "dwell_s": 1}, {"db": 0}]), 60.0);
+    config["acquisition"]["n_avg"] = json!(16); // a one-second control loop
+    config["control"]["shutdown_ramp_s"] = json!(2.0);
+    config["control"]["soft_start_db"] = json!(0);
+    configured(&mut c, config).await;
+    c.ok("random.start", json!({})).await;
+    c.wait_phase("engaged", LONG).await;
+    c.pump(Duration::from_millis(1500)).await;
+    let done = |e: &support::Event| {
+        (e.topic() == "random.live").then(|| e.data()["loop"].as_u64().unwrap_or(0))
+    };
+    let loops = c.events.iter().filter_map(done).max().unwrap_or(0);
+    c.wait_for("the end of a control loop", LONG, |e| {
+        done(e).is_some_and(|n| n > loops)
+    })
+    .await;
+
+    let t0 = Instant::now();
+    let answer = c.ok("random.stop", json!({})).await;
+    let answered = Instant::now();
+    assert_eq!(answer["state"], "stopping", "{answer}");
+    let end = c.wait_state("finished", LONG).await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+
+    let after = |e: &&support::Event| e.at >= t0 && e.data()["state"] != "finished";
+    let live: Vec<_> = c
+        .of_topic("random.live")
+        .into_iter()
+        .filter(after)
+        .collect();
+    let said = |e: &support::Event| {
+        format!(
+            "+{:.2} s {} / {} at {}",
+            (e.at - t0).as_secs_f64(),
+            e.data()["state"],
+            e.data()["phase"],
+            e.data()["level_db"]
+        )
+    };
+    println!(
+        "live frames after the stop: {:?}",
+        live.iter().map(|e| said(e)).collect::<Vec<_>>()
+    );
+    // A frame read in the first 0.3 s may have left before the request arrived.
+    let settled = t0 + Duration::from_millis(300);
+    let before_answer = live
+        .iter()
+        .filter(|e| e.at >= settled && e.at < answered)
+        .count();
+    assert!(
+        before_answer >= 2,
+        "the stop was answered {:.2} s after the request, leaving {before_answer} live frames \
+         to judge",
+        (answered - t0).as_secs_f64()
+    );
+    for e in &live {
+        let falling = e.data()["level_db"].as_f64().is_some_and(|l| l < -6.2);
+        if e.at >= settled || falling {
+            assert!(
+                e.data()["state"] == "stopping" && e.data()["phase"] == "ramping_down",
+                "a live frame after the stop: {}",
+                said(e)
+            );
+        }
+    }
+    let states: Vec<_> = c
+        .of_topic("random.state")
+        .into_iter()
+        .filter(|e| e.at >= t0)
+        .collect();
+    let first = states.first().expect("no random.state after the stop");
+    assert!(
+        first.data()["state"] == "stopping" && first.at < settled,
+        "the first random.state after the stop: {}, the answer at +{:.2} s",
+        said(first),
+        (answered - t0).as_secs_f64()
+    );
+    assert!(
+        states.iter().all(|e| e.data()["state"] != "running"),
+        "random.state went back to running: {:?}",
+        states.iter().map(|e| said(e)).collect::<Vec<_>>()
+    );
+}
+
 /// A table whose drive row comes FIRST is handed to the controller as it stands,
 /// and every input reads its own samples. On the Sim a control and a monitor row
 /// read the response and a reference row reads the drive, so if the control row

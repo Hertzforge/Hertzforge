@@ -2057,9 +2057,11 @@ Result column is the `random.state` object below.
   `manual` to `auto` resumes from the present level with its dwell restarted, and from a level
   between two of the schedule's, it moves to the one above when the dwell ends.
 - **`random.stop`** is the controlled stop: while driving, the drive starts down at the next
-  output block, not the next control loop, and ramps 40 dB down over `shutdown_ramp_s` (state
-  `stopping`); the run ends `operator_stop` at the end of the control loop in which the ramp
-  arrives. From `armed` or `review` it ends at once. It answers at once.
+  output block, not the next control loop, and ramps 40 dB down over `shutdown_ramp_s`; the run
+  ends `operator_stop` at the end of the control loop in which the ramp arrives. From the request
+  on, `random.state` and the live frames say state `stopping`, phase `ramping_down`. It answers
+  when the run takes the request, at the end of the control loop in progress. From `armed` or
+  `review` it ends at once.
 - **`random.abort`** ends the run within one control loop (`grid.loop_s`), without the shutdown
   ramp; the station takes the drive down with its own stop. The outcome is `operator_abort`. It
   answers when the loop has ended.
