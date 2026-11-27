@@ -96,6 +96,7 @@ hertzforge-mimo-random  test:timing  a5_compute_per_loop_at_72_by_24_by_1600_lin
 # clock and a 60 ms output buffer that stops for good if a seam outlasts it
 # (release builds only, as above)
 hertzforge-mimo-random  test:output_seams  identification_keeps_a_real_time_output_fed_across_every_seam
+hertzforge-mimo-random  test:output_seams  the_output_is_stopped_from_the_end_of_identification_until_the_loop_engages
 
 # A job that must still be running when the second start arrives, and a cancel
 # inside a real-time window

@@ -1,6 +1,6 @@
 //! A multiple-output law that misbehaves on purpose, for the host's tests.
-//! The `mode` parameter picks what `iterate` does; `seed` always returns the
-//! good drive.
+//! The `mode` parameter picks what `iterate` does; `seed` returns the good
+//! drive in every mode but `spin_seed`.
 //!
 //! The fixture implements the interface's raw bindings rather than the SDK's
 //! `RandomMimoLaw` trait: the SDK's types cannot express some of these
@@ -20,6 +20,7 @@
 //!   each in-band line has an eigenvalue of -1e-3 against a largest of 3e-3:
 //!   well formed, Hermitian, and not positive semi-definite.
 //! - `spin`: loop forever.
+//! - `spin_seed`: `seed` loops forever (and `iterate` returns the good drive).
 //! - `trap`: panic (a trap, with a message on stderr).
 //! - `law_error`: return an error.
 //! - `undeclared`: report a diagnostic the manifest does not declare.
@@ -47,6 +48,7 @@ const MODES: &[&str] = &[
     "out_of_band",
     "indefinite",
     "spin",
+    "spin_seed",
     "trap",
     "law_error",
     "undeclared",
@@ -115,6 +117,12 @@ impl GuestLaw for MimoMisbehave {
     }
 
     fn seed(&self, inputs: wit::MimoInputs) -> Result<wit::MimoOutputs, String> {
+        if self.mode == "spin_seed" {
+            let mut x = 0u64;
+            loop {
+                x = black_box(x.wrapping_add(1));
+            }
+        }
         Ok(self.out(self.good(self.drives), &inputs))
     }
 

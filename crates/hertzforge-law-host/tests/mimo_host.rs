@@ -524,6 +524,60 @@ fn a_law_file_runs_as_the_controllers_mimo_law_and_keeps_its_first_fault() {
     assert!(w.instance().is_poisoned());
 }
 
+/// Mutation: arm the call budget for `seed` in `WasmMimoLaw::seed`. The first
+/// solve is then stopped at 50 ms and the error names that budget.
+#[test]
+fn a_law_files_first_solve_runs_to_its_own_deadline() {
+    let call = Duration::from_millis(50);
+    let seed = Duration::from_millis(400);
+    let law = load(&host(), MISBEHAVE);
+
+    // With no seed budget set, the first solve has the call budget.
+    let grid = Grid::new();
+    let w = WasmMimoLaw::build(&law, &grid.setup, &mode("spin_seed"), call).expect("builds");
+    assert_eq!((w.budget(), w.seed_budget()), (call, call));
+    let (w, e) = within(
+        Duration::from_secs(60),
+        "the spinning first solve",
+        move || {
+            let mut w = w;
+            let e = w.seed(&Grid::new().inputs(0)).expect_err("stopped");
+            (w, e)
+        },
+    );
+    assert!(e.0.contains("budget"), "{e}");
+    assert_eq!(w.last_error(), Some(&LawError::Deadline { budget: call }));
+
+    // With one, the first solve runs to it; a call after it keeps the call budget.
+    let w = WasmMimoLaw::build(&law, &grid.setup, &mode("spin_seed"), call)
+        .expect("builds")
+        .with_seed_budget(seed);
+    assert_eq!((w.budget(), w.seed_budget()), (call, seed));
+    let (w, e, took) = within(
+        Duration::from_secs(60),
+        "the spinning first solve",
+        move || {
+            let mut w = w;
+            let t0 = Instant::now();
+            let e = w.seed(&Grid::new().inputs(0)).expect_err("stopped");
+            (w, e, t0.elapsed())
+        },
+    );
+    assert!(e.0.contains("budget"), "{e}");
+    assert_eq!(w.last_error(), Some(&LawError::Deadline { budget: seed }));
+    assert!(took >= seed, "stopped after {took:?}, before its {seed:?}");
+
+    let mut w = WasmMimoLaw::build(&law, &grid.setup, &mode("spin"), call)
+        .expect("builds")
+        .with_seed_budget(seed);
+    w.seed(&grid.inputs(0)).expect("seeds");
+    let (w, _) = within(Duration::from_secs(60), "the spin", move || {
+        let e = w.iterate(&Grid::new().inputs(1)).expect_err("stopped");
+        (w, e)
+    });
+    assert_eq!(w.last_error(), Some(&LawError::Deadline { budget: call }));
+}
+
 #[test]
 fn mimo_handles_move_between_threads() {
     fn send<T: Send>() {}

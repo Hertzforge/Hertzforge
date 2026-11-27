@@ -4,7 +4,9 @@
 //! law file). Every call, the seed included, is guarded the way the single-output
 //! core guards its law: the call runs under `catch_unwind`, it is timed on an
 //! injectable [`LawClock`] against its budget, and an error, a panic or a late
-//! answer is a [`Miss`]. The output checks of [`crate::guards`] run after.
+//! answer is a [`Miss`]. The seed is timed against its own budget in seconds
+//! (`MimoConfig::seed_budget_s`), every call after it against a fraction of the
+//! loop. The output checks of [`crate::guards`] run after.
 
 use crate::report::MimoFaultReason;
 use hertzforge_law_host::validate::resolve_params;
