@@ -3051,6 +3051,9 @@ class Model:
             refused = refused.with_traceback(None)
             handed = [(reduced_k - sigma * reduced_m).tocsr()]
             del reduced_k
+            # an iterative solve has no polish, so its iterations fill the polish's part too
+            if eigen is not None:
+                eigen.take(polish)
             return self._iterative_modes(handed.pop(), reduced_m, transform, scale, sigma,
                                          stiffness, maximum_frequency, num_modes,
                                          refused, eigen)

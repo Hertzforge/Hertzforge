@@ -53,6 +53,10 @@ ITERATIVE_ACCEPT = 1e-6
 ROUND_ITERATIONS = 20
 #: the iterations a solve may take in all
 ITERATIVE_ITERATIONS = 1000
+#: the progress a mode is counted in: a batch is given its modes' units, each iteration covers
+#: `BATCH_STEP` of what is left of them, and the batch's last units come when it converges
+MODE_UNITS = 1000
+BATCH_STEP = 0.1
 #: a round that does not cut the worst residual of the modes asked for
 #: to this share of the best it had been is a round without progress,
 #: and `STALL_ROUNDS` of them in a row are a stall. Five, because a free
@@ -467,13 +471,21 @@ class IterativeSolver:
                 self.found = grown
             ticker = self.ticker
             cycle = self.cycle if wanted else None
+            # the bar counts the modes: how many iterations a batch takes is not known, so each
+            # one moves the bar part of the way to the batch's end, and the batch's convergence
+            # the rest; the bar never stands still for a batch, and never runs ahead of one
+            if ticker is not None:
+                ticker.extend_to(MODE_UNITS * max(wanted - len(self.values), 0))
+            batch_units = {'left': 0}
 
             def precondition(residual: np.ndarray) -> np.ndarray:
                 # one call per iteration, from LOBPCG's own thread: the
                 # tick is where a cancel stops the solve
                 self.iterations += 1
                 if ticker is not None:
-                    ticker.tick()
+                    step = int(BATCH_STEP * (batch_units['left'] - 1))
+                    batch_units['left'] -= step
+                    ticker.tick(step)
                 return columns.apply(cycle, residual)
 
             def operator(function: Any) -> Any:
@@ -493,9 +505,12 @@ class IterativeSolver:
                     kept = min(self.guard.shape[1], block.shape[1])
                     block[:, :kept] = self.guard[:, :kept]
                 constraints = self.found[:, :rigid + done] if rigid + done else None
+                batch_units['left'] = MODE_UNITS * take
                 values, residuals, block = self._rounds(
                     lobpcg, shifted, scaled_mass, operator(precondition), block,
                     constraints, take, rigid + done)
+                if ticker is not None:
+                    ticker.tick(batch_units['left'])
                 self.found[:, rigid + done:rigid + done + take] = block[:, :take]
                 self.values.extend(float(value) for value in values[:take])
                 self.residuals.extend(float(value) for value in residuals[:take])
@@ -525,8 +540,6 @@ class IterativeSolver:
         failure = ''
         started = self.iterations
         while True:
-            if self.ticker is not None:
-                self.ticker.extend_to(ROUND_ITERATIONS)
             with warnings.catch_warnings(record=True) as said:
                 warnings.simplefilter('always')
                 try:

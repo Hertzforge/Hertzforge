@@ -240,6 +240,42 @@ def test_a_cancel_stops_the_iterative_solve_between_iterations(unfactorable):
     assert len(seen) == 3
 
 
+def test_the_bar_counts_the_modes_through_every_batch(unfactorable, monkeypatch):
+    """The bar moved to three quarters in the first round of iterations
+    and stood there for the rest of a solve of 30 modes of 2.5 million
+    DOF, which read as frozen: the stage's estimate was one round, and
+    the iterative solve, which has no polish, left the polish's quarter
+    of the bar to the end. Now each batch starts where the modes found
+    before it put the bar, moves on every iteration, and the solve's
+    share runs from the assembly's end to the end of the bar."""
+    unfactorable()
+    monkeypatch.setattr(iterative_modes.IterativeSolver, 'check_memory', lambda self, count: 5)
+    heard = []
+    starts = []
+    rounds = iterative_modes.IterativeSolver._rounds
+
+    def spy(self, *args):
+        # the bar's own count: what it reports is held to one report each 0.05 s
+        bar = self.ticker.parent
+        starts.append(bar.done / bar.total)
+        return rounds(self, *args)
+
+    monkeypatch.setattr(iterative_modes.IterativeSolver, '_rounds', spy)
+
+    def progress(done, total):
+        if total > 0:
+            heard.append(done / total)
+
+    _block().eigensolution(num_modes=21, progress=progress)
+    assert heard == sorted(heard), 'the bar never goes back'
+    assert len(starts) == 3, '15 elastic modes in batches of 5'
+    assembly = fem.SOLVE_BAR['assembly'] / sum(fem.SOLVE_BAR.values())
+    expected = [assembly + (1 - assembly) * k / 3 for k in range(3)]
+    assert np.allclose(starts, expected, atol=0.005), (starts, expected)
+    moving = {f for f in heard if starts[-1] < f < 1.0}
+    assert len(moving) > 3, 'it moves through the last batch'
+
+
 def test_solve_modes_reads_out_an_iterative_solve_and_its_residuals(unfactorable):
     """The app's Solve Modes says the modes came from the iterative solve
     and how far each converged, and the mode table carries a Residual
