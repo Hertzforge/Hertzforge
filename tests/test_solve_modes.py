@@ -264,3 +264,47 @@ def test_a_solved_mode_is_written_in_each_nodes_displacement_frame():
             f'mode {m + 1} moves the same way as the reader reads it'
         moved += abs(x) + abs(y) > 1e-6
     assert moved >= 3, 'modes that move the node in its plane were checked'
+
+
+def test_a_model_too_large_for_memory_is_refused_by_the_api_and_the_service(monkeypatch):
+    """The refusal is the core's, so a script and the app both get it,
+    before the factorization starts and with nothing added; with the
+    memory to hold its factor, the same model solves."""
+    from hertzforge.core import sparse_solve
+    from hertzforge.core.fem import SPARSE_ABOVE
+    from hertzforge.service.ops_project import OPERATIONS
+    from hertzforge.service.protocol import ProtocolError
+
+    geometry = _plate_geometry(mesh=24)
+    assert 6 * len(geometry.node_id) > SPARSE_ABOVE, 'solved sparse'
+    project = Project()
+    project.add('Skin', geometry)
+    estimated = []
+    real = sparse_solve.factor_memory
+
+    def spy(matrix):
+        estimated.append(real(matrix)[0])
+        return real(matrix)
+
+    monkeypatch.setattr(sparse_solve, 'factor_memory', spy)
+    factored = []
+    monkeypatch.setattr(sparse_solve, 'AccelerateFactor', lambda matrix: factored.append(1))
+    monkeypatch.setattr(sparse_solve, 'PardisoFactor', lambda matrix: factored.append(1))
+    monkeypatch.setattr(sparse_solve, 'SuperLUFactor', lambda matrix: factored.append(1))
+    monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: 2**20)
+    with pytest.raises(ValueError, match='mesh it coarser') as refused:
+        project.solve_modes('Skin', num_modes=10)
+    assert f'about {sparse_solve._gigabytes(estimated[0])} of memory' in str(refused.value)
+    assert 'its 0.00098 GB of physical memory' in str(refused.value)
+    op = next(o for o in OPERATIONS if o.id == 'project.solve_modes')
+    values = op.resolve({'source': 'Skin', 'num_modes': 10}, objects={'Skin': 'geometry'},
+                        verbs={'Skin': ['solve_modes']})
+    with pytest.raises(ProtocolError) as said:
+        op.run(project, values)
+    assert said.value.code == 'refused'
+    assert str(refused.value) in str(said.value)
+    assert factored == [] and list(project.names) == ['Skin'], 'nothing factored, nothing added'
+
+    monkeypatch.undo()
+    monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: 64 * 2**30)
+    assert project.solve_modes('Skin', num_modes=10) == 'Skin Modes'

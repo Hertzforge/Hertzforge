@@ -6780,7 +6780,11 @@ class Project(dict):
         element and each two-node line a beam. Unless a group of points
         is ground, the model is solved free-free, so the six rigid-body
         modes come back at 0 Hz, followed by the elastic modes. A geometry
-        with no element group properties raises ValueError.
+        with no element group properties raises ValueError, and so does a
+        model too large for the machine's memory, before the long
+        factorization starts: the message names the memory the factor
+        would need and the machine's physical memory
+        (`core.sparse_solve.FactorTooLarge`).
 
         Parameters
         ----------

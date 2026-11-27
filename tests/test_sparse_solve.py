@@ -22,9 +22,13 @@ import scipy.sparse as sp
 from hertzforge.core import sparse_solve
 from hertzforge.core.sparse_solve import (
     BACKEND_VARIABLE,
+    MEMORY_SHARE,
+    SUPERLU_BYTES,
     AccelerateFactor,
+    FactorTooLarge,
     PardisoFactor,
     SuperLUFactor,
+    factor_memory,
     factor_symmetric,
 )
 
@@ -40,6 +44,117 @@ def _laplacian(n=400, shift=0.0):
     main = np.full(n, 2.0) - shift
     off = np.full(n - 1, -1.0)
     return sp.diags([off, main, off], [-1, 0, 1], format='csc')
+
+
+def _block(side=12):
+    """The 7-point Laplacian of a cube of `side`³ points, shifted to be
+    indefinite: a 3-D mesh's fill, which grows fastest."""
+    line = sp.diags([np.full(side - 1, -1.0), np.full(side, 2.0), np.full(side - 1, -1.0)],
+                    [-1, 0, 1], format='csc')
+    eye = sp.identity(side, format='csc')
+    cube = (sp.kron(sp.kron(line, eye), eye) + sp.kron(sp.kron(eye, line), eye)
+            + sp.kron(sp.kron(eye, eye), line))
+    return sp.csc_matrix(cube - 0.5 * sp.identity(side ** 3))
+
+
+def _built(monkeypatch):
+    """The factorizations started, by backend, from here on."""
+    started = []
+    for kind in (AccelerateFactor, PardisoFactor, SuperLUFactor):
+        real = kind.__init__
+
+        def spy(self, matrix, real=real, backend=kind.backend):
+            started.append(backend)
+            real(self, matrix)
+
+        monkeypatch.setattr(kind, '__init__', spy)
+    return started
+
+
+@pytest.mark.parametrize('backend', ['', 'superlu'])
+def test_a_factor_beyond_memory_is_refused_before_it_starts(backend, monkeypatch):
+    """A factorization is one call into the library that nothing can
+    stop, so the factor that will not fit is refused before any
+    factorization starts, with the memory it needs and the machine's in
+    the message; the one that fits is factored, its estimate kept."""
+    monkeypatch.setenv(BACKEND_VARIABLE, backend)
+    matrix = _block()
+    needed, estimated_by = factor_memory(matrix)
+    started = _built(monkeypatch)
+    physical = int(needed / MEMORY_SHARE / 2)
+    monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: physical)
+    with pytest.raises(FactorTooLarge) as refused:
+        factor_symmetric(matrix)
+    assert started == [], 'nothing was factored'
+    said = str(refused.value)
+    assert f'about {sparse_solve._gigabytes(needed)} of memory' in said, said
+    assert f'its {sparse_solve._gigabytes(physical)} of physical memory' in said, said
+    assert f'model of {matrix.shape[0]:,} degrees of freedom' in said
+    assert said.endswith('mesh it coarser, or solve it on a machine with more memory')
+    assert (refused.value.needed, refused.value.physical) == (needed, physical)
+    assert refused.value.backend == estimated_by
+    assert isinstance(refused.value, ValueError), 'what the service refuses'
+
+    monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: int(2 * needed / MEMORY_SHARE))
+    factor = factor_symmetric(matrix)
+    assert started == [estimated_by], 'the estimate was for the backend that factored'
+    assert factor.memory == needed
+    assert probe_error(matrix, factor) < 1e-10
+
+
+def probe_error(matrix, factor):
+    return sparse_solve.probe_backward_error(matrix, factor.solve)
+
+
+@pytest.mark.parametrize('backend', ['', 'superlu'])
+def test_the_estimate_is_at_least_the_factor_of_the_matrix_itself(backend, monkeypatch):
+    """A factor holds at least the matrix's own lower triangle, eight
+    bytes a value: an estimate under that is reading the wrong field,
+    or kilobytes as bytes."""
+    monkeypatch.setenv(BACKEND_VARIABLE, backend)
+    for matrix in (_block(), _laplacian(2000)):
+        needed, _by = factor_memory(matrix)
+        assert needed >= 8 * sp.tril(matrix).nnz, (needed, matrix.shape)
+        assert needed < 16 * matrix.shape[0] ** 2, 'and less than a dense one'
+
+
+@pytest.mark.parametrize('side', [12, 16])
+def test_superlus_estimate_is_more_than_its_fill(side, monkeypatch):
+    """SuperLU has no symbolic step to ask, so its factor is estimated:
+    by its multiple of Accelerate's where that is, and by the reverse
+    Cuthill-McKee envelope elsewhere. Each is to be more than the
+    nonzeros SuperLU fills on a 3-D mesh, at its peak bytes each."""
+    from scipy.sparse.linalg import splu
+
+    matrix = _block(side)
+    factor = splu(matrix, permc_spec='MMD_AT_PLUS_A', options={'SymmetricMode': True})
+    filled = SUPERLU_BYTES * (factor.L.nnz + factor.U.nnz)
+    if sparse_solve._library() is not None:
+        assert sparse_solve._superlu_memory(matrix) > filled
+    monkeypatch.setattr(sparse_solve, '_accelerate_memory', lambda _matrix: None)
+    assert sparse_solve._superlu_memory(matrix) > filled
+
+
+def test_the_refusal_names_the_numbers_a_person_reads():
+    """Memory in the binary gigabytes a machine's is sold in."""
+    refused = FactorTooLarge(int(230.4 * 2**30), 32 * 2**30, 'accelerate', 2_540_160)
+    assert str(refused) == (
+        'factoring this model of 2,540,160 degrees of freedom would need about 230 GB of '
+        "memory by Accelerate's symbolic factorization, more than the 24 GB a "
+        'factorization may take on this machine (75% of its 32 GB of physical memory); '
+        'mesh it coarser, or solve it on a machine with more memory')
+    assert sparse_solve._gigabytes(1.5 * 2**30) == '1.5 GB'
+
+
+def test_the_physical_memory_is_the_machines():
+    physical = sparse_solve.physical_memory()
+    assert 2**30 <= physical < 2**50
+    if sys.platform == 'darwin':
+        import subprocess
+
+        told = subprocess.run(['sysctl', '-n', 'hw.memsize'], capture_output=True,
+                              text=True, check=True).stdout
+        assert physical == int(told)
 
 
 def test_the_struct_layouts_are_the_headers():
