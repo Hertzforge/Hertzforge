@@ -31,7 +31,7 @@ msnb_run <case.json> --root <problem-root> --out <run-dir> [--ideal-frf] [--reco
   for the study: a 400 s run at 8192 Hz is about 26 MB a channel.
 - `--no-true-modes`: do not follow the modes' frequencies (`true_modes.tracked` is false). On
   a 6x6 realistic structure, 1 octave a minute over 20 to 2000 Hz, following them took 24 % of
-  the run's processor time (MSNB-A-E7).
+  the run's processor time.
 - `--whole-history`: a stepped sine or a dwell keeps every update (see "Thinning" under
   `history`); a sweep is thinned as always. For a diagnosis, not for the study.
 
@@ -105,7 +105,7 @@ JSON. Unknown keys are refused at every level. Optional keys may be left out or 
 | `"dwell"` | `freq_hz` > 0; `dwell_s` > 0 | A dwell (`DwellPlan`, `DwellFor::Seconds`) |
 
 A down-only sweep is the engine's own: the scheduler starts at the top of the band and sweeps
-down once (checked: MSNB-A-E3). A reversal inside one run is not available.
+down once (`check_msnb_run.py`, check 6). A reversal inside one run is not available.
 
 ### `limits[k]`
 
@@ -298,8 +298,8 @@ other updates are read through their counts (`bin_updates`) and the drive and mo
 each point's span (`bin_drive_vpk_max`, `bin_drive_norm_max`, `true_modes.frequency_hz_min` and
 `_max`), each null where the point stands for one update (its own values are its extremes). With `--whole-history`
 a stepped sine or a dwell keeps every update (`decimation` `"every update"`, no `bin_` fields, as
-before the thinning; for a diagnosis). Measured on the pilot's 27 stepped-sine and 45 dwell cases
-(MSNB-I-E2): the thinned files are 33.5 % of the whole ones' bytes on a stepped sine and 47.1 % on a
+before the thinning; for a diagnosis). Measured on the pilot's 27 stepped-sine and 45 dwell cases:
+the thinned files are 33.5 % of the whole ones' bytes on a stepped sine and 47.1 % on a
 dwell, and every reading of the suite's scorer is the same. A
 sweep (`decimation` `"1/48 octave"`) keeps one point per bin and level: with `lo` the band's
 lower edge, an update's bin is `floor(48 log2(f / lo) + 1e-9)`; its key is (its level rounded to
@@ -352,7 +352,7 @@ The modes followed are those whose small-signal frequency lies in the identifica
 drive the simulator played (read from a second, drive-only simulator fed the same calls), so
 the frequencies are the simulator's own rule applied to the simulator's own state. Checked
 against the open-loop player's envelopes put through `reference_model.level_state`: a relative
-3.5e-9 (MSNB-A-E4).
+3.5e-9.
 
 ### `timing.json` (engine)
 
@@ -372,8 +372,9 @@ gave). `record/structure.json`: the structure the simulator ran, in the research
 outputs, with the structure's step; `mm-x4-case/1`'s modal object for the linear tier). For a
 jointed structure, `obs_play record/structure.json --drive record/drive.f8 --out <f8> --fs
 <fs_hz>` gives the same samples with no noise: equal to `inputs.f8` once rounded to float32
-(MSNB-A-E4). The player does not step a modal structure. Sample 0 of both files is the first
-sample of the engaged run, so update `k`'s readings end at sample round(`time_s` x fs).
+(`check_msnb_run.py`, check 2). The player does not step a modal structure. Sample 0 of both
+files is the first sample of the engaged run, so update `k`'s readings end at sample
+round(`time_s` x fs).
 
 ## Identification
 
@@ -383,7 +384,7 @@ controls and limit channels (the simulator's own exact response of the discrete 
 `analytic_frf_at`; for a jointed structure every mode at zero envelope; at the station's rate, through
 the structure's step and delays), turned by the delay the identification carries,
 `exp(j w (lag_frames - frames_ahead - 256) / fs)` (256 is the service's simulator block,
-`SIM_BLOCK_FRAMES`; found by fitting, MSNB-A-E2, and fitted again on every run as
+`SIM_BLOCK_FRAMES`; found by fitting, and fitted again on every run as
 `ideal_vs_measured.fitted_delay_samples`), converted to g per volt, with every line trusted and
 coherence 1. The engine's guards still use its measured identification; only the law sees the
 ideal one.
