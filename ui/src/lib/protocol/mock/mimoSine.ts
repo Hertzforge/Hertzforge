@@ -185,7 +185,26 @@ const LAWS: MimoSineLawEntry[] = [
 		true,
 		[{ key: 'pairing', label: 'Pairing', help: 'Pair each drive with a control by the reference or by the drive.', kind: 'choice', options: ['reference', 'drive'], default: 'reference' }],
 		[diag('gain', 'Gain', '', 'The ratio step on the last update.')]
-	)
+	),
+	{
+		...entry(
+			'followed_poles',
+			"As matrix, on a modal model whose resonances it refits to the readings as the sweep moves them. Needs the station's delay. Simulator only.",
+			['sweep'],
+			false,
+			[
+				{ key: 'station_delay_s', label: 'Station delay', help: "The delay from the controller's writing a drive sample to its reading the response to it, the structure's own response left out. Zero is not set: the law is refused.", kind: 'number', unit: 's', min: 0, max: 1, step: 0.000001, default: 0 },
+				GAIN_RULE,
+				{ key: 'window', label: 'Fit window', help: 'The updates the poles are refitted over.', kind: 'integer', unit: 'updates', min: 4, max: 400, step: 1, default: 40 }
+			],
+			[
+				diag('gain', 'Gain', '', 'The correction gain on the last update.'),
+				diag('gated', 'Gated', '', "1 while the identification's inverse is used, 0 while the followed model's."),
+				diag('shift_bw', 'Shift', 'bw', 'The largest move of a mode near the tone from where it was identified, in its half-power bandwidths.')
+			]
+		),
+		check: { status: 'built_in', date: null, tool_version: null, cases: [], hardware: false, message: 'Built in, on the simulator only: it does not pass the law check.' }
+	}
 ];
 
 // ---------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//! The law check run on the five built-in laws, natively: each runs every
+//! The law check run on the six built-in laws, natively: each runs every
 //! case its manifest accepts on the simulator's sine structures, and each
 //! verdict is the one recorded here. A built-in law's failures are findings,
 //! named and kept, never hidden by easing a requirement:
@@ -6,6 +6,11 @@
 //! - `matrix`: none scored. Reported, not scored:
 //!   `moved_resonance_hardening`, 2.32 dB.
 //! - `paired`, `steepest_descent`, `secant` and `ratio`: none.
+//! - `followed_poles`: `steep_reference`, 2.59 dB over the reference (asked
+//!   1.0). It corrects on the reference now, where `matrix` corrects on the
+//!   reference as the trackers read it (`matrix` was 2.56 dB over before it
+//!   did). It runs on the simulator only for this. The check tells it each
+//!   case's station delay (`check::station_delay_s`).
 //!
 //! `matrix` passes `steep_reference` at 0.19 dB since it carries the
 //! reference's change between two references the controller told and
@@ -128,4 +133,9 @@ fn mimo_sine_check_steepest_descent_natively() {
 #[test]
 fn mimo_sine_check_secant_natively() {
     expect("secant", &[]);
+}
+
+#[test]
+fn mimo_sine_check_followed_poles_natively() {
+    expect("followed_poles", &[("steep_reference", "never_over")]);
 }

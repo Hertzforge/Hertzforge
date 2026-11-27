@@ -96,7 +96,13 @@ describe('the MIMO Sine store', () => {
 		ms.setup.test.kind = 'dwell';
 		ms.setup.phase_specified = false;
 		const refused = ms.refusedLaws.filter((r) => r.why.startsWith('Needs a phase')).map((r) => r.law.id);
-		const needing = (ms.laws ?? []).filter((l) => (l as { amplitude_only?: boolean }).amplitude_only === false).map((l) => l.id);
+		// The laws that take a dwell but need a phase: a sweep-only law is refused for the test type first.
+		const needing = (ms.laws ?? [])
+			.filter((l) => {
+				const e = l as { amplitude_only?: boolean; test_types?: string[] };
+				return e.amplitude_only === false && (e.test_types ?? []).includes('dwell');
+			})
+			.map((l) => l.id);
 		expect(needing.length).toBeGreaterThan(0);
 		expect(refused).toEqual(needing);
 	});

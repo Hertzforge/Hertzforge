@@ -153,7 +153,8 @@ fn file_entry(e: CatalogEntry, law: &LoadedSineMimoLaw) -> SineMimoEntry {
 }
 
 /// Every MIMO Sine law in `catalog`: the built-ins first (`matrix`, the
-/// default, then `paired`, `steepest_descent`, `secant`, `ratio`), then the
+/// default, then `paired`, `steepest_descent`, `secant`, `ratio`,
+/// `followed_poles`), then the
 /// imported law files.
 pub fn entries(catalog: &LawCatalog) -> Vec<SineMimoEntry> {
     let mut out: Vec<SineMimoEntry> = builtin::ALL.iter().map(builtin_entry).collect();
@@ -202,6 +203,17 @@ pub fn limits(id: &str) -> Option<&'static str> {
              completed 5 of 5 dwells, 5 of 5 stepped sines and 3 of 20 sweeps at one octave a \
              minute; with drive pairing, 1 of 5 dwells and none of 5 stepped sines. It accepts \
              dwells and stepped sines."
+        }
+        "followed_poles" => {
+            "It needs the station's delay set (the delay between a drive and its reading that \
+             is not the structure's); without it the law is refused. In the research \
+             benchmark's screen of this law's research version on simulated nonlinear frames, \
+             no sweep of it or of `matrix` ended within tolerance; against `matrix` it completed \
+             more sweeps on 5 of 6 groups, had a lower 95th-percentile error on 30 of 33 \
+             structures and completed all 18 linear sweeps `matrix` did. On the strongly \
+             nonlinear frames it drove harder and its worst over-test was higher, by 0.4 to \
+             7.2 dB in the paired medians. A mode farther than 12 bandwidths from where it \
+             was identified is not followed. It accepts sweeps only."
         }
         _ => return None,
     })

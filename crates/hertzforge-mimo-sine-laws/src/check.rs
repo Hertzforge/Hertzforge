@@ -217,6 +217,12 @@ pub struct CheckStructure {
     pub drives: usize,
     /// Its full level at every control, g peak.
     pub full_level_g: f64,
+    /// The simulator's equalized step between the drive and the structure,
+    /// whole samples on every path.
+    pub step_delay_samples: usize,
+    /// Its own transport delay on every drive, whole samples; a case's
+    /// transport delay replaces it.
+    pub transport_delay_samples: usize,
 }
 
 /// The standard sine structures, by name, with their sizes.
@@ -231,6 +237,8 @@ pub const CHECK_STRUCTURES: [CheckStructure; 10] = [
         controls: 6,
         drives: 3,
         full_level_g: 1.0,
+        step_delay_samples: 2,
+        transport_delay_samples: 0,
     },
     CheckStructure {
         name: "sine-wide-3x6",
@@ -238,6 +246,8 @@ pub const CHECK_STRUCTURES: [CheckStructure; 10] = [
         controls: 3,
         drives: 6,
         full_level_g: 1.0,
+        step_delay_samples: 2,
+        transport_delay_samples: 0,
     },
     CheckStructure {
         name: "sine-base-article-6x4",
@@ -245,10 +255,15 @@ pub const CHECK_STRUCTURES: [CheckStructure; 10] = [
         controls: 4,
         drives: 4,
         full_level_g: 1.0,
+        step_delay_samples: 2,
+        transport_delay_samples: 0,
     },
     plate("sine-near-singular-4x4"),
     plate("sine-weak-4x4"),
-    plate("sine-loopback-4x4"),
+    CheckStructure {
+        transport_delay_samples: 13,
+        ..plate("sine-loopback-4x4")
+    },
 ];
 
 const fn plate(name: &'static str) -> CheckStructure {
@@ -258,6 +273,8 @@ const fn plate(name: &'static str) -> CheckStructure {
         controls: 4,
         drives: 4,
         full_level_g: 1.0,
+        step_delay_samples: 2,
+        transport_delay_samples: 0,
     }
 }
 
@@ -1213,6 +1230,7 @@ pub fn run_plan_with(
     backend: Box<dyn Backend>,
     law_budget: Option<Duration>,
 ) -> Result<CaseMeasure, CheckRunError> {
+    let (factory, told) = told_the_station(factory, &plan.station);
     let manifest = factory.manifest();
     let id = factory.describe().id;
     let setup = plan_setup(plan, &id, &manifest);
@@ -1236,8 +1254,15 @@ pub fn run_plan_with(
     .map_err(err)?;
     svc.arm().map_err(err)?;
     let t0 = Instant::now();
-    let gate = svc.identify().map_err(err)?.gate_passed;
+    let rep = svc.identify().map_err(err)?;
+    let (gate, ahead) = (rep.gate_passed, rep.frames_ahead);
     let ident_s = t0.elapsed().as_secs_f64();
+    if told && ahead != SIM_FRAMES_AHEAD {
+        return Err(CheckRunError::Setup(format!(
+            "the station held {ahead} frames ahead of the first drive frame, not the \
+             {SIM_FRAMES_AHEAD} the law was told the station's delay with"
+        )));
+    }
     if !gate {
         return Err(CheckRunError::Setup(
             "the identification's coherence gate held the run".into(),
@@ -1937,6 +1962,47 @@ pub fn sim_station(spec: &StationSpec) -> Result<Box<dyn Backend>, String> {
     Ok(Box::new(b))
 }
 
+/// The frames the simulator holds ahead of the first drive frame at every
+/// start (the engine's prefill and its queue, the identification's
+/// `frames_ahead`): a run whose law is told the station's delay is refused if
+/// its station held another count.
+pub const SIM_FRAMES_AHEAD: usize = 8;
+
+/// The delay from a drive frame leaving the engine to its response's sample
+/// on the check's simulated station `spec`, s: the frames held ahead of it,
+/// one block, the simulator's step and the transport delay (the case's for
+/// an edited structure or one with a transport delay, else the structure's
+/// own).
+/// What the check tells a law that takes the station's delay as its
+/// [`STATION_DELAY_KEY`](hertzforge_law_sdk::sine_mimo::builtin::STATION_DELAY_KEY)
+/// parameter; `None` for a structure the check does not know.
+pub fn station_delay_s(spec: &StationSpec) -> Option<f64> {
+    let s = check_structure(spec.structure)?;
+    // As [`sim_structure`] sets it.
+    let transport = if spec.edit != StructureEdit::None || spec.transport_delay_s > 0.0 {
+        (spec.transport_delay_s * spec.fs_hz).round() as usize
+    } else {
+        s.transport_delay_samples
+    };
+    let block = hertzforge_mimo_sine::service::SIM_BLOCK_FRAMES;
+    Some((SIM_FRAMES_AHEAD + block + s.step_delay_samples + transport) as f64 / spec.fs_hz)
+}
+
+/// `factory`'s law told the delay of the check's station `spec`
+/// ([`station_delay_s`]) when it takes it as a parameter, the value the law
+/// was built with replaced (the station is the check's, so the check knows
+/// its delay), and whether it was told; otherwise `factory` itself.
+fn told_the_station(
+    factory: Arc<dyn MimoSineLawFactory>,
+    spec: &StationSpec,
+) -> (Arc<dyn MimoSineLawFactory>, bool) {
+    let key = hertzforge_law_sdk::sine_mimo::builtin::STATION_DELAY_KEY;
+    match station_delay_s(spec).and_then(|s| factory.with_number(key, s)) {
+        Some(f) => (f, true),
+        None => (factory, false),
+    }
+}
+
 /// The simulator's model of `spec`'s structure, edited as it says.
 #[cfg(feature = "simulator")]
 pub fn sim_structure(spec: &StationSpec) -> Result<hertzforge_hal_sim::PlantModel, String> {
@@ -2343,6 +2409,21 @@ mod tests {
             assert_eq!((c.outputs, c.drives), s.dims(), "{}", s.name());
             assert_eq!(c.controls, s.n_controls(), "{}", s.name());
             assert_eq!(c.full_level_g, s.full_level_g(), "{}", s.name());
+            let spec = StationSpec {
+                structure: s.name(),
+                ..MimoSineCheckCase::SlowSweep.station()
+            };
+            let PlantModel::Jointed(p) = sim_structure(&spec).unwrap() else {
+                panic!("{} is not a modal structure", s.name());
+            };
+            assert!(p.output_delays_s.is_empty(), "{}", s.name());
+            assert_eq!(c.step_delay_samples, p.step_delay_samples(), "{}", s.name());
+            assert_eq!(
+                c.transport_delay_samples,
+                p.transport_delay_samples,
+                "{}",
+                s.name()
+            );
         }
         // The edits reach the structure the station is built on.
         let modes = |c: MimoSineCheckCase| -> (Vec<f64>, usize) {
@@ -2382,5 +2463,6 @@ mod tests {
         assert_eq!(types("ratio"), 7);
         assert_eq!(types("steepest_descent"), 6);
         assert_eq!(types("secant"), 6);
+        assert_eq!(types("followed_poles"), 11);
     }
 }

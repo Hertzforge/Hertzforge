@@ -1203,6 +1203,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-sine-followed-poles"
+version = "0.1.27"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-sine-matrix"
 version = "0.1.27"
 dependencies = [
@@ -1444,6 +1451,7 @@ dependencies = [
 name = "hertzforge-mimo-sine-law-math"
 version = "0.1.27"
 dependencies = [
+ "faer",
  "hertzforge-mimo-sine-law-math",
  "hertzforge-sdm",
  "serde_json",

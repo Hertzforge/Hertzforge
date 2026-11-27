@@ -527,6 +527,7 @@ sds-control             tests/mimo_sine_sim_run.rs             mimo_sine_a_stop_
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_the_shutdown_ends_a_driving_run_with_its_ramp   stop-ramp      the shutdown ends a multiple-drive sine run with its ramp
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_a_run_nobody_holds_control_of_ends_in_the_safe_stop  dropped-controller  a multiple-drive sine run nobody holds ends in the safe stop
 sds-control             tests/mimo_sine_law_check.rs           mimo_sine_an_unchecked_law_file_is_refused_on_hardware_and_taken_on_the_simulator  arm-gate  an unchecked multiple-drive sine law file never arms on hardware
+sds-control             tests/mimo_sine_law_check.rs           mimo_sine_a_simulator_only_built_in_is_refused_on_hardware  arm-gate  a multiple-drive sine built-in law that fails its check never arms on hardware
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_a_run_never_arms_on_the_default_one_drive_simulator  arm-gate  a multiple-drive sine run never arms on a station of another size
 sds-control             tests/mimo_sine_record.rs              mimo_sine_a_record_that_cannot_be_written_refuses_the_arm  arm-gate      a multiple-drive sine run whose record cannot be written does not arm
 sds-control             tests/mimo_sine_protocol.rs            mimo_sine_every_refusal_of_a_configuration_is_named       checked-input  every multiple-drive sine configuration error is refused by name

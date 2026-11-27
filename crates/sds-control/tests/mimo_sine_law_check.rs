@@ -111,6 +111,35 @@ async fn mimo_sine_laws_check_runs_every_case_and_records_a_law_file() {
     );
 }
 
+/// A built-in law that fails a scored case of the check is refused on a
+/// hardware station and taken on the simulator; every other built-in is taken
+/// on both.
+#[test]
+fn mimo_sine_a_simulator_only_built_in_is_refused_on_hardware() {
+    let dir = std::env::temp_dir().join(format!("msine-sim-only-{}", std::process::id()));
+    let cat = LawCatalog::open(&dir).unwrap();
+    let resolve = |id: &str, hardware: bool| {
+        mlaws::resolve(
+            &cat,
+            id,
+            &Map::new(),
+            Duration::from_millis(5),
+            Duration::from_secs(120),
+            hardware,
+        )
+        .err()
+        .and_then(|e| e.reason)
+    };
+    assert_eq!(resolve("followed_poles", true), Some("law_not_checked"));
+    assert_eq!(resolve("followed_poles", false), None);
+    for id in hertzforge_mimo_sine::BUILTIN_LAW_IDS {
+        if !mlaws::SIMULATOR_ONLY.contains(&id) {
+            assert_eq!(resolve(id, true), None, "{id} was refused on hardware");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The arming gate reads the catalog's record: an unchecked law file is
 /// refused on a hardware station, taken on the simulator.
 #[test]
@@ -199,7 +228,8 @@ async fn mimo_sine_a_law_file_arms_and_runs_a_dwell() {
     assert_eq!(law["sha256"], id);
 }
 
-/// The five built-in laws, each with the cases the laws crate plans for it.
+/// The built-in laws that pass every scored case, each with the cases the
+/// laws crate plans for it; `followed_poles` is checked on its own below.
 const BUILTINS: [&str; 5] = ["matrix", "paired", "steepest_descent", "secant", "ratio"];
 
 /// One law's check report, one line: its verdict and every case's number.
@@ -255,6 +285,42 @@ async fn mimo_sine_check_every_builtin_passes_through_the_service() {
     }
     eprintln!("{}", lines.join("\n"));
     assert!(all, "{}", lines.join("\n"));
+}
+
+/// `followed_poles` through the service's own method: the check tells it each
+/// case's station delay, and it fails the steep reference alone, as it does
+/// natively; every other case it runs passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_sine_check_followed_poles_through_the_service() {
+    let _turn = ONE_CHECK.lock().await;
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(
+        1800,
+    ))))
+    .await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Check"})).await;
+    let r = long_call(
+        &mut c,
+        "laws.check",
+        json!({"id": "followed_poles", "world": "sine_mimo"}),
+    )
+    .await;
+    let report = &r["report"];
+    eprintln!("{}", summary("followed_poles", report));
+    let cases = report["cases"].as_array().unwrap();
+    let failed: Vec<&str> = cases
+        .iter()
+        .filter(|k| k["passed"] != true)
+        .filter_map(|k| k["case"].as_str())
+        .collect();
+    assert_eq!(
+        failed,
+        ["steep_reference"],
+        "{}",
+        summary("followed_poles", report)
+    );
+    assert_eq!(cases.len(), 11);
+    assert_eq!(report["passed"], false);
 }
 
 /// Every built-in law as a law file passes its check through the service, the

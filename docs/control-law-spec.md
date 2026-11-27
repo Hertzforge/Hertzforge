@@ -806,14 +806,18 @@ law is told the scaled drive. A law that keeps readings or drives of its own sca
 ratio of the level it is told.
 
 **The built-in laws.** `matrix` (the default), `paired` (the contributor's template),
-`steepest_descent`, `secant` and `ratio`. Each runs natively and as a law file
-(`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`, `laws/mimo-sine-steepest-descent`,
-`laws/mimo-sine-secant`, `laws/mimo-sine-ratio`) from the same mathematics and the same
-declaration. On the same inputs over whole recorded runs (sweeps on square, tall and wide
-structures, dwells and stepped sines) the law file gives the native law's drives within rounding
-(1e-12 of the update's largest drive), except `matrix` with its modal model, whose fit is an
-iterative search that the platforms' rounding moves by up to about 1e-7 of the drive. Their
-parameters, the test types they accept and their limits are in `docs/control-laws.md`.
+`steepest_descent`, `secant`, `ratio` and `followed_poles` (the simulator only). Each runs natively
+and as a law file (`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`,
+`laws/mimo-sine-steepest-descent`, `laws/mimo-sine-secant`, `laws/mimo-sine-ratio`,
+`laws/mimo-sine-followed-poles`) from the same mathematics and the same declaration.
+`followed_poles` takes the station's delay as a parameter (`station_delay_s`): the world's setup
+tells a law the lag the controller took out of the identification (`transport-delay-s`), not the
+pure delay the identification still holds, which a modal fit with real mode shapes must take out.
+On the same inputs over whole recorded runs (sweeps on square, tall and wide structures, dwells
+and stepped sines) the law file gives the native law's drives within rounding (1e-12 of the
+update's largest drive), except `matrix` with its modal model and `followed_poles`, whose fits
+are iterative searches that the platforms' rounding moves by up to about 1e-7 of the drive. Their parameters, the test
+types they accept and their limits are in `docs/control-laws.md`.
 
 **The check.** Not built yet. It will run each law through whole runs on the simulator's standard
 structures (slow and fast sweeps, close modes, a near-singular frequency, measurement noise, a

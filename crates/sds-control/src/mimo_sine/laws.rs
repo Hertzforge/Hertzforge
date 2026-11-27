@@ -90,9 +90,16 @@ pub fn facts(cat: &LawCatalog, id: &str) -> Option<LawFacts> {
     })
 }
 
+/// The built-in laws that run on the simulator only: each fails a scored case
+/// of the law check (`followed_poles` over-tests the steep reference), so a
+/// hardware station refuses it as it refuses a law file without a passed
+/// check.
+pub const SIMULATOR_ONLY: [&str; 1] = ["followed_poles"];
+
 /// Resolve the law `id` with `given` parameter values for a run: the one seam
 /// a law choice passes through. On `hardware`, a law file arms only with a
-/// passed check for its exact file; the simulator takes any law.
+/// passed check for its exact file, and a built-in law of [`SIMULATOR_ONLY`]
+/// not at all; the simulator takes any law.
 pub fn resolve(
     cat: &LawCatalog,
     id: &str,
@@ -108,6 +115,17 @@ pub fn resolve(
             format!("No control law \"{id}\" is in the catalog."),
         )
     })?;
+    if hardware && f.builtin && SIMULATOR_ONLY.contains(&id) {
+        return Err(MethodError::named(
+            ErrorCode::Refused,
+            "law_not_checked",
+            format!(
+                "The control law \"{}\" does not pass the law check; it runs on the simulator \
+                 only.",
+                f.name
+            ),
+        ));
+    }
     if hardware && !f.builtin {
         if let Some(entry) = cat.entry(id) {
             if may_arm_on_hardware(&entry).is_err() {
@@ -158,6 +176,17 @@ pub fn list(cat: &LawCatalog) -> Vec<Value> {
                         Value::Null
                     },
                 );
+                if e.entry.builtin && SIMULATOR_ONLY.contains(&e.entry.id.as_str()) {
+                    m.insert(
+                        "check".into(),
+                        json!({
+                            "status": "built_in", "date": null, "tool_version": null,
+                            "cases": [], "hardware": false,
+                            "message": "Built in, on the simulator only: it does not pass the \
+                                        law check.",
+                        }),
+                    );
+                }
             }
             v
         })
@@ -181,7 +210,14 @@ mod tests {
         let ids: Vec<&str> = laws.iter().filter_map(|l| l["id"].as_str()).collect();
         assert_eq!(
             ids,
-            ["matrix", "paired", "steepest_descent", "secant", "ratio"]
+            [
+                "matrix",
+                "paired",
+                "steepest_descent",
+                "secant",
+                "ratio",
+                "followed_poles"
+            ]
         );
         let defaults: Vec<&str> = laws
             .iter()
@@ -189,6 +225,15 @@ mod tests {
             .filter_map(|l| l["id"].as_str())
             .collect();
         assert_eq!(defaults, ["matrix"]);
+        let hardware: Vec<&str> = laws
+            .iter()
+            .filter(|l| l["check"]["hardware"] == true)
+            .filter_map(|l| l["id"].as_str())
+            .collect();
+        assert_eq!(
+            hardware,
+            ["matrix", "paired", "steepest_descent", "secant", "ratio"]
+        );
         let of = |id: &str| laws.iter().find(|l| l["id"] == id).expect("listed").clone();
         assert_eq!(
             of("matrix")["test_types"],

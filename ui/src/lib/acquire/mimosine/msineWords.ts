@@ -199,5 +199,7 @@ export const LAW_LIMITS: Record<string, string> = {
 	paired: 'No model of the test article: each control is paired with one drive. Expect it to fail where the shakers are strongly coupled: it held none of the dwells on the coupled structure of the research testbed. It is the simplest law and the template for writing your own.',
 	steepest_descent: 'Moves the drive down the gradient of the control error through the identification. Shown to hold a dwell; it did not hold a stepped sine reliably or any sweep in the research testbed.',
 	secant: 'Finds a gain per control from two successive drives. Shown to hold a dwell only; it did not hold a stepped sine or a sweep in the research testbed.',
-	ratio: 'Multiplies each drive by a compressed ratio of wanted to measured amplitude on its paired control. Shown to hold a dwell and a stepped sine with the reference pairing; it did not hold a sweep in the research testbed.'
+	ratio: 'Multiplies each drive by a compressed ratio of wanted to measured amplitude on its paired control. Shown to hold a dwell and a stepped sine with the reference pairing; it did not hold a sweep in the research testbed.',
+	followed_poles:
+		"A research law, on the simulator only. It needs the station's delay set; without it the law is refused. Against matrix on simulated nonlinear frames it completed more sweeps and had a lower 95th-percentile error on most structures, but no sweep of either ended within tolerance, and on the strongly nonlinear frames it drove harder and over-tested by more, 0.4 to 7.2 dB. In the law check it over-tests a steep reference by 2.6 dB. A mode farther than 12 bandwidths from where it was identified is not followed."
 };

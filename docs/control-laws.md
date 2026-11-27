@@ -1069,8 +1069,15 @@ profile, an alarm band of 1.5 dB and an abort band of 6 dB, every drive's ceilin
 20 dB under the reference, the guards at their defaults, and noise of 0.01 g rms on every input
 unless the case says otherwise. A law that accepts an amplitude-only reference runs one; any other
 law gets every control in phase. A law runs only the cases of the test types it accepts: `matrix`
-all seventeen, `paired` and `ratio` seven, `steepest_descent` and `secant` six. The bands and dwells
-are short so the check of one law takes seconds of simulated test.
+all seventeen, `followed_poles` eleven, `paired` and `ratio` seven, `steepest_descent` and `secant`
+six. The bands and dwells are short so the check of one law takes seconds of simulated test.
+
+A law that takes the station's delay as a parameter (`station_delay_s`, as `followed_poles` does) is
+told each case's: the check builds its stations, so it knows the delay from the controller's writing
+a drive sample to its reading the response, the structure's own response left out. On the
+simulator that is the 8 frames the station holds ahead of the first drive frame, one block of 256
+frames, the simulator's step of 2 samples and the case's transport delay: 266 samples, 16.2 ms,
+without one. A run whose station holds another count ahead of the first drive frame is refused.
 
 | Case | Type | Structure and run | Asks |
 |---|---|---|---|
@@ -1124,7 +1131,10 @@ with the late ones among them (`misses`, `late`).
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
 as a law file with the same verdicts, through the laws crate and through the service's
-`laws.check`. Every built-in law passes every scored case it runs. On the
+`laws.check`. Every built-in law but `followed_poles` passes every scored case it runs.
+`followed_poles` fails the steep reference, 2.59 dB over it; it corrects on the reference now,
+where `matrix` corrects on the reference as the trackers read it. It runs on the simulator only for
+that: a hardware station refuses it (`law_not_checked`). On the
 limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
 control is over its reference in the second after the release (the worst is 1.1 dB under). On the
 level ladder the worst rung is 0.3 to 0.4 dB for every law. Through the steep reference `matrix`
@@ -1137,10 +1147,12 @@ case) takes about 20 s; the check times the build apart from the run.
 ### The built-in MIMO Sine laws
 
 Each runs natively and as a law file (`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`,
-`laws/mimo-sine-steepest-descent`, `laws/mimo-sine-secant`, `laws/mimo-sine-ratio`), from the same
-mathematics and the same declaration; on the same inputs over whole recorded runs the law file
-gives the native law's drives within rounding (`matrix` with its modal model within about 1e-7,
-because the modal fit is an iterative search that the platforms' rounding moves). Every built-in
+`laws/mimo-sine-steepest-descent`, `laws/mimo-sine-secant`, `laws/mimo-sine-ratio`,
+`laws/mimo-sine-followed-poles`), from the same mathematics and the same declaration; on the same
+inputs over whole recorded runs the law file gives the native law's drives within rounding
+(`matrix` with its modal model within about 1e-7, because the modal fit is an iterative search
+that the platforms' rounding moves, and `followed_poles` within about 1e-7, its fit and its
+refits of the poles moved the same way). Every built-in
 accepts all three shapes. A law that accepts a test type is not promised to hold it on every
 structure: the limits below are what the testbed measured.
 
@@ -1240,6 +1252,64 @@ four-by-four structure, with reference pairing it completed 5 of 5 dwells, 5 of 
 | `regularization` | As for `matrix` (default 0.001) |
 
 Values: `sigma_min`, `sigma_max` (the smallest and largest factor), `error_db`.
+
+**`followed_poles`** (sweep only; references with phases only; the simulator only). It carries the
+drive along a modal model of the structure and corrects it through the model's regularized
+inverse, as `matrix` does, but it follows the model's resonances as the structure moves them. Each
+update, with `Z(f)` the inverse of the model at the tone, `g` the loop-speed rule's gain and `f'`
+the next update's frequency, the drive is the drive in force, carried by the model's change of
+inverse to `f'`, plus the inverse at `f'` applied to the reference's change, plus `g` times the
+correction `Z(f)(R - C)`.
+
+The model is the identification's modes plus its smoothed remainder. The modes are found once,
+when the law is built, by a poly-reference least-squares complex frequency-domain estimate of the
+poles (pLSCF) solved at every order from 12 to 24 over half-octave ranges of the band, the poles
+that stay stable over the orders kept, and a least-squares frequency-domain fit (LSFD) of each
+control's real mode shape and a smooth background to those poles. A fit with real mode shapes
+cannot hold a pure delay, so the station's delay is taken out of the identification first and put
+back on the modes; the law is told it (`station_delay_s`) and is refused without it.
+
+Every second update the frequency and damping of each mode within four bandwidths of the tone are
+refitted to the last 40 readings, against the model run in time with the tracking filter's lag
+(each mode's envelope built up over the interval, the sum through the filter's two stages), held to
+the identification's by a prior (four bandwidths in frequency, a factor `e` in damping). A mode
+moves only where one bandwidth of shift would change the prediction by more than the readings'
+scatter, at most a quarter bandwidth a fit, never more than 12 bandwidths from where it was
+identified, its damping within 0.3 and 5 times the identification's. While the followed model
+predicts the readings worse than the identification's own model by the gate ratio, the inverse is
+the identification's, until it predicts better by as much.
+
+| Key | What it does |
+|---|---|
+| `station_delay_s` | The delay from the controller's writing a drive sample to its reading the response to it, the structure's own response left out: the controller's output queue (the identification's frames ahead plus one block), the output and acquisition chain and any transport delay, s. The fit takes out this less the lag the controller already took out, which may be negative. 0 (the default) is not set: the law is refused |
+| `gain_rule`, `fixed_gain`, `delay_estimate`, `regularization` | As for `matrix` |
+| `smoothing_lines` | Half-width of the smoothing of the model's remainder in identification lines (default 8) |
+| `window` | The updates the poles are refitted over (default 40) |
+| `gate` | Use the identification's inverse while the followed model predicts worse (default on) |
+| `gate_ratio` | How much worse the followed model must predict for the gate to switch, and better to switch back (default 2) |
+
+Values: `gain`, `error_db`, `gated`, `near_modes` (modes within four bandwidths of the tone),
+`shift_bw` (the largest move of a near mode from where it was identified, in its bandwidths),
+`damping_change` (the size of the logarithm of a near mode's damping ratio to the identification's),
+`prediction_ratio` (the followed model's prediction error over the identification's model's, -1
+until the window is full), `modes_kept`.
+
+It is the law of a research study, written from its research version and held to it on the same
+inputs over whole runs within rounding (the drives to 4e-13 of the update's largest, the followed
+frequencies to 4e-14, the dampings to 2e-11), with its modal fit held to the research version's
+fit on synthetic and simulated identifications (frequencies to 5e-13, dampings and residues to
+3e-11). Two differences: the next update's reference is aimed at the notch depth too (the two
+agree when no notch is in), and the study's options that were off by default (a complex scale per
+mode, a family of expected shifts as the fallback) are not here.
+
+Its limits. In the research benchmark's screen of the research version against `matrix` on
+simulated frames, no sweep of either ended within tolerance on the nonlinear frames; it completed
+more sweeps than `matrix` on 5 of 6 groups of them, had the lower 95th-percentile error on 30 of 33
+structures and completed all 18 linear sweeps `matrix` did. On the strongly nonlinear frames it
+drove harder, and its worst over-test was higher than `matrix`'s by 0.4 to 7.2 dB in the paired
+medians. A mode further than 12 bandwidths from where it was identified is not followed. In the law
+check it passes every case it runs but the steep reference (above), so it runs on the simulator
+only; it has not run on a shaker.
 
 ## Importing a law
 
