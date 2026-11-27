@@ -43,6 +43,32 @@ impl Event {
     }
 }
 
+/// The clock the MIMO Mixed check's law calls are timed on in the wire tests. The
+/// check runs on the simulator, whose time stands still while a law computes, so
+/// a call's budget has nothing to judge there; on the wall clock one late reading
+/// from a loaded machine at a tone law's engage ended a case with nothing wrong in it.
+pub struct StoppedClock;
+
+impl hertzforge_random::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+impl hertzforge_sine::law::LawClock for StoppedClock {
+    fn now_s(&self) -> f64 {
+        0.0
+    }
+}
+
+/// The MIMO Mixed check's law calls on the [`StoppedClock`].
+pub fn stopped_check_clocks() -> hertzforge_mimo_mixed_laws::MimoMixedCheckClocks {
+    hertzforge_mimo_mixed_laws::MimoMixedCheckClocks {
+        floor: Arc::new(StoppedClock),
+        tones: Arc::new(StoppedClock),
+    }
+}
+
 /// Test options: a fixed NI scan, a scratch data directory, the simulator `speed`
 /// times real time, and the given orphan timeout and heartbeat.
 pub fn options(
@@ -87,6 +113,7 @@ pub fn options(
         record: Default::default(),
         keep_table: false,
         mimo_sine_law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+        mimo_mixed_check_clocks: Some(stopped_check_clocks()),
     }
 }
 

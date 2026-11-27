@@ -8,7 +8,8 @@ use crate::protocol::{ErrorCode, MethodError};
 use hertzforge_hal::Backend;
 use hertzforge_mimo_mixed::service::{LawRole, MimoMixedLaws};
 use hertzforge_mimo_mixed_laws::{
-    mimo_mixed_check_station, run_mimo_mixed_check_case, MimoMixedCheckCase,
+    mimo_mixed_check_station, run_mimo_mixed_check_case_with, MimoMixedCheckCase,
+    MimoMixedCheckClocks,
 };
 use hertzforge_random_laws::CheckCase;
 use serde_json::{json, Value};
@@ -73,11 +74,14 @@ pub fn progress_json(
 }
 
 /// Run every case with `laws` (the law under check in `role`, the built-in in
-/// the other): one event as each starts and as it ends through `progress`.
+/// the other): one event as each starts and as it ends through `progress`. The
+/// laws' calls are timed on `clocks` when given, on the wall clock when not
+/// ([`crate::server::ServiceOptions::mimo_mixed_check_clocks`]).
 pub fn run_check(
     law_id: &str,
     role: LawRole,
     laws: &MimoMixedLaws,
+    clocks: Option<&MimoMixedCheckClocks>,
     progress: &mut dyn FnMut(Value),
 ) -> Result<Vec<(Value, CheckCase)>, MethodError> {
     let mut out = Vec::with_capacity(MimoMixedCheckCase::ALL.len());
@@ -94,7 +98,7 @@ pub fn run_check(
             )
         };
         let backend = case_backend(case).map_err(unsupported)?;
-        let v = run_mimo_mixed_check_case(case, laws, backend)
+        let v = run_mimo_mixed_check_case_with(case, laws, backend, clocks)
             .map_err(|e| unsupported(e.to_string()))?;
         let j = case_json(case, role, &v);
         progress(progress_json(law_id, i, case, Some(j.clone())));

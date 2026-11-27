@@ -8,6 +8,18 @@
 //! controls, 8 frames a loop, the level from -6 dB to full level, and the
 //! case's parts. A case is judged from the run's own status, read after
 //! every chunk.
+//!
+//! # The laws' time budget
+//!
+//! A check run on a user's machine ([`run_mimo_mixed_check_case`]) times every
+//! law call on the wall clock against the run's own budget, as a run on
+//! hardware does: a tone law late at its engage, or late too often after it,
+//! ends the case on a law fault. A test harness
+//! ([`run_mimo_mixed_check_case_with`]) hands the run [`MimoMixedCheckClocks`]
+//! instead, so its verdicts do not depend on how busy the machine is: the
+//! simulator's time stands still while a law computes, and one late reading
+//! from a loaded machine at a tone's engage ended a case with nothing wrong
+//! in it.
 
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_hal::Backend;
@@ -30,6 +42,7 @@ use hertzforge_random_laws::CheckCase;
 use hertzforge_reference::{Method, Provenance, Reference};
 use hertzforge_sdm::law::Tolerances;
 use hertzforge_sdm::{HermitianStack, C64};
+use std::sync::Arc;
 
 /// One case of the MIMO Mixed check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -524,6 +537,28 @@ pub fn run_mimo_mixed_check_case(
     laws: &MimoMixedLaws,
     backend: Box<dyn Backend>,
 ) -> Result<CheckCase, MimoMixedError> {
+    run_mimo_mixed_check_case_with(case, laws, backend, None)
+}
+
+/// The clocks a check run's law calls are timed on in place of the wall
+/// clock: a test harness's, never a user's check.
+#[derive(Clone)]
+pub struct MimoMixedCheckClocks {
+    /// The floor law's.
+    pub floor: Arc<dyn hertzforge_random::LawClock>,
+    /// The tone laws'.
+    pub tones: Arc<dyn hertzforge_sine::law::LawClock>,
+}
+
+/// As [`run_mimo_mixed_check_case`], the laws' calls timed on `clocks` when
+/// given (the wall clock when `None`). The budget itself is the run's own
+/// either way.
+pub fn run_mimo_mixed_check_case_with(
+    case: MimoMixedCheckCase,
+    laws: &MimoMixedLaws,
+    backend: Box<dyn Backend>,
+    clocks: Option<&MimoMixedCheckClocks>,
+) -> Result<CheckCase, MimoMixedError> {
     let st = mimo_mixed_check_station(case);
     let cfg = mimo_mixed_check_config(case);
     let mut svc = MimoMixedService::new(
@@ -533,6 +568,9 @@ pub fn run_mimo_mixed_check_case(
         hertzforge_module_abi::StationClass::HertzforgeSim,
         laws.clone(),
     )?;
+    if let Some(c) = clocks {
+        svc = svc.with_law_clocks(c.floor.clone(), c.tones.clone());
+    }
     svc.arm()?;
     svc.identify()?;
     if !svc.coherence_gate()? {

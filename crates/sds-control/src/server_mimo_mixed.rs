@@ -909,10 +909,17 @@ impl Service {
         let _slot = CheckSlot::take()?;
         let svc = self.clone();
         let law_id = facts.id.clone();
+        let clocks = self.opts.mimo_mixed_check_clocks.clone();
         let results = tokio::task::spawn_blocking(move || {
-            crate::mimo_mixed::law_check::run_check(&law_id, role, &laws, &mut |event| {
-                svc.emit("laws.check", event);
-            })
+            crate::mimo_mixed::law_check::run_check(
+                &law_id,
+                role,
+                &laws,
+                clocks.as_ref(),
+                &mut |event| {
+                    svc.emit("laws.check", event);
+                },
+            )
         })
         .await
         .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))??;

@@ -291,6 +291,13 @@ pub struct ServiceOptions {
     /// tests pass `hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET` by name, as the
     /// MIMO Sine engine's own tests do.
     pub mimo_sine_law_budget: Option<Duration>,
+    /// The clocks the MIMO Mixed check's law calls are timed on, in place of the
+    /// wall clock (`None`: the wall clock, against the run's own budget, as a user's
+    /// check runs). The check runs on the simulator, whose time stands still while a
+    /// law computes; a loaded machine reading the wall clock late once at a tone
+    /// law's engage, where one late call stops the run, failed a case with nothing
+    /// wrong in it. So the wire tests pass a stopped clock.
+    pub mimo_mixed_check_clocks: Option<hertzforge_mimo_mixed_laws::MimoMixedCheckClocks>,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -353,6 +360,7 @@ impl Default for ServiceOptions {
             record: crate::record::RecordOptions::default(),
             keep_table: false,
             mimo_sine_law_budget: None,
+            mimo_mixed_check_clocks: None,
         }
     }
 }
