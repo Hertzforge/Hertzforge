@@ -336,7 +336,8 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// law and its tone law a MIMO Sine law), so no law file or fixture. The MIMO
 /// Shock law files `mimo-shock-followed` and `mimo-shock-followed-hold` followed
 /// (2026-11-25), the SDK over the law mathematics' `followed` module, as the
-/// other three.
+/// other three, and the MIMO Sine law file `mimo-sine-followed-poles`
+/// (2026-11-26), the SDK over the MIMO Sine law math's `followed` module.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -355,6 +356,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-mimo-shock-paired",
     "hertzforge-law-mimo-shock-shape",
     "hertzforge-law-mimo-shape",
+    "hertzforge-law-mimo-sine-followed-poles",
     "hertzforge-law-mimo-sine-matrix",
     "hertzforge-law-mimo-sine-paired",
     "hertzforge-law-mimo-sine-ratio",

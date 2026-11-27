@@ -19,6 +19,7 @@ use hertzforge_sdm::law::MimoShape;
 use hertzforge_sdm::{MatrixStack, C64};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 pub use hertzforge_sine::law::{LawDescriptor, LawValues, ParamSetting};
 
@@ -27,7 +28,14 @@ pub use hertzforge_sine::law::{LawDescriptor, LawValues, ParamSetting};
 pub const DEFAULT_LAW_ID: &str = "matrix";
 
 /// The catalog ids of the built-in laws, the default first.
-pub const BUILTIN_LAW_IDS: [&str; 5] = ["matrix", "paired", "steepest_descent", "secant", "ratio"];
+pub const BUILTIN_LAW_IDS: [&str; 6] = [
+    "matrix",
+    "paired",
+    "steepest_descent",
+    "secant",
+    "ratio",
+    "followed_poles",
+];
 
 /// The identification on its own frequency grid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -466,4 +474,14 @@ pub trait MimoSineLawFactory: Send + Sync {
     /// The shapes, test types and references it accepts, and the values it
     /// may report.
     fn manifest(&self) -> LawManifest;
+
+    /// The same law with its number parameter `key` set to `value`, every
+    /// other value kept: for a caller that knows a fact of the station a run
+    /// is on that the law takes as a parameter (the law check, on its own
+    /// simulated stations). `None` when the law declares no such number
+    /// parameter, refuses the value, or cannot be rebuilt.
+    fn with_number(&self, key: &str, value: f64) -> Option<Arc<dyn MimoSineLawFactory>> {
+        let _ = (key, value);
+        None
+    }
 }

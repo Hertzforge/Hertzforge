@@ -396,4 +396,27 @@ impl MimoSineLawFactory for WasmSineMimoLawFactory {
             values: m.law.diagnostics.iter().map(|d| d.key.clone()).collect(),
         }
     }
+
+    fn with_number(&self, key: &str, value: f64) -> Option<std::sync::Arc<dyn MimoSineLawFactory>> {
+        let spec = self
+            .law
+            .manifest()
+            .law
+            .params
+            .iter()
+            .find(|p| p.key == key)?;
+        let hertzforge_law_host::ParamKind::Number(n) = &spec.kind else {
+            return None;
+        };
+        if !(n.min..=n.max).contains(&value) {
+            return None;
+        }
+        let mut f = self.clone();
+        f.params.retain(|p| p.key != key);
+        f.params.push(Param {
+            key: key.into(),
+            value: ParamValue::Number(value),
+        });
+        Some(std::sync::Arc::new(f))
+    }
 }

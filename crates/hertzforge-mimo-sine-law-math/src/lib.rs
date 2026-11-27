@@ -18,8 +18,13 @@
 //! - [`steepest`], [`secant`], [`ratio`]: the three other published laws,
 //!   as the research testbed runs them: steepest descent, the secant law with
 //!   a complex gain, and the amplitude-only ratio law per control.
+//! - [`followed`]: the followed-poles law: the matrix law's carry on a modal
+//!   model whose poles are followed through the sweep, refit on the readings,
+//!   the model built by [`modal_fit`] with the station's delay taken out.
 //! - [`speed`]: the loop-speed rule, the gain per update.
 //! - [`modal`]: the model the carry reads (modes exact, remainder smoothed).
+//! - [`modal_fit`]: the modal fit of an identification with a known delay
+//!   (poly-reference least-squares poles, least-squares shapes).
 //! - [`setup`]: the setup, interpolation at a frequency, the identification's
 //!   group delay.
 //! - [`readings`]: the opposition ratio, the largest share one shaker carries,
@@ -41,10 +46,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod followed;
 pub mod law;
 pub mod linalg;
 pub mod matrix;
 pub mod modal;
+pub mod modal_fit;
 pub mod paired;
 pub mod ratio;
 pub mod readings;

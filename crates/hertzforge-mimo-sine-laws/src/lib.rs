@@ -63,7 +63,14 @@ mod tests {
     #[test]
     fn mimo_sine_the_built_in_laws_are_named_and_the_world_is_sine_mimo() {
         assert_eq!(WORLD.as_str(), "sine_mimo");
-        for id in ["matrix", "paired", "steepest_descent", "secant", "ratio"] {
+        for id in [
+            "matrix",
+            "paired",
+            "steepest_descent",
+            "secant",
+            "ratio",
+            "followed_poles",
+        ] {
             assert!(is_builtin(id), "{id}");
         }
         assert!(!is_builtin("inverse"));

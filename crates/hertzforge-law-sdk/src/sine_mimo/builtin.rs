@@ -1,5 +1,5 @@
 //! The declarations of the built-in MIMO Sine laws (`matrix`, `paired`,
-//! `steepest_descent`, `secant`, `ratio`): their names, parameters, values,
+//! `steepest_descent`, `secant`, `ratio`, `followed_poles`): their names, parameters, values,
 //! shapes, test types and whether they take an amplitude-only reference, as
 //! plain data, and the one constructor ([`config`], [`Config::build`]) that
 //! the law files and the controller's native laws both call, so a parameter
@@ -8,6 +8,7 @@
 
 use super::{math, ManifestBuilder, Outputs, Setup, Shape, SineMimoManifest, TestType, ALL_SHAPES};
 use crate::Params;
+use math::followed::{FollowedLaw, FollowedParams, FOLLOWED_TEST_TYPES, FOLLOWED_VALUES};
 use math::law::SineLaw;
 use math::matrix::{FreePhase, MatrixLaw, MatrixParams, MATRIX_TEST_TYPES, MATRIX_VALUES};
 use math::modal::ModelChoice;
@@ -437,8 +438,136 @@ pub const RATIO: LawDecl = LawDecl {
     ],
 };
 
+/// The key of `followed_poles`' station delay.
+pub const STATION_DELAY_KEY: &str = "station_delay_s";
+
+/// `followed_poles`: the carried inverse on a modal model whose poles follow
+/// the structure through a sweep, refitted to the readings.
+pub const FOLLOWED_POLES: LawDecl = LawDecl {
+    id: "followed_poles",
+    name: "followed_poles",
+    version: "0.1.0",
+    summary: "Carries the drive along a modal model of the structure through a sweep and \
+              corrects it through the model's regularized inverse, as `matrix` does, but \
+              follows the model's resonances: every second update the frequency and damping of \
+              the modes near the tone are refitted to the last 40 readings, against the model \
+              run in time with the tracking filter's lag, held to the identification's by a \
+              prior and moved only where the readings show it. When the followed model predicts \
+              the readings worse than the identification's own, the identification's inverse is \
+              used until it predicts better. The model is fitted with the station's delay taken \
+              out, so the law needs it set. Sweeps only.",
+    shapes: &ALL_SHAPES,
+    test_types: FOLLOWED_TEST_TYPES,
+    amplitude_only: false,
+    params: &[
+        ParamDecl {
+            key: STATION_DELAY_KEY,
+            label: "Station delay",
+            help: "The delay from the controller's writing a drive sample to its reading the \
+                   response to it, the structure's own response left out: the controller's \
+                   output queue (the identification's frames ahead plus one block), the output \
+                   and acquisition chain and any transport delay. The modal fit takes it out of \
+                   the identification, less the lag the controller already took out, and puts \
+                   it back on the modes. Zero is not set: the law is refused.",
+            knob: number(0.0, 1.0, 1.0e-6, 0.0, "s"),
+        },
+        GAIN_RULE,
+        FIXED_GAIN,
+        DELAY_ESTIMATE,
+        REGULARIZATION,
+        ParamDecl {
+            key: "smoothing_lines",
+            label: "Smoothing",
+            help: "Half-width of the smoothing of the model's remainder, in identification \
+                   lines.",
+            knob: Knob::Integer {
+                unit: "lines",
+                min: 1,
+                max: 64,
+                default: 8,
+            },
+        },
+        ParamDecl {
+            key: "window",
+            label: "Fit window",
+            help: "The updates the poles are refitted over.",
+            knob: Knob::Integer {
+                unit: "updates",
+                min: 4,
+                max: 400,
+                default: 40,
+            },
+        },
+        ParamDecl {
+            key: "gate",
+            label: "Prediction gate",
+            help: "Use the identification's inverse while the followed model predicts the \
+                   readings worse than the identification's own model.",
+            knob: Knob::Toggle(true),
+        },
+        ParamDecl {
+            key: "gate_ratio",
+            label: "Gate ratio",
+            help: "How much worse the followed model's prediction must be for the gate to \
+                   switch to the identification's inverse; it switches back when the followed \
+                   model is better by as much.",
+            knob: number(1.05, 100.0, 0.05, 2.0, ""),
+        },
+    ],
+    values: &[
+        GAIN,
+        ERROR_DB,
+        ValueDecl {
+            key: "gated",
+            label: "Gated",
+            unit: "",
+            help: "1 while the identification's inverse is used, 0 while the followed model's.",
+        },
+        ValueDecl {
+            key: "near_modes",
+            label: "Modes near",
+            unit: "",
+            help: "Modes within four bandwidths of the tone.",
+        },
+        ValueDecl {
+            key: "shift_bw",
+            label: "Shift",
+            unit: "bw",
+            help: "The largest move of a mode near the tone from where it was identified, in its \
+                   half-power bandwidths.",
+        },
+        ValueDecl {
+            key: "damping_change",
+            label: "Damping change",
+            unit: "",
+            help: "The largest change of a near mode's damping, as the size of the logarithm of \
+                   its ratio to the identification's.",
+        },
+        ValueDecl {
+            key: "prediction_ratio",
+            label: "Prediction ratio",
+            unit: "",
+            help: "The followed model's prediction error over the window against the \
+                   identification's model's; -1 until the window is full.",
+        },
+        ValueDecl {
+            key: "modes_kept",
+            label: "Modes in the model",
+            unit: "",
+            help: "Resonances the modal fit kept.",
+        },
+    ],
+};
+
 /// Every built-in law, the default (`matrix`) first.
-pub const ALL: [LawDecl; 5] = [MATRIX, PAIRED, STEEPEST_DESCENT, SECANT, RATIO];
+pub const ALL: [LawDecl; 6] = [
+    MATRIX,
+    PAIRED,
+    STEEPEST_DESCENT,
+    SECANT,
+    RATIO,
+    FOLLOWED_POLES,
+];
 
 /// The declaration with catalog id `id`.
 pub fn decl(id: &str) -> Option<&'static LawDecl> {
@@ -477,6 +606,8 @@ pub enum Config {
     Secant(SecantParams),
     /// `ratio`.
     Ratio(RatioParams),
+    /// `followed_poles`.
+    Followed(FollowedParams),
 }
 
 fn gain_rule(p: &Params) -> Result<GainRule, String> {
@@ -547,6 +678,22 @@ pub fn config(id: &str, p: &Params) -> Result<Config, String> {
             eps: p.number("regularization")?,
             ..RatioParams::default()
         }),
+        "followed_poles" => {
+            let lines = usize::try_from(p.integer("smoothing_lines")?)
+                .map_err(|_| "the smoothing must be at least one line".to_string())?;
+            let window = usize::try_from(p.integer("window")?)
+                .map_err(|_| "the fit window must be a count of updates".to_string())?;
+            Config::Followed(FollowedParams {
+                station_delay_s: p.number(STATION_DELAY_KEY)?,
+                gain_rule: gain_rule(p)?,
+                eps: p.number("regularization")?,
+                smoothing_lines: lines,
+                window,
+                gate: p.toggle("gate")?,
+                gate_ratio: p.number("gate_ratio")?,
+                ..FollowedParams::default()
+            })
+        }
         other => return Err(format!("no built-in MIMO Sine law has the id `{other}`")),
     })
 }
@@ -560,10 +707,12 @@ impl Config {
             Config::Steepest(_) => &STEEPEST_DESCENT,
             Config::Secant(_) => &SECANT,
             Config::Ratio(_) => &RATIO,
+            Config::Followed(_) => &FOLLOWED_POLES,
         }
     }
 
-    /// Build the law for a run. `matrix` fits its model here.
+    /// Build the law for a run. `matrix` and `followed_poles` fit their
+    /// models here.
     pub fn build(&self, setup: &math::Setup) -> Result<BuiltLaw, String> {
         Ok(match *self {
             Config::Matrix(p) => BuiltLaw::Matrix(Box::new(MatrixLaw::new(setup, p)?)),
@@ -575,6 +724,7 @@ impl Config {
             Config::Steepest(p) => BuiltLaw::Steepest(Box::new(SteepestLaw::new(setup, p)?)),
             Config::Secant(p) => BuiltLaw::Secant(Box::new(SecantLaw::new(setup, p)?)),
             Config::Ratio(p) => BuiltLaw::Ratio(Box::new(RatioLaw::new(setup, p)?)),
+            Config::Followed(p) => BuiltLaw::Followed(Box::new(FollowedLaw::new(setup, p)?)),
         })
     }
 }
@@ -592,6 +742,8 @@ pub enum BuiltLaw {
     Secant(Box<SecantLaw>),
     /// `ratio`.
     Ratio(Box<RatioLaw>),
+    /// `followed_poles`.
+    Followed(Box<FollowedLaw>),
 }
 
 impl BuiltLaw {
@@ -602,6 +754,7 @@ impl BuiltLaw {
             BuiltLaw::Steepest(l) => l.as_mut(),
             BuiltLaw::Secant(l) => l.as_mut(),
             BuiltLaw::Ratio(l) => l.as_mut(),
+            BuiltLaw::Followed(l) => l.as_mut(),
         }
     }
 }
@@ -622,6 +775,7 @@ impl SineLaw for BuiltLaw {
             BuiltLaw::Steepest(_) => &STEEPEST_VALUES,
             BuiltLaw::Secant(_) => &SECANT_VALUES,
             BuiltLaw::Ratio(_) => &RATIO_VALUES,
+            BuiltLaw::Followed(_) => &FOLLOWED_VALUES,
         }
     }
 }
@@ -671,12 +825,13 @@ mod tests {
 
     #[test]
     fn mimo_sine_each_declaration_names_the_maths_values_and_test_types() {
-        let maths: [(&str, &[&str], math::TestTypes); 5] = [
+        let maths: [(&str, &[&str], math::TestTypes); 6] = [
             ("matrix", &MATRIX_VALUES, MATRIX_TEST_TYPES),
             ("paired", &PAIRED_VALUES, PAIRED_TEST_TYPES),
             ("steepest_descent", &STEEPEST_VALUES, STEEPEST_TEST_TYPES),
             ("secant", &SECANT_VALUES, SECANT_TEST_TYPES),
             ("ratio", &RATIO_VALUES, RATIO_TEST_TYPES),
+            ("followed_poles", &FOLLOWED_VALUES, FOLLOWED_TEST_TYPES),
         ];
         for (id, values, types) in maths {
             let d = decl(id).unwrap();
@@ -716,12 +871,16 @@ mod tests {
             Config::Paired(r) => assert_eq!(r, GainRule::default()),
             c => panic!("{c:?}"),
         }
+        match config("followed_poles", &defaults(&FOLLOWED_POLES)).unwrap() {
+            Config::Followed(p) => assert_eq!(p, FollowedParams::default()),
+            c => panic!("{c:?}"),
+        }
     }
 
     #[test]
     fn mimo_sine_the_structure_delay_choice_reaches_the_gain_rule() {
         use crate::ParamValue;
-        for d in [&MATRIX, &PAIRED, &STEEPEST_DESCENT] {
+        for d in [&MATRIX, &PAIRED, &STEEPEST_DESCENT, &FOLLOWED_POLES] {
             let mut p = defaults(d);
             for x in p.0.iter_mut() {
                 if x.key == "delay_estimate" {
@@ -732,6 +891,7 @@ mod tests {
                 Config::Matrix(m) => m.gain_rule,
                 Config::Paired(r) => r,
                 Config::Steepest(s) => s.gain_rule,
+                Config::Followed(f) => f.gain_rule,
                 c => panic!("{c:?}"),
             };
             assert_eq!(rule.delay_estimate(), DelayEstimate::Principal, "{}", d.id);

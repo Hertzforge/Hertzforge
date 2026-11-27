@@ -9,8 +9,9 @@ description = "The mathematics of the multiple-drive sine control laws"
 # The arithmetic of the MIMO Sine built-in laws (`matrix`, `paired`), the
 # loop-speed rule, the model the carry runs through, the regularized inverse by
 # shape and the readings for several shakers, with nothing around it: plain
-# records in, plain records out. It depends only on `hertzforge-sdm`, which
-# builds for `wasm32-wasip2`, and must keep building there:
+# records in, plain records out. It depends only on `hertzforge-sdm` and the
+# `faer` that crate already uses, both of which build for `wasm32-wasip2`, and
+# must keep building there:
 # `cargo build -p hertzforge-mimo-sine-law-math --target wasm32-wasip2`.
 
 [features]
@@ -20,6 +21,10 @@ reference-structure = []
 
 [dependencies]
 hertzforge-sdm = { path = "../hertzforge-sdm" }
+# The general real eigendecomposition with eigenvectors, least squares and
+# dense solves of `followed_poles`' modal fit. MIT; the same version and
+# features as `hertzforge-sdm`'s (no rayon: law files are single-threaded).
+faer = { version = "0.24", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 hertzforge-mimo-sine-law-math = { path = ".", features = ["reference-structure"] }

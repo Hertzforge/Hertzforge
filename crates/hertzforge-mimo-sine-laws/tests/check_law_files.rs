@@ -125,3 +125,43 @@ fn mimo_sine_check_steepest_descent_as_a_law_file() {
 fn mimo_sine_check_secant_as_a_law_file() {
     same_as_native("secant");
 }
+
+#[test]
+fn mimo_sine_check_followed_poles_as_a_law_file() {
+    same_as_native("followed_poles");
+}
+
+/// The check tells a law its station's delay through `with_number`: each
+/// form of `followed_poles` takes it inside the parameter's range, with
+/// every other value kept, and refuses it outside; a key the law does not
+/// declare, or a law without the parameter, is not told.
+#[test]
+fn mimo_sine_followed_poles_is_told_its_station_delay_only_in_range() {
+    use hertzforge_law_sdk::sine_mimo::builtin::STATION_DELAY_KEY as KEY;
+    use hertzforge_mimo_sine::law::ParamSetting;
+    let setting = |f: &dyn MimoSineLawFactory, key: &str| {
+        f.describe()
+            .params
+            .into_iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+    };
+    for f in [
+        builtin("followed_poles").unwrap(),
+        file_law("followed_poles"),
+    ] {
+        assert_eq!(setting(&*f, KEY), Some(ParamSetting::Number(0.0)));
+        let told = f.with_number(KEY, 0.0162).expect("in range");
+        assert_eq!(setting(&*told, KEY), Some(ParamSetting::Number(0.0162)));
+        assert_eq!(setting(&*told, "window"), setting(&*f, "window"));
+        assert_eq!(setting(&*told, "gate"), setting(&*f, "gate"));
+        for v in [-1e-3, 1.5] {
+            assert!(f.with_number(KEY, v).is_none(), "{v} s");
+        }
+        assert!(f.with_number("no_such_key", 0.0162).is_none());
+    }
+    for id in ["matrix", "paired"] {
+        assert!(builtin(id).unwrap().with_number(KEY, 0.0162).is_none());
+        assert!(file_law(id).with_number(KEY, 0.0162).is_none());
+    }
+}

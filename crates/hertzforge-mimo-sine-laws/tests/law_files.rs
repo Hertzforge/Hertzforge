@@ -291,7 +291,14 @@ fn mimo_sine_an_imported_law_file_lists_with_its_test_types() {
     let ids: Vec<&str> = before.iter().map(|e| e.entry.id.as_str()).collect();
     assert_eq!(
         ids,
-        ["matrix", "paired", "steepest_descent", "secant", "ratio"]
+        [
+            "matrix",
+            "paired",
+            "steepest_descent",
+            "secant",
+            "ratio",
+            "followed_poles"
+        ]
     );
     assert_eq!(before[0].test_type_names(), ["sweep", "dwell", "stepped"]);
     assert_eq!(before[3].test_type_names(), ["dwell"]);
@@ -300,7 +307,7 @@ fn mimo_sine_an_imported_law_file_lists_with_its_test_types() {
         .import(&law_file("law_fixture_sine_mimo_template"))
         .unwrap();
     let after = entries(&catalog);
-    assert_eq!(after.len(), 6);
+    assert_eq!(after.len(), 7);
     let file = after.last().unwrap();
     assert_eq!(file.entry.id, imported.id);
     assert!(!file.entry.builtin);
@@ -421,4 +428,47 @@ fn mimo_sine_parity_paired_steepest_secant_and_ratio() {
         DWELL,
         TestType::Dwell,
     );
+}
+
+/// `followed_poles` on sweeps over a square, a tall and a wide structure, and
+/// with its gate off and a short window, so the poles are refitted many times
+/// over the run. The structure's identification holds no delay, so the law is
+/// told a station delay of one step of its parameter. Its modal fit and its
+/// refits of the poles move with the platforms' rounding as `matrix`'s fit
+/// does: measured on a Mac, the drives to 5.1e-8 of the update's largest and
+/// the values to 3.2e-4 (both the window of 10). The drives are held to
+/// 1e-6, and the values to `matrix`'s 1e-3.
+#[test]
+fn mimo_sine_parity_followed_poles_sweeps_square_tall_and_wide() {
+    let d = &builtin::FOLLOWED_POLES;
+    let told = (builtin::STATION_DELAY_KEY, ParamValue::Number(1e-6));
+    let mut n = 0;
+    for (c, m) in [(3, 3), (3, 2), (2, 3)] {
+        let st = structure(c, m);
+        let s = setup_of(&st);
+        n += parity_within(
+            d,
+            std::slice::from_ref(&told),
+            &st,
+            &s,
+            SWEEP,
+            TestType::Sweep,
+            1e-6,
+        );
+    }
+    let st = structure(3, 3);
+    n += parity_within(
+        d,
+        &[
+            told,
+            ("gate", ParamValue::Toggle(false)),
+            ("window", ParamValue::Integer(10)),
+        ],
+        &st,
+        &setup_of(&st),
+        SWEEP,
+        TestType::Sweep,
+        1e-6,
+    );
+    assert!(n > 3000, "{n} updates");
 }

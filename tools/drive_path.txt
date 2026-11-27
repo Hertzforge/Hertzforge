@@ -81,6 +81,7 @@ laws/mimo-shock-followed-hold       a law file: computes a drive
 laws/mimo-shock-inverse             a law file: computes a drive
 laws/mimo-shock-paired              a law file: computes a drive
 laws/mimo-shock-shape               a law file: computes a drive
+laws/mimo-sine-followed-poles       a law file: computes a drive
 laws/mimo-sine-matrix               a law file: computes a drive
 laws/mimo-sine-paired               a law file: computes a drive
 laws/mimo-sine-ratio                a law file: computes a drive

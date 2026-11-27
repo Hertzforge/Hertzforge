@@ -212,6 +212,22 @@ impl MimoSineLawFactory for BuiltinFactory {
     fn manifest(&self) -> LawManifest {
         decl_manifest(self.decl)
     }
+
+    fn with_number(&self, key: &str, value: f64) -> Option<Arc<dyn MimoSineLawFactory>> {
+        let d = self.decl.params.iter().find(|p| p.key == key)?;
+        let decl::Knob::Number { min, max, .. } = d.knob else {
+            return None;
+        };
+        if !(min..=max).contains(&value) {
+            return None;
+        }
+        let mut params = self.params.clone();
+        let p = params.0.iter_mut().find(|p| p.key == key)?;
+        p.value = hertzforge_law_sdk::ParamValue::Number(value);
+        BuiltinFactory::new(self.decl, params)
+            .ok()
+            .map(|f| Arc::new(f) as Arc<dyn MimoSineLawFactory>)
+    }
 }
 
 /// A built-in law built for one run, as the core's [`MimoSineLaw`].
