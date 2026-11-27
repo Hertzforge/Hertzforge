@@ -1249,7 +1249,7 @@ OPERATIONS = (
         params=(GEOMETRY, SOLIDS, WITHIN), outputs=('reading', 'shape3d'),
         run=reorder_solids, edits=True),
     Operation(
-        id='project.combine_solids', title='Combine Solids', workspace='geometry',
+        id='project.combine_solids', title='Boolean', workspace='geometry',
         summary='Make two or more parts one: their union, the rest subtracted from the '
                 'first, or their intersection.',
         params=(GEOMETRY, OPERATION, SOLIDS, NAME), outputs=('reading', 'shape3d'),
