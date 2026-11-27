@@ -2687,8 +2687,13 @@ class Model:
         at a time), refined by `polish_modes`; a model the block method
         does not converge is solved by ARPACK (`scipy.sparse.linalg.eigsh`)
         instead, with a warning. Its one factorization is Accelerate's
-        supernodal Cholesky on a Mac and SuperLU's symmetric LU elsewhere
-        (`sparse_solve.factor_symmetric`). It finds the lowest `num_modes`, or every mode up to
+        supernodal Cholesky on a Mac, PARDISO's on x86-64 Windows and
+        Linux and SuperLU's symmetric LU elsewhere
+        (`sparse_solve.factor_symmetric`); a model whose factor would take
+        more than `sparse_solve.MEMORY_SHARE` of the machine's physical
+        memory is refused with `sparse_solve.FactorTooLarge`, a
+        ValueError naming the memory it would need, before the
+        factorization starts. It finds the lowest `num_modes`, or every mode up to
         `maximum_frequency`, and one of the two must be given. Its memory
         grows with the number of nodes instead of its square: a plate model of
         1,500 nodes that needs about 13 GB dense needs tens of megabytes
@@ -3070,12 +3075,15 @@ class Model:
             # for 400 modes doubling from 24, 8.2 s predicting, 4.7 s
             # asked outright). The check below still holds a miscount
             # to the answer, at the cost of another run.
-            from .sparse_solve import count_below
+            # A count whose own factorization would not fit beside the
+            # one held is skipped the same way: on a Mac it is SuperLU's,
+            # four to five times the size of Accelerate's
+            from .sparse_solve import FactorTooLarge, count_below
             if ticker is not None:
                 ticker.busy()
             try:
-                wanted = count_below(reduced_k, reduced_m, limit) + 2
-            except RuntimeError:
+                wanted = count_below(reduced_k, reduced_m, limit, held=factor.memory) + 2
+            except (RuntimeError, FactorTooLarge):
                 pass
         while True:
             wanted = max(1, min(wanted, size - 1))

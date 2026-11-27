@@ -12,6 +12,11 @@ in Intel's oneMKL, through pypardiso (Cholesky, or LDLT with
 Bunch-Kaufman pivoting). Everywhere else, and wherever those refuse a
 matrix, it is SuperLU's LU through scipy, told the matrix is symmetric
 so it orders and pivots for that.
+
+A factor that would not fit in the machine's memory is refused before
+the factorization starts (`factor_memory`, `FactorTooLarge`): the
+factorization is one long call into the library, which nothing can
+interrupt, and a factor larger than memory runs it in swap for hours.
 """
 
 from __future__ import annotations
@@ -58,7 +63,7 @@ def probe_backward_error(matrix: Any, solve: Any) -> float:
     return float(np.linalg.norm(matrix @ answer - probe) / np.linalg.norm(probe))
 
 
-def count_below(stiffness: Any, mass: Any, shift: float) -> int:
+def count_below(stiffness: Any, mass: Any, shift: float, held: int = 0) -> int:
     """How many eigenvalues of K phi = lambda M phi lie below `shift`,
     read off the signs of one factorization of K - shift M.
 
@@ -80,6 +85,9 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
         K and M, symmetric, M positive definite.
     shift : float
         The eigenvalue to count below, (rad/s)².
+    held : int, default 0
+        Bytes already held, by the factor the modal solve keeps: the
+        count's own factorization must fit beside them.
 
     Returns
     -------
@@ -92,6 +100,9 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
     RuntimeError
         If the factorization fails, had to pivot off the diagonal or
         perturbed a pivot, so its signs are not the inertia.
+    FactorTooLarge
+        Before anything is factored, when the factorization and `held`
+        would take more than `MEMORY_SHARE` of the machine's memory.
 
     References
     ----------
@@ -108,7 +119,8 @@ def count_below(stiffness: Any, mass: Any, shift: float) -> int:
     # 1.5 s where SuperLU took 29 on a 135,000-DOF frame, 5.2 s to 41 on
     # a 106,000-DOF block of bricks, the same counts (2026-11-02)
     if not _superlu_only() and _pypardiso() is not None:
-        return _pardiso_negatives(shifted)
+        return _pardiso_negatives(shifted, held)
+    _refuse_beyond_memory(held + _superlu_memory(shifted), 'superlu', shifted.shape[0])
     factor = splu(shifted,
                   permc_spec='MMD_AT_PLUS_A',
                   options={'SymmetricMode': True, 'DiagPivotThresh': 0.0})
@@ -121,6 +133,8 @@ class SuperLUFactor:
     """SuperLU's factorization of a symmetric matrix, through scipy."""
 
     backend = 'superlu'
+    #: the bytes `factor_memory` estimated, set by `factor_symmetric`
+    memory = 0
 
     def __init__(self, matrix: Any) -> None:
         from scipy.sparse.linalg import splu
@@ -234,8 +248,14 @@ def _library() -> dict[str, Any] | None:
         factor = lib._SparseFactorSymmetric_Double
         solve = lib._SparseSolveOpaque_Double
         destroy = lib._SparseDestroyOpaqueNumeric_Double
+        symbolic = lib._SparseSymbolicFactorSymmetric
+        destroy_symbolic = lib._SparseDestroyOpaqueSymbolic
     except (OSError, AttributeError):
         return None
+    symbolic.restype = _Symbolic
+    symbolic.argtypes = [C.c_uint8, C.POINTER(_MatrixStructure), C.POINTER(_SymbolicOptions)]
+    destroy_symbolic.restype = None
+    destroy_symbolic.argtypes = [C.POINTER(_Symbolic)]
     factor.restype = _Factorization
     factor.argtypes = [C.c_uint8, C.POINTER(_SparseMatrix),
                        C.POINTER(_SymbolicOptions), C.POINTER(_NumericOptions)]
@@ -252,11 +272,26 @@ def _library() -> dict[str, Any] | None:
     report = _REPORT(lambda text: messages.append(text.decode(errors='replace')))
     _accelerate.update(
         ok=True, factor=factor, solve=solve, destroy=destroy, messages=messages,
+        symbolic_factor=symbolic, destroy_symbolic=destroy_symbolic,
         # Accelerate's defaults, with its errors kept rather than printed
         symbolic=_SymbolicOptions(0, 0, None, None, _MALLOC(('malloc', libc)),
                                   _FREE(('free', libc)), report),
         numeric=_NumericOptions(0, 0, None, 0.1, 0.0), report=report)
     return _accelerate
+
+
+def _lower_structure(matrix: Any) -> tuple[_MatrixStructure, np.ndarray, np.ndarray, Any]:
+    """Accelerate's structure of the lower triangle of a symmetric
+    matrix, with the column starts and row indices it points into (to be
+    kept while the structure is used) and the triangle itself."""
+    lower = sp.tril(matrix, format='csc')
+    lower.sort_indices()
+    starts = np.ascontiguousarray(lower.indptr, dtype=np.int64)
+    rows = np.ascontiguousarray(lower.indices, dtype=np.int32)
+    n = lower.shape[0]
+    structure = _MatrixStructure(n, n, starts.ctypes.data_as(C.POINTER(C.c_long)),
+                                 rows.ctypes.data_as(C.POINTER(C.c_int)), _LOWER_SYMMETRIC, 1)
+    return structure, starts, rows, lower
 
 
 class AccelerateFactor:
@@ -268,25 +303,21 @@ class AccelerateFactor:
     """
 
     backend = 'accelerate'
+    #: the bytes `factor_memory` estimated, set by `factor_symmetric`
+    memory = 0
 
     def __init__(self, matrix: Any) -> None:
         lib = _library()
         if lib is None:
             raise ValueError('Accelerate is not available here')
-        lower = sp.tril(matrix, format='csc')
-        lower.sort_indices()
         # kept for the factorization's life: Accelerate reads them in
         # place and the factor may refer back to the structure
-        self._starts = np.ascontiguousarray(lower.indptr, dtype=np.int64)
-        self._rows = np.ascontiguousarray(lower.indices, dtype=np.int32)
+        structure, self._starts, self._rows, lower = _lower_structure(matrix)
         self._values = np.ascontiguousarray(lower.data, dtype=np.float64)
         n = lower.shape[0]
         self.shape: tuple[int, int] = (n, n)
-        self._matrix = _SparseMatrix(
-            _MatrixStructure(n, n, self._starts.ctypes.data_as(C.POINTER(C.c_long)),
-                             self._rows.ctypes.data_as(C.POINTER(C.c_int)),
-                             _LOWER_SYMMETRIC, 1),
-            self._values.ctypes.data_as(C.POINTER(C.c_double)))
+        self._matrix = _SparseMatrix(structure,
+                                     self._values.ctypes.data_as(C.POINTER(C.c_double)))
         self._factor = None
         for kind in (_CHOLESKY, _LDLT):
             del lib['messages'][:]
@@ -534,16 +565,25 @@ def _pardiso_solver(mtype: int) -> Any:
     return solver
 
 
-def _pardiso_negatives(matrix: Any) -> int:
+def _pardiso_negatives(matrix: Any, held: int = 0) -> int:
     """The negative eigenvalue count of a symmetric matrix, from
-    PARDISO's LDLT (`count_below`)."""
+    PARDISO's LDLT (`count_below`), refused with `FactorTooLarge` when
+    its factor and the `held` bytes would not fit in memory."""
     from pypardiso.pardiso_wrapper import PyPardisoError
 
+    upper = _upper_triangle(matrix)
     solver = _pardiso_solver(-2)
     try:
-        solver.factorize(_upper_triangle(matrix))
+        # the analysis first, so the factor's size is known before the
+        # numeric factorization, which then reuses the ordering
+        _refuse_beyond_memory(held + _pardiso_analysis(solver, upper), 'pardiso',
+                              upper.shape[0])
+        solver.set_phase(22)
+        solver._call_pardiso(upper, np.zeros((upper.shape[0], 1)))
         perturbed = int(solver.get_iparm(14))
         negatives = int(solver.get_iparm(23))
+    except FactorTooLarge:
+        raise
     except (PyPardisoError, ValueError) as failure:
         raise RuntimeError(f'PARDISO could not factor the matrix: {failure}') from None
     finally:
@@ -562,6 +602,8 @@ class PardisoFactor:
     """
 
     backend = 'pardiso'
+    #: the bytes `factor_memory` estimated, set by `factor_symmetric`
+    memory = 0
 
     def __init__(self, matrix: Any) -> None:
         pypardiso = _pypardiso()
@@ -608,6 +650,198 @@ class PardisoFactor:
         self._solver = None
 
 
+# ---- whether a factor fits in memory --------------------------------------
+#
+# A 754,640-brick model (2.5 million degrees of freedom) on a 32 GB Mac
+# took the analysis service to 84 GB with 59 GB of it in swap, and the
+# factorization crawled on with no end in sight (2026-11-27). The call
+# into the library cannot be interrupted, so the only way out was to
+# quit the app; the factor's size is known, or well estimated, before
+# that call starts.
+
+#: the share of the machine's physical memory a factorization may take;
+#: the rest is the system's, the matrices' and the eigenvectors'
+MEMORY_SHARE = 0.75
+
+#: bytes a nonzero of SuperLU's L and U take at its peak, the value, its
+#: row index and the arrays it grows as it goes: 22 and 23.6 measured on
+#: blocks of 14,553 and 52,728 degrees of freedom
+SUPERLU_BYTES = 24
+
+#: SuperLU's peak over the size of Accelerate's factor of the same
+#: matrix, where both are: measured 4.0 on the Frame-Wing, 4.9 on two
+#: blocks of bricks and 5.4 on a plate of bricks one thick
+SUPERLU_OVER_ACCELERATE = 8.0
+
+
+def physical_memory() -> int:
+    """The machine's physical memory, in bytes."""
+    if sys.platform == 'win32':
+        class _MemoryStatus(C.Structure):
+            _fields_ = [('dwLength', C.c_ulong), ('dwMemoryLoad', C.c_ulong),
+                        ('ullTotalPhys', C.c_ulonglong), ('ullAvailPhys', C.c_ulonglong),
+                        ('ullTotalPageFile', C.c_ulonglong),
+                        ('ullAvailPageFile', C.c_ulonglong),
+                        ('ullTotalVirtual', C.c_ulonglong), ('ullAvailVirtual', C.c_ulonglong),
+                        ('ullAvailExtendedVirtual', C.c_ulonglong)]
+
+        status = _MemoryStatus()
+        status.dwLength = C.sizeof(_MemoryStatus)
+        C.windll.kernel32.GlobalMemoryStatusEx(C.byref(status))  # type: ignore[attr-defined]
+        return int(status.ullTotalPhys)
+    return int(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES'))
+
+
+def _gigabytes(size: float) -> str:
+    # binary gigabytes, the unit a machine's memory is sold and shown in
+    # (a 32 GB Mac has 32 x 2^30 bytes)
+    value = size / 2**30
+    return f'{value:.0f} GB' if value >= 10 else f'{value:.2g} GB'
+
+
+class FactorTooLarge(ValueError):
+    """A factorization refused because its factor would not fit in the
+    machine's memory, raised before it starts.
+
+    Attributes
+    ----------
+    needed : int
+        The bytes the factorization was estimated to need, with any
+        factor already held.
+    physical : int
+        The machine's physical memory, in bytes (`physical_memory`).
+    backend : str
+        The solver the estimate is for: 'accelerate', 'pardiso' or
+        'superlu'.
+    """
+
+    def __init__(self, needed: int, physical: int, backend: str, size: int) -> None:
+        self.needed, self.physical, self.backend = needed, physical, backend
+        how = {'accelerate': "by Accelerate's symbolic factorization",
+               'pardiso': "by PARDISO's analysis",
+               'superlu': "by an estimate of SuperLU's fill"}[backend]
+        super().__init__(
+            f'factoring this model of {size:,} degrees of freedom would need about '
+            f'{_gigabytes(needed)} of memory {how}, more than the '
+            f'{_gigabytes(MEMORY_SHARE * physical)} a factorization may take on this '
+            f'machine ({MEMORY_SHARE:.0%} of its {_gigabytes(physical)} of physical '
+            'memory); mesh it coarser, or solve it on a machine with more memory')
+
+
+def _refuse_beyond_memory(needed: int, backend: str, size: int) -> None:
+    physical = physical_memory()
+    if needed > MEMORY_SHARE * physical:
+        raise FactorTooLarge(needed, physical, backend, size)
+
+
+def _accelerate_memory(matrix: Any) -> tuple[int, int] | None:
+    """(factor, workspace) bytes of Accelerate's Cholesky of the
+    matrix, from its symbolic factorization alone; None where Accelerate
+    is not or refuses the structure. The factor is the least a Cholesky
+    takes; an LDLT that delays pivots takes more."""
+    lib = _library()
+    if lib is None:
+        return None
+    structure, _starts, _rows, _lower = _lower_structure(matrix)
+    symbolic = lib['symbolic_factor'](_CHOLESKY, C.byref(structure), C.byref(lib['symbolic']))
+    status, factor, workspace = (symbolic.status, symbolic.factorSize_Double,
+                                 symbolic.workspaceSize_Double)
+    lib['destroy_symbolic'](C.byref(symbolic))
+    return (int(factor), int(workspace)) if status == 0 else None
+
+
+def _pardiso_analysis(solver: Any, upper: Any) -> int:
+    """Run PARDISO's analysis (phase 11: ordering and symbolic
+    factorization) of `upper` on `solver`, and return the bytes its
+    factorization will take at its peak, max(iparm 15, iparm 16 +
+    iparm 17) kilobytes, as oneMKL's manual gives it."""
+    solver._check_A(upper)
+    solver.set_phase(11)
+    solver._call_pardiso(upper, np.zeros((upper.shape[0], 1)))
+    symbolic, permanent, numeric = (int(solver.get_iparm(index)) for index in (15, 16, 17))
+    return 1024 * max(symbolic, permanent + numeric)
+
+
+def _pardiso_memory(matrix: Any, mtype: int) -> int | None:
+    """The bytes PARDISO's factorization of the matrix will take, from
+    an analysis on a solver of its own; None where PARDISO is not or
+    refuses the matrix."""
+    if _pypardiso() is None:
+        return None
+    from pypardiso.pardiso_wrapper import PyPardisoError
+
+    solver = _pardiso_solver(mtype)
+    try:
+        return _pardiso_analysis(solver, _upper_triangle(matrix))
+    except (PyPardisoError, ValueError):
+        return None
+    finally:
+        solver.free_memory(everything=True)
+
+
+def _superlu_memory(matrix: Any) -> int:
+    """The bytes SuperLU's factorization of the matrix will take at its
+    peak, estimated; SuperLU has no symbolic step to ask.
+
+    Where Accelerate is, `SUPERLU_OVER_ACCELERATE` times the size of
+    Accelerate's factor. Elsewhere, from the envelope of the matrix in
+    reverse Cuthill-McKee order: the entries between each row's first
+    nonzero and the diagonal, which an envelope solver would fill, taken
+    for L and for U, at `SUPERLU_BYTES` each. That came out 1.4 to 2.5
+    times SuperLU's own fill on blocks and plates of bricks of 4,000 to
+    52,000 degrees of freedom, and 4.5 times on the Frame-Wing, but 0.8
+    times on a bar of 1,845: an estimate, and a generous one for a
+    large model, not a bound.
+    """
+    accelerate = _accelerate_memory(matrix)
+    if accelerate is not None:
+        return int(SUPERLU_OVER_ACCELERATE * accelerate[0])
+    from scipy.sparse.csgraph import reverse_cuthill_mckee
+
+    rows = sp.csr_matrix(matrix)
+    order = reverse_cuthill_mckee(rows, symmetric_mode=True)
+    lower = sp.tril(rows[order][:, order], format='csr')
+    lower.sort_indices()
+    n = lower.shape[0]
+    filled = np.ones(n, dtype=np.int64)
+    stored = np.diff(lower.indptr) > 0
+    first = lower.indices[lower.indptr[:-1][stored]]
+    filled[stored] = np.arange(n)[stored] - first + 1
+    return int(SUPERLU_BYTES * 2 * int(filled.sum()))
+
+
+def factor_memory(matrix: Any) -> tuple[int, str]:
+    """The bytes `factor_symmetric` will take to factor the matrix, at
+    its peak, and the backend the estimate is for.
+
+    Each backend is asked in the order `factor_symmetric` tries them,
+    the first that takes the matrix answering: Accelerate's symbolic
+    factorization gives its factor and workspace exactly, in a small
+    part of the factorization's time (0.15 s of 4.1 s on a block of
+    89,373 degrees of freedom); PARDISO's analysis gives its peak, at
+    the cost of one more ordering of the matrix; SuperLU's is estimated
+    (`_superlu_memory`).
+
+    Parameters
+    ----------
+    matrix : sparse matrix
+        Square and symmetric.
+
+    Returns
+    -------
+    tuple of (int, str)
+        The bytes, and 'accelerate', 'pardiso' or 'superlu'.
+    """
+    if not _superlu_only():
+        accelerate = _accelerate_memory(matrix)
+        if accelerate is not None:
+            return sum(accelerate), 'accelerate'
+        pardiso = _pardiso_memory(matrix, 2)
+        if pardiso is not None:
+            return pardiso, 'pardiso'
+    return _superlu_memory(matrix), 'superlu'
+
+
 def factor_symmetric(matrix: Any) -> AccelerateFactor | PardisoFactor | SuperLUFactor:
     """The matrix factored by the fastest solver here that takes it:
     Accelerate on a Mac, PARDISO on x86-64 Windows and Linux, else
@@ -621,11 +855,25 @@ def factor_symmetric(matrix: Any) -> AccelerateFactor | PardisoFactor | SuperLUF
     Returns
     -------
     AccelerateFactor, PardisoFactor or SuperLUFactor
+        With `memory`, the bytes `factor_memory` estimated it would take.
+
+    Raises
+    ------
+    FactorTooLarge
+        Before anything is factored, when `factor_memory` is more than
+        `MEMORY_SHARE` of the machine's physical memory.
     """
+    needed, backend = factor_memory(matrix)
+    _refuse_beyond_memory(needed, backend, matrix.shape[0])
+    factor: AccelerateFactor | PardisoFactor | SuperLUFactor | None = None
     if not _superlu_only():
         for fast in (AccelerateFactor, PardisoFactor):
             try:
-                return fast(matrix)
+                factor = fast(matrix)
+                break
             except ValueError:
                 pass
-    return SuperLUFactor(matrix)
+    if factor is None:
+        factor = SuperLUFactor(matrix)
+    factor.memory = needed
+    return factor

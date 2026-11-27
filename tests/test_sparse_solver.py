@@ -700,7 +700,7 @@ def test_a_miscount_still_reaches_the_frequency_by_prediction(monkeypatch):
     from hertzforge.core import sparse_solve
     from hertzforge.demo import plate
 
-    def refuse(*_args):
+    def refuse(*_args, **_kwargs):
         raise RuntimeError('pivoted off the diagonal')
 
     monkeypatch.setattr(sparse_solve, 'count_below', refuse)
@@ -710,6 +710,67 @@ def test_a_miscount_still_reaches_the_frequency_by_prediction(monkeypatch):
     _compare(model, maximum_frequency=top * 0.99)
     assert asked[0] == 24 + fem.LANCZOS_GUARD and len(asked) >= 2
     assert asked[1] != 2 * 24 + fem.LANCZOS_GUARD, 'predicted, not doubled'
+
+
+@pytest.mark.parametrize('backend', ['', 'superlu'])
+def test_a_count_that_would_not_fit_beside_the_factor_is_refused(backend, monkeypatch):
+    """The count's factorization is made while the modal solve holds its
+    own factor, so it has to fit beside it: refused, before it factors,
+    with the factor's bytes held, and counted with nothing held."""
+    from hertzforge.core import sparse_solve
+    from hertzforge.core.sparse_solve import BACKEND_VARIABLE, MEMORY_SHARE, FactorTooLarge
+    from hertzforge.demo import plate
+
+    monkeypatch.setenv(BACKEND_VARIABLE, backend)
+    stiffness, mass, *_rest = plate.build().scaled_system()
+    shift = (2.0 * np.pi * 500.0) ** 2
+    asked = []
+    real = sparse_solve._refuse_beyond_memory
+
+    def spy(needed, *args):
+        asked.append(needed)
+        real(needed, *args)
+
+    monkeypatch.setattr(sparse_solve, '_refuse_beyond_memory', spy)
+    below = sparse_solve.count_below(stiffness, mass, shift)
+    needed = asked[-1]
+    assert needed > 0
+    monkeypatch.setattr(sparse_solve, 'physical_memory',
+                        lambda: int(1.2 * needed / MEMORY_SHARE))
+    assert sparse_solve.count_below(stiffness, mass, shift) == below
+    with pytest.raises(FactorTooLarge) as refused:
+        sparse_solve.count_below(stiffness, mass, shift, held=needed // 2)
+    assert refused.value.needed == needed + needed // 2
+
+
+def test_a_search_whose_count_will_not_fit_still_reaches_the_frequency(monkeypatch):
+    """The count is told what the solve's factor holds, and a count
+    refused for memory is skipped as a count that failed is: the
+    search guesses and predicts its way to every mode up to the
+    frequency instead."""
+    from hertzforge.core import sparse_solve
+    from hertzforge.core.sparse_solve import FactorTooLarge
+    from hertzforge.demo import plate
+
+    told = []
+
+    def refuse(*_args, held=0):
+        told.append(held)
+        raise FactorTooLarge(10 * 2**30, 2**30, 'superlu', 100)
+
+    real = sparse_solve.factor_symmetric
+    factors = []
+
+    def factored(matrix):
+        factors.append(real(matrix))
+        return factors[-1]
+
+    monkeypatch.setattr(sparse_solve, 'count_below', refuse)
+    monkeypatch.setattr(sparse_solve, 'factor_symmetric', factored)
+    model = plate.build()
+    top = float(model.eigensolution(solver='dense', num_modes=40).frequency[-1])
+    _compare(model, maximum_frequency=top * 0.99)
+    assert told == [factors[0].memory] and told[0] > 0, 'told the bytes the factor holds'
 
 
 def test_the_count_is_predicted_from_how_the_modes_grow():
