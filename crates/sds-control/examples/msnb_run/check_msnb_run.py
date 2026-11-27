@@ -103,7 +103,8 @@ def run(tmp, name, c, *flags):
     with open(path, 'w') as fh:
         json.dump(c, fh)
     out = os.path.join(tmp, name)
-    p = subprocess.run([RUN, path, '--root', PROBLEMS, '--out', out, *flags], capture_output=True, text=True)
+    p = subprocess.run([RUN, path, '--root', PROBLEMS, '--out', out, *flags], capture_output=True, text=True,
+                       check=False)
     return p.returncode, out, p.stderr
 
 
@@ -153,14 +154,14 @@ def phasors_match(out, freq_hz, scale=1.0, tol_db=0.01, tol_deg=0.01):
     # Updates where the drive has changed by under 1e-4 of itself (0.001 dB) over the last 0.75 s:
     # the response is steady over the demodulation's half second, whatever the engine's tracker is.
     d = np.array(h['drive_re']) + 1j * np.array(h['drive_im'])
-    lag = int(round(0.75 / r['structure']['tick_s']))
+    lag = round(0.75 / r['structure']['tick_s'])
     steady = [k for k in range(lag, len(d) - 1)
               if np.abs(d[k - lag:k + 1] - d[k]).max() <= 1e-4 * np.abs(d[k]).max()]
     if not steady:
         return ['no update with a steady drive']
     bad = []
     for k in (steady[0], steady[-1]):
-        end = int(round(h['time_s'][k] * FS))
+        end = round(h['time_s'][k] * FS)
         t = np.arange(end - n, end) / FS
         ph = 2.0 * (x[end - n:end] * np.exp(-2j * np.pi * freq_hz * t)[:, None]).mean(0)
         c = cplx(h, 'control', k) * scale
@@ -187,7 +188,7 @@ def modes_match(out, pid, amp_scale=1.0, tol=1e-7):
     idx = [m['index'] for m in tm['modes']]
     worst = 0.0
     for k, t in enumerate(r['history']['time_s']):
-        s = int(round(t * FS)) // tm['resolution_samples'] * tm['resolution_samples']
+        s = round(t * FS) // tm['resolution_samples'] * tm['resolution_samples']
         if s == 0:
             continue
         f, _ = rm.level_state(st, env[s - 1] / ra)
@@ -332,7 +333,7 @@ def broken_thinnings(thin):
     out = []
     a = copy.deepcopy(thin)
     k = h['judged'].index(True)
-    for key, v in a['history'].items():
+    for v in a['history'].values():
         if isinstance(v, list) and len(v) == h['points']:
             del v[k]
     a['history']['points'] -= 1
