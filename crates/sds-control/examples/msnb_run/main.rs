@@ -583,7 +583,11 @@ fn parse_case(v: &Value) -> Result<Case, String> {
                     "{what}.bound needs at least two frequencies and one amplitude for each"
                 ));
             }
-            if freqs.windows(2).any(|w| !(w[1] > w[0])) || freqs[0] <= 0.0 {
+            if freqs
+                .windows(2)
+                .any(|w| w[1].partial_cmp(&w[0]) != Some(std::cmp::Ordering::Greater))
+                || freqs[0] <= 0.0
+            {
                 return Err(format!(
                     "{what}.bound.frequency_hz must be above 0 and ascending"
                 ));
@@ -657,7 +661,12 @@ fn parse_reference(v: &Value) -> Result<ReferenceTable, String> {
             .ok_or("reference frequency_hz is required")?,
         "reference frequency_hz",
     )?;
-    if freqs.len() < 2 || freqs[0] <= 0.0 || freqs.windows(2).any(|w| !(w[1] > w[0])) {
+    if freqs.len() < 2
+        || freqs[0] <= 0.0
+        || freqs
+            .windows(2)
+            .any(|w| w[1].partial_cmp(&w[0]) != Some(std::cmp::Ordering::Greater))
+    {
         return Err(
             "reference frequency_hz needs at least two frequencies, above 0 and ascending".into(),
         );
@@ -726,7 +735,7 @@ fn phase_points(freqs: &[f64], deg: &[f64]) -> Result<(Vec<PhasePoint>, usize), 
                 let t = (cross - a) / (bu - a);
                 let lo = fa * (1.0 + 2.0 * GAP);
                 let hi = fb / (1.0 + 2.0 * GAP);
-                if !(hi > lo) {
+                if hi.partial_cmp(&lo) != Some(std::cmp::Ordering::Greater) {
                     return Err(format!(
                         "two reference frequencies ({fa} and {fb} Hz) are too close to split a phase wrap between"
                     ));
@@ -2344,7 +2353,7 @@ fn main() {
     let spans: Vec<(usize, usize)> = if is_sweep {
         sweep_points(&ticks, band.0)
     } else if thin_stepped {
-        let flags: Vec<bool> = ticks.iter().map(|t| judged(t)).collect();
+        let flags: Vec<bool> = ticks.iter().map(&judged).collect();
         stepped_points(&ticks, &flags)
     } else {
         (0..ticks.len()).map(|i| (i, i + 1)).collect()
@@ -2485,10 +2494,8 @@ fn main() {
                     true_max.push(Value::Null);
                     continue;
                 }
-                let rows: Vec<Vec<f64>> = ticks[s..e.min(ticks.len())]
-                    .iter()
-                    .map(|t| modes_at(t))
-                    .collect();
+                let rows: Vec<Vec<f64>> =
+                    ticks[s..e.min(ticks.len())].iter().map(&modes_at).collect();
                 let m = rows[0].len();
                 true_min.push(n9s(
                     (0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::INFINITY, f64::min))
@@ -2732,6 +2739,42 @@ mod tests {
         assert!(covers(&[21.0, 2000.0], (20.0, 2000.0), "r").is_err());
         assert!(covers(&[20.0, 1999.0], (20.0, 2000.0), "r").is_err());
         assert!(covers(&[100.0, 200.0], (150.0, 150.0), "r").is_ok());
+    }
+
+    #[test]
+    fn msnb_frequencies_that_do_not_rise_are_refused() {
+        // The reference's grid: a repeated or a falling frequency is refused.
+        let reference = |f: Value| {
+            json!({
+                "schema": "msnb-reference/1", "controls": ["c01"], "frequency_hz": f,
+                "amplitude_m_s2_pk": [[1.0], [1.0], [1.0]], "phase_deg": [[0.0], [0.0], [0.0]]
+            })
+        };
+        assert!(parse_reference(&reference(json!([20.0, 200.0, 2000.0]))).is_ok());
+        for f in [json!([20.0, 200.0, 200.0]), json!([20.0, 2000.0, 200.0])] {
+            assert!(parse_reference(&reference(f))
+                .unwrap_err()
+                .contains("ascending"));
+        }
+        // A limit channel's bound: the same.
+        let limit = |f: Value| {
+            let mut v = base();
+            v["limits"] = json!([{"output": "l01", "bound": {
+                "frequency_hz": f, "amplitude_m_s2_pk": [1.0, 1.0, 1.0]}}]);
+            parse_case(&v)
+        };
+        assert!(limit(json!([20.0, 200.0, 2000.0])).is_ok());
+        for f in [json!([20.0, 200.0, 200.0]), json!([20.0, 2000.0, 200.0])] {
+            assert!(limit(f).unwrap_err().contains("ascending"));
+        }
+        // A phase wrap between two frequencies with no room to split it, and between
+        // frequencies that are not numbers.
+        assert!(phase_points(&[100.0, 100.0], &[170.0, -170.0])
+            .unwrap_err()
+            .contains("too close"));
+        assert!(phase_points(&[f64::NAN, 200.0], &[170.0, -170.0])
+            .unwrap_err()
+            .contains("too close"));
     }
 
     #[test]
