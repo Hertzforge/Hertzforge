@@ -46,6 +46,10 @@ dependencies = [
     "cadquery-ocp-novtk",
     # BSD-3-Clause: the analysis service's WebSocket server
     "websockets",
+    # MIT: smoothed-aggregation algebraic multigrid, the preconditioner of
+    # the iterative modal solve for a model whose factor will not fit in
+    # memory (`core.iterative_modes`)
+    "pyamg",
 ]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [

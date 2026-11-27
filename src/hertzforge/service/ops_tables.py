@@ -55,7 +55,8 @@ def _table(project: Any, name: str) -> dict:
     if isinstance(obj, ShapeSet):
         # the Description column is typed into
         return v.table(name, headers, rows, v.editing(
-            'project.describe_mode', {'shapes': name}, [None, None, None, 'description'],
+            'project.describe_mode', {'shapes': name},
+            [None, None, None, 'description'] + [None] * (len(headers) - 4),
             kinds={'description': 'text'}))
     return v.table(name, headers, rows)
 

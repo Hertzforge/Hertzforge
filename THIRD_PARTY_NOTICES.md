@@ -48,7 +48,7 @@ its own license. `tools/check_licenses.py` reads every installed package's licen
 | Package | License | Use |
 |---|---|---|
 | numpy, scipy, h5py, pandas, pint, threadpoolctl | BSD-3-Clause | arrays, signal processing, HDF5 files, tables, units, BLAS threads |
-| netCDF4, openpyxl | MIT | Rattlesnake `.nc4` files, Excel channel tables |
+| netCDF4, openpyxl, pyamg | MIT | Rattlesnake `.nc4` files, Excel channel tables, multigrid for the iterative modal solve |
 | certifi (netCDF4's dependency) | MPL-2.0 | used unmodified; source at github.com/certifi/python-certifi |
 | cadquery-ocp-novtk (the `OCP` bindings) | Apache-2.0 | solids, booleans and STEP/IGES import |
 | OpenCASCADE Technology 8.0.1, inside that wheel | LGPL-2.1 with the Open CASCADE exception | shipped as shared libraries, unmodified and replaceable; source at github.com/Open-Cascade-SAS/OCCT, tag `V8_0_1` |

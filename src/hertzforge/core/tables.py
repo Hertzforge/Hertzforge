@@ -164,10 +164,21 @@ def table_of(obj: Any, geometry: Any = None,
                           in zip(row, MATCHED_DECIMALS)] for row in rows]
 
     if isinstance(obj, ShapeSet):
-        return (['Mode', 'Frequency [Hz]', 'Damping [%]', 'Description'],
-                [[str(m + 1), f'{float(obj.frequency[m]):.4f}',
-                  f'{float(obj.damping[m]) * 100:.3f}', obj.description[m]]
-                 for m in range(obj.num_shapes)])
+        headers = ['Mode', 'Frequency [Hz]', 'Damping [%]', 'Description']
+        rows = [[str(m + 1), f'{float(obj.frequency[m]):.4f}',
+                 f'{float(obj.damping[m]) * 100:.3f}', obj.description[m]]
+                for m in range(obj.num_shapes)]
+        # modes from the iterative solve say how far each converged; the
+        # direct solve's are converged to round-off and have no column
+        from .iterative_modes import iterative_residual
+
+        read = [iterative_residual(comment) for comment in obj.comment]
+        if any(value is not None for value in read):
+            headers.append('Residual')
+            for row, value in zip(rows, read):
+                row.append('' if value is None else
+                           value if isinstance(value, str) else f'{value:.1e}')
+        return headers, rows
     if isinstance(obj, ChannelTable):
         # every column, because the schema is already the curated set:
         # a Rattlesnake save's coupling and feedback wiring stop at the
