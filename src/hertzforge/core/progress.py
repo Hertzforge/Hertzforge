@@ -144,6 +144,13 @@ class Share:
         moves on its own until the next count."""
         self.parent.busy()
 
+    def take(self, other: Share) -> None:
+        """Take over the units `other` has not given its parent yet, for a
+        stage that turns out to do the work of both."""
+        self.units += other.units - other._given
+        other.units = other._given
+        self._pass()
+
     def _pass(self) -> None:
         reached = (self.units * min(self.done, self.total) // self.total
                    if self.total > 0 else 0)
