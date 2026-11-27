@@ -98,6 +98,10 @@ interface Pending {
 	resolve: (result: unknown) => void;
 	reject: (err: RequestError) => void;
 	timer: ReturnType<typeof setTimeout>;
+	/** The event topic that says the request is still being worked on, and starts its wait again. */
+	aliveOn?: string;
+	/** Start the wait again from now. */
+	rearm: () => void;
 }
 
 export class ServiceClient {
@@ -178,12 +182,14 @@ export class ServiceClient {
 
 	/**
 	 * Send a request and wait for its response. If the service is not connected yet the request
-	 * waits for the connection, within the same timeout.
+	 * waits for the connection, within the same timeout. With `aliveOn`, an event of that topic
+	 * says the service is still working on it, and the wait starts again: the request times out
+	 * only after `timeoutMs` with no word, however long the work takes.
 	 */
 	async request<R = Record<string, unknown>>(
 		method: string,
 		params: Record<string, unknown> = {},
-		options: { timeoutMs?: number } = {}
+		options: { timeoutMs?: number; aliveOn?: string } = {}
 	): Promise<R> {
 		const timeoutMs = options.timeoutMs ?? requestTimeoutFor(method, this.requestTimeoutMs);
 		const deadline = Date.now() + timeoutMs;
@@ -211,15 +217,35 @@ export class ServiceClient {
 		const remaining = Math.max(1, deadline - Date.now());
 		const id = this.nextId++;
 		return new Promise<R>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			const seconds = Math.round(timeoutMs / 1000);
+			const expire = () => {
 				this.pending.delete(id);
-				reject(new RequestError('timeout', `${method} got no response within ${Math.round(timeoutMs / 1000)} s.`, method));
-			}, remaining);
-			this.pending.set(id, { method, resolve: resolve as (r: unknown) => void, reject, timer });
+				reject(
+					new RequestError(
+						'timeout',
+						options.aliveOn
+							? `${method} heard nothing from the ${this.service} service for ${seconds} s.`
+							: `${method} got no response within ${seconds} s.`,
+						method
+					)
+				);
+			};
+			const entry: Pending = {
+				method,
+				resolve: resolve as (r: unknown) => void,
+				reject,
+				timer: setTimeout(expire, remaining),
+				aliveOn: options.aliveOn,
+				rearm: () => {
+					clearTimeout(entry.timer);
+					entry.timer = setTimeout(expire, timeoutMs);
+				}
+			};
+			this.pending.set(id, entry);
 			try {
 				this.socket!.send(encodeFrame({ type: 'request', id, method, params }) as string);
 			} catch (err) {
-				clearTimeout(timer);
+				clearTimeout(entry.timer);
 				this.pending.delete(id);
 				reject(new RequestError('disconnected', `Could not send ${method}: ${(err as Error).message}`, method));
 			}
@@ -326,6 +352,7 @@ export class ServiceClient {
 		}
 
 		if (message.type === 'event') {
+			for (const p of this.pending.values()) if (p.aliveOn === message.topic) p.rearm();
 			const set = this.handlers.get(message.topic);
 			if (!set) return;
 			for (const handler of [...set]) {
