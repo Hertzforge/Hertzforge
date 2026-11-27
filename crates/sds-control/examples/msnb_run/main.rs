@@ -119,7 +119,8 @@ fn refuse(msg: impl std::fmt::Display) -> ! {
 type Obj = Map<String, Value>;
 
 fn obj<'a>(v: &'a Value, what: &str) -> Result<&'a Obj, String> {
-    v.as_object().ok_or_else(|| format!("{what} must be an object"))
+    v.as_object()
+        .ok_or_else(|| format!("{what} must be an object"))
 }
 fn only(o: &Obj, allowed: &[&str], what: &str) -> Result<(), String> {
     for k in o.keys() {
@@ -205,7 +206,8 @@ fn relpath(s: &str, what: &str) -> Result<PathBuf, String> {
     if s.is_empty()
         || p.is_absolute()
         || s.starts_with('~')
-        || p.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || p.components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
     {
         return Err(format!(
             "{what} must be a path relative to the root, with no \"..\" (got \"{s}\")"
@@ -360,7 +362,10 @@ fn parse_case(v: &Value) -> Result<Case, String> {
         .filter(|s| !s.is_empty())
         .ok_or("case_id is required")?
         .to_owned();
-    let st = obj(c.get("structure").ok_or("structure is required")?, "structure")?;
+    let st = obj(
+        c.get("structure").ok_or("structure is required")?,
+        "structure",
+    )?;
     only(st, &["file", "sha256"], "structure")?;
     let structure_file = relpath(
         opt_str(st, "file", "structure")?.ok_or("structure.file is required")?,
@@ -378,18 +383,23 @@ fn parse_case(v: &Value) -> Result<Case, String> {
         }
     };
     let fs_hz = opt_f64(c, "fs_hz", "the case")?.unwrap_or(8192.0);
-    let tick_s = opt_f64(c, "tick_s", "the case")?
-        .unwrap_or(hertzforge_mimo_sine::limits::DEFAULT_TICK_S);
+    let tick_s =
+        opt_f64(c, "tick_s", "the case")?.unwrap_or(hertzforge_mimo_sine::limits::DEFAULT_TICK_S);
     let law = obj(c.get("law").ok_or("law is required")?, "law")?;
     only(law, &["id", "params"], "law")?;
-    let law_id = opt_str(law, "id", "law")?.ok_or("law.id is required")?.to_owned();
+    let law_id = opt_str(law, "id", "law")?
+        .ok_or("law.id is required")?
+        .to_owned();
     let law_params = match present(law, "params") {
         None => Map::new(),
         Some(p) => obj(p, "law.params")?.clone(),
     };
     let t = obj(c.get("test").ok_or("test is required")?, "test")?;
     let band = |t: &Obj| -> Result<(f64, f64), String> {
-        let b = f64_list(t.get("band_hz").ok_or("test.band_hz is required")?, "test.band_hz")?;
+        let b = f64_list(
+            t.get("band_hz").ok_or("test.band_hz is required")?,
+            "test.band_hz",
+        )?;
         if b.len() != 2 || !(b[0] > 0.0 && b[1] > b[0]) {
             return Err("test.band_hz must be [lo, hi] with 0 < lo < hi".into());
         }
@@ -397,7 +407,11 @@ fn parse_case(v: &Value) -> Result<Case, String> {
     };
     let test = match opt_str(t, "type", "test")? {
         Some("sweep") => {
-            only(t, &["type", "band_hz", "rate_oct_per_min", "direction"], "test")?;
+            only(
+                t,
+                &["type", "band_hz", "rate_oct_per_min", "direction"],
+                "test",
+            )?;
             let down = match opt_str(t, "direction", "test")? {
                 None | Some("up") => false,
                 Some("down") => true,
@@ -405,12 +419,19 @@ fn parse_case(v: &Value) -> Result<Case, String> {
             };
             TestSpec::Sweep {
                 band: band(t)?,
-                rate: pos(req_f64(t, "rate_oct_per_min", "test")?, "test.rate_oct_per_min")?,
+                rate: pos(
+                    req_f64(t, "rate_oct_per_min", "test")?,
+                    "test.rate_oct_per_min",
+                )?,
                 down,
             }
         }
         Some("stepped") => {
-            only(t, &["type", "band_hz", "steps_per_octave", "step_s"], "test")?;
+            only(
+                t,
+                &["type", "band_hz", "steps_per_octave", "step_s"],
+                "test",
+            )?;
             TestSpec::Stepped {
                 band: band(t)?,
                 per_octave: pos(
@@ -429,7 +450,10 @@ fn parse_case(v: &Value) -> Result<Case, String> {
         }
         _ => return Err("test.type must be \"sweep\", \"stepped\" or \"dwell\"".into()),
     };
-    let r = obj(c.get("reference").ok_or("reference is required")?, "reference")?;
+    let r = obj(
+        c.get("reference").ok_or("reference is required")?,
+        "reference",
+    )?;
     only(r, &["file", "sha256", "inline", "phase"], "reference")?;
     let reference_file = match opt_str(r, "file", "reference")? {
         Some(f) => Some(relpath(f, "reference.file")?),
@@ -479,7 +503,9 @@ fn parse_case(v: &Value) -> Result<Case, String> {
                             }
                             RungFor::Sweeps(n as u32)
                         }
-                        _ => return Err("ladder.rung gives one of \"seconds\" and \"sweeps\"".into()),
+                        _ => {
+                            return Err("ladder.rung gives one of \"seconds\" and \"sweeps\"".into())
+                        }
                     }
                 }
             };
@@ -533,10 +559,15 @@ fn parse_case(v: &Value) -> Result<Case, String> {
                 .ok_or_else(|| format!("{what}.output is required"))?
                 .to_owned();
             let b = obj(
-                e.get("bound").ok_or_else(|| format!("{what}.bound is required"))?,
+                e.get("bound")
+                    .ok_or_else(|| format!("{what}.bound is required"))?,
                 &format!("{what}.bound"),
             )?;
-            only(b, &["frequency_hz", "amplitude_m_s2_pk"], &format!("{what}.bound"))?;
+            only(
+                b,
+                &["frequency_hz", "amplitude_m_s2_pk"],
+                &format!("{what}.bound"),
+            )?;
             let freqs = f64_list(
                 b.get("frequency_hz")
                     .ok_or_else(|| format!("{what}.bound.frequency_hz is required"))?,
@@ -553,7 +584,9 @@ fn parse_case(v: &Value) -> Result<Case, String> {
                 ));
             }
             if freqs.windows(2).any(|w| !(w[1] > w[0])) || freqs[0] <= 0.0 {
-                return Err(format!("{what}.bound.frequency_hz must be above 0 and ascending"));
+                return Err(format!(
+                    "{what}.bound.frequency_hz must be above 0 and ascending"
+                ));
             }
             if amp.iter().any(|a| *a <= 0.0) {
                 return Err(format!("{what}.bound.amplitude_m_s2_pk must be above 0"));
@@ -603,19 +636,31 @@ fn parse_reference(v: &Value) -> Result<ReferenceTable, String> {
     let r = obj(v, "the reference")?;
     only(
         r,
-        &["schema", "controls", "frequency_hz", "amplitude_m_s2_pk", "phase_deg"],
+        &[
+            "schema",
+            "controls",
+            "frequency_hz",
+            "amplitude_m_s2_pk",
+            "phase_deg",
+        ],
         "the reference",
     )?;
     if r.get("schema").and_then(Value::as_str) != Some("msnb-reference/1") {
         return Err("the reference's schema must be \"msnb-reference/1\"".into());
     }
-    let controls = str_list(r.get("controls").ok_or("reference controls is required")?, "reference controls")?;
+    let controls = str_list(
+        r.get("controls").ok_or("reference controls is required")?,
+        "reference controls",
+    )?;
     let freqs = f64_list(
-        r.get("frequency_hz").ok_or("reference frequency_hz is required")?,
+        r.get("frequency_hz")
+            .ok_or("reference frequency_hz is required")?,
         "reference frequency_hz",
     )?;
     if freqs.len() < 2 || freqs[0] <= 0.0 || freqs.windows(2).any(|w| !(w[1] > w[0])) {
-        return Err("reference frequency_hz needs at least two frequencies, above 0 and ascending".into());
+        return Err(
+            "reference frequency_hz needs at least two frequencies, above 0 and ascending".into(),
+        );
     }
     let rows = |k: &str| -> Result<Vec<Vec<f64>>, String> {
         let l = r
@@ -623,13 +668,21 @@ fn parse_reference(v: &Value) -> Result<ReferenceTable, String> {
             .and_then(Value::as_array)
             .ok_or_else(|| format!("reference {k} must be a list of lists"))?;
         if l.len() != freqs.len() {
-            return Err(format!("reference {k} has {} rows for {} frequencies", l.len(), freqs.len()));
+            return Err(format!(
+                "reference {k} has {} rows for {} frequencies",
+                l.len(),
+                freqs.len()
+            ));
         }
         l.iter()
             .map(|row| {
                 let row = f64_list(row, &format!("reference {k}"))?;
                 if row.len() != controls.len() {
-                    return Err(format!("reference {k}: a row has {} values for {} controls", row.len(), controls.len()));
+                    return Err(format!(
+                        "reference {k}: a row has {} values for {} controls",
+                        row.len(),
+                        controls.len()
+                    ));
                 }
                 Ok(row)
             })
@@ -640,7 +693,11 @@ fn parse_reference(v: &Value) -> Result<ReferenceTable, String> {
     if amp.iter().flatten().any(|a| *a <= 0.0) {
         return Err("reference amplitude_m_s2_pk must be above 0 everywhere".into());
     }
-    if phase.iter().flatten().any(|p| !(*p > -180.0 && *p <= 180.0)) {
+    if phase
+        .iter()
+        .flatten()
+        .any(|p| !(*p > -180.0 && *p <= 180.0))
+    {
         return Err("reference phase_deg must be above -180 and at most 180".into());
     }
     Ok(ReferenceTable {
@@ -724,8 +781,7 @@ struct Structure {
 }
 
 fn load_structure(bytes: &[u8]) -> Result<Structure, String> {
-    let raw: Value =
-        serde_json::from_slice(bytes).map_err(|e| format!("structure.json: {e}"))?;
+    let raw: Value = serde_json::from_slice(bytes).map_err(|e| format!("structure.json: {e}"))?;
     let o = obj(&raw, "structure.json")?;
     let kind = match o.get("kind").and_then(Value::as_str) {
         Some(k @ ("jointed" | "modal")) => k.to_owned(),
@@ -742,7 +798,12 @@ fn load_structure(bytes: &[u8]) -> Result<Structure, String> {
         .ok_or("structure.json: an output has no name")?;
     let roles = outs
         .iter()
-        .map(|x| x.get("role").and_then(Value::as_str).unwrap_or("").to_owned())
+        .map(|x| {
+            x.get("role")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        })
         .collect();
     let drive_names = o
         .get("drives")
@@ -777,19 +838,33 @@ fn runner_structure(st: &Structure, rows: &[usize]) -> Result<Value, String> {
         .and_then(Value::as_object)
         .ok_or("structure.json: no simulator block")?;
     let pick = |v: &Value, what: &str| -> Result<Vec<Value>, String> {
-        let a = v.as_array().ok_or_else(|| format!("{what} is not a list"))?;
+        let a = v
+            .as_array()
+            .ok_or_else(|| format!("{what} is not a list"))?;
         rows.iter()
-            .map(|&i| a.get(i).cloned().ok_or_else(|| format!("{what} is too short")))
+            .map(|&i| {
+                a.get(i)
+                    .cloned()
+                    .ok_or_else(|| format!("{what} is too short"))
+            })
             .collect()
     };
-    let n_d = o.get("n_drives").and_then(Value::as_u64).ok_or("structure.json: no n_drives")? as usize;
+    let n_d = o
+        .get("n_drives")
+        .and_then(Value::as_u64)
+        .ok_or("structure.json: no n_drives")? as usize;
     if st.kind == "modal" {
         // The linear tier: `to_runner_structure`'s modal object (mm-x4-case/1).
         if present(sim, "softening").is_some() {
             return Err("structure.json: a modal structure with softening is not run here".into());
         }
         let mut modes = Vec::new();
-        for (k, m) in o["modes"].as_array().expect("checked at load").iter().enumerate() {
+        for (k, m) in o["modes"]
+            .as_array()
+            .expect("checked at load")
+            .iter()
+            .enumerate()
+        {
             let zeta = m
                 .get("zeta")
                 .and_then(Value::as_f64)
@@ -811,7 +886,11 @@ fn runner_structure(st: &Structure, rows: &[usize]) -> Result<Value, String> {
                 let mut out = Vec::new();
                 for &i in rows {
                     for j in 0..n_d {
-                        out.push(r.get(i * n_d + j).cloned().ok_or("simulator.residual is too short")?);
+                        out.push(
+                            r.get(i * n_d + j)
+                                .cloned()
+                                .ok_or("simulator.residual is too short")?,
+                        );
                     }
                 }
                 out
@@ -828,19 +907,27 @@ fn runner_structure(st: &Structure, rows: &[usize]) -> Result<Value, String> {
         }));
     }
     let mut modes = Vec::new();
-    for (k, m) in o["modes"].as_array().expect("checked at load").iter().enumerate() {
+    for (k, m) in o["modes"]
+        .as_array()
+        .expect("checked at load")
+        .iter()
+        .enumerate()
+    {
         let m = obj(m, &format!("mode {k}"))?;
         let mut mode = Map::new();
         for key in ["f_hz", "zeta", "drive_shape", "reference_amplitude"] {
             mode.insert(
                 key.into(),
-                m.get(key).cloned().ok_or_else(|| format!("mode {k} has no {key}"))?,
+                m.get(key)
+                    .cloned()
+                    .ok_or_else(|| format!("mode {k} has no {key}"))?,
             );
         }
         mode.insert(
             "output_shape".into(),
             Value::Array(pick(
-                m.get("output_shape").ok_or_else(|| format!("mode {k} has no output_shape"))?,
+                m.get("output_shape")
+                    .ok_or_else(|| format!("mode {k} has no output_shape"))?,
                 &format!("mode {k} output_shape"),
             )?),
         );
@@ -852,7 +939,13 @@ fn runner_structure(st: &Structure, rows: &[usize]) -> Result<Value, String> {
     let law = o.get("level_law").and_then(Value::as_object);
     let mut joint = Map::new();
     if let Some(l) = law {
-        for k in ["delta", "damping_gain", "freq_exponent", "damping_exponent", "decay_cycles"] {
+        for k in [
+            "delta",
+            "damping_gain",
+            "freq_exponent",
+            "damping_exponent",
+            "decay_cycles",
+        ] {
             if let Some(v) = l.get(k) {
                 joint.insert(k.into(), v.clone());
             }
@@ -864,7 +957,11 @@ fn runner_structure(st: &Structure, rows: &[usize]) -> Result<Value, String> {
             let mut out = Vec::new();
             for &i in rows {
                 for j in 0..n_d {
-                    out.push(r.get(i * n_d + j).cloned().ok_or("simulator.residual is too short")?);
+                    out.push(
+                        r.get(i * n_d + j)
+                            .cloned()
+                            .ok_or("simulator.residual is too short")?,
+                    );
                 }
             }
             out
@@ -904,7 +1001,9 @@ fn modal_plant_of(rs: &Value) -> Result<ModalPlant, String> {
         let ds = vec_of(&m["drive_shape"], &format!("mode {k} drive_shape"))?;
         let os = vec_of(&m["output_shape"], &format!("mode {k} output_shape"))?;
         if ds.len() != n_d || os.len() != n_o {
-            return Err(format!("mode {k}: the shapes are not {n_d} drives and {n_o} outputs"));
+            return Err(format!(
+                "mode {k}: the shapes are not {n_d} drives and {n_o} outputs"
+            ));
         }
         let mut md = Mode::new(
             m["f_hz"].as_f64().ok_or_else(|| format!("mode {k} f_hz"))?,
@@ -1076,8 +1175,7 @@ impl Backend for Edge {
                 }
             }
             if self.record {
-                r.inputs
-                    .extend(out[..n * n_ch].iter().map(|&v| v as f64));
+                r.inputs.extend(out[..n * n_ch].iter().map(|&v| v as f64));
             }
             r.frames += n as u64;
             if let Some(s) = self.stepper.as_ref() {
@@ -1098,7 +1196,8 @@ impl Backend for Edge {
             drive
         } else {
             self.gbuf.clear();
-            self.gbuf.extend(drive.iter().map(|&v| (v as f64 * self.gain) as f32));
+            self.gbuf
+                .extend(drive.iter().map(|&v| (v as f64 * self.gain) as f32));
             &self.gbuf
         };
         let a = self.main.write_drive(drive)?;
@@ -1145,7 +1244,11 @@ impl MimoSineLawFactory for LawTap {
         if let Some((r, l)) = self.ideal.lock().expect("ideal").clone() {
             let id = &mut s.identification;
             assert_eq!(r.dims(), id.response.dims(), "the ideal response's size");
-            assert_eq!(l.dims(), id.limit_response.dims(), "the ideal limit response's size");
+            assert_eq!(
+                l.dims(),
+                id.limit_response.dims(),
+                "the ideal limit response's size"
+            );
             id.response = r;
             id.limit_response = l;
             id.coherence.iter_mut().for_each(|c| *c = 1.0);
@@ -1205,7 +1308,10 @@ fn sweep_points(ticks: &[TickRecord], lo: f64) -> Vec<(usize, usize)> {
     let mut starts = Vec::new();
     let mut key: Option<(i64, i64)> = None;
     for (i, t) in ticks.iter().enumerate() {
-        let k = ((t.level_db * 1e6).round() as i64, bin_of(t.frequency_hz, lo));
+        let k = (
+            (t.level_db * 1e6).round() as i64,
+            bin_of(t.frequency_hz, lo),
+        );
         if key != Some(k) {
             starts.push(i);
             key = Some(k);
@@ -1234,7 +1340,14 @@ fn sweep_points(ticks: &[TickRecord], lo: f64) -> Vec<(usize, usize)> {
 /// of updates it stands for.
 fn stepped_points(ticks: &[TickRecord], judged: &[bool]) -> Vec<(usize, usize)> {
     let n = ticks.len();
-    let key = |t: &TickRecord| ((t.level_db * 1e6).round() as i64, t.frequency_hz.to_bits(), t.settling, t.miss);
+    let key = |t: &TickRecord| {
+        (
+            (t.level_db * 1e6).round() as i64,
+            t.frequency_hz.to_bits(),
+            t.settling,
+            t.miss,
+        )
+    };
     let same = |i: usize, j: usize| !judged[i] && !judged[j] && key(&ticks[i]) == key(&ticks[j]);
     let starts: Vec<usize> = (0..n)
         .filter(|&i| i == 0 || i + 1 == n || !same(i - 1, i) || !same(i, i + 1))
@@ -1301,7 +1414,8 @@ fn compare_responses(
         let sxx: f64 = pts.iter().map(|p| (p.0 - mf) * (p.0 - mf)).sum();
         let slope = if sxx > 0.0 { sxy / sxx } else { 0.0 };
         let c = ma - slope * mf;
-        let wrapped = (c + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let wrapped =
+            (c + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
         (slope * fs / std::f64::consts::TAU, wrapped.to_degrees())
     } else {
         (f64::NAN, f64::NAN)
@@ -1486,8 +1600,8 @@ fn test_length_s(t: &TestSpec) -> f64 {
 fn main() {
     let t_start = Instant::now();
     let a = args();
-    let case_bytes = std::fs::read(&a.case)
-        .unwrap_or_else(|e| refuse(format!("{}: {e}", a.case.display())));
+    let case_bytes =
+        std::fs::read(&a.case).unwrap_or_else(|e| refuse(format!("{}: {e}", a.case.display())));
     let case_v: Value = serde_json::from_slice(&case_bytes)
         .unwrap_or_else(|e| refuse(format!("{}: {e}", a.case.display())));
     let case = parse_case(&case_v).unwrap_or_else(|e| refuse(e));
@@ -1503,9 +1617,8 @@ fn main() {
     }
 
     // The structure.
-    let st_bytes = std::fs::read(a.root.join(&case.structure_file)).unwrap_or_else(|e| {
-        refuse(format!("{}: {e}", case.structure_file.display()))
-    });
+    let st_bytes = std::fs::read(a.root.join(&case.structure_file))
+        .unwrap_or_else(|e| refuse(format!("{}: {e}", case.structure_file.display())));
     let st_sha = sha256_hex(&st_bytes);
     if let Some(want) = &case.structure_sha256 {
         if *want != st_sha {
@@ -1568,7 +1681,10 @@ fn main() {
             let sha = sha256_hex(&b);
             if let Some(want) = &case.reference_sha256 {
                 if *want != sha {
-                    refuse(format!("{}: SHA-256 {sha}, the case says {want}", f.display()));
+                    refuse(format!(
+                        "{}: SHA-256 {sha}, the case says {want}",
+                        f.display()
+                    ));
                 }
             }
             (
@@ -1601,12 +1717,18 @@ fn main() {
 
     // The law.
     let Some(decl) = hertzforge_mimo_sine_laws::builtin_decl(&case.law_id) else {
-        refuse(format!("\"{}\" is not a built-in MIMO Sine law", case.law_id));
+        refuse(format!(
+            "\"{}\" is not a built-in MIMO Sine law",
+            case.law_id
+        ));
     };
     let specs = hertzforge_mimo_sine_laws::facts::host_manifest(decl).params;
     for k in case.law_params.keys() {
         if !specs.iter().any(|s| &s.key == k) {
-            refuse(format!("law.params: \"{k}\" is not a parameter of {}", case.law_id));
+            refuse(format!(
+                "law.params: \"{k}\" is not a parameter of {}",
+                case.law_id
+            ));
         }
     }
     let params = sds_control::mimo::adapter::params_of(&specs, &case.law_params);
@@ -1662,7 +1784,13 @@ fn main() {
         };
         controls.push(ControlChannel {
             channel: 1 + k,
-            profile: profile(&control_names[k], &reference.freqs, &amp, prot.alarm_db, prot.abort_db),
+            profile: profile(
+                &control_names[k],
+                &reference.freqs,
+                &amp,
+                prot.alarm_db,
+                prot.abort_db,
+            ),
             phase,
         });
     }
@@ -1674,7 +1802,13 @@ fn main() {
             let g: Vec<f64> = l.amp.iter().map(|&x| units::to_engine(x)).collect();
             LimitChannel {
                 channel: 1 + nc + j,
-                profile: profile(&l.output, &l.freqs, &g, prot.limit_alarm_db, prot.limit_abort_db),
+                profile: profile(
+                    &l.output,
+                    &l.freqs,
+                    &g,
+                    prot.limit_alarm_db,
+                    prot.limit_abort_db,
+                ),
             }
         })
         .collect();
@@ -1856,7 +1990,11 @@ fn main() {
             "type": "sweep", "band_hz": [band.0, band.1], "rate_oct_per_min": rate,
             "direction": if down { "down" } else { "up" },
             "start_hz": if down { band.1 } else { band.0 }, "sweeps": 1}),
-        TestSpec::Stepped { band, per_octave, step_s } => json!({
+        TestSpec::Stepped {
+            band,
+            per_octave,
+            step_s,
+        } => json!({
             "type": "stepped", "band_hz": [band.0, band.1], "steps_per_octave": per_octave,
             "spacing": "log", "step_s": step_s}),
         TestSpec::Dwell { freq_hz, dwell_s } => json!({
@@ -2099,9 +2237,22 @@ fn main() {
     let ch_name = |kind: &str, i: u8| -> Value {
         let i = i as usize;
         match kind {
-            "control" => control_names.get(i).cloned().map(Value::from).unwrap_or(Value::Null),
-            "limit" => limit_names.get(i).cloned().map(Value::from).unwrap_or(Value::Null),
-            "drive" => st.drive_names.get(i).cloned().map(Value::from).unwrap_or(Value::Null),
+            "control" => control_names
+                .get(i)
+                .cloned()
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+            "limit" => limit_names
+                .get(i)
+                .cloned()
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+            "drive" => st
+                .drive_names
+                .get(i)
+                .cloned()
+                .map(Value::from)
+                .unwrap_or(Value::Null),
             _ => Value::Null,
         }
     };
@@ -2110,7 +2261,9 @@ fn main() {
         .find(|e| matches!(e.kind, EventKind::Stopping { .. }))
         .copied();
     let (guard, channel) = match outcome {
-        Some(Outcome::ControlAbort { control }) => (Some("control_abort"), ch_name("control", control)),
+        Some(Outcome::ControlAbort { control }) => {
+            (Some("control_abort"), ch_name("control", control))
+        }
         Some(Outcome::LimitAbort { limit }) => (Some("limit_abort"), ch_name("limit", limit)),
         Some(Outcome::DriveAbort { drive }) => (Some("drive_abort"), ch_name("drive", drive)),
         Some(Outcome::Kinematic { control }) => (Some("kinematic"), ch_name("control", control)),
@@ -2148,8 +2301,10 @@ fn main() {
     for e in &events {
         let kind = e.kind.as_str();
         let n = kept.entry(kind).or_default();
-        if matches!(e.kind, EventKind::Alarm { .. } | EventKind::AlarmCleared { .. })
-            && *n >= EVENTS_KEPT_PER_KIND
+        if matches!(
+            e.kind,
+            EventKind::Alarm { .. } | EventKind::AlarmCleared { .. }
+        ) && *n >= EVENTS_KEPT_PER_KIND
         {
             *dropped.entry(kind).or_default() += 1;
             continue;
@@ -2159,15 +2314,21 @@ fn main() {
             EventKind::Held { by_law } => json!({"by_law": by_law}),
             EventKind::ManualFrequency { to_hz } => json!({"to_hz": n9(to_hz)}),
             EventKind::NotchIn { depth } => json!({"depth": n9(depth)}),
-            EventKind::Alarm { control, error_db } => json!({"control": ch_name("control", control), "error_db": n9(error_db)}),
+            EventKind::Alarm { control, error_db } => {
+                json!({"control": ch_name("control", control), "error_db": n9(error_db)})
+            }
             EventKind::AlarmCleared { control } => json!({"control": ch_name("control", control)}),
             EventKind::LawMiss { reason } => json!({"reason": reason}),
             EventKind::OverCeiling { scale } => json!({"scale": n9(scale)}),
-            EventKind::Stopping { outcome } | EventKind::Ended { outcome } => json!({"outcome": outcome.as_str()}),
+            EventKind::Stopping { outcome } | EventKind::Ended { outcome } => {
+                json!({"outcome": outcome.as_str()})
+            }
             _ => json!({}),
         };
-        ev_json.push(json!({"time_s": n9(e.time_s), "index": e.index, "frequency_hz": n9(e.frequency_hz),
-            "level_db": n9(e.level_db), "kind": kind, "detail": detail}));
+        ev_json.push(
+            json!({"time_s": n9(e.time_s), "index": e.index, "frequency_hz": n9(e.frequency_hz),
+            "level_db": n9(e.level_db), "kind": kind, "detail": detail}),
+        );
     }
     run["events"] = Value::Array(ev_json);
     run["events_dropped"] = json!(dropped);
@@ -2248,8 +2409,16 @@ fn main() {
                 emin.push(Value::Null);
                 emax.push(Value::Null);
             } else {
-                emin.push(n9s((0..nc).map(|k| j.iter().map(|t| t.error_db[k]).fold(f64::INFINITY, f64::min))));
-                emax.push(n9s((0..nc).map(|k| j.iter().map(|t| t.error_db[k]).fold(f64::NEG_INFINITY, f64::max))));
+                emin.push(n9s((0..nc).map(|k| {
+                    j.iter()
+                        .map(|t| t.error_db[k])
+                        .fold(f64::INFINITY, f64::min)
+                })));
+                emax.push(n9s((0..nc).map(|k| {
+                    j.iter()
+                        .map(|t| t.error_db[k])
+                        .fold(f64::NEG_INFINITY, f64::max)
+                })));
             }
         }
         hist["bin_updates"] = json!(upd);
@@ -2275,7 +2444,10 @@ fn main() {
             let mut per = vec![f64::NEG_INFINITY; nd];
             let mut nrm = f64::NEG_INFINITY;
             for t in &ticks[s..e.min(ticks.len())] {
-                let mags: Vec<f64> = t.drive[..nd].iter().map(|d| C64::new(n9f(d.re), n9f(d.im)).norm()).collect();
+                let mags: Vec<f64> = t.drive[..nd]
+                    .iter()
+                    .map(|d| C64::new(n9f(d.re), n9f(d.im)).norm())
+                    .collect();
                 for (p, m) in per.iter_mut().zip(&mags) {
                     *p = p.max(*m);
                 }
@@ -2313,10 +2485,17 @@ fn main() {
                     true_max.push(Value::Null);
                     continue;
                 }
-                let rows: Vec<Vec<f64>> = ticks[s..e.min(ticks.len())].iter().map(|t| modes_at(t)).collect();
+                let rows: Vec<Vec<f64>> = ticks[s..e.min(ticks.len())]
+                    .iter()
+                    .map(|t| modes_at(t))
+                    .collect();
                 let m = rows[0].len();
-                true_min.push(n9s((0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::INFINITY, f64::min))));
-                true_max.push(n9s((0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::NEG_INFINITY, f64::max))));
+                true_min.push(n9s(
+                    (0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::INFINITY, f64::min))
+                ));
+                true_max.push(n9s(
+                    (0..m).map(|k| rows.iter().map(|r| r[k]).fold(f64::NEG_INFINITY, f64::max))
+                ));
             }
         }
     }
@@ -2378,7 +2557,11 @@ fn main() {
     drop(tap);
 
     // The clock.
-    let mut calls: Vec<f64> = ticks.iter().filter(|t| t.law_called).map(|t| t.law_s).collect();
+    let mut calls: Vec<f64> = ticks
+        .iter()
+        .filter(|t| t.law_called)
+        .map(|t| t.law_s)
+        .collect();
     let over = calls.iter().filter(|&&s| s > setup_budget_s).count();
     calls.sort_by(f64::total_cmp);
     let timing = json!({
@@ -2453,7 +2636,11 @@ mod tests {
         v["test"] = json!({"type": "sweep", "band_hz": [20, 2000], "rate_oct_per_min": 1, "direction": "down"});
         assert_eq!(
             parse_case(&v).unwrap().test,
-            TestSpec::Sweep { band: (20.0, 2000.0), rate: 1.0, down: true }
+            TestSpec::Sweep {
+                band: (20.0, 2000.0),
+                rate: 1.0,
+                down: true
+            }
         );
     }
 
@@ -2532,7 +2719,10 @@ mod tests {
         }
         // The spans that are not judged: first and last of each run of the same key.
         let starts: Vec<usize> = p.iter().map(|x| x.0).collect();
-        assert_eq!(starts, vec![0, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 18, 19, 20, 21, 23]);
+        assert_eq!(
+            starts,
+            vec![0, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 18, 19, 20, 21, 23]
+        );
         assert_eq!(p.last().copied(), Some((23, 24)));
     }
 
