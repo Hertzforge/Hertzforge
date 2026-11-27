@@ -37,6 +37,7 @@ from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
+from ..drawing.viz.geometry import forget_drawings
 from . import (
     dialogs,
     display_units,
@@ -88,6 +89,12 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.upl
                    'project.setups', 'project.save_setup', 'project.open_setup',
                    'project.channel_table', 'project.put_channel_table',
                    'project.seeds', 'project.seed')
+
+#: the requests that change no geometry, so the drawings the views kept stay good across
+#: them; any other request forgets them as it starts and as it ends
+#: (`viz.geometry.drawing_once`)
+KEEPS_DRAWINGS = frozenset({'catalog.list', 'units.system', 'op.cancel', 'project.show',
+                            'project.actions', 'project.children'})
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -804,6 +811,9 @@ class Connection:
         ident, method = request['id'], request.get('method')
         params = request.get('params', {})
         started = time.perf_counter()
+        keeps = method in KEEPS_DRAWINGS
+        if not keeps:
+            forget_drawings()
         try:
             if method == 'catalog.list':
                 _only(params, (), 'catalog.list')
@@ -899,6 +909,9 @@ class Connection:
             frame = _error(ident, 'internal',
                            f'{method} failed inside the service: '
                            f'{type(error).__name__}: {error}')
+        finally:
+            if not keeps:
+                forget_drawings()
         log.info('%s #%s %.3f s', method, ident, time.perf_counter() - started)
         try:
             await self.send(frame)

@@ -3,7 +3,9 @@ to know, with none of the code that draws it."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -136,44 +138,202 @@ def element_cells(geometry: Geometry,
     # One rule for every scene because the HTML export once drew a brick
     # as one eight-sided polygon in node order, which folds it into a bow
     # tie (Brandon, 2026-10-11, the website's brick examples).
-    id_to_row = {int(i): r for r, i in enumerate(geometry.node_id)}
+    drawn = (drawn_once('cells', geometry, lambda: _cells(geometry, None)) if indices is None
+             else _cells(geometry, indices))
+    faces, lines, points, skins = ({color: list(entries) for color, entries in part.items()}
+                                   for part in drawn)
+    if separate_skins:
+        return faces, lines, points, skins
+    for color, skin in skins.items():
+        faces.setdefault(color, []).extend(skin)
+    return faces, lines, points
+
+
+#: how many geometries' drawings are kept at once
+KEPT = 4
+
+
+class _Kept:
+    """The drawings `drawn_once` keeps, by kind and geometry, with the
+    generation `forget_drawings` was at when each was drawn."""
+
+    def __init__(self) -> None:
+        self.lock: threading.Lock = threading.Lock()
+        self.generation: int = 0
+        self.drawings: dict[tuple[str, int], tuple[Any, int, Any]] = {}
+        self.reading: threading.local = threading.local()
+
+
+_kept = _Kept()
+
+
+@contextmanager
+def drawing_once() -> Iterator[None]:
+    """While it holds, `element_cells` (and the mesh drawn from it) draws a
+    geometry once and hands out copies after, and keeps the drawing for the
+    requests that follow until `forget_drawings`: one view of a large mesh asks
+    for it several times, and every click on the mesh asks for a view. Only for
+    work that changes no geometry; whatever may change one calls
+    `forget_drawings` before and after."""
+    before = getattr(_kept.reading, 'on', False)
+    _kept.reading.on = True
+    try:
+        yield
+    finally:
+        _kept.reading.on = before
+
+
+def forget_drawings() -> None:
+    """Drop every drawing `drawing_once` kept, and any being drawn now, so a
+    geometry edited from here on is drawn as it is."""
+    with _kept.lock:
+        _kept.generation += 1
+        _kept.drawings.clear()
+
+
+def drawn_once(kind: str, geometry: Geometry, draw: Any) -> Any:
+    """`draw()`, kept for `geometry` under `kind` while `drawing_once` holds,
+    drawn afresh otherwise. A drawing begun before `forget_drawings` was last
+    called is used once: it carries the generation it began in, and is not
+    handed out in a later one."""
+    if not getattr(_kept.reading, 'on', False):
+        return draw()
+    key = (kind, id(geometry))
+    with _kept.lock:
+        generation = _kept.generation
+        kept = _kept.drawings.get(key)
+        if kept is not None and kept[0] is geometry and kept[1] == generation:
+            _kept.drawings[key] = _kept.drawings.pop(key)
+            return kept[2]
+    drawn = draw()
+    with _kept.lock:
+        _kept.drawings.pop(key, None)
+        _kept.drawings[key] = (geometry, generation, drawn)
+        held = {k[1] for k in _kept.drawings}
+        while len(held) > KEPT:
+            oldest = next(iter(_kept.drawings))[1]
+            for k in [k for k in _kept.drawings if k[1] == oldest]:
+                del _kept.drawings[k]
+            held.discard(oldest)
+    return drawn
+
+
+def _cells(geometry: Geometry, indices: Sequence[int] | None) -> tuple[dict, dict, dict, dict]:
+    """`element_cells` with the skins apart: (faces, lines, points, skins)."""
+    row_of = _node_rows(geometry)
 
     def rows(node_ids):
-        return [id_to_row[int(i)] for i in node_ids]
+        return row_of(node_ids).tolist()
 
+    order = (np.arange(len(geometry.elem_conn)) if indices is None
+             else np.asarray(indices, dtype=np.int64).reshape(-1))
+    codes = np.asarray(geometry.elem_type, dtype=np.int64)[order]
+    volume_codes = [c for c in np.unique(codes).tolist() if ELEMENT_TYPES[c][2] == 'volume']
+    volume = np.isin(codes, volume_codes)
     faces: dict[int, list[list[int]]] = {}
     lines: dict[int, list[list[int]]] = {}
     points: dict[int, list[int]] = {}
-    skins: dict[int, dict[tuple[int, ...], list[int]]] = {}
-    for i in (range(len(geometry.elem_conn)) if indices is None else indices):
+    for i in order[~volume].tolist():
         code, color = int(geometry.elem_type[i]), int(geometry.elem_color[i])
         conn = geometry.elem_conn[i]
         render = ELEMENT_TYPES[code][2]
         polygons, segments = element_shapes(code, conn)
         if render == 'face':
             faces.setdefault(color, []).extend(rows(face) for face in polygons)
-        elif render == 'volume':
-            # a solid draws as its skin: the faces of its cells that no
-            # other cell of the color shares (2026-09-30; a polyline
-            # through every corner drew the mesh's insides as a tangle)
-            skin = skins.setdefault(color, {})
-            for face in polygons:
-                corners = rows(face)
-                key = tuple(sorted(corners))
-                if key in skin:
-                    del skin[key]
-                else:
-                    skin[key] = corners
         elif render == 'line':
             lines.setdefault(color, []).extend(rows(pair) for pair in segments)
         elif render == 'point':
             points.setdefault(color, []).extend(rows(conn))
-    if separate_skins:
-        return faces, lines, points, {color: list(skin.values())
-                                      for color, skin in skins.items()}
-    for color, skin in skins.items():
-        faces.setdefault(color, []).extend(skin.values())
-    return faces, lines, points
+    return faces, lines, points, _skins(geometry, order[volume], row_of)
+
+
+def _node_rows(geometry: Geometry):
+    """A function from node ids to their rows in `node_id`, the last row
+    for an id listed twice, raising KeyError for an id that is not there."""
+    ids = np.asarray(geometry.node_id, dtype=np.int64).reshape(-1)
+    sorter = np.argsort(ids, kind='stable')
+
+    def row_of(node_ids: ArrayLike) -> np.ndarray:
+        wanted = np.asarray(node_ids, dtype=np.int64)
+        at = np.searchsorted(ids, wanted, side='right', sorter=sorter) - 1
+        found = (at >= 0) & (ids[sorter[at.clip(0)]] == wanted) if len(ids) else at >= len(ids)
+        if not found.all():
+            raise KeyError(int(wanted[~found].flat[0]))
+        return sorter[at]
+
+    return row_of
+
+
+def _skins(geometry: Geometry, elements: np.ndarray, row_of) -> dict[int, list[list[int]]]:
+    """The skin of each color's solids, as `element_cells` returns it: every
+    face of their cells (`solid_faces`) that an odd number of the color's
+    cells name, as the corner rows of the last cell that names it, in the
+    order those cells come in `elements`. A solid draws as its skin because a
+    polyline through every corner drew a mesh's insides as a tangle."""
+    # The faces are matched as arrays: a loop over the cells one at a time
+    # took seconds per view of a 750,000-hex mesh, and the views a few
+    # clicks asked for queued behind each other for minutes.
+    stride = 8                                # more than any cell's faces
+    colors = np.asarray(geometry.elem_color, dtype=np.int64)[elements]
+    _, first = np.unique(colors, return_index=True)
+    out: dict[int, list[list[int]]] = {int(c): [] for c in colors[np.sort(first)]}
+    sizes = np.fromiter((len(geometry.elem_conn[i]) for i in elements.tolist()),
+                        dtype=np.int64, count=len(elements))
+    by_length: dict[int, list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
+    for size in np.unique(sizes).tolist():
+        cell_faces = solid_faces(size)
+        if not cell_faces:
+            continue
+        at = np.flatnonzero(sizes == size)
+        cells = row_of(np.stack([geometry.elem_conn[i] for i in elements[at].tolist()]))
+        for j, face in enumerate(cell_faces):
+            by_length.setdefault(len(face), []).append(
+                (at * stride + j, colors[at], cells[:, list(face)]))
+    kept: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+    for parts in by_length.values():
+        where = np.concatenate([p[0] for p in parts])
+        color = np.concatenate([p[1] for p in parts])
+        corners = np.concatenate([p[2] for p in parts])
+        sort = np.argsort(where, kind='stable')
+        where, color, corners = where[sort], color[sort], corners[sort]
+        words = _packed(np.column_stack([color - color.min(), np.sort(corners, axis=1)]))
+        # lexsort is stable, so each face's last cell ends its run
+        by_key = np.lexsort(words[::-1])
+        ordered = [word[by_key] for word in words]
+        differs = np.zeros(max(len(by_key) - 1, 0), dtype=bool)
+        for word in ordered:
+            differs |= word[1:] != word[:-1]
+        starts = np.flatnonzero(np.r_[True, differs])
+        ends = np.r_[starts[1:], len(by_key)]
+        odd = (ends - starts) % 2 == 1
+        keep = np.sort(by_key[ends[odd] - 1])
+        kept.append((where[keep], color[keep], corners[keep]))
+    if kept:
+        where = np.concatenate([k[0] for k in kept])
+        sort = np.argsort(where, kind='stable')
+        color = np.concatenate([k[1] for k in kept])[sort]
+        corners = [row for k in kept for row in k[2].tolist()]
+        for c, row in zip(color.tolist(), (corners[s] for s in sort.tolist())):
+            out[c].append(row)
+    return out
+
+
+def _packed(columns: np.ndarray) -> list[np.ndarray]:
+    """The rows of a non-negative integer array as a few unsigned 64-bit
+    words each, as many columns to a word as their widths allow, earlier
+    columns in higher bits, so the words sort in the order the rows do."""
+    words: list[np.ndarray] = []
+    used = 64
+    for column in columns.T:
+        column = column.astype(np.uint64)
+        width = max(int(column.max()).bit_length(), 1) if len(column) else 1
+        if used + width > 64:
+            words.append(column.copy())
+            used = width
+        else:
+            words[-1] = (words[-1] << np.uint64(width)) | column
+            used += width
+    return words
 
 
 AXIS_COLORS = ('#e5534b', '#3fb950', '#4c92d9')
