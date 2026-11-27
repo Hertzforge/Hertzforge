@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "msnb-case/1",
+  "title": "MIMO Sine benchmark case (msnb_run)",
+  "description": "One MIMO Sine case: a structure of the Open Benchmark Set, a built-in law, a test, a reference and the run's settings. Every path is relative to the runner's --root. Amplitudes are m/s^2 peak, drives volts. See FORMAT_RUN.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "case_id", "structure", "law", "test", "reference"],
+  "$defs": {
+    "relpath": {"type": "string", "minLength": 1, "not": {"pattern": "(^/)|(^~)|(^[A-Za-z]:)|(\\.\\.)"}},
+    "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "band": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2},
+    "volts": {"oneOf": [
+      {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+      {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10}, "minItems": 1}
+    ]},
+    "reference_body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "controls", "frequency_hz", "amplitude_m_s2_pk", "phase_deg"],
+      "properties": {
+        "schema": {"const": "msnb-reference/1"},
+        "controls": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "frequency_hz": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2},
+        "amplitude_m_s2_pk": {"type": "array", "items": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}}},
+        "phase_deg": {"type": "array", "items": {"type": "array", "items": {"type": "number", "exclusiveMinimum": -180, "maximum": 180}}}
+      }
+    }
+  },
+  "properties": {
+    "schema": {"const": "msnb-case/1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "structure": {
+      "type": "object", "additionalProperties": false, "required": ["file"],
+      "properties": {"file": {"$ref": "#/$defs/relpath"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "controls": {"type": ["array", "null"], "items": {"type": "string"}, "minItems": 1},
+    "fs_hz": {"type": ["number", "null"], "minimum": 1000, "maximum": 204800},
+    "tick_s": {"type": ["number", "null"], "minimum": 0.002, "maximum": 1.0},
+    "law": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {
+        "id": {"enum": ["matrix", "paired", "ratio", "steepest_descent", "secant"]},
+        "params": {"type": ["object", "null"]}
+      }
+    },
+    "test": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type", "band_hz", "rate_oct_per_min"],
+         "properties": {"type": {"const": "sweep"}, "band_hz": {"$ref": "#/$defs/band"},
+                        "rate_oct_per_min": {"type": "number", "exclusiveMinimum": 0},
+                        "direction": {"enum": ["up", "down", null]}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "band_hz", "steps_per_octave", "step_s"],
+         "properties": {"type": {"const": "stepped"}, "band_hz": {"$ref": "#/$defs/band"},
+                        "steps_per_octave": {"type": "number", "exclusiveMinimum": 0},
+                        "step_s": {"type": "number", "exclusiveMinimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "freq_hz", "dwell_s"],
+         "properties": {"type": {"const": "dwell"}, "freq_hz": {"type": "number", "exclusiveMinimum": 0},
+                        "dwell_s": {"type": "number", "exclusiveMinimum": 0}}}
+      ]
+    },
+    "reference": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "file": {"$ref": "#/$defs/relpath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "inline": {"$ref": "#/$defs/reference_body"},
+        "phase": {"enum": ["specified", "amplitude_only", "auto", null]}
+      },
+      "oneOf": [{"required": ["file"]}, {"required": ["inline"]}]
+    },
+    "full_level_scale": {"type": ["number", "null"], "exclusiveMinimum": 0},
+    "ladder": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "properties": {
+        "levels_db": {"type": "array", "items": {"type": "number", "minimum": -60, "maximum": 12}, "minItems": 1},
+        "rung": {"oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["seconds"], "properties": {"seconds": {"type": "number", "exclusiveMinimum": 0}}},
+          {"type": "object", "additionalProperties": false, "required": ["sweeps"], "properties": {"sweeps": {"type": "integer", "minimum": 1}}},
+          {"type": "null"}
+        ]}
+      }
+    },
+    "drives": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "properties": {"ceiling_vpk": {"$ref": "#/$defs/volts"}, "abort_vpk": {"$ref": "#/$defs/volts"},
+                     "gain": {"type": "number", "exclusiveMinimum": 0}}
+    },
+    "noise": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "properties": {"rms_m_s2": {"type": "number", "minimum": 0}, "seed": {"type": "integer", "minimum": 0}}
+    },
+    "identification_seed": {"type": ["integer", "null"], "minimum": 0},
+    "limits": {
+      "type": ["array", "null"], "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["output", "bound"],
+        "properties": {
+          "output": {"type": "string"},
+          "bound": {
+            "type": "object", "additionalProperties": false, "required": ["frequency_hz", "amplitude_m_s2_pk"],
+            "properties": {
+              "frequency_hz": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2},
+              "amplitude_m_s2_pk": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2}
+            }
+          }
+        }
+      }
+    },
+    "protective": {"enum": ["default", "widened", null]},
+    "max_test_s": {"type": ["number", "null"], "exclusiveMinimum": 0}
+  }
+}
