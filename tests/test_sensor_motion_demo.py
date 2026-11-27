@@ -119,7 +119,40 @@ def test_four_triaxial_sensors_fit_once_released_and_nothing_is_said(random_test
     start = mg._started(motion.basis, mg._sensors_of(motion.channels), None)
     assert start is not None and start[1] > mg.POOR_MISFIT
     found = mg.fit_poses(motion)
-    assert found.misfit < mg.GOOD_MISFIT and found.starts == 2
+    # the first fit and at least one after the release; how many more depends on which
+    # minimum the released fit's linear start finds
+    assert found.misfit < mg.GOOD_MISFIT and found.starts >= 2
     assert not found.notes and not found.left_out
     assert [(one.node, one.axes, one.reversed, one.note) for one in found.sensors] == [
         (node, (0, 1, 2), (), '') for node in (1, 2, 3, 4)]
+
+
+def test_four_triaxial_sensors_fit_from_any_basis_of_their_motion(random_test):
+    """The fit reads the subspace the motion spans, not the basis it is
+    given for it. Released, four tri-axial sensors give exactly as many
+    linear conditions as unknowns, so the start the release is fitted
+    from is set by the last digits of the data, as a change of basis or
+    of thread count leaves them, and its refine can stop in a minimum
+    near the warning level. Read from that partial fit, the released
+    sensor's channels do not meet, and a sound sensor is said to have
+    every axis wrong. When releasing from linear starts alone does not
+    make the rest fit, the release is fitted from random starts too; some
+    of these bases need them, and the whole layout's random starts alone
+    land wrong. The result must not depend on which basis is given."""
+    from dataclasses import replace
+
+    from scipy.stats import special_ortho_group
+
+    from hertzforge.core.data import parse_dof
+
+    history = random_test['BARC Random']
+    rows = [row for row, dof in enumerate(history.response_dof) if parse_dof(dof)[0] in (1, 2, 3, 4)]
+    motion = mg.rigid_motion([history], records=[rows])
+    misfits, said = [], []
+    for seed in range(24):
+        turn = special_ortho_group.rvs(mg.MOTIONS, random_state=seed)
+        found = mg.fit_poses(replace(motion, basis=motion.basis @ turn))
+        misfits.append(found.misfit)
+        said.extend(found.notes + found.left_out)
+    assert max(misfits) < mg.GOOD_MISFIT, misfits
+    assert said == []

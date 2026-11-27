@@ -742,12 +742,13 @@ def _refine(basis: np.ndarray, sensors: Mapping[int, list], start: np.ndarray,
     return fit.x, float(np.sqrt(2.0 * fit.cost / MOTIONS))
 
 
-def _started(basis: np.ndarray, groups: Mapping[Any, list], rng: np.random.Generator | None
-             ) -> tuple[np.ndarray, float, int, bool] | None:
+def _started(basis: np.ndarray, groups: Mapping[Any, list], rng: np.random.Generator | None,
+             enough: float = POOR_MISFIT) -> tuple[np.ndarray, float, int, bool] | None:
     """A fit of `groups`: its poses, its misfit, how many starts it took
     and whether it had a linear one. With no `rng` only the linear start
     is tried, and None is returned where the groups give too few
-    conditions for one."""
+    conditions for one. Random starts are tried when there is no linear
+    start or it leaves more than `enough`."""
     tried: list[tuple[float, np.ndarray]] = []
     lines = _linear_start(basis, groups)
     if lines is not None:
@@ -755,7 +756,7 @@ def _started(basis: np.ndarray, groups: Mapping[Any, list], rng: np.random.Gener
         tried.append((misfit, poses))
     if rng is None:
         return (tried[0][1], tried[0][0], 1, True) if tried else None
-    if not tried or tried[0][0] > POOR_MISFIT:
+    if not tried or tried[0][0] > enough:
         for _ in range(AFTER_LINEAR if tried else STARTS):
             start = np.concatenate([np.concatenate([Rotation.random(random_state=rng).as_rotvec(),
                                                     rng.standard_normal(3)])
@@ -805,14 +806,20 @@ def _one_body(lines: np.ndarray, members: Sequence[tuple], size: float) -> list[
     return list(min(fits, key=lambda pair: scores[pair][0] / SQUARE + scores[pair][1] / (MEETING * size)))
 
 
-def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarray
+def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarray,
+                 rng: np.random.Generator | None = None
                  ) -> tuple[dict, np.ndarray, float, set[int], int] | None:
     """A poor fit looked into for DOFs that are labeled wrong.
 
     The sensor the fit explains worst is released: each of its channels
     is fitted as a sensor of one axis, bound by nothing its node says of
-    it. When the rest then fit, up to `MOST_RELEASED` sensors released,
-    the released channels' own lines say what they are. Those of one node
+    it. When the rest then fit to within `GOOD_MISFIT`, up to
+    `MOST_RELEASED` sensors released, the released channels' own lines
+    say what they are. Each release is fitted from the linear start and,
+    given `rng`, one that leaves more than `GOOD_MISFIT` from
+    `AFTER_LINEAR` random starts as well. A random start is kept only
+    when it fits; otherwise another sensor is still wrong, and the next
+    is released from where the linear start left it. Those of one node
     that are square to each other and meet are that sensor after all
     (`_one_body`): a right-handed set needed only the better start, and a
     left-handed one has an axis reversed or two exchanged, and is fitted
@@ -828,6 +835,7 @@ def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarra
     trial: dict[Any, list] = dict(groups)
     released: list[int] = []
     fit = None
+    tries = 1
     for _ in range(MOST_RELEASED):
         left = _left_over(basis, trial, poses)
         whole = [(_share(left, basis, members), key) for key, members in trial.items()
@@ -840,14 +848,28 @@ def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarra
                  for inner, inner_members in (
                      [((key, axis), [(row, axis, sign)]) for row, axis, sign in members]
                      if key == worst else [(key, members)])}
+        # Released, four sensors of three axes leave exactly as many linear conditions as
+        # unknowns, so the linear start is set by the noise and the refine from it can settle
+        # in a minimum near POOR_MISFIT that depends on the last digits of the data. The lines
+        # of a partial fit say nothing about the released channels: that minimum once called
+        # every axis of a sound sensor wrong. A random start is kept only when it fits: while
+        # another sensor is still wrong, random starts find layouts that fit the rest better
+        # than the linear start and point the next release at a sound sensor.
         fit = _started(basis, trial, None)
         if fit is None:
             return None
+        taken = 1
+        if rng is not None and fit[1] > GOOD_MISFIT:
+            again = _started(basis, trial, rng, GOOD_MISFIT)
+            taken = again[2]
+            if again[1] <= GOOD_MISFIT:
+                fit = again
         released.append(worst)
+        tries += taken
         poses = fit[0]
-        if fit[1] <= POOR_MISFIT:
+        if fit[1] <= GOOD_MISFIT:
             break
-    if fit is None or fit[1] > POOR_MISFIT:
+    if fit is None or fit[1] > GOOD_MISFIT:
         return None
     lines = _lines(poses, trial, count)
     places = np.array([poses[6 * k + 3:6 * k + 6] for k, (key, members) in enumerate(trial.items())
@@ -876,7 +898,7 @@ def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarra
     again, misfit = _refine(basis, found, _poses_from(lines, found))
     if misfit > POOR_MISFIT:
         return None
-    return found, again, misfit, left_handed, len(released) + 1
+    return found, again, misfit, left_handed, tries
 
 
 def _label_notes(channels: Sequence[Channel], groups: Mapping[Any, list], poses: np.ndarray,
@@ -953,7 +975,9 @@ def fit_poses(motion: Motion, seed: int = 0) -> Recovered:
     rng = np.random.default_rng(seed)
     left_handed: set[int] = set()
     first = _started(basis, groups, None)
-    looked = (_looked_into(basis, groups, first[0])
+    # the random starts of a release cost seconds on a large layout, so they are tried only
+    # when releasing from the linear starts alone does not make the rest fit
+    looked = (_looked_into(basis, groups, first[0]) or _looked_into(basis, groups, first[0], rng)
               if first is not None and first[1] > POOR_MISFIT else None)
     if looked is not None:
         groups, poses, misfit, left_handed, starts = looked

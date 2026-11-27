@@ -558,6 +558,26 @@ def test_two_left_handed_sensors_are_both_named(layout, history):
     assert _places_off(layout, found) < 2e-3 and _as_the_data_has_it(layout, found) < 0.25
 
 
+def test_two_left_handed_sensors_are_both_named_from_any_basis_of_their_motion(history):
+    """Released first, sensor 40 leaves sensor 20 still wrong among the
+    rest, and the fit stays poor. The next sensor released is chosen from
+    that fit's poses, so it must be the linear start's: random starts there
+    find layouts that fit the rest better and point at a sound sensor,
+    which the basis the motion is given in decides."""
+    from dataclasses import replace
+
+    motion = mg.rigid_motion([_relabeled(history, {'20Z+': '20Z-', '40X+': '40Y+',
+                                                   '40Y+': '40X+'})], averagings=[FRAMES])
+    rng = np.random.default_rng(3)
+    named = []
+    for _ in range(8):
+        turn, _r = np.linalg.qr(rng.standard_normal((mg.MOTIONS, mg.MOTIONS)))
+        found = mg.fit_poses(replace(motion, basis=motion.basis @ turn))
+        named.append(({one.node for one in found.sensors if one.reversed},
+                      found.misfit < mg.GOOD_MISFIT))
+    assert named == [({20, 40}, True)] * 8
+
+
 def test_a_channel_on_the_wrong_node_is_left_out_and_said_where_it_measures(layout, history):
     """The Z channels of two tri-axial sensors exchanged: each is left out of
     the node it is labeled at and said to pass through the other sensor, and
