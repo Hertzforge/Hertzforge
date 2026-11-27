@@ -116,7 +116,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'add_solid_cone': 'Add Cone', 'add_solid_sphere': 'Add Sphere', 'add_solid_section': 'Add Section',
     'add_solid_plate': 'Add Plate', 'add_solid_disk': 'Add Disk', 'add_solid_hole': 'Add Hole',
     'edit_solid': 'Edit Solid', 'move_solids': 'Move Part', 'copy_solids': 'Copy Solids',
-    'reorder_solids': 'Reorder', 'combine_solids': 'Combine', 'separate_solids': 'Take Apart',
+    'reorder_solids': 'Reorder', 'combine_solids': 'Boolean', 'separate_solids': 'Take Apart',
     'delete_solids': 'Delete Solids', 'pattern_solids': 'Pattern', 'mesh_solids': 'Mesh',
     'mate_surfaces': 'Mate',
     'delete_mated_surfaces': 'Delete Mates', 'set_view': 'Set View', 'tone_readout': 'Tones',

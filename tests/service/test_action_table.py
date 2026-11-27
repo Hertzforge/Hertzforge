@@ -219,7 +219,7 @@ def test_a_part_offers_its_own_verbs_alone(plate):
     solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
     assert set(SHAPES) <= set(solids)
     assert 'Mesh' not in solids, 'Mesh meshes the solids picked'
-    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
+    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Boolean'} & set(solids)
     assert 'Reorder' not in solids, 'a solid is reordered by dragging it in the tree'
     assert 'Show Solids' not in solids, 'picking the row shows them'
     nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
@@ -263,17 +263,17 @@ def test_solids_picked_together_combine(validate):
             {'geometry': 'Part'}, objects={'Part': 'geometry'}, verbs={'Part': []}))
     one, together = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': 1},
                           validate=validate)
-    assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
+    assert one['parts'] == ['solid'] and 'Boolean' not in verbs_in(one)
     # a block is edited in its own Add form, which takes the place of Edit Solid
     assert row(one, 'Edit')['fill']['solid'] == '1' and 'Edit Solid' not in verbs_in(one)
     # Mesh on the Solids row meshes every part; on solids picked, those
     assert row(one, 'Mesh')['fill']['solids'] == '1' and 'geometry' in row(one, 'Mesh')['modules']
-    assert row(together, 'Combine')['candidates'] == ['2', '3']
+    assert row(together, 'Boolean')['candidates'] == ['2', '3']
     picked = {'name': 'Part', 'kind': 'solid', 'id': 1, 'ids': [1, 3]}
     columns = table(state, 'Part', part=picked, validate=validate)
     both = columns[0]
     assert both['parts'] == ['solid', 'solid']
-    for verb in ('Combine', 'Move Part', 'Pattern', 'Delete Solids'):
+    for verb in ('Boolean', 'Move Part', 'Pattern', 'Delete Solids'):
         assert row(both, verb)['fill']['solids'] == '1, 3' and row(both, verb)['ready'], verb
     assert row(both, 'Edit Solid')['reason'] == 'Pick one solid in the tree'
     assert len(columns) == 1
