@@ -490,6 +490,14 @@ The controller also ends a run on its own:
 | Kinematic and input overload | As in single-output Random |
 | Law fault | Too many unusable law calls in a row: the run ends in a controlled stop |
 
+The error the divergence judgement reads depends on the law. For a law that controls every line it
+is each control's error line by line. The built-in band-average law sets one level per band and
+leaves the lines inside a band to the structure, so its line error does not fall as it converges:
+it is judged on each control's error in its own bands, the response summed over a band's lines
+against the reference summed over the same lines. The floor and the number of loops are the same,
+the envelope still judges every line, and a divergence stop says which error it counted. The
+band-average law imported as a law file is judged line by line, as every law file is.
+
 Coherence and phase errors are shown and recorded; they do not trip the run. The report says how
 the run ended and why.
 

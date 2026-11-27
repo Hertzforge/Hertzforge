@@ -356,6 +356,17 @@ pub trait MimoControlLaw {
     /// Called once per control loop with a fresh estimate. Returns the next
     /// full-level drive.
     fn iterate(&mut self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, LawError>;
+
+    /// The bands of a law that sets one level per band and leaves the lines inside a
+    /// band to the structure: each band's lines as a half-open range, in line
+    /// order. The core then judges divergence on each control's band error (the
+    /// band's summed response over its summed target), because the line error of
+    /// such a law does not fall as it converges. `None`, the default, is a law
+    /// that controls every line; the core judges it line by line. The envelope
+    /// judges every line of every law.
+    fn control_bands(&self) -> Option<Vec<(usize, usize)>> {
+        None
+    }
 }
 
 #[cfg(test)]

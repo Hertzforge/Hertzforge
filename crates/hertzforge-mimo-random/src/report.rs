@@ -84,6 +84,19 @@ impl MimoFaultReason {
     }
 }
 
+/// The error the core's divergence judgement counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DivergenceMeasure {
+    /// The rms over the band's lines of each line's dB error: a law that controls
+    /// every line. A record written before the measure was recorded reads as this.
+    #[default]
+    Lines,
+    /// The rms over the law's bands of each band's dB error, the band's response
+    /// summed over its lines before the dB: a law that declares its bands.
+    Bands,
+}
+
 /// The protection that ended a run, or the law fault that stopped it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -100,6 +113,9 @@ pub enum MimoTripKind {
         control: usize,
         consecutive_loops: u32,
         error_db: f64,
+        /// The error that was judged: line by line, or in the law's bands.
+        #[serde(default)]
+        measure: DivergenceMeasure,
     },
     /// The change cap held a drive back on `lines` lines for
     /// `consecutive_loops` loops running: the law asks for more change than the
@@ -156,10 +172,17 @@ impl MimoTripKind {
                 control,
                 consecutive_loops,
                 error_db,
-            } => format!(
-                "Control {control}'s error grew for {consecutive_loops} loops in a row, to \
-                 {error_db:.1} dB."
-            ),
+                measure,
+            } => {
+                let error = match measure {
+                    DivergenceMeasure::Lines => "error",
+                    DivergenceMeasure::Bands => "error in the control law's bands",
+                };
+                format!(
+                    "Control {control}'s {error} grew for {consecutive_loops} loops in a row, \
+                     to {error_db:.1} dB."
+                )
+            }
             MimoTripKind::CapDivergence {
                 drive,
                 lines,

@@ -39,8 +39,8 @@ pub use config::{
 };
 pub use quantities::{MimoQuantity, Series, Trace};
 pub use report::{
-    GateReport, LawLine, MimoEvent, MimoEventKind, MimoFaultReason, MimoReport, MimoState,
-    MimoStatus, MimoTripKind, MimoTripRecord, Prediction,
+    DivergenceMeasure, GateReport, LawLine, MimoEvent, MimoEventKind, MimoFaultReason, MimoReport,
+    MimoState, MimoStatus, MimoTripKind, MimoTripRecord, Prediction,
 };
 pub use service::{
     setup_hash_of, IdentificationSet, Kept, KeptLawCall, KeptLoop, MimoError, MimoRandomService,
