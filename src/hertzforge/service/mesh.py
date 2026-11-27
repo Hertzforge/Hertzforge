@@ -43,7 +43,19 @@ def outline(faces: list[list[int]]) -> np.ndarray:
         out.append(np.stack([polygons, np.roll(polygons, -1, axis=1)], axis=-1).reshape(-1, 2))
     if not out:
         return np.zeros((0, 2), dtype=np.int64)
-    return np.unique(np.sort(np.concatenate(out), axis=1), axis=0)
+    return unique_pairs(np.concatenate(out))
+
+
+def unique_pairs(pairs: np.ndarray) -> np.ndarray:
+    """Pairs of node rows, each once whichever way round it came, smaller row first, in
+    order: what `np.unique(np.sort(pairs, axis=1), axis=0)` gives, found as one integer a
+    pair, since unique over rows sorted a large mesh's edges for seconds."""
+    pairs = np.sort(np.asarray(pairs, dtype=np.int64).reshape(-1, 2), axis=1)
+    if not len(pairs):
+        return pairs
+    span = int(pairs.max()) + 1
+    joined = np.unique(pairs[:, 0] * span + pairs[:, 1])
+    return np.column_stack([joined // span, joined % span])
 
 
 def element_highlights(geometry: Any, elements: Any) -> tuple[list[list[int]], list[list[int]]]:
@@ -136,6 +148,13 @@ def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     nodes a triangle or a line uses are sent, so a brick model's interior
     nodes do not travel; a geometry with no faces or lines sends every
     node."""
+    from hertzforge.drawing.viz.geometry import drawn_once
+
+    used, triangles, segments = drawn_once('mesh', geometry, lambda: _drawn_mesh(geometry))
+    return used.copy(), triangles.copy(), segments.copy()
+
+
+def _drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     from hertzforge.drawing.viz.geometry import element_cells
 
     faces, lines, _points = element_cells(geometry)
@@ -144,7 +163,7 @@ def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     segments = np.asarray([pair for group in lines.values() for pair in group],
                           dtype=np.int64).reshape(-1, 2)
     if polygons:
-        segments = np.unique(np.sort(np.vstack([segments, outline(polygons)]), axis=1), axis=0)
+        segments = unique_pairs(np.vstack([segments, outline(polygons)]))
     used = np.unique(np.concatenate([triangles.ravel(), segments.ravel()]))
     if not used.size:
         used = np.arange(geometry.num_nodes)

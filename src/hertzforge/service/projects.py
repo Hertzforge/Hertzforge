@@ -868,8 +868,13 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "quantity" is a quantity the view lists, or null')
     if 'sine_reading' in prefs and prefs['sine_reading'] not in ('curves', 'bars'):
         raise bad_request('project.show "sine_reading" is curves or bars')
-    return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
-                        dict(part) if part else None, dict(prefs))
+    from hertzforge.drawing.viz.geometry import drawing_once
+
+    # a view changes nothing, so its mesh is drawn once, and kept for the next view
+    with drawing_once():
+        return showing.show(state.project, list(objects),
+                            {str(k): list(v) for k, v in records.items()},
+                            dict(part) if part else None, dict(prefs))
 
 
 def actions(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
