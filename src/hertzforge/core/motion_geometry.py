@@ -807,7 +807,8 @@ def _one_body(lines: np.ndarray, members: Sequence[tuple], size: float) -> list[
 
 
 def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarray,
-                 rng: np.random.Generator) -> tuple[dict, np.ndarray, float, set[int], int] | None:
+                 rng: np.random.Generator | None = None
+                 ) -> tuple[dict, np.ndarray, float, set[int], int] | None:
     """A poor fit looked into for DOFs that are labeled wrong.
 
     The sensor the fit explains worst is released: each of its channels
@@ -815,8 +816,10 @@ def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarra
     it. When the rest then fit to within `GOOD_MISFIT`, up to
     `MOST_RELEASED` sensors released, the released channels' own lines
     say what they are. Each release is fitted from the linear start and,
-    when that leaves more than `GOOD_MISFIT`, from `AFTER_LINEAR` random
-    starts as well. Those of one node
+    given `rng`, one that leaves more than `GOOD_MISFIT` from
+    `AFTER_LINEAR` random starts as well. A random start is kept only
+    when it fits; otherwise another sensor is still wrong, and the next
+    is released from where the linear start left it. Those of one node
     that are square to each other and meet are that sensor after all
     (`_one_body`): a right-handed set needed only the better start, and a
     left-handed one has an axis reversed or two exchanged, and is fitted
@@ -849,14 +852,20 @@ def _looked_into(basis: np.ndarray, groups: Mapping[int, list], poses: np.ndarra
         # unknowns, so the linear start is set by the noise and the refine from it can settle
         # in a minimum near POOR_MISFIT that depends on the last digits of the data. The lines
         # of a partial fit say nothing about the released channels: that minimum once called
-        # every axis of a sound sensor wrong.
+        # every axis of a sound sensor wrong. A random start is kept only when it fits: while
+        # another sensor is still wrong, random starts find layouts that fit the rest better
+        # than the linear start and point the next release at a sound sensor.
         fit = _started(basis, trial, None)
         if fit is None:
             return None
-        if fit[1] > GOOD_MISFIT:
-            fit = _started(basis, trial, rng, GOOD_MISFIT)
+        taken = 1
+        if rng is not None and fit[1] > GOOD_MISFIT:
+            again = _started(basis, trial, rng, GOOD_MISFIT)
+            taken = again[2]
+            if again[1] <= GOOD_MISFIT:
+                fit = again
         released.append(worst)
-        tries += fit[2]
+        tries += taken
         poses = fit[0]
         if fit[1] <= GOOD_MISFIT:
             break
@@ -966,7 +975,9 @@ def fit_poses(motion: Motion, seed: int = 0) -> Recovered:
     rng = np.random.default_rng(seed)
     left_handed: set[int] = set()
     first = _started(basis, groups, None)
-    looked = (_looked_into(basis, groups, first[0], rng)
+    # the random starts of a release cost seconds on a large layout, so they are tried only
+    # when releasing from the linear starts alone does not make the rest fit
+    looked = (_looked_into(basis, groups, first[0]) or _looked_into(basis, groups, first[0], rng)
               if first is not None and first[1] > POOR_MISFIT else None)
     if looked is not None:
         groups, poses, misfit, left_handed, starts = looked
