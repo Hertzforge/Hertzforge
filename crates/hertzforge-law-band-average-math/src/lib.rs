@@ -27,7 +27,7 @@ mod linalg;
 mod params;
 mod sweep;
 
-pub use bands::nth_octave_edges;
+pub use bands::{band_line_ranges, nth_octave_edges};
 pub use hertzforge_sdm::C64;
 pub use params::{KappaRule, Params, Regularization, TfUpdateBlend};
 

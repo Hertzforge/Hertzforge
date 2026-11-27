@@ -36,6 +36,13 @@
 //! one `not_converged` trip's `error_pct` moved (at most 0.034 and 0.29
 //! points, and 0.0045), and every drive hash, gate, clamp, clip, state, level
 //! and end held.
+//!
+//! Re-recorded once more, when the identification noise's Box-Muller sine came
+//! to be the plain `sin` of its angle in every build (`hertzforge-dsp`'s
+//! `GaussRng`): before, an incremental and a non-incremental build drew noise
+//! a last bit apart on macOS, and only one of them matched this file. Every
+//! drive hash moved and `drive_rms` by at most 3.1e-16 relative; every other
+//! number, gate, clamp, clip, state, level and end held.
 
 mod common;
 

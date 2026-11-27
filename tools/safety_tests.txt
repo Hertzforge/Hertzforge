@@ -309,6 +309,9 @@ hertzforge-random       tests/law_guards.rs                    a_runaway_law_is_
 hertzforge-random       tests/law_guards.rs                    an_oscillating_law_is_capped_and_aborted_for_divergence   divergence     an oscillating Random law is aborted for divergence
 hertzforge-random       tests/service_acceptance.rs            acceptance_j_divergence_abort_caller_contract             divergence     the Random divergence abort
 hertzforge-mimo-random  tests/guards_adversarial.rs            an_oscillating_law_trips_the_divergence_abort             divergence     an oscillating multiple-output law trips divergence
+hertzforge-mimo-random  tests/band_divergence.rs               a_band_law_whose_band_levels_drift_is_stopped_for_divergence  divergence  a band law whose band levels drift is stopped on band error
+hertzforge-mimo-random  tests/band_divergence.rs               a_band_law_holding_its_band_levels_is_not_stopped_for_divergence  divergence  a band law holding its band levels is judged on band error, not stopped on line error
+hertzforge-mimo-random  src/service.rs                         a_malformed_declaration_is_not_used                       divergence     a law's malformed band declaration leaves it judged line by line
 hertzforge-sine         tests/law_guards.rs                    twenty_db_a_tick_is_capped_to_one_and_trips_divergence_after_a_second  divergence  a Sine law stepping 20 dB a tick trips divergence
 hertzforge-mixed        tests/drive_ceiling.rs                 a_law_pushing_against_its_rate_cap_with_nothing_holding_it_still_trips_divergence  divergence  a Mixed law against its rate cap trips divergence
 hertzforge-shock-host   tests/closed_loop_guards.rs            a_law_that_diverges_trips_divergence                      divergence     a diverging shock law is stopped

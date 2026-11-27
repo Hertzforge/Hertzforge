@@ -796,7 +796,13 @@ pub mod cola {
             let u2 = self.next_uniform();
             let r = (-2.0 * u1.ln()).sqrt();
             let theta = std::f64::consts::TAU * u2;
-            self.spare = Some(r * theta.sin());
+            // The sine's angle goes through `black_box` so the compiler never
+            // merges the two calls into one sine-and-cosine call. On macOS that
+            // call (`__sincos_stret`) rounds the sine apart from `sin` for about
+            // one angle in 450, and whether the merge happens depends on how the
+            // crate is split into codegen units, so an incremental and a
+            // non-incremental build drew different noise from one seed.
+            self.spare = Some(r * std::hint::black_box(theta).sin());
             r * theta.cos()
         }
     }
@@ -1157,6 +1163,40 @@ pub mod cola {
     pub fn forward_exponent_is_positive() -> bool {
         let x = [(0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)];
         fft::fft(&x)[1].1 > 0.0
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::GaussRng;
+
+        /// Each Box-Muller pair is the plain `sin` and `cos` of its angle, bit
+        /// for bit. A merged sine-and-cosine call rounds the sine differently on
+        /// macOS for about one angle in 450, so 20 000 pairs drawn through a
+        /// merged call would show dozens of moved sines.
+        #[test]
+        fn a_normal_pair_is_the_plain_sine_and_cosine_of_its_angle() {
+            let mut rng = GaussRng::new(0x5EED);
+            let mut mirror = rng.clone();
+            let pairs = 20_000;
+            let (mut sines, mut cosines) = (0, 0);
+            for _ in 0..pairs {
+                let c = rng.next_normal();
+                let s = rng.next_normal();
+                let r = (-2.0 * mirror.next_uniform().ln()).sqrt();
+                let theta = std::f64::consts::TAU * mirror.next_uniform();
+                if s.to_bits() != (r * std::hint::black_box(theta).sin()).to_bits() {
+                    sines += 1;
+                }
+                if c.to_bits() != (r * std::hint::black_box(theta).cos()).to_bits() {
+                    cosines += 1;
+                }
+            }
+            assert_eq!(
+                (sines, cosines),
+                (0, 0),
+                "of {pairs} pairs, {sines} sines and {cosines} cosines are not the plain sin and cos"
+            );
+        }
     }
 }
 

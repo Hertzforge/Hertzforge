@@ -11,7 +11,7 @@ mod common;
 use common::*;
 use hertzforge_law_band_average_math::{BandAverage, Frame, Params};
 use hertzforge_law_host::{DiagnosticKind, Param, ParamValue};
-use hertzforge_mimo_laws::{BandAverageLaw, BuiltinMimoLaw, DiagKind, ParamVal};
+use hertzforge_mimo_laws::{BandAverageLaw, BuiltinMimoLaw, DiagKind, ParamVal, PseudoInverseLaw};
 use hertzforge_sdm::law::{DiagnosticData, MimoControlLaw, MimoInput};
 
 const FILE: &str = "hertzforge_law_mimo_band_average";
@@ -98,6 +98,42 @@ fn the_law_reports_the_diagnostics_it_declares() {
 
 /// With the FRF update on, the law solves again from the FRF it is handed once
 /// the estimate holds enough frames, and says how many times it has.
+/// The law tells the core its bands, so the core can judge it on band error: every
+/// line of the controlled band in exactly one band, in order, each band a
+/// sixth-octave wide at the default and a whole octave at order 1. A law that
+/// controls every line declares none.
+#[test]
+fn the_law_declares_the_bands_it_controls() {
+    let s = synthetic(23);
+    let (lo, hi) = s.setup.band;
+    let law = BandAverageLaw::with_params(&s.setup, &[]).expect("builds");
+    let bands = law.control_bands().expect("a band law declares its bands");
+    assert_eq!(bands.first().map(|b| b.0), Some(lo));
+    assert_eq!(bands.last().map(|b| b.1), Some(hi));
+    for w in bands.windows(2) {
+        assert_eq!(w[0].1, w[1].0, "{bands:?}");
+    }
+    let sixth = 10f64.powf(0.05);
+    for &(first, end) in &bands {
+        assert!(first < end);
+        assert!(((end - 1) as f64) < first as f64 * sixth, "{first}..{end}");
+    }
+    let octave = BandAverageLaw::with_params(&s.setup, &[("oct_order", ParamVal::Integer(1))])
+        .expect("builds")
+        .control_bands()
+        .expect("bands");
+    assert!(
+        octave.len() < bands.len(),
+        "{} of {}",
+        octave.len(),
+        bands.len()
+    );
+    assert_eq!((octave[0].0, octave[octave.len() - 1].1), (lo, hi));
+
+    let lines = PseudoInverseLaw::with_params(&s.setup, &[]).expect("builds");
+    assert_eq!(lines.control_bands(), None);
+}
+
 #[test]
 fn accepted_frf_updates_are_counted() {
     let s = synthetic(22);

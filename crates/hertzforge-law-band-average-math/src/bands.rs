@@ -26,6 +26,27 @@ pub fn nth_octave_edges(f_min: f64, f_max: f64, oct_order: usize) -> (Vec<f64>, 
     (lb, ub)
 }
 
+/// Each band's lines on a grid of `n_lines` lines `df` apart, as half-open ranges in
+/// line order: a line belongs to the band whose edges hold its bin centre, the rule
+/// the law places a line by. Bands that hold no line are left out.
+pub fn band_line_ranges(df: f64, oct_order: usize, n_lines: usize) -> Vec<(usize, usize)> {
+    let band_of = Bands::new(df, oct_order, n_lines).band_of;
+    let mut ranges = Vec::new();
+    let mut k = 0;
+    while k < n_lines {
+        let Some(b) = band_of[k] else {
+            k += 1;
+            continue;
+        };
+        let first = k;
+        while k < n_lines && band_of[k] == Some(b) {
+            k += 1;
+        }
+        ranges.push((first, k));
+    }
+    ranges
+}
+
 /// The analysis grid against the bands.
 pub(crate) struct Bands {
     pub lb: Vec<f64>,
@@ -100,6 +121,30 @@ mod tests {
         }
         assert!(ub[0] > 10.0 && lb[0] <= 10.0);
         assert!(*ub.last().unwrap() > 8192.0);
+    }
+
+    #[test]
+    fn band_line_ranges_hold_each_line_of_a_band_once_and_in_order() {
+        let (df, lines) = (2.0, 2049);
+        let ranges = band_line_ranges(df, 6, lines);
+        let bands = Bands::new(df, 6, lines);
+        let mut placed = 0;
+        for (w, &(first, end)) in ranges.iter().enumerate() {
+            assert!(first < end && end <= lines);
+            if w > 0 {
+                assert!(ranges[w - 1].1 <= first);
+            }
+            let b = bands.band_of[first].expect("a line of a band");
+            assert!(
+                bands.band_of[first..end].iter().all(|&of| of == Some(b)),
+                "band {b}"
+            );
+            assert!((first as f64) * df >= bands.lb[b] && ((end - 1) as f64) * df < bands.ub[b]);
+            placed += end - first;
+        }
+        assert_eq!(placed, bands.band_of.iter().flatten().count());
+        // 1 kHz is a band edge at an even order, so line 500 starts a band.
+        assert!(ranges.iter().any(|&(first, _)| first == 500));
     }
 
     #[test]

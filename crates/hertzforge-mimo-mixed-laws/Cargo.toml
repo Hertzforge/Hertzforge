@@ -29,6 +29,8 @@ hertzforge-sdm.workspace = true
 hertzforge-hal.workspace = true
 hertzforge-channel-table.workspace = true
 hertzforge-module-abi.workspace = true
+# The tone law's clock, which a test harness may hand a check run.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
 
 [dev-dependencies]
 # A catalog entry's identity, in the hardware rule's tests.
