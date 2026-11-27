@@ -2691,9 +2691,16 @@ class Model:
         Linux and SuperLU's symmetric LU elsewhere
         (`sparse_solve.factor_symmetric`); a model whose factor would take
         more than `sparse_solve.MEMORY_SHARE` of the machine's physical
-        memory is refused with `sparse_solve.FactorTooLarge`, a
-        ValueError naming the memory it would need, before the
-        factorization starts. It finds the lowest `num_modes`, or every mode up to
+        memory is not factored: it is solved iteratively instead
+        (`iterative_modes`: LOBPCG preconditioned by smoothed-aggregation
+        algebraic multigrid), each mode to a relative residual of
+        `iterative_modes.ITERATIVE_RESIDUAL`, which its comment carries.
+        That solve finds at most `iterative_modes.ITERATIVE_MODE_LIMIT`
+        modes, preconditions solid elements far better than shells, beams,
+        rigid links and springs, and refuses a model it does not converge
+        (`iterative_modes.IterativeStalled`) or that will not fit in memory
+        either (`iterative_modes.IterativeTooLarge`, a
+        `sparse_solve.FactorTooLarge`). It finds the lowest `num_modes`, or every mode up to
         `maximum_frequency`, and one of the two must be given. Its memory
         grows with the number of nodes instead of its square: a plate model of
         1,500 nodes that needs about 13 GB dense needs tens of megabytes
@@ -2748,10 +2755,11 @@ class Model:
         if solver == 'sparse' or (solver == 'auto'
                                   and self.num_dof > SPARSE_ABOVE):
             with blas_threads():
-                eigenvalues, full, stiffness = self._sparse_modes(
+                eigenvalues, full, stiffness, residuals = self._sparse_modes(
                     fixed, maximum_frequency, num_modes, ticker)
         else:
             eigenvalues, full, stiffness = self._dense_modes(fixed, ticker)
+            residuals = None
         if ticker.total:
             ticker.tick(ticker.total - ticker.done)
         # a rigid-body eigenvalue is zero plus round-off, and comes out
@@ -2777,12 +2785,18 @@ class Model:
         if num_modes is not None:
             keep = keep[:int(num_modes)]
 
+        comment: str | list[str] = self.name or ''
+        if residuals is not None:
+            from .iterative_modes import iterative_comment
+
+            comment = [iterative_comment(self.name or '', None if still else float(r))
+                       for r, still in zip(residuals[order][keep], zero[order][keep])]
         return ShapeSet(frequency=frequency[keep],
                         damping=np.full(len(keep), float(damping)),
                         coordinate=self.dof_strings(),
                         shape_matrix=full[:, keep].T,
                         mass_unit='kg',
-                        comment=self.name or '')
+                        comment=comment)
 
     def _strains_no_element(self, shapes: np.ndarray) -> np.ndarray:
         """Which of these modes (one per column, at every degree of
@@ -2992,14 +3006,16 @@ class Model:
         return 1.0 / mu - shift, transform @ shapes, stiffness
 
     def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
-        """(eigenvalues, shapes at every DOF, stiffness) for the lowest
-        modes, by shift-invert block Lanczos on the sparse matrices,
-        ARPACK's Lanczos behind it."""
+        """(eigenvalues, shapes at every DOF, stiffness, residuals) for the
+        lowest modes, by shift-invert block Lanczos on the sparse matrices,
+        ARPACK's Lanczos behind it; residuals is None. A model whose factor
+        will not fit in memory is solved by `_iterative_modes` instead,
+        and its residuals are each mode's."""
         import warnings
 
         from scipy.sparse.linalg import LinearOperator, eigsh
 
-        from .sparse_solve import factor_symmetric
+        from .sparse_solve import FactorTooLarge, factor_symmetric
 
         if num_modes is None and maximum_frequency is None:
             raise ValueError(
@@ -3026,6 +3042,18 @@ class Model:
             ticker.busy()
         try:
             factor = factor_symmetric((reduced_k - sigma * reduced_m).tocsc())
+        except FactorTooLarge as refused:
+            # without its traceback, which holds the factor estimate's copy
+            # of the shifted matrix for as long as the solve keeps it; and
+            # with K - sigma M in place of K, which the solve does not need
+            # and which is as large, passed so that no name here keeps it
+            # once the solver lets it go
+            refused = refused.with_traceback(None)
+            handed = [(reduced_k - sigma * reduced_m).tocsr()]
+            del reduced_k
+            return self._iterative_modes(handed.pop(), reduced_m, transform, scale, sigma,
+                                         stiffness, maximum_frequency, num_modes,
+                                         refused, eigen)
         except RuntimeError as failure:
             empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
                                    & (reduced_k.diagonal() <= 0.0))
@@ -3130,7 +3158,99 @@ class Model:
         eigenvalues, vectors, _residuals = polish_modes(
             reduced_k, reduced_m, sigma, vectors, wanted, factor=factor,
             ticker=polish)
-        return eigenvalues, transform @ (scale @ vectors), stiffness
+        return eigenvalues, transform @ (scale @ vectors), stiffness, None
+
+    def _iterative_modes(self, shifted, reduced_m, transform, scale, sigma, stiffness,
+                         maximum_frequency, num_modes, refused, ticker=None):
+        """`_sparse_modes` for a model whose factor will not fit in memory:
+        LOBPCG preconditioned by smoothed-aggregation multigrid
+        (`iterative_modes.IterativeSolver`), on the same constrained,
+        scaled system, given as K - sigma M (`shifted`) and M. Returns the
+        modes asked for and no guard beyond them, so nothing that did not
+        converge is passed on."""
+        from scipy.linalg import eigh as dense_eigh
+        from scipy.sparse.linalg import splu
+
+        from .iterative_modes import ITERATIVE_MODE_LIMIT, IterativeSolver, _nbytes
+
+        size = reduced_m.shape[0]
+        if num_modes is not None and int(num_modes) > ITERATIVE_MODE_LIMIT:
+            raise ValueError(
+                f'{int(num_modes)} modes were asked for, and this model, whose factor will '
+                f'not fit in memory, is solved iteratively, which finds at most '
+                f'{ITERATIVE_MODE_LIMIT}: ask for {ITERATIVE_MODE_LIMIT} or fewer')
+        # The rigid-body motions in the solve's coordinates, q = S^-1 T^+ R:
+        # the multigrid's coarse levels are built to carry them, and those
+        # that strain nothing (all six, free-free) are kept out of the
+        # iterations and returned as they are. T^+ by least squares,
+        # since ties and oblique rigid links give T columns of their own;
+        # T^T T is diagonal but for each rigid body's lead and ties
+        rigid = self.rigid_body_vectors()
+        gram = (transform.T @ transform).tocsc()
+        near_null = splu(gram).solve(np.asarray(transform.T @ rigid)) \
+            / scale.diagonal()[:, None]
+        moved = reduced_m @ near_null
+        _values, combinations = dense_eigh(near_null.T @ (shifted @ near_null + sigma * moved),
+                                          near_null.T @ moved)
+        motions = near_null @ combinations
+        still = _strains_nothing(transform @ (scale @ motions), stiffness)
+        deflated = motions[:, still]
+        # every node's degrees of freedom kept alike (a solid's three
+        # translations, a shell's six), so the multigrid aggregates nodes
+        blocksize = None
+        selection = transform.tocsc()
+        if selection.nnz == size and np.all(np.diff(selection.indptr) == 1):
+            nodes = selection.indices // 6
+            counts = np.bincount(nodes)
+            counts = counts[counts > 0]
+            if np.all(counts == counts[0]) and np.all(np.diff(nodes) >= 0):
+                blocksize = int(counts[0])
+        held = sum(_nbytes(matrix) for matrix in (reduced_m, stiffness, transform.tocsr()))
+        solver = IterativeSolver(shifted, reduced_m, sigma, near_null, deflated,
+                                 blocksize, held, self.num_dof, refused,
+                                 weak=self._weak_for_multigrid(), ticker=ticker)
+        # the solver keeps the multigrid's copy of K - sigma M once it is built
+        del shifted
+        limit = (None if maximum_frequency is None
+                 else (2.0 * np.pi * float(maximum_frequency)) ** 2)
+        wanted = int(num_modes) if num_modes is not None else 24
+        while True:
+            wanted = max(1, min(wanted, size - 1, ITERATIVE_MODE_LIMIT))
+            eigenvalues, vectors, residuals = solver.modes(wanted)
+            if (limit is None or num_modes is not None
+                    or eigenvalues[wanted - 1] > limit or wanted >= size - 1):
+                break
+            if wanted >= ITERATIVE_MODE_LIMIT:
+                hertz = float(maximum_frequency)
+                raise ValueError(
+                    f'every mode up to {hertz:g} Hz is more than the '
+                    f'{ITERATIVE_MODE_LIMIT} modes the iterative solve finds, and this '
+                    'model, whose factor will not fit in memory, is solved iteratively: '
+                    f'the {ITERATIVE_MODE_LIMIT}th is at '
+                    f'{math.sqrt(max(eigenvalues[wanted - 1], 0.0)) / (2.0 * math.pi):.4g} '
+                    'Hz. Ask for a lower highest frequency, or for a number of modes')
+            # the next solve starts from the modes found, and asks for the
+            # count they predict, as the direct search does
+            expected = predicted_count(eigenvalues[:wanted], limit)
+            wanted = (2 * wanted if expected is None
+                      else max(wanted + 1, math.ceil(SEARCH_MARGIN * expected)))
+        # the solver, its hierarchy and its copy of the modes let go before
+        # the modes are written at every degree of freedom
+        del solver
+        keep = slice(0, wanted)
+        vectors = vectors[:, keep]
+        return eigenvalues[keep], transform @ (scale @ vectors), stiffness, residuals[keep]
+
+    def _weak_for_multigrid(self) -> str:
+        """The elements of this model that multigrid built for elasticity
+        preconditions poorly, counted in words ('412 shell elements and 6
+        springs'); empty when it has none."""
+        found = [(len(self.plates) + len(self.triangles), 'shell element'),
+                 (len(self.beams), 'beam'), (len(self.rigid_links), 'rigid link'),
+                 (len(self.springs), 'spring')]
+        said = [f'{count:,} {what}{"" if count == 1 else "s"}' for count, what in found
+                if count]
+        return ' and '.join([', '.join(said[:-1]), said[-1]] if len(said) > 1 else said)
 
     def constraint_transform(self, fixed: Sequence[str] = (),
                              sparse: bool = False) -> Any:
@@ -3988,6 +4108,10 @@ def _displacement_frames(geometry: Any) -> dict[int, np.ndarray]:
             if int(cs) in rotations}
 
 
+#: modes whose strain energy `_strains_nothing` sums at a time
+ENERGY_CHUNK = 8
+
+
 def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
     """Which of these modes store no strain energy, and so sit at 0 Hz.
 
@@ -3998,11 +4122,18 @@ def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
     motion. Both really are at zero frequency; the distinction between
     them is a modeling question, not a numerical one.
     """
-    energy = np.sum(shapes * (stiffness @ shapes), axis=0)
-    # the same sum with every cancellation removed: how big the terms were
-    # before they annihilated each other
-    magnitude = np.sum(np.abs(shapes) * (abs(stiffness) @ np.abs(shapes)),
-                       axis=0)
+    # a few modes at a time, so a model of millions of degrees of freedom
+    # holds a few of its products at once rather than four of them whole
+    absolute = abs(stiffness)
+    energy = np.empty(shapes.shape[1])
+    magnitude = np.empty(shapes.shape[1])
+    for lo in range(0, shapes.shape[1], ENERGY_CHUNK):
+        part = shapes[:, lo:lo + ENERGY_CHUNK]
+        energy[lo:lo + ENERGY_CHUNK] = np.sum(part * (stiffness @ part), axis=0)
+        # the same sum with every cancellation removed: how big the terms
+        # were before they annihilated each other
+        size = np.abs(part)
+        magnitude[lo:lo + ENERGY_CHUNK] = np.sum(size * (absolute @ size), axis=0)
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = np.abs(energy) / magnitude
     return np.nan_to_num(ratio, nan=0.0) < ZERO_ENERGY

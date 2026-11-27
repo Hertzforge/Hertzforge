@@ -6,11 +6,14 @@
 Each block is nx x ny x nz aluminum bricks, free, solved for its lowest
 `--modes` modes through `Model.eigensolution(solver='sparse')`: with the
 machine's own factorization (PARDISO on x86-64 Windows and Linux,
-Accelerate on a Mac), and with SuperLU for the blocks of up to
+Accelerate on a Mac), or by the iterative solve (lobpcg, with the worst
+residual of its modes) when the factor will not fit, and with SuperLU for the blocks of up to
 `--superlu-up-to` bricks, which is what the packaged builds used before
 oneMKL rode along. Each case runs in its own process, so each has a
 fresh library and its own memory, and one that runs past `--timeout`
-seconds is stopped and reported as such. The table goes to standard
+seconds is stopped and reported as such. Each case's peak memory is its
+process's largest resident size, where the platform reports it (not on
+Windows). The table goes to standard
 output, and to the job summary when run by GitHub Actions.
 
 The case it was written for: a 193,627-brick model, 20 modes, took 70
@@ -63,8 +66,20 @@ sparse_solve.factor_symmetric = spy
 shapes = model.eigensolution(num_modes=modes, solver='sparse')
 solved = time.perf_counter()
 elastic = [float(f) for f in shapes.frequency if f > 0.0]
-print(json.dumps({'dof': int(model.num_dof), 'backend': used[0] if used else '?',
-                  'build_s': built - started, 'solve_s': solved - built,
+from hertzforge.core.iterative_modes import iterative_residual
+read = [iterative_residual(comment) for comment in shapes.comment]
+residuals = [value for value in read if isinstance(value, float)]
+try:
+    import resource
+    # bytes on macOS, kilobytes on Linux
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak *= 1 if sys.platform == 'darwin' else 1024
+except ImportError:
+    peak = None
+print(json.dumps({'dof': int(model.num_dof),
+                  'backend': used[0] if used else ('lobpcg' if residuals else '?'),
+                  'build_s': built - started, 'solve_s': solved - built, 'peak': peak,
+                  'worst_residual': max(residuals) if residuals else None,
                   'first_hz': elastic[0] if elastic else None,
                   'last_hz': elastic[-1] if elastic else None}))
 '''
@@ -132,8 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     print(f'{platform.platform()}, {platform.machine()}, {os.cpu_count()} logical CPUs, '
           f'Python {platform.python_version()}', flush=True)
-    rows = ['| Bricks | DOF | Solver | Build | Solve | First, last elastic mode |',
-            '|---:|---:|---|---:|---:|---|']
+    rows = ['| Bricks | DOF | Solver | Build | Solve | Peak memory | First, last elastic mode |',
+            '|---:|---:|---|---:|---:|---:|---|']
     for text in arguments.blocks:
         dims = tuple(int(part) for part in text.lower().split('x'))
         bricks = dims[0] * dims[1] * dims[2]
@@ -144,10 +159,16 @@ def main(argv: list[str] | None = None) -> int:
             if result['outcome'] == 'solved':
                 elastic = ('none: every mode asked for is rigid' if result['first_hz'] is None
                            else f"{result['first_hz']:.2f}, {result['last_hz']:.2f} Hz")
-                row = (f"| {bricks:,} | {result['dof']:,} | {result['backend']} | "
-                       f"{result['build_s']:.1f} s | {result['solve_s']:.1f} s | {elastic} |")
+                backend = result['backend']
+                if result.get('worst_residual') is not None:
+                    backend += f", residual {result['worst_residual']:.0e} at worst"
+                peak = ('not measured here' if result.get('peak') is None
+                        else f"{result['peak'] / 2**30:.1f} GB")
+                row = (f"| {bricks:,} | {result['dof']:,} | {backend} | "
+                       f"{result['build_s']:.1f} s | {result['solve_s']:.1f} s | {peak} | "
+                       f"{elastic} |")
             else:
-                row = f"| {bricks:,} | | {solver} | | {result['outcome']} | |"
+                row = f"| {bricks:,} | | {solver} | | {result['outcome']} | | |"
             rows.append(row)
             print(row, flush=True)
     table = '\n'.join(rows)

@@ -555,8 +555,45 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
         limit = {'maximum_frequency': params['maximum_frequency']}
     else:
         limit = {'num_modes': params['num_modes']}
-    return _added_shapes(project, lambda: project.solve_modes(
-        params['source'], damping=params['damping'] / 100.0, **limit, progress=hook()))
+    names: list[str] = []
+
+    def solve() -> str:
+        names.append(project.solve_modes(params['source'], damping=params['damping'] / 100.0,
+                                         **limit, progress=hook()))
+        return names[0]
+
+    views = _added_shapes(project, solve)
+    return views + _iterative_reading(names[0], project[names[0]])
+
+
+def _iterative_reading(name: str, shapes: Any) -> list[dict]:
+    """For modes from the iterative solve, a reading that says so and how
+    far each converged; nothing for the direct solve's, which converge to
+    round-off."""
+    from hertzforge.core.iterative_modes import (
+        ITERATIVE_ACCEPT,
+        ITERATIVE_RESIDUAL,
+        iterative_residual,
+    )
+
+    read = [iterative_residual(comment) for comment in shapes.comment]
+    if all(value is None for value in read):
+        return []
+    measured = [value for value in read if isinstance(value, float)]
+    worst = max(measured, default=0.0)
+    rows = v.notes([(
+        "this model's factor would not fit in memory, so its modes come from the "
+        'iterative solve (LOBPCG preconditioned by algebraic multigrid), which runs each '
+        f'mode to a relative residual of {ITERATIVE_RESIDUAL:.0e} and refuses one above '
+        f'{ITERATIVE_ACCEPT:.0e}. The worst of these is at {worst:.1e}')])
+    for k, value in enumerate(read):
+        if isinstance(value, float):
+            rows.append(v.row(f'Mode {k + 1} residual', value, None,
+                              'pass' if value < ITERATIVE_RESIDUAL else 'warn'))
+        elif value is not None:
+            rows.append(v.row(f'Mode {k + 1} residual', 'none: a motion that strains nothing',
+                              None, 'info'))
+    return [v.reading(f'{name}: solved iteratively', rows)]
 
 
 def expand(project: Any, params: dict[str, Any]) -> list[dict]:
