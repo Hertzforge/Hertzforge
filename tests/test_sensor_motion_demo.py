@@ -119,7 +119,37 @@ def test_four_triaxial_sensors_fit_once_released_and_nothing_is_said(random_test
     start = mg._started(motion.basis, mg._sensors_of(motion.channels), None)
     assert start is not None and start[1] > mg.POOR_MISFIT
     found = mg.fit_poses(motion)
-    assert found.misfit < mg.GOOD_MISFIT and found.starts == 2
+    # the first fit and at least one after the release; how many more depends on which
+    # minimum the released fit's linear start finds
+    assert found.misfit < mg.GOOD_MISFIT and found.starts >= 2
     assert not found.notes and not found.left_out
     assert [(one.node, one.axes, one.reversed, one.note) for one in found.sensors] == [
         (node, (0, 1, 2), (), '') for node in (1, 2, 3, 4)]
+
+
+def test_four_triaxial_sensors_fit_from_any_basis_of_their_motion(random_test):
+    """The fit reads the subspace the motion spans, not the basis it is
+    given for it. Released, four tri-axial sensors give exactly as many
+    linear conditions as unknowns, so the start the release is fitted
+    from is set by the last digits of the data, as a change of basis or
+    of thread count leaves them, and its refine can stop in a minimum
+    near the warning level. Read from that partial fit, the released
+    sensor's channels do not meet, and a sound sensor is said to have
+    every axis wrong. Sixteen bases are enough to land in that minimum;
+    the result must not depend on which one is given."""
+    from dataclasses import replace
+
+    from hertzforge.core.data import parse_dof
+
+    history = random_test['BARC Random']
+    rows = [row for row, dof in enumerate(history.response_dof) if parse_dof(dof)[0] in (1, 2, 3, 4)]
+    motion = mg.rigid_motion([history], records=[rows])
+    rng = np.random.default_rng(7)
+    misfits, said = [], []
+    for _ in range(16):
+        turn, _r = np.linalg.qr(rng.standard_normal((mg.MOTIONS, mg.MOTIONS)))
+        found = mg.fit_poses(replace(motion, basis=motion.basis @ turn))
+        misfits.append(found.misfit)
+        said.extend(found.notes + found.left_out)
+    assert max(misfits) < mg.GOOD_MISFIT, misfits
+    assert said == []

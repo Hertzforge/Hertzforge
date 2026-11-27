@@ -271,8 +271,10 @@ tests instead.
 A DOF labeled wrong makes a layout that no rigid sensors fit. When the first fit leaves more than
 5 % of the motion unexplained, it is looked into: the sensor that fits worst is released, each of
 its channels fitted on its own with nothing assumed from its node, and then the next worst, up to
-three. When the other sensors then fit, the released channels' own lines say what is wrong, and the
-sensors that were labeled right are placed as if nothing were wrong.
+three. When the other sensors then fit, leaving under 1 % unexplained, the released channels' own
+lines say what is wrong, and the sensors that were labeled right are placed as if nothing were
+wrong. A fit that leaves more says nothing reliable about the released channels, so it is tried
+again from a few random starts before the next sensor is released.
 
 | Mistake | What is said |
 |---|---|
