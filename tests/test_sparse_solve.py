@@ -58,17 +58,20 @@ def _block(side=12):
 
 
 def _built(monkeypatch):
-    """The factorizations started, by backend, from here on."""
-    started = []
+    """The backends tried, and those that made a factor, from here on.
+    A backend the machine lacks is tried and refuses at once, as
+    Accelerate does off a Mac, so only a made factor is the one used."""
+    tried, made = [], []
     for kind in (AccelerateFactor, PardisoFactor, SuperLUFactor):
         real = kind.__init__
 
         def spy(self, matrix, real=real, backend=kind.backend):
-            started.append(backend)
+            tried.append(backend)
             real(self, matrix)
+            made.append(backend)
 
         monkeypatch.setattr(kind, '__init__', spy)
-    return started
+    return tried, made
 
 
 @pytest.mark.parametrize('backend', ['', 'superlu'])
@@ -80,12 +83,12 @@ def test_a_factor_beyond_memory_is_refused_before_it_starts(backend, monkeypatch
     monkeypatch.setenv(BACKEND_VARIABLE, backend)
     matrix = _block()
     needed, estimated_by = factor_memory(matrix)
-    started = _built(monkeypatch)
+    tried, made = _built(monkeypatch)
     physical = int(needed / MEMORY_SHARE / 2)
     monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: physical)
     with pytest.raises(FactorTooLarge) as refused:
         factor_symmetric(matrix)
-    assert started == [], 'nothing was factored'
+    assert tried == [], 'no backend was tried'
     said = str(refused.value)
     assert f'about {sparse_solve._gigabytes(needed)} of memory' in said, said
     assert f'its {sparse_solve._gigabytes(physical)} of physical memory' in said, said
@@ -97,7 +100,7 @@ def test_a_factor_beyond_memory_is_refused_before_it_starts(backend, monkeypatch
 
     monkeypatch.setattr(sparse_solve, 'physical_memory', lambda: int(2 * needed / MEMORY_SHARE))
     factor = factor_symmetric(matrix)
-    assert started == [estimated_by], 'the estimate was for the backend that factored'
+    assert made == [estimated_by], 'the estimate was for the backend that factored'
     assert factor.memory == needed
     assert probe_error(matrix, factor) < 1e-10
 
