@@ -76,8 +76,23 @@ notarize() {
   # asking for the submission history first is the one check that the
   # credentials still answer, before minutes of uploading
   xcrun notarytool history "${NOTARY[@]}" >/dev/null 2>&1 || return 1
-  local said id
-  said=$(xcrun notarytool submit "$1" "${NOTARY[@]}" --wait)
+  local said id try
+  # a runner that loses its connection fails the upload or the wait with an HTTPError
+  # ("The Internet connection appears to be offline"), which ended a release's build twice
+  # running after the app itself had been accepted; the submission is made again, and one
+  # left behind half done does no harm
+  for try in 1 2 3; do
+    if said=$(xcrun notarytool submit "$1" "${NOTARY[@]}" --wait 2>&1); then
+      break
+    fi
+    echo "$said" | tail -2 >&2
+    if [[ $try == 3 ]]; then
+      echo "sign_macos.sh: notarytool failed three times on $(basename "$1")" >&2
+      exit 1
+    fi
+    echo "sign_macos.sh: notarytool failed on $(basename "$1"); trying again in ${NOTARY_RETRY_S:-60} s" >&2
+    sleep "${NOTARY_RETRY_S:-60}"
+  done
   echo "$said" | tail -3
   # --wait exits 0 whatever Apple decided: the status says, and Apple's log says why
   if ! grep -q 'status: Accepted' <<<"$said"; then
